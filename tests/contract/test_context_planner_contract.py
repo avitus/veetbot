@@ -15,7 +15,7 @@ from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
-from agent_core.context.rendering import build_prefix
+from agent_core.context.rendering import build_prefix, deferred_index_items
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.memory import (
@@ -25,12 +25,19 @@ from agent_core.domain.memory import (
     Sensitivity,
     TracedPersonContext,
 )
-from agent_core.domain.messages import ModelLimits, ResolvedModel
+from agent_core.domain.messages import (
+    ModelLimits,
+    ResolvedModel,
+    SystemMessage,
+    TextPart,
+)
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
 from agent_core.domain.skills import SessionSkillCatalog
 from agent_core.memory.profiles import SnapshotProfiles
+from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.registry import StaticToolRegistry
+from agent_core.tools.tool_call import ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from tests.contract.memory_fixtures import formation_stack, memory, trace
@@ -403,6 +410,96 @@ async def test_context_planner_preserves_first_occurrence_priority_at_the_tool_c
     )
 
     assert plan.tool_names == ("web.fetch",)
+    # Without tool.call nothing can be deferred, but the cut is recorded (ADR-0123).
+    assert plan.deferred_tool_names == ()
+    assert plan.skipped_tool_names == ("system.current_time",)
+
+
+async def test_context_planner_defers_overflow_and_records_what_the_index_cannot_hold() -> None:
+    """tool.call takes a slot only when something is deferred; a full index skips the rest."""
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    config["classes"]["tool_definitions"]["max_items"] = 2
+    config["classes"]["deferred_tool_index"]["max_items"] = 1
+    registry = StaticToolRegistry()
+    registry.register(ToolCallTool())
+    registry.register(WebFetchTool(FakeWebProvider()))
+    registry.register(CurrentTimeTool(clock))
+    registry.register(CalculatorTool())
+    configured_agent = agent().model_copy(
+        update={
+            "enabled_tools": [
+                "web.fetch",
+                "system.current_time",
+                "math.calculate",
+                "tool.call",
+            ]
+        }
+    )
+    planner = EventContextPlanner(
+        factory,
+        registry,
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    )
+
+    plan = await planner.plan(
+        session(),
+        configured_agent,
+        principal(),
+        ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+    )
+
+    assert plan.tool_names == ("tool.call", "web.fetch")
+    assert plan.deferred_tool_names == ("system.current_time",)
+    assert plan.skipped_tool_names == ("math.calculate",)
+    [index] = deferred_index_items(plan.deferred_tool_specs)
+    assert index in build_prefix(
+        configured_agent,
+        plan.tool_specs,
+        persona=plan.persona_text,
+        deferred_tools=plan.deferred_tool_specs,
+    )
+    assert isinstance(index, SystemMessage)
+    [part] = index.content
+    assert isinstance(part, TextPart)
+    assert "- system.current_time(timezone?): " in part.text
+
+
+async def test_context_planner_keeps_a_plan_from_an_equivalent_earlier_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A context-builder@11 plan renders the same bytes, so it stays current (ADR-0123)."""
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+
+    def planner() -> EventContextPlanner:
+        return EventContextPlanner(
+            factory,
+            StaticToolRegistry(),
+            ConservativeTokenEstimator(),
+            clock,
+            principal(),
+            config,
+            policy_version="contract-policy@1",
+        )
+
+    current_version = planner_module.BUILDER_VERSION
+    monkeypatch.setattr(planner_module, "BUILDER_VERSION", "context-builder@11")
+    previous = await planner().plan(session(), agent(), principal(), model)
+    monkeypatch.setattr(planner_module, "BUILDER_VERSION", current_version)
+    reused = await planner().plan(session(), agent(), principal(), model)
+
+    assert previous.builder_version == "context-builder@11"
+    assert reused == previous
 
 
 async def test_context_planner_sizes_snapshot_from_final_model_visible_bytes() -> None:

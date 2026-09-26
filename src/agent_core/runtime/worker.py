@@ -40,9 +40,13 @@ class DurableWorker:
         heartbeat_divisor: int = 3,
         poll_interval_seconds: float = 0.25,
         record_claim_metric: RecordClaimMetric | None = None,
+        maintain_browser_leases: Callable[[], Awaitable[None]] | None = None,
+        browser_lease_upkeep_seconds: float = 60,
     ) -> None:
         if heartbeat_divisor < 2:
             raise ValueError("heartbeat_divisor must be at least two")
+        if browser_lease_upkeep_seconds <= 0:
+            raise ValueError("browser lease upkeep interval must be positive")
         self._uow_factory = uow_factory
         self._executor = executor
         self._clock = clock
@@ -58,10 +62,27 @@ class DurableWorker:
         self._heartbeat_interval = lease_seconds / heartbeat_divisor
         self._poll_interval = poll_interval_seconds
         self._record_claim_metric = record_claim_metric
+        # Hosted browser leases live in this process, which ran their runs, so
+        # this worker (not the maintenance role) releases and renews them.
+        self._maintain_browser_leases = maintain_browser_leases
+        self._browser_lease_upkeep_seconds = browser_lease_upkeep_seconds
         self._stopping = False
 
     def stop(self) -> None:
         self._stopping = True
+
+    async def _keep_browser_leases(
+        self,
+        maintain: Callable[[], Awaitable[None]],
+    ) -> None:
+        while not self._stopping:
+            try:
+                await maintain()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("browser lease upkeep failed: %s", self._worker_id)
+            await self._clock.sleep(self._browser_lease_upkeep_seconds)
 
     async def claim(self) -> ClaimedRun | None:
         started = perf_counter()
@@ -162,17 +183,30 @@ class DurableWorker:
         return True
 
     async def run_forever(self) -> None:
-        while not self._stopping:
-            try:
-                worked = await self.run_once()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("durable worker iteration failed: %s", self._worker_id)
-                await self._clock.sleep(self._poll_interval)
-                continue
-            if not worked:
-                await self._clock.sleep(self._poll_interval)
+        upkeep = (
+            None
+            if self._maintain_browser_leases is None
+            else asyncio.create_task(
+                self._keep_browser_leases(self._maintain_browser_leases),
+                name=f"browser-lease-upkeep-{self._worker_id}",
+            )
+        )
+        try:
+            while not self._stopping:
+                try:
+                    worked = await self.run_once()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("durable worker iteration failed: %s", self._worker_id)
+                    await self._clock.sleep(self._poll_interval)
+                    continue
+                if not worked:
+                    await self._clock.sleep(self._poll_interval)
+        finally:
+            if upkeep is not None:
+                upkeep.cancel()
+                await asyncio.gather(upkeep, return_exceptions=True)
 
 
 class MaintenanceWorker:
@@ -199,11 +233,13 @@ class MaintenanceWorker:
         sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         sweep_folder_proposals: Callable[[], Awaitable[int]] | None = None,
         sweep_upload_ingests: Callable[[], Awaitable[int]] | None = None,
+        sweep_people_duplicates: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
         terminal_schedule_sweep_interval_seconds: float = 3600,
         folder_proposal_interval_seconds: float = 900,
+        people_duplicate_interval_seconds: float = 900,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -225,6 +261,7 @@ class MaintenanceWorker:
         self._sweep_terminal_schedules = sweep_terminal_schedules
         self._sweep_folder_proposals = sweep_folder_proposals
         self._sweep_upload_ingests = sweep_upload_ingests
+        self._sweep_people_duplicates = sweep_people_duplicates
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         if email_cache_sweep_interval_seconds <= 0:
@@ -235,6 +272,8 @@ class MaintenanceWorker:
             raise ValueError("terminal schedule sweep interval must be positive")
         if folder_proposal_interval_seconds <= 0:
             raise ValueError("folder proposal interval must be positive")
+        if people_duplicate_interval_seconds <= 0:
+            raise ValueError("people duplicate interval must be positive")
         self._artifact_orphan_interval = timedelta(seconds=artifact_orphan_interval_seconds)
         self._last_artifact_orphan_sweep_at: datetime | None = None
         # Readers withhold expired bodies themselves, so this mailbox-wide sweep
@@ -252,6 +291,9 @@ class MaintenanceWorker:
         # Folder proposals are a slow sweep on their own timer, like decay.
         self._folder_proposal_interval = timedelta(seconds=folder_proposal_interval_seconds)
         self._last_folder_proposal_sweep_at: datetime | None = None
+        # Duplicate People are merged or suggested on their own slow timer (ADR-0125).
+        self._people_duplicate_interval = timedelta(seconds=people_duplicate_interval_seconds)
+        self._last_people_duplicate_sweep_at: datetime | None = None
         self._stopping = False
 
     def stop(self) -> None:
@@ -373,6 +415,17 @@ class MaintenanceWorker:
                 await self._sweep_people_erasures()
             except Exception:
                 logger.exception("People erasure retry failed")
+        people_duplicate_sweep_due = (
+            self._last_people_duplicate_sweep_at is None
+            or self._clock.now() - self._last_people_duplicate_sweep_at
+            >= self._people_duplicate_interval
+        )
+        if self._sweep_people_duplicates is not None and people_duplicate_sweep_due:
+            self._last_people_duplicate_sweep_at = self._clock.now()
+            try:
+                await self._sweep_people_duplicates()
+            except Exception:
+                logger.exception("People duplicate sweep failed")
         terminal_schedule_sweep_due = (
             self._last_terminal_schedule_sweep_at is None
             or self._clock.now() - self._last_terminal_schedule_sweep_at

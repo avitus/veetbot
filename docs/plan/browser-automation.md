@@ -226,7 +226,9 @@ ever returning another principal's metadata.
 One browser lease belongs to one run attempt and one profile. Concurrent use of
 the same mutable profile is rejected unless the provider offers copy-on-write
 isolation with a single serialized commit. The lease has a deadline and is
-closed on terminal run, cancellation, policy invalidation, or worker loss.
+closed on terminal run, cancellation, policy invalidation, or worker loss. It
+spans the run's parking on its own approval and its wait to resume; any other
+parking, such as for the user's answer or a delegated child, closes it.
 
 Two placements implement the same port:
 
@@ -380,17 +382,34 @@ of `BrowserProfileControlPlane`. Trusted composition supplies the profile id,
 principal, provider reference, run id, attempt number, and deadline. None is a
 model tool argument. Acquisition returns a random opaque lease reference to the
 provider adapter, never to the model. The service permits at most one live
-mutable lease for a profile, caps the deadline at fifteen minutes, and treats a
-service restart as invalidating every outstanding lease.
+mutable lease for a profile, caps each requested deadline at fifteen minutes
+and a lease's life at sixty, and treats a service restart as invalidating every
+outstanding lease. The requested deadline is the run attempt's, never one tool
+call's: the run deadline when the run has one, otherwise the cap. An acquire
+that repeats a live lease's profile, principal, provider reference, run, and
+attempt returns that lease and its action sequence, whatever deadline it asks
+for, so a run resumed in another process continues its own page. A different
+run cannot take a live lease whose run still needs it and is refused as
+`tool.browser.profile_unavailable`. Later calls of the attempt, including one
+resumed after its approval, reuse the lease while it outlives the call; the
+provider drops a lease the service no longer honours or does not answer for,
+and an expired lease is replaced.
+
+A lease renews in steps of at most fifteen minutes, up to sixty minutes after
+acquisition and never past the run's deadline, only while its run is running,
+queued to resume, or parked on its own approval (ADR-0127). The run worker that
+holds the lease runs this upkeep about once a minute. It renews a lease within
+five minutes of expiry and closes one whose run has ended, including a run
+cancelled while parked. Renewing an expired or revoked lease fails.
 
 Every navigate, observe, and act request authenticates the service caller and
 revalidates the complete lease tuple, expiry, revocation fence, allowed origins,
 and operation sequence before browser dispatch. Action also revalidates the
 page revision. Closing a healthy lease seals the browser runtime's storage state
 back into the encrypted profile before releasing exclusivity. A failed or
-expired lease is closed without accepting client-supplied profile bytes. The
-orchestration caller can never upload, download, or name a filesystem path for
-profile material.
+expired lease is closed without sealing its state or accepting client-supplied
+profile bytes, however late the close arrives. The orchestration caller can
+never upload, download, or name a filesystem path for profile material.
 
 Revocation first persists the encrypted revocation fence and then synchronously
 closes every live runtime for that profile. New operations fail from the fence
@@ -400,12 +419,13 @@ authentication ceremony. Lease references are stored only as keyed hashes in
 service memory, compared in constant time, bounded to 128 characters, and never
 logged.
 
-The data-plane HTTP surface consists only of acquire, navigate, observe, act,
-and close. It uses the same authenticate-before-buffering boundary, 64-KiB JSON
-ceiling, generic error responses, and exact idempotency rules as lifecycle.
-Acquire and close are idempotent for the same complete scope. Navigate and
-observe are read-only. Act is sequence-bound and never retried after dispatch;
-an ambiguous response is `tool.browser.outcome_unknown`.
+The data-plane HTTP surface consists only of acquire, renew, navigate,
+observe, act, and close. It uses the same authenticate-before-buffering
+boundary, 64-KiB JSON ceiling, generic error responses, and exact idempotency
+rules as lifecycle. Acquire, renew, and close are idempotent for the same
+complete request. Navigate and observe are read-only. Act is sequence-bound and
+never retried after dispatch; an ambiguous response is
+`tool.browser.outcome_unknown`, and the provider then retires the lease.
 
 ### User-controlled authentication ceremony
 

@@ -319,8 +319,11 @@ import Testing
         let lock = NSLock()
         var queries: [[URLQueryItem]] = []
         let client = try makePeopleClient { request in
-            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            lock.withLock { queries.append(query) }
+            // Only the directory read counts; Needs review also asks for duplicates.
+            if request.url?.path == "/v1/people" {
+                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                lock.withLock { queries.append(query) }
+            }
             return (200, #"{"items":[],"next_cursor":null}"#)
         }
         let model = PeopleViewModel(makeAPIClient: { client })
@@ -490,6 +493,77 @@ import Testing
         #expect(lock.withLock { Set(writes).count } == 1)
     }
 
+    /// Needs review asks about possible duplicates; an answer sends the exact revision.
+    @Test func needsReviewListsMergeSuggestionsAndAnswersThem() async throws {
+        let sourceID = UUID(), targetID = UUID(), suggestionID = UUID(), sessionID = UUID()
+        let lock = NSLock()
+        var answered: [String: Any] = [:]
+        let client = try makePeopleClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/people/merge-suggestions"):
+                let open = lock.withLock { answered.isEmpty }
+                return (200, "{\"items\":[\(open ? suggestionJSON(suggestionID, source: sourceID, target: targetID) : "")],\"next_cursor\":null}")
+            case ("POST", "/v1/sessions"):
+                return (200, "{\"id\":\"\(sessionID)\",\"status\":\"ACTIVE\",\"agent_id\":\"test\",\"agent_version\":\"1\",\"metadata\":{},\"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\"}")
+            case ("POST", "/v1/people/merge-suggestions/\(suggestionID.uuidString)"):
+                let body = try JSONSerialization.jsonObject(with: request.peopleBodyData!) as! [String: Any]
+                lock.withLock { answered = body }
+                return (200, suggestionJSON(suggestionID, source: sourceID, target: targetID, state: "merged"))
+            default:
+                return (200, #"{"items":[],"next_cursor":null}"#)
+            }
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        await model.selectCollection(.review)
+        #expect(model.suggestions.map(\.id) == [suggestionID])
+        #expect(model.suggestions.first?.explanation == "Same first name and your family name")
+        let suggestion = try #require(model.suggestions.first)
+        await model.resolveSuggestion(suggestion, decision: "merge")
+        #expect(model.suggestions.isEmpty)
+        let body = lock.withLock { answered }
+        #expect(body["decision"] as? String == "merge")
+        #expect(body["expected_revision"] as? Int == 1)
+        #expect(body["session_id"] as? String == sessionID.uuidString)
+    }
+    /// A merge made without asking can be undone from the surviving person.
+    @Test func automaticMergeOffersUndoAndSuggestionsAreAnsweredFromTheProfile() async throws {
+        let id = UUID(), mergedID = UUID(), operationID = UUID(), suggestionID = UUID(), otherID = UUID()
+        let sessionID = UUID()
+        let lock = NSLock()
+        var identity: [String: Any] = [:]
+        var decision: String?
+        let client = try makePeopleClient { request in
+            let path = request.url?.path ?? ""
+            if request.httpMethod == "POST", path == "/v1/people/identity-operations" {
+                let body = try JSONSerialization.jsonObject(with: request.peopleBodyData!) as! [String: Any]
+                lock.withLock { identity = body }
+                return (200, "{\"id\":\"\(UUID())\",\"revision\":1,\"state\":\"preview\",\"operation\":\"undo\",\"expires_at\":\"2026-09-25T00:10:00Z\",\"assignments\":[]}")
+            }
+            if request.httpMethod == "POST", path.hasPrefix("/v1/people/merge-suggestions/") {
+                let body = try JSONSerialization.jsonObject(with: request.peopleBodyData!) as! [String: Any]
+                lock.withLock { decision = body["decision"] as? String }
+                return (200, suggestionJSON(suggestionID, source: otherID, target: id, state: "separated"))
+            }
+            let merged = "{\"operation_id\":\"\(operationID)\",\"revision\":2,\"merged\":\(personJSON(mergedID)),\"merged_at\":\"2026-09-24T12:00:00Z\"}"
+            return (200, "{\"person\":\(personJSON(id)),\"aliases\":[],\"relationships\":[],\"history\":[],\"commitments\":[],\"facts\":[],\"fact_revisions\":{},\"merge_suggestions\":[\(suggestionJSON(suggestionID, source: otherID, target: id))],\"automatic_merges\":[\(merged)],\"truncated\":false,\"coverage\":\"Recorded evidence only\"}")
+        }
+        let model = PeopleDetailViewModel(personID: id, makeAPIClient: { client })
+        await model.reload()
+        let automatic = try #require(model.profile?.automaticMerges.first)
+        #expect(automatic.operationID == operationID)
+        await model.undoAutomaticMerge(automatic, sessionID: sessionID)
+        #expect(model.preview?.operation == "undo")
+        let undo = lock.withLock { identity }
+        #expect(undo["operation"] as? String == "undo")
+        #expect(undo["operation_id"] as? String == operationID.uuidString)
+        #expect(undo["expected_revision"] as? Int == 2)
+        model.cancelPreview()
+        let suggestion = try #require(model.profile?.mergeSuggestions.first)
+        #expect(suggestion.other(than: id).id == otherID)
+        await model.resolveSuggestion(suggestion, decision: "separate", sessionID: sessionID)
+        #expect(lock.withLock { decision } == "separate")
+        #expect(model.errorMessage == nil)
+    }
     @Test func addingAliasUsesTheGovernedProfileWrite() async throws {
         let id = UUID(), sessionID = UUID()
         let lock = NSLock()
@@ -508,6 +582,10 @@ import Testing
         #expect(lock.withLock { writes } == 1)
         #expect(model.errorMessage == nil)
     }
+}
+
+private func suggestionJSON(_ id: UUID, source: UUID, target: UUID, state: String = "open") -> String {
+    "{\"id\":\"\(id)\",\"revision\":\(state == "open" ? 1 : 2),\"source\":\(personJSON(source)),\"target\":\(personJSON(target)),\"reason\":\"first_name\",\"family_name\":true,\"state\":\"\(state)\",\"created_at\":\"2026-09-24T12:00:00Z\",\"updated_at\":\"2026-09-24T12:00:00Z\"}"
 }
 
 private func personJSON(_ id: UUID) -> String {
@@ -529,7 +607,8 @@ private extension URLRequest {
     }
 }
 
-private func makePeopleClient(_ handler: @escaping (URLRequest) throws -> (Int, String)) throws -> VeetbotAPIClient {
+/// Serves each request from `handler` through a private URL protocol; shared by the People suites.
+func makePeopleClient(_ handler: @escaping (URLRequest) throws -> (Int, String)) throws -> VeetbotAPIClient {
     let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     let handlerID = PeopleTestURLProtocol.register(handler)

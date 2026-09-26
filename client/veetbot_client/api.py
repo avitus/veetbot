@@ -7,6 +7,7 @@ import json
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -17,6 +18,7 @@ from . import __version__
 
 MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SSE_FRAME_BYTES = 1024 * 1024
+DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
 
 class ClientError(RuntimeError):
@@ -195,6 +197,17 @@ def parse_sse(lines: Iterable[bytes]) -> Iterator[SSEEvent]:
     event = _dispatch_sse(event_name=event_name, event_id=event_id, data_lines=data_lines)
     if event is not None:
         yield event
+
+
+def _bare_name(name: object, artifact_id: str) -> str:
+    """Keep only the final component of a server-supplied file name."""
+
+    raw = name if isinstance(name, str) else ""
+    bare = raw.replace("\\", "/").rsplit("/", 1)[-1]
+    bare = "".join(character for character in bare if character.isprintable()).strip()
+    if bare in {"", ".", ".."}:
+        return "artifact-" + "".join(c for c in artifact_id if c.isalnum() or c in "-_")
+    return bare
 
 
 class ApiClient:
@@ -383,6 +396,43 @@ class ApiClient:
             f"/v1/approvals/{quote(approval_id, safe='')}/resolve",
             body=body,
         )
+
+    def download_artifact(self, artifact_id: str, destination: Path | None = None) -> Path:
+        """Save an artifact under its bare name, or at `destination`, never overwriting."""
+
+        path = f"/v1/artifacts/{quote(artifact_id, safe='')}"
+        metadata = self._request_json("GET", path)
+        size = metadata.get("size_bytes")
+        if type(size) is not int or size < 0:
+            raise ProtocolError("artifact metadata omitted its size")
+        target = destination or Path.cwd()
+        if target.is_dir():
+            target = target / _bare_name(metadata.get("name"), artifact_id)
+        request = Request(  # noqa: S310 - ApiClient restricts base URLs to HTTP(S).
+            self._url(f"{path}/content"),
+            headers=self._headers({"Accept": "*/*"}),
+            method="GET",
+        )
+        try:
+            file = target.open("xb")
+        except FileExistsError as exc:
+            raise ClientError(f"{target} already exists; choose another path") from exc
+        except OSError as exc:
+            raise ClientError(f"cannot write {target}: {exc.strerror or exc}") from exc
+        written = 0
+        try:
+            with file, self._open(request) as response:
+                while chunk := response.read(DOWNLOAD_CHUNK_BYTES):
+                    written += len(chunk)
+                    if written > size:
+                        raise ProtocolError("artifact content was larger than its metadata")
+                    file.write(chunk)
+            if written != size:
+                raise ProtocolError("artifact content was shorter than its metadata")
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        return target
 
     def stream_events(self, run_id: str, last_event_id: int | None = None) -> Iterator[SSEEvent]:
         headers = self._headers({"Accept": "text/event-stream"})

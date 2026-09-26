@@ -6,12 +6,16 @@ import hashlib
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
+from uuid import UUID
+
+import pytest
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.determinism import RandomIdFactory
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.bootstrap import build
 from agent_core.domain.artifacts import ArtifactOrigin
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.views import TextContentBlock
 from agent_core.runtime.worker import DurableWorker
@@ -94,3 +98,61 @@ async def test_postgres_artifact_metadata_and_content_round_trip(tmp_path: Path)
     assert view.sha256 == hashlib.sha256(content).hexdigest()
     assert view.size_bytes == len(content)
     assert downloaded == content
+
+
+async def test_postgres_reply_retention_matches_the_repository_contract(tmp_path: Path) -> None:
+    """ADR-0122: a run's exports outlive the retention window; nothing else does."""
+    settings = replace(database_settings(), artifact_root=tmp_path)
+    async with build(settings=settings, storage="postgres") as composition:
+        session = await composition.services.sessions.create(composition.principal, "general", {})
+        submitted = await composition.services.runs.submit(
+            composition.principal,
+            session.id,
+            [TextContentBlock(text="create a run for reply files")],
+            None,
+            None,
+        )
+        run_id = submitted.run_id
+        factory = ArtifactWriterFactory(
+            composition.uow_factory,
+            FilesystemArtifactStore(tmp_path),
+            composition.clock,
+            RandomIdFactory(),
+        )
+
+        async def create(origin: ArtifactOrigin, name: str) -> UUID:
+            ref = await factory.for_run(
+                tenant_id=composition.principal.tenant_id,
+                principal_id=composition.principal.principal_id,
+                session_id=session.id,
+                run_id=run_id,
+                origin=origin,
+            ).create(_chunks(name.encode()), name, "text/plain", TrustLevel.EXTERNAL_UNTRUSTED)
+            return ref.artifact_id
+
+        exported = await create(ArtifactOrigin.SANDBOX_EXPORT, "chart.txt")
+        written = await create(ArtifactOrigin.MODEL_OUTPUT, "notes.txt")
+        captured = await create(ArtifactOrigin.TOOL_OUTPUT, "capture.json")
+        pending = await create(ArtifactOrigin.SANDBOX_EXPORT, "pending.txt")
+
+        async with composition.uow_factory() as uow:
+            retained = await uow.artifacts.retain_for_reply(
+                [written, exported, written], composition.principal, run_id=run_id
+            )
+        with pytest.raises(NotFoundError):
+            async with composition.uow_factory() as uow:
+                await uow.artifacts.retain_for_reply(
+                    [pending, captured], composition.principal, run_id=run_id
+                )
+        async with composition.uow_factory() as uow:
+            stored = {
+                artifact.id: artifact
+                for artifact in await uow.artifacts.list_for_run(run_id, composition.principal)
+            }
+
+    assert [artifact.id for artifact in retained] == [written, exported]
+    assert stored[exported].expires_at is None
+    assert stored[written].expires_at is None
+    assert stored[captured].expires_at is not None
+    # A refused request retains nothing, not even the eligible export it named.
+    assert stored[pending].expires_at is not None

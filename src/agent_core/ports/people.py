@@ -61,6 +61,16 @@ class PeopleStore(Protocol):
         self, principal: Principal, account_id: str, thread_id: str, message_ids: frozenset[str]
     ) -> int: ...
 
+    async def withhold_generated_summaries(
+        self, principal: Principal, interaction_ids: Sequence[UUID]
+    ) -> int:
+        """Replace a generated email summary with its label in every stored revision.
+
+        The caller holds the owner's People lock. Returns how many interactions
+        changed; an already withheld or non-email interaction does not count.
+        """
+        ...
+
     async def erase_session(self, principal: Principal, session_id: UUID) -> int: ...
 
     async def erase_principal(self, principal: Principal) -> int: ...

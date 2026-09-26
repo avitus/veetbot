@@ -14,6 +14,8 @@ mcp:
   connect_timeout_seconds: 10
   request_timeout_seconds: 30
   idle_timeout_seconds: 900
+  # A tenant HTTP server's remembered discovery; stdio lasts the process (ADR-0131).
+  discovery_reuse_seconds: 3600
   description_maximum_bytes: 1024
   schema_maximum_depth: 16
   schema_maximum_bytes: 32768

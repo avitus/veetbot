@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import io
+import json
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -20,8 +21,10 @@ from client.veetbot_client import __version__
 from client.veetbot_client.api import (
     ApiClient,
     ApiError,
+    ClientError,
     ConfigurationError,
     ConnectionFailureError,
+    ProtocolError,
     SSEEvent,
     parse_sse,
 )
@@ -575,3 +578,96 @@ def test_client_main_retries_only_readiness_before_running_once(
     assert client.health_calls == 2
     assert client.supplied_token == OPAQUE_AUTH_VALUE
     assert len(run_calls) == 1
+
+
+def _artifact_metadata(name: str, size: int) -> FakeResponse:
+    return FakeResponse(
+        json.dumps(
+            {"id": "artifact-1", "name": name, "media_type": "text/plain", "size_bytes": size}
+        ).encode()
+    )
+
+
+def test_api_client_downloads_an_artifact_under_its_bare_name(tmp_path: Path) -> None:
+    opener = FakeOpener(
+        [_artifact_metadata("../reports/Jev Update.txt", 6), FakeResponse(b"hello\n")]
+    )
+    client = ApiClient("https://agent.example", token=OPAQUE_AUTH_VALUE, opener=opener)
+
+    saved = client.download_artifact("artifact-1", tmp_path)
+
+    assert saved == tmp_path / "Jev Update.txt"
+    assert saved.read_bytes() == b"hello\n"
+    metadata, content = opener.requests
+    assert metadata.full_url == "https://agent.example/v1/artifacts/artifact-1"
+    assert content.full_url == "https://agent.example/v1/artifacts/artifact-1/content"
+    assert content.get_header("Authorization") == f"Bearer {OPAQUE_AUTH_VALUE}"
+
+
+def test_api_client_saves_to_an_explicit_file_path(tmp_path: Path) -> None:
+    opener = FakeOpener([_artifact_metadata("report.md", 2), FakeResponse(b"# ")])
+    client = ApiClient("https://agent.example", opener=opener)
+
+    saved = client.download_artifact("artifact-1", tmp_path / "chosen.md")
+
+    assert saved == tmp_path / "chosen.md"
+    assert saved.read_bytes() == b"# "
+
+
+def test_api_client_never_overwrites_an_existing_file(tmp_path: Path) -> None:
+    (tmp_path / "report.txt").write_bytes(b"keep me")
+    opener = FakeOpener([_artifact_metadata("report.txt", 3), FakeResponse(b"new")])
+    client = ApiClient("https://agent.example", opener=opener)
+
+    with pytest.raises(ClientError, match="already exists"):
+        client.download_artifact("artifact-1", tmp_path)
+
+    assert (tmp_path / "report.txt").read_bytes() == b"keep me"
+
+
+def test_api_client_reports_an_unwritable_destination_as_a_client_error(tmp_path: Path) -> None:
+    opener = FakeOpener([_artifact_metadata("report.txt", 3), FakeResponse(b"new")])
+    client = ApiClient("https://agent.example", opener=opener)
+    missing = tmp_path / "missing" / "report.txt"
+
+    with pytest.raises(ClientError, match=r"cannot write .*report\.txt"):
+        client.download_artifact("artifact-1", missing)
+
+    assert not missing.parent.exists()
+    assert [request.full_url for request in opener.requests] == [
+        "https://agent.example/v1/artifacts/artifact-1"
+    ]
+
+
+def test_api_client_discards_a_download_longer_than_its_metadata(tmp_path: Path) -> None:
+    opener = FakeOpener([_artifact_metadata("report.txt", 3), FakeResponse(b"too long")])
+    client = ApiClient("https://agent.example", opener=opener)
+
+    with pytest.raises(ProtocolError, match="larger than"):
+        client.download_artifact("artifact-1", tmp_path)
+
+    assert not (tmp_path / "report.txt").exists()
+
+
+def test_interactive_download_command_saves_the_named_artifact(tmp_path: Path) -> None:
+    class DownloadingApi(ScriptedChatApi):
+        def __init__(self) -> None:
+            super().__init__()
+            self.downloads: list[tuple[str, Path | None]] = []
+
+        def download_artifact(self, artifact_id: str, destination: Path | None = None) -> Path:
+            self.downloads.append((artifact_id, destination))
+            return tmp_path / "report.txt"
+
+    api = DownloadingApi()
+    stdout = io.StringIO()
+    inputs = iter(["/download artifact-1", f"/download artifact-2 {tmp_path}", "/help", "/quit"])
+    application = ChatApplication(
+        cast(ChatApi, api),
+        Console(stdout, io.StringIO(), read_line=lambda _label: next(inputs)),
+    )
+
+    assert application.run() == 0
+    assert api.downloads == [("artifact-1", None), ("artifact-2", tmp_path)]
+    assert f"Saved {tmp_path / 'report.txt'}" in stdout.getvalue()
+    assert "/download <artifact-id> [path]" in stdout.getvalue()

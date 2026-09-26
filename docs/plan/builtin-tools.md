@@ -127,16 +127,17 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Seventeen more model-callable tools are declared at build time by other
+Twenty-nine more model-callable tools are declared at build time by other
 specifications:
 
 ```text
 tool                          kind        declared by
-----------------------------  ----------  -------------------
+----------------------------  ----------  ------------------------
 conversation.ask_user         control     tool-system
 delegate.run                  control     tool-system
 context.update_working_state  control     context-engine
 skill.load                    control     skills
+tool.call                     control     tool-system
 skill.manage                  capability  skills
 memory.remember               capability  memory-formation
 memory.search                 capability  memory-retrieval
@@ -145,15 +146,28 @@ knowledge.ingest              capability  knowledge-documents
 knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
+browser.navigate              capability  browser-automation
+browser.observe               capability  browser-automation
+browser.act                   capability  browser-automation
 schedule.create               capability  scheduling
 schedule.list                 capability  scheduling
+schedule.update               capability  scheduling
 schedule.pause                capability  scheduling
 schedule.resume               capability  scheduling
 schedule.cancel               capability  scheduling
+email.context                 capability  email-experience
+email.feedback                capability  email-experience
+email.subscriptions           capability  email-unsubscribe
+email.unsubscribe             capability  email-unsubscribe
+people.search                 capability  people-and-relationships
+people.context                capability  people-and-relationships
+people.history                capability  people-and-relationships
 ```
 
-Twenty-five model-callable tools in total, and this document's roster is
-eight of them. The rule that keeps both numbers right is
+Thirty-seven model-callable builtin tools in total, and this document's roster
+is eight of them. Tools a paired device contributes are not builtins: they
+register in the reserved `device` domain when the device attaches. The rule
+that keeps both numbers right is
 [knowledge-documents.md](knowledge-documents.md)'s, and it is repeated
 here because a reader who finds it only there has already been
 confused: *"Subject specifications declare their own tools ... so this
@@ -165,11 +179,13 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other seventeen, `skill.manage`, `web.search`,
-`web.fetch`, and the five `schedule.*` tools are fully classified in their subject
-specifications;
+nothing else.** Of the other twenty-nine, `skill.manage`, `web.search`,
+`web.fetch`, the three `browser.*` tools, and the six `schedule.*` tools are
+fully classified in their subject specifications, and the four `email.*` and
+three `people.*` tools in this document's Milestone 26, 28, and 31 sections
+below;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
-`skill.load` carries three. The three remaining control tools inherit
+`skill.load` carries three. The four remaining control tools inherit
 `side_effect: NONE` and `target_kind: in_process` from the
 registration constraint on their kind and declare nothing else. Of the
 five memory and knowledge tools, `memory.search`,
@@ -182,24 +198,25 @@ one. Whoever builds a tool on that list supplies its classification
 with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
-roster.** Its subject is the twenty-four checked-in, complete builtin tool
-identities (plus historical versions of `memory.remember` and `skill.load`):
-`math.calculate`, `conversation.ask_user`, `system.current_time`, the three
-`workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
+roster.** Its subject is every builtin the composition root registers, and
+that is a function of the deployment. Seventeen identities are always
+registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
+the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the three `memory.*` tools,
-`skill.load`, `skill.manage`, the two `knowledge.*` tools, the two `web.*`
-tools, and the five `schedule.*` tools. Step 6 validates every registered version of
-those twenty-four identities.
-`delegate.run` is the
-twenty-fifth model-callable tool declared by the corpus.
-[tool-system.md](tool-system.md) deferred its implementation with the
+`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other twenty register only
+with their flag or provider: `skill.manage` with skill authoring, the two
+`web.*` and three `browser.*` tools with their providers, `delegate.run` with
+`AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
+and worker, the three `people.*` tools with People, `email.context` and
+`email.feedback` with Email mode, and `email.subscriptions` and
+`email.unsubscribe` with email unsubscribe. Historical versions of
+`memory.remember`, `skill.load`, `artifact.export`, `schedule.list`, and
+`delegate.run` register beside their current versions, and step 6 validates
+every registered version.
+[tool-system.md](tool-system.md) deferred `delegate.run` with the
 general-purpose-subagent extension, and Milestone 13 supplied it:
 [subagents-and-delegation.md](subagents-and-delegation.md) is its checked-in
-specification, a control tool in the `delegate` domain gated behind
-`AGENT_DELEGATION_ENABLED`. The composition root registers it only when that
-flag is on, so a default deployment still validates twenty-four identities in
-step 6 while a delegation-enabled one validates `delegate.run` as the
-twenty-fifth. Step 3, domain membership,
+specification, a control tool in the `delegate` domain. Step 3, domain membership,
 already passes for every registered tool because the partition table in
 [tool-system.md](tool-system.md) lists their builtin domains, `delegate`
 among them.
@@ -231,15 +248,17 @@ Milestone 6.
 Sharing a milestone with `sandbox.run_command` carries its own hazard,
 and it is worth naming so that the two designs are not allowed to
 merge. Exporting a file is not a property of having run a command.
-`artifact.export` takes a workspace path, is `IDEMPOTENT`, and runs
-`in_process`; `sandbox.run_command` is none of those. They share a
-milestone and nothing else.
+`artifact.export` takes a workspace path (or, since ADR-0122, text the
+model wrote), is `IDEMPOTENT`, and runs `in_process`;
+`sandbox.run_command` is none of those. They share a milestone and
+nothing else.
 
 Milestone 6 is right because Milestone 6 is where the model gains
 control tools and the programmatic bridge — the first point at which
 the model is deciding what leaves the run, rather than the executor
 deciding what to keep. `artifact.export` is that decision made explicit,
-and it belongs with the others.
+and it belongs with the others. ADR-0122 makes the decision visible: every
+file a run exports is attached to its final reply.
 
 This is a judgment call on a question the plan leaves open, and it is
 recorded as such.
@@ -348,7 +367,10 @@ otherwise have to guess whether they were considered.
     condition anyway.** Exporting the same path twice within a run must
     return the same `ArtifactRef` rather than creating a second one.
     That is a requirement on the Milestone 6 design, not an observation
-    about it, and it is what makes the class honest.
+    about it, and it is what makes the class honest. The run-bound
+    artifact writer enforces it: when the run already holds a live
+    artifact with the same origin, name, media type, and content, it
+    returns that artifact's reference and stores nothing.
 5.  **`allow_parallel` is `yes` only for the four read-only tools.** The
     two Milestone 1 tools are pure; the two workspace readers observe a
     filesystem that nothing in the same step is writing, because a step
@@ -1046,7 +1068,9 @@ worker's lease rather than for a run's logical lifetime. A run that
 pauses for an approval and resumes on another worker gets an empty
 one, and that document already requires `sandbox.run_command`'s
 description to tell the model that files worth keeping should be
-exported.
+exported. The worker in fact discards the workspace whenever a run
+finishes or pauses, and since ADR-0122 both descriptions say so and name
+`artifact.export` as the only way a file reaches the owner.
 
 `workspace.write_text`'s description carries the same sentence, for
 the same reason and with more force, because writing a file is the
@@ -1054,6 +1078,12 @@ operation whose entire point is that something persists. A model that
 writes `notes.md`, requests an approval, and reads `notes.md` back
 after the resume gets `no_such_path`, and the only place that outcome
 can be prevented is the description it read before it wrote.
+
+The same lifetime is why the default agent does not advertise
+`workspace.list_files` (ADR-0124). Within one claim a model knows what
+it wrote, and a sandbox command that creates files can print its own
+listing. The tool stays registered, and an explicit `enabled_tools`
+list may still name it.
 
 ### Text, encoding, and what makes a file binary
 
@@ -1369,7 +1399,7 @@ tool.not_found.no_such_path
 tool.invalid_arguments.not_text
   Not a UTF-8 text file. This tool reads text only.
 tool.invalid_arguments.not_a_file
-  That path is a directory. Use workspace.list_files.
+  That path is a directory.
 tool.invalid_arguments.not_a_directory
   That path is a file. Use workspace.read_text.
 ```
@@ -1386,10 +1416,12 @@ tempting alternative, but `OUTPUT_INVALID` is the tool blaming its own
 output for the caller's choice of file. The path is the argument, and
 the argument named something this tool does not read.
 
-The two directory codes name the tool to use instead. That is the same
+`not_a_directory` names the tool to use instead. That is the same
 tradeoff `math.calculate` makes in the other direction: the message
 carries the remedy and never the input, and a sibling tool's name is
-remedy rather than input.
+remedy rather than input. `not_a_file` names none: the default agent
+no longer advertises `workspace.list_files` (ADR-0124), and a message
+that names a tool the model was not offered costs a refused call.
 
 ## `demo.external_write`
 
@@ -1491,7 +1523,11 @@ two still owe:
 2.  **`artifact.export`, at Milestone 6.** The argument shape, the
     `ArtifactRef` it returns, the size ceiling, and the
     same-path-same-run identity that makes its `IDEMPOTENT`
-    classification true.
+    classification true. ADR-0122 adds version 2.0.0: `path` defaults to
+    the empty string, an optional `content` of at most 1 MiB is saved as
+    text under a bare file name, exactly one of the two is required, and
+    the text result states that the file is attached to the reply.
+    Version 1.0.0 stays registered for pinned sessions.
 
 ## Registration, and the startup check
 
@@ -1624,9 +1660,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is what this document designs; twenty-five model-callable tools are
-    declared at build time across the corpus, and seventeen of them belong
-    to other specifications. Resolved by naming those seventeen here,
+    is what this document designs; thirty-seven model-callable builtin tools
+    are declared at build time across the corpus, and twenty-nine of them
+    belong to other specifications. Resolved by naming those twenty-nine here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
@@ -1841,7 +1877,10 @@ can remove one source without deleting another account's context.
 `people.search`, `people.context`, and `people.history`. All three require
 `people.read`, are read-only and parallel-safe, return data at memory trust,
 and exist only with `AGENT_PEOPLE_ENABLED=1`. Their closed JSON schemas expose
-all execution bounds. People context shares the ordinary recall budget and
+all execution bounds. The exception is a `people.history@1.1.0` source read
+(ADR-0126). It also requires `email.read`, and it returns the retained original
+email at external-untrusted trust. Chats pinned to 1.0.0 keep the first
+contract. People context shares the ordinary recall budget and
 cannot grant permission to send a message or change an email recipient.
 The governed `memory.remember` surface adds explicit person references only
 while People is enabled; old pinned catalogs retain their prior contract.

@@ -3,6 +3,9 @@
 - Status: Proposed
 - Date: 2026-09-17
 - Related: ADR-0030, ADR-0071, ADR-0097 (calling, whose tools this restored)
+- Amended by: ADR-0124 (2026-09-23), after email unsubscribe took two of the
+  four discovered slots; ADR-0123 (2026-09-25), which defers what does not fit
+  instead of skipping it silently
 - Detailed design: `docs/plan/context-engine.md`
 
 ## Context

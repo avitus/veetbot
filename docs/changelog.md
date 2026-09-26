@@ -4,6 +4,153 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-25 — Veetbot keeps a website open while you approve its clicks
+
+- With a signed-in browser profile, Veetbot could open a page but not act on
+  it: every browser step started a new blank browser, so a click never found
+  the page it was meant for. One browser now serves a whole run.
+- The page stays open while a click waits for your approval, for up to an hour.
+  After that, Veetbot opens the site again. ADR-0127: a run's browser renews
+  while the run is working or waiting for your approval. It closes when the run
+  ends, waits on something else, or is cancelled, so signing in again is not
+  held up.
+- A lost reply from the browser service no longer locks the profile for
+  fifteen minutes. A click whose outcome is unknown is never repeated. The
+  next browser step starts from a fresh page.
+
+## 2026-09-25 — New chats stop starting every MCP server before they answer
+
+- Measured over 80 production Chat turns, the first message of a new chat
+  waited 11 s at the median before its first model request, almost all of it
+  starting the Gmail and calling servers two at a time. Follow-up messages
+  waited 0.4 s. ADR-0131: the API and the interactive worker now remember each
+  server's last discovery, a new chat pins that catalog without starting
+  anything, and a server starts on the first call of one of its tools. Both
+  processes warm the memory in the background when they start, so the first
+  chat after a release is fast too.
+- Tools stay pinned per chat as before. A server whose tools changed since it
+  was remembered answers the changed tool with `tool.withdrawn`, and the next
+  chat pins the new catalog. Typed Email work still starts its servers at once.
+- Timing is recorded where it was missing. Each model attempt now records its
+  duration, time to first event, time to first text, retries and usage, and
+  each MCP handshake its duration.
+- `agent run latency [--days N] [--json]` prints recent Chat latency from the
+  event log: turn phases, first and follow-up setup, per-model timing and cache
+  use, per-tool and per-server durations, and queue waits. It prints no
+  message, argument or title content.
+
+## 2026-09-25 — Every person you choose opens, on a redesigned profile
+
+- On the Mac, Memory's People collection opened the first person you chose
+  and then ignored the others: the right pane stayed on that profile. It
+  happened once the directory was longer than its column, as a real one is.
+  The directory now selects the person the right pane shows and highlights
+  that row, and each profile starts fresh for its person.
+- The person profile is redesigned on Mac, iPhone and iPad. A header shows the
+  person's initials, name, what they are to you and their main address, with
+  Prepare for a conversation, Pin and Rename. Cards follow for names and
+  contact details, relationships in plain words such as "Your colleague" or
+  "Friend of Maya", a history timeline, open threads with their state, and
+  facts with Inspect evidence and Correct. Sections with nothing recorded
+  collapse into one note, and the coverage line says what was analyzed.
+- A possible duplicate now asks at the top of the profile. Automatic merges,
+  Repair identity and Forget person sit under Manage person, with Forget in
+  red. Buttons stay legible in dark appearance and at the largest text sizes.
+
+## 2026-09-25 — Email exchanges are summarized, and Chat can read the original
+
+- Asked about someone you had written to, Chat could say only that an email
+  went out on a date to a list of recipients. ADR-0126: each observed email
+  exchange now gets a short summary in that person's history, such as "Sent
+  email: …" or "Received email: …". Each Email refresh writes up to four,
+  newest first, after it assesses mail, prepares drafts and verifies
+  unsubscribe evidence. Each summary is one small model call, billed to the
+  approved Email allowance.
+- A summary is kept only when its supporting quote appears word for word in
+  the message or its subject, and when it passes the injection and
+  secret-material checks People already applies to what it shows. Mail older
+  than ninety days, bulk mail, and excluded or suppressed sources are never
+  summarized, and nothing is summarized while email learning is paused.
+  Deleting a fact formed from the same message withholds its summary for good.
+  Excluding or erasing the source, deleting the session that fetched it, or
+  forgetting anyone in the exchange removes it.
+- `people.history@1.1.0` names each email's message and Gmail thread, and
+  returns the retained original text of one message, 8,000 characters at a
+  time, to an owner with `email.read`. Version 1.0.0 stays registered for
+  chats pinned to it.
+
+## 2026-09-25 — Duplicate people merge, and teams stop being people
+
+- After the People cleanup, the directory still held "Investment Team",
+  "Partners", a verification service and an address shown as a name, because
+  the owner had written to them. ADR-0125: a label that is an address, or
+  that names a group, department, organization or service, never becomes or
+  matches a person. Rerunning `agent people repair-directory` removes the
+  existing ones, except any you renamed or confirmed an address for yourself.
+- Duplicates such as "Erin Vitus" beside "Erin" now resolve in two ways. An
+  address you gave one person, which a correspondent also holds, merges that
+  correspondent automatically, and the survivor's page offers an undo. A
+  name match asks you instead, because two people can share a name. Needs
+  review lists each possible duplicate with Merge and Not the same.
+- A pair you keep apart, or a merge you undo, is never suggested again. The
+  pass runs every 15 minutes, or now with `agent people dedupe --owner
+  TENANT/PRINCIPAL --confirm`.
+- `GET /v1/people/merge-suggestions` and
+  `POST /v1/people/merge-suggestions/{id}` are new, and migration
+  `524f16dfc8f9` admits the new People record kind.
+
+## 2026-09-25 — Chat offers every tool, not just the first thirty
+
+- Chat sent the model at most thirty tool definitions and silently dropped the
+  rest: all sixteen Gmail tools, and the next built-in tool would have dropped
+  `mcp.bland_read.list_calls` again. ADR-0123: tools that do not fit are listed
+  in a short deferred tool index and called through `tool.call`, under their
+  own names, policy and approvals. Nothing is dropped silently any more; a
+  tool that fits nowhere is recorded on the plan.
+- Discovered tools now rank reads first, not by name, so looking things up
+  keeps its full definitions. The six schedule and unsubscribe management
+  tools move to the index.
+- With production's flags every one of the forty-six tools is offered: thirty
+  definitions at 5,908 estimated tokens plus a seventeen-entry index at 1,013.
+  New chats get it; existing chats keep their roster.
+
+## 2026-09-23 — Files reach you on the reply, and replies can be copied
+
+- A file the agent made never reached the owner: `artifact.export` stored it,
+  but the model saw an empty result and the reply was text only. ADR-0122:
+  every file a run exports now appears as a button under its answer, in the
+  app you already have, and stays for as long as the conversation.
+- `artifact.export@2.0.0` also takes text directly (plain text, Markdown, CSV,
+  or JSON, up to 1 MiB), so "put that in a file" is one call with no approval
+  prompt. No policy file changed; version 1.0.0 stays for pinned sessions.
+- The workspace tools and the default instructions now say the workspace is
+  discarded when a run finishes or pauses and that a file is attached only when
+  `artifact.export` succeeded.
+- The Apple app adds Copy and Select Text under every finished message. Copy
+  writes the whole message as formatted text for Mail, Notes, or Gmail, with
+  a plain-text version free of Markdown symbols; Select Text opens a native
+  text view where any range can be selected. The artifact viewer opens at a
+  reading width on the Mac, and the sidebar sync no longer redraws an
+  unchanged conversation every 30 seconds.
+- The terminal client adds `/download ARTIFACT_ID [PATH]`.
+- Exporting the same file twice in one run now returns the first artifact
+  instead of storing a copy, as `builtin-tools.md` always required.
+
+## 2026-09-23 — Chat can list calls again
+
+- Email unsubscribe added two configured tools, so the owner's roster reached
+  twenty-eight of Chat's thirty slots. Name order then left
+  `mcp.bland_read.list_calls` and every Gmail tool out: Chat could place a
+  call but not list them, and nothing said why.
+- ADR-0124 takes `workspace.list_files` out of the default agent's roster. The
+  workspace lives for one worker claim, so a model knows what it wrote there;
+  the tool stays registered. All three calling tools fit, at 7,058 of 9,000
+  tokens. New chats get the change; existing chats keep their roster.
+- `workspace.read_text` answers a directory path with "That path is a
+  directory." instead of naming a tool the model may not have.
+- The production-shaped roster gate now enables email unsubscribe, the flag
+  it missed.
+
 ## 2026-09-23 — People holds who you know or write to
 
 - Production People held 130 provisional people, 128 of them names from

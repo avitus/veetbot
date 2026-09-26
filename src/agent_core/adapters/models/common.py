@@ -16,6 +16,7 @@ from agent_core.domain.messages import (
     FileReferencePart,
     ImageReferencePart,
     ModelAttempt,
+    ModelCompletedEvent,
     ModelEvent,
     ModelFailedEvent,
     ModelPermanentError,
@@ -146,6 +147,14 @@ def should_retry_failure_event(
         and not event.error.stream_had_output
         and event.sequence == 0
     )
+
+
+def with_internal_retries(event: ModelEvent, internal_attempt: int) -> ModelEvent:
+    """Report the retries made before output on the attempt's terminal event (ADR-0131)."""
+
+    if isinstance(event, ModelCompletedEvent) and internal_attempt > 1:
+        return event.model_copy(update={"internal_retry_count": internal_attempt - 1})
+    return event
 
 
 class Dumpable(Protocol):

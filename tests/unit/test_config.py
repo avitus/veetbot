@@ -1151,13 +1151,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_182_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_185_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 182
+    assert len(qualified_paths) == 185
     assert "runtime/limits.yaml:email.unsubscribe_grace_days" in qualified_paths
     assert {
         "folders/profiles.yaml:proposals.threshold",

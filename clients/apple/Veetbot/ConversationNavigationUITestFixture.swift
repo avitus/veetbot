@@ -214,10 +214,25 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let body: String
         let statusCode: Int
         switch (request.httpMethod, url.path) {
+        case ("GET", "/v1/people") where ProcessInfo.processInfo.arguments.contains(Self.peopleDirectoryArgument):
+            statusCode = 200
+            let secondPage = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .contains(URLQueryItem(name: "cursor", value: "page-2")) == true
+            let people = [Self.personJSON, Self.secondPersonJSON] + (3...72).map(Self.directoryPersonJSON)
+            let page = secondPage ? people[50...] : people[..<50]
+            body = "{\"items\":[\(page.joined(separator: ","))],\"next_cursor\":\(secondPage ? "null" : "\"page-2\"")}"
+        case ("GET", let path) where path.hasPrefix("/v1/people/00000000-0000-0000-0000-0000000C"):
+            statusCode = 200
+            let number = Int(path.suffix(4)) ?? 0
+            body = """
+            {"person":\(Self.directoryPersonJSON(number)),"aliases":[{"id":"00000000-0000-0000-0000-0000000D\(String(format: "%04d", number))","revision":1,"value":"contact\(number)@example.com","identifier_kind":"email","verification":"channel_observed","context":"","valid_to":null,"support_ids":[]}],"relationships":[],"history":[],"commitments":[],"facts":[],"fact_revisions":{},"related_labels":{},"truncated":false,"coverage":"Email analyzed: recent 90 days."}
+            """
         case ("GET", "/v1/people"):
             statusCode = 200
-            let second = Self.personJSON.replacingOccurrences(of: "000777", with: "000782").replacingOccurrences(of: "Maya", with: "Maya Chen")
-            body = "{\"items\":[\(Self.personJSON),\(second)],\"next_cursor\":null}"
+            body = "{\"items\":[\(Self.personJSON),\(Self.secondPersonJSON)],\"next_cursor\":null}"
+        case ("GET", "/v1/people/00000000-0000-0000-0000-000000000782"):
+            statusCode = 200
+            body = Self.secondProfileJSON
         case ("GET", "/v1/people/imports"):
             statusCode = 200
             body = #"{"items":[],"next_cursor":null}"#
@@ -820,6 +835,69 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let personJSON = """
         {"id":"00000000-0000-0000-0000-000000000777","revision":1,"display_name":"Maya","state":"active","pinned":false,"sensitivity":"sensitive","support_ids":[]}
         """
+
+    /// A directory as long as a real one, paged at the client's limit of 50.
+    static let peopleDirectoryArgument = "--ui-testing-people-directory"
+
+    private static func directoryPersonJSON(_ number: Int) -> String {
+        """
+        {"id":"00000000-0000-0000-0000-0000000C\(String(format: "%04d", number))","revision":1,"display_name":"Contact \(String(format: "%02d", number))","state":"provisional","pinned":false,"sensitivity":"sensitive","support_ids":[]}
+        """
+    }
+
+    private static let secondPersonJSON = personJSON
+        .replacingOccurrences(of: "000777", with: "000782")
+        .replacingOccurrences(of: "Maya", with: "Maya Chen")
+
+    /// A second, distinct profile, so choosing another person has visible
+    /// content to replace. It fills every section of the profile.
+    private static let secondProfileJSON = """
+        {"person":\(secondPersonJSON),\
+        "aliases":[\(secondAliasesJSON)],\
+        "relationships":[\(secondRelationshipsJSON)],\
+        "history":[\(secondHistoryJSON)],\
+        "commitments":[\(secondCommitmentsJSON)],\
+        "facts":[\(secondFactJSON)],"fact_revisions":{"00000000-0000-0000-0000-0000000007a5":1},\
+        "related_labels":{"00000000-0000-0000-0000-000000000777":"Maya"},\
+        "merge_suggestions":[\(secondSuggestionJSON)],\
+        "automatic_merges":[{"operation_id":"00000000-0000-0000-0000-0000000007B3","revision":1,"merged":\(mergedPersonJSON),"merged_at":"2026-09-20T12:00:00Z"}],\
+        "truncated":false,"coverage":"Email analyzed: recent 90 days; earlier Chat history not imported."}
+        """
+
+    private static let secondAliasesJSON = """
+        {"id":"00000000-0000-0000-0000-0000000007A1","revision":1,"value":"maya.chen@example.com","identifier_kind":"email","verification":"channel_observed","context":"work","valid_to":null,"support_ids":[]},\
+        {"id":"00000000-0000-0000-0000-0000000007A7","revision":1,"value":"+1 415 555 0142","identifier_kind":"phone","verification":"owner_confirmed","context":"mobile","valid_to":null,"support_ids":[]}
+        """
+
+    private static let secondRelationshipsJSON = """
+        {"id":"00000000-0000-0000-0000-0000000007A2","revision":1,"subject":{"kind":"person","id":"00000000-0000-0000-0000-000000000782"},"object":{"kind":"owner"},"predicate":"colleague","qualifier":"Design review team","valid_from":"2025-03-01T00:00:00Z","precision":"month","source_timezone":"America/Los_Angeles","support_ids":[]},\
+        {"id":"00000000-0000-0000-0000-0000000007A6","revision":1,"subject":{"kind":"person","id":"00000000-0000-0000-0000-000000000782"},"object":{"kind":"person","id":"00000000-0000-0000-0000-000000000777"},"predicate":"friend","qualifier":"","precision":"unknown","support_ids":[]}
+        """
+
+    private static let secondHistoryJSON = """
+        {"id":"00000000-0000-0000-0000-0000000007A3","revision":1,"channel":"email","interaction_kind":"exchange","attribution":"observed","direction":"incoming","summary":"Shared the Q3 roadmap draft and asked for comments by Friday.","occurred_at":"2026-09-18T16:30:00Z","precision":"instant","source_timezone":"America/Los_Angeles","support_ids":[],"participants":[]},\
+        {"id":"00000000-0000-0000-0000-0000000007A8","revision":1,"channel":"email","interaction_kind":"exchange","attribution":"observed","direction":"outgoing","summary":"Sent email","occurred_at":"2026-09-12T23:02:00Z","precision":"instant","source_timezone":"America/Los_Angeles","support_ids":[],"participants":[]},\
+        {"id":"00000000-0000-0000-0000-0000000007A9","revision":1,"channel":"chat","interaction_kind":"meeting","attribution":"owner_reported","direction":"reported","summary":"Met for coffee to plan the offsite.","occurred_at":"2026-08-28T00:00:00Z","precision":"day","source_timezone":"America/Los_Angeles","support_ids":[],"participants":[]}
+        """
+
+    private static let secondCommitmentsJSON = """
+        {"id":"00000000-0000-0000-0000-0000000007A4","revision":1,"debtor":{"kind":"owner"},"beneficiary":{"kind":"person","id":"00000000-0000-0000-0000-000000000782"},"description":"Send feedback on the Q3 roadmap draft","state":"open","due_at":"2026-09-26T00:00:00Z","due_precision":"day","source_timezone":"America/Los_Angeles","support_ids":[]},\
+        {"id":"00000000-0000-0000-0000-0000000007B0","revision":1,"debtor":{"kind":"person","id":"00000000-0000-0000-0000-000000000782"},"beneficiary":{"kind":"owner"},"description":"Share the offsite budget","state":"uncertain","due_at":null,"due_precision":null,"support_ids":[]}
+        """
+
+    private static let mergedPersonJSON = personJSON
+        .replacingOccurrences(of: "000777", with: "0007B1")
+        .replacingOccurrences(of: "Maya", with: "Maya C.")
+        .replacingOccurrences(of: "\"active\"", with: "\"merged\"")
+
+    private static let secondSuggestionJSON = """
+        {"id":"00000000-0000-0000-0000-0000000007B2","revision":1,"source":\(secondPersonJSON),"target":\(personJSON.replacingOccurrences(of: "000777", with: "0007B4").replacingOccurrences(of: "Maya", with: "M. Chen")),"reason":"nickname","family_name":false,"state":"open"}
+        """
+
+    private static let secondFactJSON = memoryJSON
+        .replacingOccurrences(of: ConversationNavigationUITestFixture.memoryID, with: "00000000-0000-0000-0000-0000000007A5")
+        .replacingOccurrences(of: "\"subject\":\"the user\"", with: "\"subject\":\"Maya Chen\"")
+        .replacingOccurrences(of: "The user prefers dark mode.", with: "Maya Chen leads the design review team.")
 
     private static let memoryJSON = """
         {"id":"\(ConversationNavigationUITestFixture.memoryID)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}

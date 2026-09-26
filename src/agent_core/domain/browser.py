@@ -264,11 +264,29 @@ class BrowserProfileView(BaseModel):
     last_used_at: datetime | None = None
 
 
+# The hosted service caps each lease request at fifteen minutes and a lease's
+# whole life, renewals included, at sixty (ADR-0127).
+MAXIMUM_BROWSER_LEASE_SECONDS = 15 * 60
+MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS = 60 * 60
+
+
+class BrowserRunState(StrEnum):
+    """What a hosted lease's run needs from it."""
+
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+    RESUMING = "resuming"
+    ENDED = "ended"
+
+
 class BrowserLease(BaseModel):
     """Secret orchestration-side handle for one isolated service lease."""
 
     lease_ref: str = Field(min_length=32, max_length=128, repr=False)
     expires_at: datetime
+    # The last action sequence the service applied on this lease; a caller
+    # that reattaches continues from it.
+    sequence: int = Field(default=0, ge=0)
 
 
 class BrowserAuthenticationView(BaseModel):

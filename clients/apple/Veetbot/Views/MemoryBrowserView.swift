@@ -11,6 +11,8 @@ public struct MemoryBrowserView: View {
     @ObservedObject var model: MemoryViewModel
     @StateObject private var people = PeopleViewModel()
     @State private var collection = "memories"
+    /// The person shown beside the Mac directory.
+    @State private var selectedPersonID: UUID?
     @State private var pendingDeletion: MemoryView?
     private let sessionID: UUID?
     @Environment(\.dismiss) private var dismiss
@@ -27,7 +29,7 @@ public struct MemoryBrowserView: View {
                     Text("Memories").tag("memories")
                     Text("People").tag("people")
                 }.pickerStyle(.segmented).padding()
-                if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID) }
+                if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
                 else { content }
             }
                 .navigationTitle("Memory")
@@ -58,6 +60,9 @@ public struct MemoryBrowserView: View {
                         if collection == "memories" { typeFilterMenu }
                     }
                 }
+            #if os(macOS)
+            detailColumn
+            #endif
         }
         .confirmationDialog(
             "Delete this memory?",
@@ -91,6 +96,32 @@ public struct MemoryBrowserView: View {
         .memoryBrowserPresentationSizing()
         #endif
     }
+
+    /// On the Mac the directory selects the person its adjacent column shows;
+    /// elsewhere each row pushes the profile.
+    private var peopleSelection: Binding<UUID?>? {
+        #if os(macOS)
+        $selectedPersonID
+        #else
+        nil
+        #endif
+    }
+
+    #if os(macOS)
+    /// The split view's second column. A memory row's navigation link replaces
+    /// it while that memory is open.
+    @ViewBuilder
+    private var detailColumn: some View {
+        if collection == "people", let selectedPersonID {
+            PeopleDetailView(personID: selectedPersonID, sessionID: sessionID)
+                .environment(\.peopleSelection, PeopleSelectionAction { self.selectedPersonID = $0 })
+        } else if collection == "people" {
+            PeoplePlaceholder()
+        } else {
+            Color.clear
+        }
+    }
+    #endif
 
     @ViewBuilder
     private var content: some View {

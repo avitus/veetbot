@@ -953,7 +953,34 @@ async def test_run_produced_artifact_downloads_through_the_public_api(tmp_path: 
         assert metadata.json()["run_id"] == str(run_id)
 
         download = await client.get(f"/v1/artifacts/{artifact_id}/content")
+        # ADR-0122: the exported file rides on the reply the owner sees.
+        transcript = await client.get(f"/v1/sessions/{session_id}/messages")
+        async with composition.uow_factory() as uow:
+            stored = await uow.artifacts.get(UUID(artifact_id), composition.principal)
+            events = [
+                event
+                for event in await uow.events.list_after(session_id, 0, composition.principal)
+                if event.run_id == run_id
+            ]
 
     assert download.status_code == 200, download.text
     assert download.text == content
     assert download.headers["content-disposition"].startswith("attachment")
+    assert transcript.status_code == 200, transcript.text
+    assert transcript.json()["items"][-1]["content"] == [
+        {"type": "text", "text": "Report exported."},
+        {
+            "type": "file",
+            "artifact_id": artifact_id,
+            "media_type": "text/plain",
+            "filename": "report.txt",
+        },
+    ]
+    assert stored.expires_at is None
+    [reply] = [
+        event.payload["message"]
+        for event in events
+        if event.event_type == "assistant.message.completed"
+    ]
+    [completed] = [event.payload for event in events if event.event_type == "run.completed"]
+    assert completed["final_message"] == reply

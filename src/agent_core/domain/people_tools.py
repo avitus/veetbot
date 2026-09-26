@@ -33,6 +33,19 @@ class PeopleHistoryArgs(PeopleValue):
     channel: Literal["chat", "email", "sms"] | None = None
     limit: int = Field(default=5, ge=1, le=5)
     cursor: str | None = Field(default=None, max_length=2048)
+    source_id: UUID | None = Field(
+        default=None,
+        description=(
+            "One of an email item's source_ids: return that message's retained "
+            "original text instead of items."
+        ),
+    )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        le=10_000_000,
+        description="Character offset into the original text; use next_offset.",
+    )
 
 
 class PersonReference(PeopleValue):
@@ -67,6 +80,15 @@ class PeopleContextResult(PeopleValue):
     truncated: bool
 
 
+class HistoryEmailReference(PeopleValue):
+    account_id: str = Field(max_length=100)
+    message_id: str = Field(max_length=1024)
+    # The Gmail thread, for the account's Gmail read tools.
+    provider_thread_id: str = Field(max_length=1024)
+    # Email mode's cached conversation, for email.context; null once it is gone.
+    thread_id: UUID | None
+
+
 class HistoryToolItem(PeopleValue):
     id: UUID
     channel: Literal["chat", "email", "sms"]
@@ -77,9 +99,27 @@ class HistoryToolItem(PeopleValue):
     participants: list[InteractionParticipant] = Field(max_length=6)
     source_ids: list[UUID] = Field(max_length=4)
     details_truncated: bool
+    email: HistoryEmailReference | None = None
+
+
+class PeopleSourceText(PeopleValue):
+    source_id: UUID
+    account_id: str = Field(max_length=100)
+    message_id: str = Field(max_length=1024)
+    thread_id: UUID | None
+    sender: str = Field(max_length=2000)
+    to: str | None = Field(max_length=2000)
+    cc: str | None = Field(max_length=2000)
+    subject: str = Field(max_length=998)
+    sent_at: AwareDatetime
+    text: str = Field(max_length=8000)
+    offset: int = Field(ge=0)
+    next_offset: int | None
+    complete: bool
 
 
 class PeopleHistoryResult(PeopleValue):
     items: list[HistoryToolItem] = Field(max_length=5)
     next_cursor: str | None = Field(max_length=2048)
     coverage: str = Field(max_length=300)
+    source: PeopleSourceText | None = None

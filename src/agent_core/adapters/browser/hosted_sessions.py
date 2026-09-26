@@ -180,6 +180,17 @@ class HostedBrowserSessionControlPlane:
         assert isinstance(result, BrowserObservation)
         return result
 
+    async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease:
+        digest = _private_ref_digest(lease_ref)
+        result = await self._post(
+            "/v1/browser-sessions:renew",
+            payload={"lease_ref": lease_ref, "deadline_at": deadline_at.isoformat()},
+            response_model=BrowserLease,
+            idempotency_key=f"browser-session:{digest}:renew",
+        )
+        assert isinstance(result, BrowserLease)
+        return result
+
     async def close(self, lease_ref: str) -> None:
         digest = _private_ref_digest(lease_ref)
         await self._post(

@@ -108,6 +108,7 @@ from agent_core.adapters.persistence.device_channel import (
 )
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
 from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
+from agent_core.adapters.persistence.latency_report import chat_latency_report
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
@@ -245,6 +246,10 @@ from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.attachments import StoredAttachmentResolver
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
+from agent_core.application.browser_leases import (
+    browser_run_state,
+    release_browser_lease_if_done,
+)
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
     BrowserProfileManagementService,
@@ -267,8 +272,9 @@ from agent_core.application.notification_dispatcher import (
 )
 from agent_core.application.notification_producer import NotificationProducer
 from agent_core.application.notification_worker import NotificationWorker
-from agent_core.application.people import PublicPeopleService
+from agent_core.application.people import PublicPeopleService, RetainedEmailReader
 from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
+from agent_core.application.people_duplicates import PeopleDeduplicator
 from agent_core.application.people_erasure import PeopleErasureService
 from agent_core.application.people_identity import PeopleIdentityService
 from agent_core.application.people_repair import PeopleDirectoryRepair
@@ -382,9 +388,14 @@ from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
-from agent_core.domain.agents import AgentSpec, Principal, content_addressed_agent_version
+from agent_core.domain.agents import (
+    DEFERRED_TOOLS_METADATA_KEY,
+    AgentSpec,
+    Principal,
+    content_addressed_agent_version,
+)
 from agent_core.domain.approvals import ApprovalResolutionType
-from agent_core.domain.browser import BrowserProfile
+from agent_core.domain.browser import BrowserProfile, BrowserRunState
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -504,6 +515,7 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.observability.latency import ChatLatencyReport
 from agent_core.observability.logging import configure_logging
 from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
@@ -513,7 +525,10 @@ from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.artifacts import AttachmentResolver
-from agent_core.ports.browser import BrowserProvider
+from agent_core.ports.browser import (
+    BrowserProvider,
+    browser_lease_upkeep,
+)
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 from agent_core.ports.browser_sessions import (
     BrowserAuthenticationControlPlane,
@@ -552,7 +567,7 @@ from agent_core.scheduling.materializer import ScheduleMaterializer
 from agent_core.scheduling.worker import ScheduleWorker
 from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
-from agent_core.tools.artifact_export import ArtifactExportTool
+from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
@@ -575,12 +590,21 @@ from agent_core.tools.memory_remember import (
     PeopleMemoryRememberTool,
 )
 from agent_core.tools.memory_search import MemorySearchTool
-from agent_core.tools.people import PeopleContextTool, PeopleHistoryTool, PeopleSearchTool
+from agent_core.tools.people import (
+    LegacyPeopleHistoryTool,
+    PeopleContextTool,
+    PeopleHistoryTool,
+    PeopleSearchTool,
+)
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
 from agent_core.tools.schedule_lifecycle import (
+    SCHEDULE_CANCEL_TOOL_NAME,
     SCHEDULE_LIFECYCLE_TOOL_NAMES,
+    SCHEDULE_PAUSE_TOOL_NAME,
+    SCHEDULE_RESUME_TOOL_NAME,
+    SCHEDULE_UPDATE_TOOL_NAME,
     LegacyScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
@@ -594,6 +618,7 @@ from agent_core.tools.skill_load import (
     SkillLoadTool,
 )
 from agent_core.tools.skill_manage import SkillManageTool
+from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME, ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_search import WebSearchTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
@@ -602,6 +627,20 @@ from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
 logger = logging.getLogger(__name__)
 LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
+
+
+def _duplicate_sweep(
+    duplicates: PeopleDeduplicator | None, principal: Principal
+) -> Callable[[], Awaitable[int]] | None:
+    """The maintenance pass that merges decisive duplicates and asks about the rest."""
+    if duplicates is None or "people.write" not in principal.scopes:
+        return None
+
+    async def sweep() -> int:
+        report = await duplicates.run(principal, apply=True)
+        return len(report.merges) + len(report.suggestions) + report.withdrawn
+
+    return sweep
 
 
 def _correspondence_reprojector(
@@ -617,6 +656,21 @@ def _correspondence_reprojector(
         ).reproject_correspondence(record)
 
     return reproject
+
+
+def _retained_email_reader(
+    uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
+) -> Callable[[Principal], RetainedEmailReader]:
+    """People history's view of the original email Veetbot kept (ADR-0126); no model."""
+
+    def reader(owner: Principal) -> RetainedEmailReader:
+        from agent_core.memory.email_people import EmailPeopleFormationService
+
+        return EmailPeopleFormationService(
+            uow_factory, clock, ids, owner, provider="people-source", model="none"
+        )
+
+    return reader
 
 
 @dataclass(frozen=True, slots=True)
@@ -680,6 +734,15 @@ class Composition:
     judgment_provider: JudgmentProvider | None = None
     attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
+    # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
+    latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
+
+    def start_mcp_discovery_warmup(self) -> asyncio.Task[None]:
+        """Remember this tenant's MCP catalogs in the background (ADR-0131).
+
+        Only the API and the interactive worker call this; serving never waits for it.
+        """
+        return self.mcp.start_discovery_warmup((self.principal.tenant_id,))
 
 
 @dataclass(frozen=True, slots=True)
@@ -706,7 +769,9 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "system.current_time, or web.search when available. Do not use sandbox.run_command "
     "for those requests; use it only when arbitrary code execution is necessary. If no "
     "read-only tool can answer, explain the limitation or ask before proposing sandboxed "
-    "code execution."
+    "code execution. To give the user a file, call artifact.export with the text as content "
+    "or a workspace path; the file is attached to your reply. Never say a file is attached "
+    "unless artifact.export succeeded."
 )
 _BROWSER_TOOL_NAMES = frozenset({"browser.navigate", "browser.observe", "browser.act"})
 
@@ -2265,6 +2330,11 @@ async def _compose(
         raise ConfigurationError("MCP idle timeout must be numeric")
     if idle_timeout <= 0:
         raise ConfigurationError("MCP idle timeout must be positive")
+    discovery_reuse = mcp_config.get("discovery_reuse_seconds")
+    if not isinstance(discovery_reuse, (int, float)) or isinstance(discovery_reuse, bool):
+        raise ConfigurationError("MCP discovery reuse must be numeric")
+    if discovery_reuse <= 0:
+        raise ConfigurationError("MCP discovery reuse must be positive")
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -2320,6 +2390,7 @@ async def _compose(
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
+    registry.register(ToolCallTool())
     registry.register(CurrentTimeTool(clock))
     registry.register(WorkspaceReadTextTool())
     registry.register(WorkspaceWriteTextTool())
@@ -2328,6 +2399,9 @@ async def _compose(
     registry.register(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
+    # A session keeps the exact tool version it was shown, and the registry
+    # treats the last registration as latest: 1.0.0 stays for pinned sessions.
+    registry.register(LegacyArtifactExportTool())
     registry.register(ArtifactExportTool())
     if web_search_provider is not None:
         registry.register(WebSearchTool(web_search_provider))
@@ -2876,16 +2950,22 @@ async def _compose(
         registry.register(PeopleMemoryRememberTool(memory_service))
     registry.register(MemorySearchTool(memory_retriever))
     people_erasure = PeopleErasureService(uow_factory, clock)
+    people_identity = PeopleIdentityService(uow_factory, clock, ids)
+    people_duplicates = (
+        PeopleDeduplicator(uow_factory, clock, people_identity) if settings.people_enabled else None
+    )
     people_service = (
         PublicPeopleService(
             uow_factory,
             clock,
-            identity=PeopleIdentityService(uow_factory, clock, ids),
+            identity=people_identity,
+            duplicates=people_duplicates,
             erasure=people_erasure,
             memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
             legacy_linker=lambda owner, limit, cursor: link_existing_beliefs(
                 uow_factory, clock, owner, limit=limit, cursor=cursor
             ),
+            email_sources=_retained_email_reader(uow_factory, clock, ids),
         )
         if settings.people_enabled
         else None
@@ -2961,6 +3041,8 @@ async def _compose(
         people_retriever = PeopleAwareMemoryRetriever(people_context, principal)
         registry.register(PeopleSearchTool(uow_factory, clock))
         registry.register(PeopleContextTool(people_context))
+        # Chats pinned before ADR-0126 keep 1.0.0; the latest registration wins.
+        registry.register(LegacyPeopleHistoryTool(people_service))
         registry.register(PeopleHistoryTool(people_service))
     registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None
@@ -2998,6 +3080,7 @@ async def _compose(
             ids,
             connect_timeout_seconds=float(connect_timeout),
             idle_timeout_seconds=float(idle_timeout),
+            discovery_reuse_seconds=float(discovery_reuse),
             call_interceptor=None if call_service is None else call_service.invoke,
         )
         skill_catalogs = SkillCatalogService(
@@ -3289,6 +3372,19 @@ async def _compose(
             if delegation_joins is not None:
                 await delegation_joins.parent_parked(run_id, delegation_id)
 
+        async def after_parked_cancel(run_id: UUID) -> None:
+            if delegation_joins is not None:
+                await delegation_joins.after_run(run_id)
+            if browser_provider is not None:
+                # In one process the parked run's lease is here; elsewhere the
+                # run worker's lease upkeep releases it.
+                try:
+                    await release_browser_lease_if_done(
+                        browser_provider, uow_factory, principal, run_id
+                    )
+                except Exception:
+                    logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
+
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
             try:
                 async with uow_factory() as uow:
@@ -3304,6 +3400,13 @@ async def _compose(
                 await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
+            if browser_provider is not None:
+                try:
+                    await release_browser_lease_if_done(
+                        browser_provider, uow_factory, principal, run_id
+                    )
+                except Exception:
+                    logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:
                 await schedule_accountant.account(run_id)
             except Exception:
@@ -3637,7 +3740,7 @@ async def _compose(
             seed_checkpoint=checkpoint_seeder,
             cancel_parked_run=executor.cancel_parked_run,
             trajectory_export_enabled=trajectory_export_enabled,
-            on_parked_cancelled=(None if delegation_joins is None else delegation_joins.after_run),
+            on_parked_cancelled=after_parked_cancel,
         )
         approval_service = ApprovalService(
             uow_factory=uow_factory,
@@ -3981,6 +4084,12 @@ async def _compose(
                 metrics=schedule_metrics,
             )
 
+        # Run workers hold the hosted browser leases of the runs they executed,
+        # so they, not the maintenance role, release and renew them (ADR-0127).
+        browser_lease_maintenance = (
+            None if browser_provider is None else browser_lease_upkeep(browser_provider)
+        )
+
         return (
             Composition(
                 settings=settings,
@@ -4015,6 +4124,7 @@ async def _compose(
                             duration_seconds=duration_seconds,
                         )
                     ),
+                    maintain_browser_leases=browser_lease_maintenance,
                 ),
                 async_worker_factory=lambda worker_id: DurableWorker(
                     uow_factory=uow_factory,
@@ -4033,6 +4143,7 @@ async def _compose(
                             duration_seconds=duration_seconds,
                         )
                     ),
+                    maintain_browser_leases=browser_lease_maintenance,
                 ),
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
@@ -4049,6 +4160,7 @@ async def _compose(
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
                     sweep_people_erasures=lambda: people_erasure.resume_pending(principal),
+                    sweep_people_duplicates=_duplicate_sweep(people_duplicates, principal),
                     sweep_terminal_schedules=sweep_terminal_schedules,
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
@@ -4228,6 +4340,9 @@ def _browser_provider(
             async with profiles() as uow:
                 return await uow.browser_profiles.get(requested_profile_id, owner)
 
+        async def read_run_state(run_id: UUID) -> BrowserRunState:
+            return await browser_run_state(profiles, principal, run_id)
+
         if profile_id is not None:
             return HostedBrowserProvider(
                 principal=principal,
@@ -4235,6 +4350,8 @@ def _browser_provider(
                 allowed_origins=allowed_origins,
                 profiles=load_profile,
                 sessions=sessions,
+                now=now,
+                run_state=read_run_state,
             )
 
         async def select_session_profile(context: ToolExecutionContext) -> UUID:
@@ -4251,6 +4368,7 @@ def _browser_provider(
             profile_selector=select_session_profile,
             sessions=sessions,
             now=now,
+            run_state=read_run_state,
         )
     raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
 
@@ -4682,7 +4800,8 @@ async def build(
         "system.current_time",
         "workspace.read_text",
         "workspace.write_text",
-        "workspace.list_files",
+        # workspace.list_files stays registered but gives its slot to the
+        # calling tools: the workspace lives for one claim (ADR-0124).
         *(
             []
             if web_search_enabled or web_fetch_enabled or browser_enabled
@@ -4692,6 +4811,7 @@ async def build(
         "artifact.export",
         WORKING_STATE_TOOL_NAME,
         SKILL_LOAD_TOOL_NAME,
+        TOOL_CALL_TOOL_NAME,
         "memory.remember",
         "memory.search",
         "memory.recall_episodes",
@@ -4729,6 +4849,21 @@ async def build(
             else []
         ),
     ]
+    # ADR-0123: management tools that change or clean up existing state are
+    # never the first step of a request, so they are offered through the
+    # deferred tool index and leave their definition slots to other tools.
+    default_deferred_tools = [
+        name
+        for name in (
+            SCHEDULE_UPDATE_TOOL_NAME,
+            SCHEDULE_PAUSE_TOOL_NAME,
+            SCHEDULE_RESUME_TOOL_NAME,
+            SCHEDULE_CANCEL_TOOL_NAME,
+            SUBSCRIPTIONS_TOOL_NAME,
+            UNSUBSCRIBE_TOOL_NAME,
+        )
+        if name in default_enabled_tools
+    ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
         version=(
@@ -4743,6 +4878,11 @@ async def build(
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits or _run_limits_from_defaults(run_defaults),
+        metadata=(
+            {DEFERRED_TOOLS_METADATA_KEY: default_deferred_tools}
+            if enabled_tools is None and default_deferred_tools
+            else {}
+        ),
     )
     if storage == "postgres":
         agent = agent.model_copy(
@@ -5036,7 +5176,19 @@ async def build(
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
             surface_limits=surface_limits,
         )
-        composition = replace(composition, attachment_resolver=attachment_resolver)
+        composition = replace(
+            composition,
+            attachment_resolver=attachment_resolver,
+            latency_report=(
+                None
+                if engine is None
+                else partial(
+                    chat_latency_report,
+                    create_session_factory(engine),
+                    tenant_id=effective_principal.tenant_id,
+                )
+            ),
+        )
         yield composition
     finally:
         if composition is not None:

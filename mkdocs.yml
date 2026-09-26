@@ -246,4 +246,11 @@ nav:
       - ADR-0119 Owner-chosen models and reasoning effort: adr/0119-owner-chosen-models-and-reasoning-effort.md
       - ADR-0120 Files attached to chat messages: adr/0120-chat-attachments.md
       - ADR-0121 People holds who the owner knows or writes to: adr/0121-people-holds-who-the-owner-knows-or-writes-to.md
+      - ADR-0122 Files the agent exports reach the owner on its reply: adr/0122-exported-files-reach-the-owner-on-the-reply.md
+      - ADR-0123 Chat defers tools past its item cap instead of dropping them: adr/0123-deferred-tools-past-the-item-cap.md
+      - ADR-0124 Chat's default roster drops workspace.list_files so the calling tools fit: adr/0124-chat-roster-drops-workspace-list-files.md
+      - ADR-0125 Duplicate people merge on decisive evidence: adr/0125-duplicate-people-merge-on-decisive-evidence.md
+      - ADR-0126 Email correspondence carries a short summary, and Chat can read the original: adr/0126-correspondence-summaries-and-original-email.md
+      - ADR-0127 Browser leases renew while the run needs them: adr/0127-browser-leases-renew-while-the-run-needs-them.md
+      - ADR-0131 New chats pin MCP catalogs from the last discovery and start servers on first use: adr/0131-new-chats-reuse-mcp-discovery.md
   - Changelog: changelog.md

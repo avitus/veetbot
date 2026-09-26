@@ -126,7 +126,7 @@ already follow.
   This is the fixed-endpoint arrangement web-access.md:162-167 describes: the
   composition root selects the adapter and the adapter hard-codes its host.
   The egress policy governs sandbox traffic and tenant-supplied URLs
-  (sandbox-isolation.md:805-816) and gains no entry.
+  (sandbox-isolation.md:810-821) and gains no entry.
 - **Call-time credential.** `TYPESAFE_API_KEY` enters the existing credential
   broker as the reference `typesafe`, as web-access.md:140-146 describes for
   the web providers. The adapter resolves it on every call, sends it only as
@@ -175,7 +175,7 @@ audit.
 `JUDGMENT_PROVIDER` selects the provider and accepts `disabled` and
 `typesafe`; it defaults to `disabled` and an unknown value is a configuration
 error at load. It is an environment value by the corpus's own test
-(bootstrap-and-composition.md:338-340): whether a deployment holds a vendor
+(bootstrap-and-composition.md:339-341): whether a deployment holds a vendor
 account differs between two deployments of one revision. It appears in
 `.env.example` and the production template with `TYPESAFE_API_KEY` left empty,
 and in neither the schedule nor the notification worker's template, because

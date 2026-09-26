@@ -206,8 +206,9 @@ Keeping them apart is what lets a tool that needs to read a file be
 handed the ability to read a file and nothing else. A single port
 carrying `execute` alongside `read_file` is a port that every holder
 can run processes with, and `artifact.export` — an in-process tool
-whose entire job is to copy one workspace file into the artifact
-store — would then hold arbitrary code execution in order to do it.
+whose job is to copy one workspace file into the artifact store, or
+since ADR-0122 to store text the model wrote — would then hold
+arbitrary code execution in order to do it.
 
 ### `EnvironmentSpec`
 
@@ -475,14 +476,17 @@ The lifecycle, precisely:
 2. **Held** across steps within a lease, so a run that writes a file
    in one step reads it in the next. This is the common case and it
    works.
-3. **Held across a short hold.** A run waiting for an approval keeps
-   its sandbox for up to `approval_hold_seconds`, which
-   [tool-system.md](tool-system.md) sets at 300 for the orchestration
-   bridge and which is the same number here. The wall clock keeps
-   running against `expires_at` during a hold; a hold does not extend
-   a sandbox's life.
-4. **Released** when the hold exceeds that, when the run reaches a
-   terminal state, or when the lease is lost. The sandbox is
+3. **Held across a bridge hold.** A script whose bridged tool call waits
+   for an approval keeps its sandbox for up to `approval_hold_seconds`,
+   which [tool-system.md](tool-system.md) sets at 300 for the
+   orchestration bridge, because the run has not suspended: it is still
+   inside the step. The wall clock keeps running against `expires_at`
+   during a hold; a hold does not extend a sandbox's life. A direct tool
+   call that needs an approval suspends the run at once, and suspension
+   ends the claim.
+4. **Released** at the end of every claim — when the run suspends, when
+   a bridge hold exceeds its limit and the run suspends, when the run
+   reaches a terminal state, or when the lease is lost. The sandbox is
    destroyed and the workspace goes with it.
 5. **Fresh on resume.** A run that resumes finds no workspace and
    provisions a new one on its next sandbox-targeted call.
@@ -491,8 +495,9 @@ Two consequences the implementer must carry into the product rather
 than leaving in the design.
 
 The first is that the model has to know. `sandbox.run_command`'s
-description says the workspace does not survive an interruption and
-that files worth keeping should be exported. This is not a nicety: a
+description says the workspace is discarded when the run finishes or
+pauses, which is what the worker does at every claim's end, and that
+`artifact.export` is how a file reaches the user (ADR-0122). This is not a nicety: a
 model that assumes durability writes `results.csv`, waits for an
 approval, resumes, and reads a file that is not there. Telling it
 once in the tool description is cheaper than every recovery path that
@@ -1022,8 +1027,9 @@ three things it cannot infer:
 1. The command runs with no network unless network access has been
    enabled and approved for this call, and the error when it has not
    is a connection failure rather than a permission message.
-2. The workspace does not survive an interruption. Files that matter
-   should be exported with `artifact.export`.
+2. The workspace is discarded when the run finishes or pauses. A file
+   the user should receive is exported with `artifact.export`, which
+   attaches it to the reply (ADR-0122).
 3. Output above the limit is truncated to a head-and-tail excerpt and
    the full output becomes an artifact whose identifier is in the
    result. The model does not need to re-run the command to see the
@@ -1080,7 +1086,9 @@ authorization, which ADR-0028 already specifies.
 properties and an operator asking "what did this run produce" wants
 them separated. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
-`artifact.export`; `UPLOAD` is a client-supplied file, produced since
+`artifact.export` of a workspace path; `MODEL_OUTPUT` is
+`artifact.export` of text the model wrote, produced since ADR-0122;
+`UPLOAD` is a client-supplied file, produced since
 ADR-0120 by the chat attachment route with no run until a sent message
 claims it;
 `TRAJECTORY_EXPORT` is the redacted, consent-gated run export
@@ -1178,7 +1186,10 @@ cap, both operator configuration. `expires_at` is written at creation
 and a sweeper deletes expired objects and their metadata rows. ADR-0120
 gives uploads their own two lifetimes: 24 hours while unclaimed, and none
 once a sent message claims one, so an attachment lives as long as its
-conversation and goes with it.
+conversation and goes with it. ADR-0122 applies the second rule to the
+run's own `SANDBOX_EXPORT` and `MODEL_OUTPUT` artifacts when its final
+reply attaches them; an export from a run that never replies keeps its
+30 days.
 
 The corpus does not currently bound artifacts anywhere, which
 [http-api-and-streaming.md](http-api-and-streaming.md) notices from
@@ -1407,8 +1418,8 @@ The concern that produced the original sentence survives, and this
 document adopts it as a constraint rather than as a separation.
 `sandbox.run_command` and `artifact.export` are now in the same
 milestone, and they must not merge. `artifact.export` takes a
-workspace path and produces an `ArtifactRef`; it does not take a
-command result, it is `IDEMPOTENT` where the other is not, and it is
+workspace path, or since ADR-0122 text the model wrote, and produces an
+`ArtifactRef`; it does not take a command result, it is `IDEMPOTENT` where the other is not, and it is
 `in_process` where the other is `sandbox`. Exporting a file is not a
 property of having run a command, and a convenience field on
 `sandbox.run_command` that exports its outputs would make it one.
@@ -1696,7 +1707,7 @@ build failure.
 Two process-local transports run through the same proxy code under one rule
 that is not the operator allowlist: `CONNECT` only, port 443 only, a public
 hostname shape, one resolution with every resolved address checked against
-the non-configurable denylist (sandbox-isolation.md:884-898), and a dial to
+the non-configurable denylist (sandbox-isolation.md:889-903), and a dial to
 the checked address. [ADR-0098](../adr/0098-automatic-browser-site-resources.md)
 introduced the first for browser page resources.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds the second for

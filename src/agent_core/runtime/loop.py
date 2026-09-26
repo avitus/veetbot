@@ -7,9 +7,11 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.artifacts import reply_attachments, reply_file_reference
 from agent_core.domain.context import ContextPlan, WorkingState
 from agent_core.domain.errors import (
     ApprovalRequiredError,
@@ -32,6 +34,7 @@ from agent_core.domain.messages import (
     ReasoningEffort,
     ResolvedModel,
     StopReason,
+    TextDeltaEvent,
     TextPart,
     ToolCallItem,
     ToolResultItem,
@@ -118,6 +121,54 @@ async def _append_event(
             ),
             lease=context.lease,
         )
+
+
+async def _complete_reply(context: RunContext, message: AssistantMessage) -> AssistantMessage:
+    """Record the final reply with every file the run exported (ADR-0122).
+
+    One unit of work chooses the files, keeps them for the life of the
+    conversation, and records the reply, so a fenced lease or an erasure fence
+    rolls all three back together. The returned object is also the run's final
+    message: `run.completed` repeats it, and a client that compares the two
+    must see the same content.
+    """
+
+    reply = message
+    async with context.uow_factory() as uow:
+        exported = reply_attachments(
+            await uow.artifacts.list_for_run(context.run.id, context.principal)
+        )
+        if exported:
+            retained = await uow.artifacts.retain_for_reply(
+                [artifact.id for artifact in exported],
+                context.principal,
+                run_id=context.run.id,
+            )
+            reply = message.model_copy(
+                update={
+                    "content": [
+                        *message.content,
+                        *(reply_file_reference(artifact) for artifact in retained),
+                    ]
+                },
+                deep=True,
+            )
+        await uow.events.append(
+            NewEvent(
+                session_id=context.run.session_id,
+                run_id=context.run.id,
+                event_type="assistant.message.completed",
+                actor_type="runtime",
+                payload={"message": reply.model_dump(mode="json")},
+            ),
+            lease=context.lease,
+        )
+    # Only a committed reply replaces the turn's copy in the checkpoint.
+    conversation = context.checkpoint.conversation
+    for index, item in enumerate(conversation):
+        if item is message:
+            conversation[index] = reply
+    return reply
 
 
 def _record_open_question(
@@ -254,6 +305,13 @@ async def checkpoint(context: RunContext, trigger: str) -> None:
     except BaseException:
         context.checkpoint = previous
         raise
+
+
+def _elapsed_ms(started_at: datetime, finished_at: datetime | None) -> int | None:
+    """Whole milliseconds between two clock readings, or None when the second never came."""
+    if finished_at is None:
+        return None
+    return max(0, round((finished_at - started_at).total_seconds() * 1000))
 
 
 def _failure(
@@ -526,6 +584,11 @@ async def _invoke_model(
         terminal: ModelCompletedEvent | ModelFailedEvent | None = None
         if context.uow_factory.is_open():
             raise RuntimeError("model I/O cannot begin while a unit of work is open")
+        # Timed on the run's clock from the moment the request is issued (ADR-0131).
+        issued_at = context.clock.now()
+        first_event_at: datetime | None = None
+        first_text_at: datetime | None = None
+        terminal_at = issued_at
         try:
             stream = cast(
                 AsyncGenerator[ModelEvent, None],
@@ -546,6 +609,11 @@ async def _invoke_model(
                             step,
                         )
                     expected_sequence += 1
+                    observed_at = context.clock.now()
+                    if first_event_at is None:
+                        first_event_at = observed_at
+                    if first_text_at is None and isinstance(event, TextDeltaEvent) and event.text:
+                        first_text_at = observed_at
                     if context.on_model_event is not None:
                         # This callback is on the provider-consumption path and must
                         # return promptly; it must never perform unbounded I/O.
@@ -560,6 +628,7 @@ async def _invoke_model(
                                 step,
                             )
                         terminal = event
+                        terminal_at = observed_at
         except ModelStreamError as exc:
             return _failure(
                 context,
@@ -638,6 +707,11 @@ async def _invoke_model(
                 "attempt_id": str(attempt.attempt_id),
                 "step_number": step.step_number,
                 "stop_reason": terminal.stop_reason.value,
+                "usage": terminal.turn.usage.model_dump(mode="json"),
+                "internal_retry_count": terminal.internal_retry_count,
+                "duration_ms": _elapsed_ms(issued_at, terminal_at),
+                "time_to_first_event_ms": _elapsed_ms(issued_at, first_event_at),
+                "time_to_first_text_ms": _elapsed_ms(issued_at, first_text_at),
                 "tool_names": [call.name for call in terminal.turn.tool_calls],
                 "conversation_items": [
                     item.model_dump(mode="json")
@@ -745,11 +819,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
                     step,
                 )
             assert message is not None
-            await _append_event(
-                context,
-                "assistant.message.completed",
-                {"message": message.model_dump(mode="json")},
-            )
+            message = await _complete_reply(context, message)
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
 
         synthesis_reserve = _synthesis_reserve_dimension(

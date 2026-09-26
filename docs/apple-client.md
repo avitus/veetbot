@@ -294,6 +294,18 @@ horizontally rather than compressing their contents past readability. Messages
 and tool calls retain their first-seen event order as later status events update
 an existing tool card. Approval rule internals are intentionally not shown.
 
+Every finished message with text has Copy and Select Text (ADR-0122): labelled
+under an answer, icon-only under the owner's own messages and at accessibility
+text sizes. SwiftUI selection stops at each rendered paragraph, list item, and
+table cell, so Copy writes the whole message at once, rendered from the same
+Markdown parser as formatted RTF, semantic HTML, and plain text without Markdown
+symbols, with no text color so a dark-mode copy never pastes white. Select Text
+opens the message in a native read-only text view (`NSTextView`, `UITextView`)
+where any range, or all of it, can be selected and copied with its formatting;
+the view keeps a selection when the transcript redraws. A file the agent exported
+arrives as a button under its answer and opens the artifact viewer, which on the
+Mac opens at a reading width.
+
 Adjacent successful calls of the same tool, including `web.search` and
 `web.fetch`, collapse into one count-labelled activity bundle. Expanding it
 preserves access to each call's arguments, result, and risk. The bundle shows

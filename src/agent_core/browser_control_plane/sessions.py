@@ -9,7 +9,7 @@ import hmac
 import json
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
@@ -21,6 +21,8 @@ from agent_core.browser_control_plane.models import (
 from agent_core.browser_control_plane.ports import EncryptedProfileStore
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS,
+    MAXIMUM_BROWSER_LEASE_SECONDS,
     BrowserAction,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
@@ -33,7 +35,8 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.errors import ConflictError
 
-MAXIMUM_LEASE_SECONDS = 15 * 60
+MAXIMUM_LEASE_SECONDS = MAXIMUM_BROWSER_LEASE_SECONDS
+MAXIMUM_LEASE_LIFETIME_SECONDS = MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS
 AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 
 
@@ -45,6 +48,7 @@ class _LeaseScope:
     provider_ref: str
     run_id: UUID
     attempt_number: int
+    # The first expiry; with the rest of the scope it derives the lease reference.
     expires_at: datetime
 
 
@@ -53,6 +57,9 @@ class _LeaseState:
     scope: _LeaseScope
     identity: ProfileMaterialIdentity
     runtime: BrowserSessionRuntime
+    acquired_at: datetime
+    # The live expiry, which renewal extends.
+    expires_at: datetime
     sequence: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     closed: bool = False
@@ -168,9 +175,15 @@ class HostedProfileSessionService:
         async with self._lock:
             existing = self._lease_for_profile(profile_id)
             if existing is not None:
-                if existing.scope != scope:
+                # A repeat for the same run attempt, whose earlier answer may have
+                # been lost, is that attempt's lease whatever horizon it asks for.
+                if replace(existing.scope, expires_at=expires_at) != scope:
                     raise ConflictError("browser profile already has an active lease")
-                return BrowserLease(lease_ref=lease_ref, expires_at=expires_at)
+                return BrowserLease(
+                    lease_ref=self._lease_ref(existing.scope),
+                    expires_at=existing.expires_at,
+                    sequence=existing.sequence,
+                )
             if self._active_ceremony_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile has an active authentication ceremony")
             identity = metadata.identity()
@@ -185,6 +198,8 @@ class HostedProfileSessionService:
                 scope=scope,
                 identity=identity,
                 runtime=runtime,
+                acquired_at=now,
+                expires_at=expires_at,
             )
         return BrowserLease(lease_ref=lease_ref, expires_at=expires_at)
 
@@ -229,12 +244,40 @@ class HostedProfileSessionService:
             state.sequence = sequence
             return observation
 
+    async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease:
+        """Extend a live lease by at most fifteen minutes, never past an hour.
+
+        An expired or revoked lease is closed, unsealed, and refused.
+        """
+
+        state = await self._require_lease(lease_ref)
+        async with self._lock:
+            if state.closed:
+                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+            now = self._now()
+            extended = min(
+                deadline_at,
+                now + timedelta(seconds=MAXIMUM_LEASE_SECONDS),
+                state.acquired_at + timedelta(seconds=MAXIMUM_LEASE_LIFETIME_SECONDS),
+            )
+            state.expires_at = max(state.expires_at, extended)
+            return BrowserLease(
+                lease_ref=lease_ref,
+                expires_at=state.expires_at,
+                sequence=state.sequence,
+            )
+
     async def close(self, lease_ref: str) -> None:
         async with self._lock:
             key, state = self._find_lease(lease_ref)
             if state is None or key is None:
                 return
             self._leases.pop(key)
+            expired = state.expires_at <= self._now()
+        if expired:
+            # An expired lease closes without sealing, whoever asks and when.
+            await self._close_lease_state(state)
+            return
         async with state.lock:
             try:
                 material = await state.runtime.storage_state()
@@ -469,7 +512,7 @@ class HostedProfileSessionService:
             if state is None or key is None:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
             metadata = await self._store.find_by_profile(state.scope.profile_id)
-            if state.scope.expires_at <= self._now() or metadata is None or metadata.revoked:
+            if state.expires_at <= self._now() or metadata is None or metadata.revoked:
                 self._leases.pop(key)
                 invalid = state
             else:
@@ -483,7 +526,7 @@ class HostedProfileSessionService:
         async with self._lock:
             now = self._now()
             for key, lease_state in tuple(self._leases.items()):
-                if lease_state.scope.expires_at <= now:
+                if lease_state.expires_at <= now:
                     self._leases.pop(key)
                     expired_leases.append(lease_state)
             for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):

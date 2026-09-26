@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from datetime import datetime
 from decimal import Decimal
@@ -225,6 +226,25 @@ class InteractionParticipant(PeopleValue):
     role: Literal["sender", "recipient", "participant", "mentioned"]
 
 
+CORRESPONDENCE_SUMMARY_GENERATOR = "correspondence-summary@1"
+
+
+class InteractionSummaryProvenance(PeopleValue):
+    """Where an observed email exchange's generated summary came from (ADR-0126).
+
+    ``generated`` means the summary field carries the gist; ``retry`` and
+    ``abstained`` record invalid results; ``withheld`` means a related fact was
+    deleted, so the label stays and no summary is generated again.
+    """
+
+    state: Literal["generated", "retry", "abstained", "withheld"]
+    generator: str = Field(min_length=1, max_length=64)
+    source_id: UUID | None = None
+    passage_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    recorded_at: AwareDatetime
+
+
 class PeopleInteraction(PeopleEntity):
     kind: Literal["interaction"] = "interaction"
     superseded_by: UUID | None = None
@@ -248,6 +268,7 @@ class PeopleInteraction(PeopleEntity):
     precision: Literal["instant", "day", "month", "year", "unknown"] = "unknown"
     source_timezone: SourceTimezone = None
     participants: list[InteractionParticipant] = Field(min_length=1, max_length=64)
+    summary_provenance: InteractionSummaryProvenance | None = None
 
     @model_validator(mode="after")
     def interaction_consistent(self) -> PeopleInteraction:
@@ -264,6 +285,46 @@ class PeopleInteraction(PeopleEntity):
         if self.ended_at and (not self.occurred_at or self.ended_at < self.occurred_at):
             raise ValueError("interaction interval is reversed")
         return self
+
+
+def observed_email_label(direction: str) -> str:
+    """The fixed summary an observed email exchange carries without a gist (ADR-0121)."""
+    return "Sent email" if direction == "outgoing" else "Received email"
+
+
+def summarizable_exchange(record: PeopleInteraction) -> bool:
+    """Whether a generated correspondence summary may exist on this record (ADR-0126)."""
+    return (
+        record.channel == "email"
+        and record.interaction_kind == "exchange"
+        and record.attribution == "observed"
+        and record.direction in {"incoming", "outgoing"}
+    )
+
+
+def summary_pending(record: PeopleInteraction) -> bool:
+    """An observed exchange with no summary yet, or with one retry left."""
+    return (
+        summarizable_exchange(record)
+        and record.superseded_by is None
+        and (record.summary_provenance is None or record.summary_provenance.state == "retry")
+    )
+
+
+def withheld_summary(record: PeopleInteraction, at: datetime) -> PeopleInteraction:
+    """The same revision with its generated gist replaced by the observed label."""
+    prior = record.summary_provenance
+    return record.model_copy(
+        update={
+            "summary": observed_email_label(record.direction),
+            "summary_provenance": InteractionSummaryProvenance(
+                state="withheld",
+                generator=CORRESPONDENCE_SUMMARY_GENERATOR if prior is None else prior.generator,
+                source_id=None if prior is None else prior.source_id,
+                recorded_at=at,
+            ),
+        }
+    )
 
 
 class PeopleCommitment(PeopleEntity):
@@ -303,6 +364,8 @@ class IdentityAssignment(PeopleValue):
 class PeopleOperation(PeopleEntity):
     kind: Literal["operation"] = "operation"
     operation: Literal["merge", "split", "undo", "forget"]
+    # A merge the system applied on decisive identifier evidence (ADR-0125).
+    automatic: bool = False
     state: Literal["preview", "completed", "cleanup_pending", "cancelled"]
     person_ids: list[UUID] = Field(min_length=1, max_length=20)
     expected_revisions: dict[UUID, int] = Field(default_factory=dict)
@@ -312,6 +375,30 @@ class PeopleOperation(PeopleEntity):
     assignment_scope_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     undo_of: UUID | None = None
     original_states: dict[UUID, Literal["active", "provisional"]] = Field(default_factory=dict)
+
+
+class PeopleMergeSuggestion(PeopleEntity):
+    """A possible duplicate awaiting the owner's decision (ADR-0125).
+
+    One record exists per pair of identities. Merging or separating closes it
+    for good; a suggestion that stops qualifying is withdrawn and may reopen.
+    """
+
+    kind: Literal["merge_suggestion"] = "merge_suggestion"
+    source_id: UUID
+    target_id: UUID
+    reason: Literal["same_name", "first_name", "nickname", "same_address"]
+    family_name: bool = False
+    state: Literal["open", "merged", "separated", "withdrawn"] = "open"
+    operation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def decided_pair(self) -> PeopleMergeSuggestion:
+        if self.source_id == self.target_id:
+            raise ValueError("a merge suggestion needs two identities")
+        if (self.state == "merged") != (self.operation_id is not None):
+            raise ValueError("only a merged suggestion names its merge operation")
+        return self
 
 
 class PeopleErasure(PeopleEntity):
@@ -407,7 +494,8 @@ PeopleRecord = Annotated[
     | PeopleCommitment
     | PeopleOperation
     | PeopleErasure
-    | PeopleImportJob,
+    | PeopleImportJob
+    | PeopleMergeSuggestion,
     Field(discriminator="kind"),
 ]
 PEOPLE_RECORD: TypeAdapter[PeopleRecord] = TypeAdapter(PeopleRecord)
@@ -456,6 +544,8 @@ class PeopleQuery(PeopleValue):
     # ADR-0121 review queue: provisional, unpinned people with no attached
     # owner-confirmed or channel-observed identifier.
     needs_review: bool = False
+    # ADR-0126: observed email exchanges still waiting for a generated summary.
+    summary_pending: bool = False
 
     @model_validator(mode="after")
     def ordered_range(self) -> PeopleQuery:
@@ -531,6 +621,154 @@ def is_non_person_reference(label: str) -> bool:
     return " ".join(label.casefold().split()).strip(".,;:!?'\"") in NON_PERSON_REFERENCES
 
 
+# Whole words that make a label name a group, a department, an organization,
+# or an automated service rather than one person (ADR-0125). Singular roles such
+# as "partner", "analyst", or "manager" stay person references, and words that
+# are also common surnames (for example "Mailer" or "Bank") are left out.
+GROUP_OR_SERVICE_WORDS: frozenset[str] = frozenset(
+    {
+        "accounting",
+        "accounts",
+        "admin",
+        "admins",
+        "administration",
+        "admissions",
+        "alerts",
+        "api",
+        "association",
+        "billing",
+        "board",
+        "bookings",
+        "bot",
+        "capital",
+        "careers",
+        "clients",
+        "clinic",
+        "college",
+        "committee",
+        "community",
+        "company",
+        "compliance",
+        "corp",
+        "corporation",
+        "council",
+        "crew",
+        "customer",
+        "customers",
+        "daemon",
+        "department",
+        "dept",
+        "developers",
+        "digest",
+        "directors",
+        "employees",
+        "engineers",
+        "events",
+        "everyone",
+        "executives",
+        "faculty",
+        "families",
+        "family",
+        "feedback",
+        "finance",
+        "foundation",
+        "founders",
+        "friends",
+        "fund",
+        "group",
+        "groups",
+        "help",
+        "helpdesk",
+        "hospital",
+        "hr",
+        "inc",
+        "info",
+        "information",
+        "institute",
+        "insurance",
+        "investors",
+        "invoices",
+        "labs",
+        "leadership",
+        "legal",
+        "llc",
+        "ltd",
+        "managers",
+        "marketing",
+        "media",
+        "members",
+        "membership",
+        "news",
+        "newsletter",
+        "noreply",
+        "notification",
+        "notifications",
+        "oauth",
+        "office",
+        "operations",
+        "orders",
+        "parents",
+        "partners",
+        "payroll",
+        "press",
+        "receipts",
+        "recruiting",
+        "recruitment",
+        "relations",
+        "reservations",
+        "returns",
+        "robot",
+        "sales",
+        "security",
+        "service",
+        "services",
+        "shipping",
+        "society",
+        "squad",
+        "staff",
+        "students",
+        "studios",
+        "support",
+        "survey",
+        "teachers",
+        "team",
+        "teams",
+        "university",
+        "updates",
+        "ventures",
+        "verification",
+        "volunteers",
+    }
+)
+
+
+def is_group_or_service_name(label: str) -> bool:
+    """Whether a label names a group, a service, or an address rather than a person."""
+    cleaned = unicodedata.normalize("NFC", label).strip()
+    if "@" in cleaned:
+        # An address shown as a display name identifies no one by name.
+        return True
+    return any(
+        word in GROUP_OR_SERVICE_WORDS for word in re.findall(r"[^\W\d_]+", cleaned.casefold())
+    )
+
+
+_ROLE_MAILBOX = re.compile(
+    r"^(?:no[._-]?reply|do[._-]?not[._-]?reply|support|info|hello|sales|help|billing|team"
+    r"|contact|admin|notifications?|news|newsletter|office|jobs|careers|partners|investors"
+    r"|ir|press|media|marketing|hr|recruiting|admissions|accounts|accounting|finance|legal"
+    r"|security|verification|verify|alerts|updates|digest|members|community|orders"
+    r"|receipts|invoices|shipping|returns|feedback|events|reservations|bookings|api|bot)"
+    r"(?:[+._-].*)?$",
+    re.IGNORECASE,
+)
+
+
+def is_role_mailbox(address: str) -> bool:
+    """Whether an address's local part names a shared or automated mailbox."""
+    return _ROLE_MAILBOX.fullmatch(address.rpartition("@")[0]) is not None
+
+
 def normalize_identifier(kind: str, namespace: str, value: str) -> str:
     """Only normalization justified without provider-specific alias evidence."""
     if kind not in {"name", "role", "email", "phone", "handle"} or not namespace.strip():
@@ -557,6 +795,8 @@ def referenced_people(record: PeopleRecord) -> set[UUID]:
         return set(record.scope.person_ids)
     if isinstance(record, PeopleOperation):
         return set(record.person_ids)
+    if isinstance(record, PeopleMergeSuggestion):
+        return {record.source_id, record.target_id}
     if isinstance(record, Person) and record.merged_into:
         return {record.merged_into}
     if isinstance(record, (PersonIdentifier, PersonMention, PersonMemoryLink)):

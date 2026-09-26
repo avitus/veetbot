@@ -31,7 +31,7 @@ from tests.unit.test_browser_composition import (
     test_revoked_standing_browser_grant_falls_back_to_interactive_approval as revoked_grant_pipeline,  # noqa: E501
 )
 from tests.unit.test_hosted_browser_provider import (
-    test_hosted_provider_acquires_exact_execution_scope_and_rotates_between_runs as hosted_lease_contract,  # noqa: E501
+    test_hosted_provider_keeps_one_lease_per_run_attempt_and_rotates_between_attempts as hosted_lease_contract,  # noqa: E501
 )
 
 

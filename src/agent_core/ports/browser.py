@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
+from uuid import UUID
 
 from agent_core.domain.browser import BrowserAction, BrowserActionContext, BrowserObservation
 from agent_core.domain.tools import ToolExecutionContext
@@ -36,6 +37,25 @@ async def bind_browser_execution(
         return
     binder = cast(Callable[[ToolExecutionContext], Awaitable[None]], candidate)
     await binder(context)
+
+
+async def release_browser_run(provider: BrowserProvider, run_id: UUID) -> None:
+    """Close the lease a hosted provider holds for a run that has ended."""
+
+    candidate = getattr(provider, "release_run", None)
+    if candidate is None:
+        return
+    releaser = cast(Callable[[UUID], Awaitable[None]], candidate)
+    await releaser(run_id)
+
+
+def browser_lease_upkeep(provider: BrowserProvider) -> Callable[[], Awaitable[None]] | None:
+    """The periodic lease upkeep a hosted provider needs, if it holds leases."""
+
+    candidate = getattr(provider, "maintain_leases", None)
+    if candidate is None:
+        return None
+    return cast(Callable[[], Awaitable[None]], candidate)
 
 
 async def browser_action_context(

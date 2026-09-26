@@ -687,7 +687,7 @@ private struct MarkdownCodeBlockView: View {
     }
 }
 
-private enum SystemClipboard {
+enum SystemClipboard {
     @MainActor
     static func copy(_ text: String) {
         #if os(iOS)

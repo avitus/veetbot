@@ -1017,3 +1017,25 @@ async def test_erased_correspondence_ids_skip_without_aborting_registration() ->
     async with factory() as uow:
         key = semantic_source_key("work", later.provider_thread_id, later.message_id)
         assert await uow.email.get(principal(), "semantic_source", key) is not None
+
+
+async def test_group_service_and_address_named_recipients_create_no_person() -> None:
+    """A team, a service, or an address shown as a name is not someone you know (ADR-0125)."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory, status="ready")
+    await service.register_source(
+        await mail(
+            factory,
+            message_id="m-sent",
+            sender=OWNER,
+            to=(
+                "Investment Team <invest@fund.test>, Partners <deals@fund.test>, "
+                "API OAuth Dev Verification <api-oauth-dev-verification@google.test>, "
+                '"iron@gracepres.test" <iron@gracepres.test>, Dana Reyes <dana@fund.test>'
+            ),
+            labels=["SENT"],
+        )
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(all_rows(["person"])) if isinstance(r, Person)]
+    assert [person.display_name for person in people] == ["Dana Reyes"]

@@ -207,7 +207,7 @@ agent people repair-directory --owner TENANT/PRINCIPAL --confirm
 The first command is a preview and writes nothing. It reports:
 
 - each person the repair would remove, with a reason of `unconfirmed`,
-  `pronoun`, or `self`;
+  `pronoun`, `self`, or `group`;
 - the active people who would get an owner-confirmed name alias;
 - how many facts would be deleted or unlinked;
 - how many mail threads would have their generated summaries reset.
@@ -238,6 +238,38 @@ remain, no source is suppressed, and each removal appends a content-free
 
 The repair refuses to run while a People import is queued or running. A second
 run changes nothing. Rerun it after restoring a snapshot taken before it ran.
+
+## Duplicate people
+
+[ADR-0125](adr/0125-duplicate-people-merge-on-decisive-evidence.md) merges
+duplicates only on decisive evidence and asks about the rest. The maintenance
+worker runs the pass every 15 minutes when its principal holds `people.write`.
+To run it now:
+
+```text
+agent people dedupe --owner TENANT/PRINCIPAL
+agent people dedupe --owner TENANT/PRINCIPAL --confirm
+```
+
+The first command previews and writes nothing. It lists the merges it would
+apply and the pairs it would ask about. With `--confirm`, the pass does three
+things:
+
+- merges each provisional correspondent holding an address, number or handle
+  the owner gave someone else;
+- records a merge suggestion for each name match or address that only
+  correspondents share;
+- withdraws suggestions that no longer match.
+
+The owner answers suggestions in the People browser under Needs review. A
+dismissed suggestion, an undone merge, or a split keeps that pair apart for
+good.
+
+Entries named like a group, service or address, such as “Investment Team”,
+stay until the directory repair runs again. Rerun `agent people
+repair-directory` to preview and remove them. Mail history does not keep such
+an entry. An identifier you confirmed or an edit you made, such as renaming
+someone “Sam from Legal”, does.
 
 ## Historical imports
 

@@ -44,6 +44,53 @@ import Testing
         #expect(width >= Self.openingWidth(ideal: 600, minimum: 520))
     }
 
+    @Test func artifactViewerOpensAtItsIdealWidth() async throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore()
+        )
+        // Loading fails without a connection; the sheet still opens at its width.
+        let width = try await presentedSheetWidth { ArtifactViewerView(model: model, artifactID: UUID()) }
+        #expect(width >= Self.openingWidth(ideal: 760, minimum: 680))
+    }
+
+    @Test func messageTextSheetOpensAtItsIdealWidth() async throws {
+        let selection = MessageTextSelection(
+            id: "event-2", rendition: MarkdownRendition(markdown: Self.transcript)
+        )
+        let width = try await presentedSheetWidth { MessageTextSheet(selection: selection) }
+        #expect(width >= Self.openingWidth(ideal: 680, minimum: 520))
+    }
+
+    @Test func aRedrawWithTheSameMessageKeepsTheSelection() throws {
+        let rendition = MarkdownRendition(markdown: "First paragraph\n\nSecond paragraph")
+        let host = NSHostingView(rootView: SelectableMessageText(attributedText: rendition.attributedText))
+        host.frame = NSRect(x: 0, y: 0, width: 480, height: 320)
+        host.layoutSubtreeIfNeeded()
+        let textView = try #require(Self.textView(in: host))
+        #expect(textView.isEditable == false)
+        #expect(textView.isSelectable)
+        textView.setSelectedRange(NSRange(location: 6, length: 20))
+
+        host.rootView = SelectableMessageText(attributedText: rendition.attributedText)
+        host.layoutSubtreeIfNeeded()
+
+        #expect(textView.selectedRange() == NSRange(location: 6, length: 20))
+        #expect(textView.string == rendition.attributedText.string)
+    }
+
+    private static func textView(in view: NSView) -> NSTextView? {
+        if let textView = view as? NSTextView { return textView }
+        for subview in view.subviews {
+            if let found = textView(in: subview) { return found }
+        }
+        return nil
+    }
+
     /// macOS 15 and later open a fitted sheet at its ideal width; earlier
     /// releases open it at the content's minimum width.
     private static func openingWidth(ideal: CGFloat, minimum: CGFloat) -> CGFloat {

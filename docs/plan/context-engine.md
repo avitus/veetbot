@@ -102,23 +102,26 @@ Assembly order is fixed and total:
 | 3 | A | Agent instructions (pinned `AgentSpec` version) | `TRUSTED_CONFIGURATION` |
 | 4 | A | Persona row (pinned persona revision) | `TRUSTED_CONFIGURATION` |
 | 5 | A | Tool definitions (filtered, canonically serialized) | `TRUSTED_CONFIGURATION` |
-| 6 | A | Skill catalog (pinned at session open) | per entry |
-| 7 | A | Session-open memory snapshot | `MEMORY` |
-| 8 | B | Compacted history summary, if any | `PLATFORM` (see below) |
-| 9 | B | Retained conversation items, oldest to newest | per item |
-| 10 | B | Loaded skill bodies, in load order | per skill |
-| 11 | B | Working-state block | per entry |
-| 12 | B | In-turn recall and correction lines | `MEMORY` |
-| 13 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
-| 14 | B | The current user message | `USER` |
+| 6 | A | Deferred tool index, if any | builtin entries `TRUSTED_CONFIGURATION`; others `EXTERNAL_UNTRUSTED` |
+| 7 | A | Skill catalog (pinned at session open) | per entry |
+| 8 | A | Session-open memory snapshot | `MEMORY` |
+| 9 | B | Compacted history summary, if any | `PLATFORM` (see below) |
+| 10 | B | Retained conversation items, oldest to newest | per item |
+| 11 | B | Loaded skill bodies, in load order | per skill |
+| 12 | B | Working-state block | per entry |
+| 13 | B | In-turn recall and correction lines | `MEMORY` |
+| 14 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
+| 15 | B | The current user message | `USER` |
 
-Rows 6 and 10 are added by [skills.md](skills.md), which owns their content,
+Rows 7 and 11 are added by [skills.md](skills.md), which owns their content,
 their caps, and their trust derivation. Row 4 is added at Milestone 22 by
 [persona-surface.md](persona-surface.md), which owns its content, its cap, its
 promotion rules, and the row's rotation behavior; an empty persona renders no
 bytes at all, so a session without one reproduces the three-row instruction
-prefix exactly. They are listed here because assembly
-order is fixed and total, and a table that omits three of its rows is neither.
+prefix exactly. Row 6 is added by
+[ADR-0123](../adr/0123-deferred-tools-past-the-item-cap.md); an empty index
+renders no bytes either. They are listed here because assembly
+order is fixed and total, and a table that omits four of its rows is neither.
 
 Platform policy comes first because it is the only content that must be read before
 anything that might try to override it. The current user message comes last because
@@ -158,7 +161,8 @@ call it. **The tool set is resolved once at session open and pinned in the conte
 plan.** Two resolution-time rules narrow the set before it pins. When the pinned
 skill catalog is empty, [skills.md](skills.md) directs the planner not to
 advertise `skill.load`, because a control tool with no valid argument only
-invites guessed names. An operational Email session pins no tools at all,
+invites guessed names; `tool.call` is likewise advertised only while the plan
+defers something (ADR-0123). An operational Email session pins no tools at all,
 because its typed tasks send none to a model (ADR-0104). A tool whose authorization is later revoked stays in the
 prefix and is
 denied at call time by the policy engine (Section 9), which is where the security
@@ -250,6 +254,7 @@ ceiling.
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
+| A | Deferred tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
@@ -282,19 +287,54 @@ carries an item cap for the same reason and is capped at twenty;
 [skills.md](skills.md) argues that number and the 6,000-token body class beside
 it, which never yields because a third `skill.load` fails instead.
 
+The item cap then bound in production. Email unsubscribe brought the owner's
+configured roster to twenty-eight tools, and name order left
+`mcp.bland_read.list_calls` outside the thirty.
+[ADR-0124](../adr/0124-chat-roster-drops-workspace-list-files.md) takes
+`workspace.list_files` out of the default agent's roster, which leaves exactly
+three discovered slots for the calling tools. A configured tool past the
+thirtieth slot is cut as silently as a discovered one, so the production-shaped
+roster gate enables every flag that production enables and that changes the
+default roster, and gains each new one when production activates it.
+
+The tool filter this section prescribes is the **deferred tool index**
+([ADR-0123](../adr/0123-deferred-tools-past-the-item-cap.md)). A deferred tool
+is resolved, authorized and pinned exactly like a defined one, but the prompt
+carries a one-line index entry instead of its definition: the name, its
+parameter names with optional ones marked, and the first sentence of its
+description. The model reaches it through the control tool `tool.call`, which
+the tool pipeline unwraps before resolution, so validation, policy, approval,
+idempotency and events all run under the deferred tool's own name; invalid
+arguments return that tool's input schema. A tool is **advertised** by its
+definition or by its index entry. The index is its own Region A class,
+forty entries and 2,000 tokens, and the prefix ceiling rose by exactly that cap.
+
 After authorization and session-environment filtering, tools explicitly named in
-`AgentSpec.enabled_tools` receive slots first, in first-occurrence order. Discovered
-tools fill the remaining slots in name order when their complete definitions fit
-both the item and token caps. An oversized discovered definition is skipped;
-explicitly enabled capabilities still fail at plan time if they exceed the token
-cap. The selected set is then sorted by name for stable rendering. Adding an MCP account must not evict an explicitly
-enabled web, clock, or workspace capability merely because its name sorts earlier.
-The item and token ceilings still apply; excess discovered tools require a narrower
-catalog or explicit agent configuration. Builder version `context-builder@11`
-rebuilds older plans through the ordinary logged epoch rotation, so existing
-sessions recover the configured capabilities without replacing their history.
-A snapshot containing People context is retained even when it contains no ordinary
-beliefs; the epoch rotation also rebuilds older plans that omitted such snapshots.
+`AgentSpec.enabled_tools` receive definitions first, in first-occurrence order,
+except the ones the agent's configuration names as deferred. Discovered tools
+follow **reads first**: tools whose side effect is `NONE`, `WORKSPACE_READ` or
+`NETWORK_READ` before any that change the world, then by server or device, then
+by name. A deferred tool costs at most one extra model step, and a read is
+usually a request's first step, so reads keep their definitions. Discovered
+definitions must fit both the item and token caps; explicitly enabled
+capabilities still fail at plan time if they exceed the token cap. The selected
+set is then sorted by name for stable rendering. Adding an MCP account must not
+evict an explicitly enabled web, clock, or workspace capability merely because
+its name sorts earlier.
+
+When anything is deferred and the agent enables `tool.call`, `tool.call` takes
+a definition slot, and every candidate without a definition becomes an index
+entry: the configured deferrals first, then the overflow in the order above.
+What fits in neither is skipped, and its name is recorded on the plan event as
+`skipped_tool_names`. An agent without `tool.call` defers nothing and records
+its skips the same way, so no tool leaves the roster silently. Builder version
+`context-builder@12` treats a `context-builder@11` plan as current, because it
+renders the same bytes: re-planning it could move the selection under a run
+parked on an approval. Earlier versions rebuild through the ordinary logged
+epoch rotation, so existing sessions recover the configured capabilities
+without replacing their history. A snapshot containing People context is
+retained even when it contains no ordinary beliefs; the epoch rotation also
+rebuilds older plans that omitted such snapshots.
 
 The token side of the tool-definition cap measures the conservative larger form
 of the **model-visible** provider contract: name, description, and input schema
@@ -315,10 +355,11 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 20,000 tokens — 15,000 before
+The prefix classes sum to a hard ceiling of 22,000 tokens — 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
-exactly its own cap, the same move the skill classes made, and 17,000 before
-ADR-0105 added the 3,000 tokens it gave the tool class. If a plan exceeds it,
+exactly its own cap, the same move the skill classes made, 17,000 before
+ADR-0105 added the 3,000 tokens it gave the tool class, and 20,000 before
+ADR-0123 added the 2,000 of the deferred tool index. If a plan exceeds it,
 **the session fails to open with a structured error naming the offending class**.
 It does not silently truncate the agent's instructions. A truncated system prompt
 is an agent that behaves subtly wrong forever, which is far worse than a session

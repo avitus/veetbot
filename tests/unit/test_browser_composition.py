@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 from uuid import UUID
 
@@ -13,9 +19,16 @@ from agent_core.adapters.browser.hosted_provider import (
     SessionBoundHostedBrowserProvider,
 )
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
+from agent_core.adapters.determinism import FixedClock
+from agent_core.application.browser_leases import browser_run_state
 from agent_core.bootstrap import Composition, build
+from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
+from agent_core.browser_control_plane.ports import StaticProfileKeyring
+from agent_core.browser_control_plane.service import HostedProfileLifecycleService
+from agent_core.browser_control_plane.sessions import HostedProfileSessionService
 from agent_core.config import Settings, load_settings
 from agent_core.context.estimator import ConservativeTokenEstimator
+from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserAction,
@@ -23,19 +36,30 @@ from agent_core.domain.browser import (
     BrowserActionContext,
     BrowserActionKind,
     BrowserGrant,
+    BrowserObservation,
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProviderError,
+    BrowserRunState,
 )
 from agent_core.domain.errors import InvalidStateTransition, NotFoundError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunStatus
-from agent_core.domain.tools import ToolInvocationStatus, ToolSpec
+from agent_core.domain.tools import (
+    ToolExecutionContext,
+    ToolInvocation,
+    ToolInvocationStatus,
+    ToolSpec,
+)
+from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.browser import browser_lease_upkeep
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.registry import RegisteredTool
+from tests.contract.support import principal as contract_principal
+from tests.contract.test_hosted_profile_session_service_contract import FakeSessionRuntime
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_config import base_environment
 from tests.unit.test_web_tools import FakeWebProvider
@@ -544,3 +568,322 @@ async def test_revoked_standing_browser_grant_falls_back_to_interactive_approval
     assert run.status is RunStatus.WAITING_FOR_APPROVAL
     assert len(pending) == 1
     assert provider.actions == []
+
+
+@dataclass
+class RevisionCheckingRuntime(FakeSessionRuntime):
+    """A hosted runtime that, like the Playwright one, acts only on the page it rendered."""
+
+    revision: str | None = None
+
+    async def navigate(self, url: str) -> BrowserObservation:
+        observation = await super().navigate(url)
+        self.revision = observation.revision
+        return observation
+
+    async def act(self, action: BrowserAction) -> BrowserObservation:
+        if action.expected_revision != self.revision:
+            raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+        return await super().act(action)
+
+
+def navigate_then_act_script() -> FakeModelScript:
+    return FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="browser.navigate",
+                        arguments={"url": "https://example.org/lesson"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="browser.act",
+                        arguments={
+                            "kind": "click",
+                            "expected_revision": "revision-1",
+                            "ref": "revision-1:0",
+                        },
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="The lesson continued.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+
+
+@dataclass
+class HostedBrowserHarness:
+    """A session-bound provider over the real isolated session service."""
+
+    clock: FixedClock
+    owner: Principal
+    sessions: HostedProfileSessionService
+    runtimes: list[RevisionCheckingRuntime]
+    profile: BrowserProfile
+    provider: SessionBoundHostedBrowserProvider
+    compositions: list[Composition] = field(default_factory=list)
+
+    async def run_state(self, run_id: UUID) -> BrowserRunState:
+        composition = self.compositions[-1]
+        return await browser_run_state(composition.uow_factory, self.owner, run_id)
+
+
+async def hosted_browser_harness(tmp_path: Path) -> HostedBrowserHarness:
+    clock = FixedClock(GRANT_NOW)
+    owner = contract_principal().model_copy(update={"scopes": set(PLATFORM_SCOPES)})
+    store = FilesystemEncryptedProfileStore(
+        tmp_path / "profiles",
+        StaticProfileKeyring(
+            {"key-v1": hashlib.sha256(b"synthetic-session-key").digest()},
+            current_version="key-v1",
+        ),
+    )
+    runtimes: list[RevisionCheckingRuntime] = []
+
+    def runtime_factory(tenant_id: str) -> RevisionCheckingRuntime:
+        assert tenant_id == owner.tenant_id
+        runtime = RevisionCheckingRuntime()
+        runtimes.append(runtime)
+        return runtime
+
+    sessions = HostedProfileSessionService(
+        store,
+        runtime_factory=runtime_factory,
+        now=clock.now,
+        process_secret=b"synthetic-process-secret-with-32-bytes",
+        ceremony_base_url="https://browser-login.example.test",
+    )
+    lifecycle = HostedProfileLifecycleService(
+        store,
+        reference_factory=lambda: "opaque-session-reference-0000000000000001",
+        invalidate_profile=sessions.invalidate_profile,
+    )
+    provisioned = await lifecycle.provision(PROFILE_ID, owner, ("https://example.org",))
+    profile = BrowserProfile(
+        id=PROFILE_ID,
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        provider_name=provisioned.provider_name,
+        provider_ref=provisioned.provider_ref,
+        allowed_origins=("https://example.org",),
+        status=BrowserProfileStatus.READY,
+        generation=1,
+        encryption_key_version=provisioned.encryption_key_version,
+        created_at=GRANT_NOW,
+        updated_at=GRANT_NOW,
+    )
+
+    async def load(requested_owner: Principal, profile_id: UUID) -> BrowserProfile:
+        assert requested_owner == owner
+        assert profile_id == PROFILE_ID
+        return profile
+
+    async def select(context: ToolExecutionContext) -> UUID:
+        del context
+        return PROFILE_ID
+
+    harness_state: list[HostedBrowserHarness] = []
+
+    async def read_run_state(run_id: UUID) -> BrowserRunState:
+        return await harness_state[0].run_state(run_id)
+
+    harness = HostedBrowserHarness(
+        clock=clock,
+        owner=owner,
+        sessions=sessions,
+        runtimes=runtimes,
+        profile=profile,
+        provider=SessionBoundHostedBrowserProvider(
+            principal=owner,
+            profiles=load,
+            profile_selector=select,
+            sessions=sessions,
+            now=clock.now,
+            run_state=read_run_state,
+        ),
+    )
+    harness_state.append(harness)
+    return harness
+
+
+@asynccontextmanager
+async def hosted_browser_session(
+    harness: HostedBrowserHarness,
+    script: FakeModelScript,
+) -> AsyncIterator[tuple[Composition, UUID]]:
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=script,
+        clock=harness.clock,
+        principal=harness.owner,
+        enabled_tools=[
+            "browser.navigate",
+            "browser.observe",
+            "browser.act",
+            "conversation.ask_user",
+        ],
+        browser_provider_override=harness.provider,
+    ) as composition:
+        harness.compositions.append(composition)
+        async with composition.uow_factory() as uow:
+            await uow.browser_profiles.create(harness.profile)
+        created = await composition.services.sessions.create(
+            harness.owner,
+            "general",
+            {},
+            browser_profile_id=PROFILE_ID,
+        )
+        yield composition, created.id
+
+
+async def act_invocation(composition: Composition, run_id: UUID) -> ToolInvocation:
+    async with composition.uow_factory() as uow:
+        invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+    return next(item for item in invocations if item.tool_name == "browser.act")
+
+
+async def test_hosted_lease_spans_the_run_attempt_and_closes_when_the_run_ends(
+    tmp_path: Path,
+) -> None:
+    harness = await hosted_browser_harness(tmp_path)
+    runtimes = harness.runtimes
+    async with hosted_browser_session(harness, navigate_then_act_script()) as (
+        composition,
+        session_id,
+    ):
+        run_id = await composition.runs.submit("Continue my lesson.", session_id)
+        approval = (await composition.approvals.list_pending(run_id=run_id))[0]
+        parked_lease_open = not runtimes[0].closed
+        # The owner answers after the navigation call's own deadline has passed.
+        harness.clock.advance(timedelta(minutes=2))
+        await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        run = await composition.runs.wait_terminal(run_id)
+        act = await act_invocation(composition, run_id)
+
+        assert run.status is RunStatus.COMPLETED
+        assert act.status is ToolInvocationStatus.SUCCEEDED, act.outcome
+        # One browser served the whole attempt, stayed open while it waited for
+        # approval, and closed when the run ended rather than at build teardown.
+        assert parked_lease_open
+        assert len(runtimes) == 1
+        assert len(runtimes[0].actions) == 1
+        assert runtimes[0].closed
+        await harness.sessions.acquire(
+            PROFILE_ID,
+            harness.owner,
+            harness.profile.provider_ref or "",
+            run_id=UUID("00000000-0000-0000-0000-0000000000e9"),
+            attempt_number=1,
+            deadline_at=harness.clock.now() + timedelta(minutes=1),
+        )
+
+    # The next run starts from the state the finished run sealed.
+    assert runtimes[1].initial_material == runtimes[0].sealed_material
+
+
+async def test_hosted_lease_closes_when_the_run_waits_for_the_user_instead(
+    tmp_path: Path,
+) -> None:
+    harness = await hosted_browser_harness(tmp_path)
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="browser.navigate",
+                        arguments={"url": "https://example.org/lesson"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="conversation.ask_user",
+                        arguments={"question": "Which lesson should I continue?"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+        ]
+    )
+    async with hosted_browser_session(harness, script) as (composition, session_id):
+        run_id = await composition.runs.submit("Continue my lesson.", session_id)
+        run = await composition.runs.get(run_id)
+
+        # Only the run's own approval keeps the page; any other parking frees it.
+        assert run.status is RunStatus.WAITING_FOR_USER
+        assert harness.runtimes[0].closed
+
+
+async def test_hosted_lease_closes_when_a_parked_run_is_cancelled(tmp_path: Path) -> None:
+    harness = await hosted_browser_harness(tmp_path)
+    async with hosted_browser_session(harness, navigate_then_act_script()) as (
+        composition,
+        session_id,
+    ):
+        run_id = await composition.runs.submit("Continue my lesson.", session_id)
+        parked_lease_open = not harness.runtimes[0].closed
+
+        cancelled = await composition.runs.cancel(run_id)
+
+        assert parked_lease_open
+        assert cancelled.status is RunStatus.CANCELLED
+        assert harness.runtimes[0].closed
+
+
+async def test_hosted_lease_survives_a_twenty_minute_approval_wait_under_upkeep(
+    tmp_path: Path,
+) -> None:
+    harness = await hosted_browser_harness(tmp_path)
+    upkeep = browser_lease_upkeep(harness.provider)
+    assert upkeep is not None
+    async with hosted_browser_session(harness, navigate_then_act_script()) as (
+        composition,
+        session_id,
+    ):
+        run_id = await composition.runs.submit("Continue my lesson.", session_id)
+        approval = (await composition.approvals.list_pending(run_id=run_id))[0]
+        for _minute in range(20):
+            harness.clock.advance(timedelta(minutes=1))
+            await upkeep()
+        await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        run = await composition.runs.wait_terminal(run_id)
+        act = await act_invocation(composition, run_id)
+
+        assert run.status is RunStatus.COMPLETED
+        assert act.status is ToolInvocationStatus.SUCCEEDED, act.outcome
+        assert len(harness.runtimes) == 1
+
+
+class UpkeepSpy(FakeBrowserProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.stop: Callable[[], None] = lambda: None
+
+    async def maintain_leases(self) -> None:
+        self.calls += 1
+        self.stop()
+
+
+async def test_run_workers_keep_hosted_leases_on_a_periodic_upkeep() -> None:
+    provider = UpkeepSpy()
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        fixed_clock_at=GRANT_NOW,
+        enabled_tools=["browser.navigate"],
+        browser_provider_override=provider,
+    ) as composition:
+        for factory in (composition.worker_factory, composition.async_worker_factory):
+            worker = factory("worker-under-test")
+            provider.stop = worker.stop
+            await asyncio.wait_for(worker.run_forever(), timeout=5)
+
+    assert provider.calls == 2

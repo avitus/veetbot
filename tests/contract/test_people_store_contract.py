@@ -1101,3 +1101,181 @@ async def people_review_directory_contract(store: PeopleStore) -> None:
 
 async def test_memory_people_review_directory_contract() -> None:
     await people_review_directory_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
+async def people_merge_suggestion_contract(store: PeopleStore) -> None:
+    """A possible duplicate is stored, found from either person, and erased with them."""
+    from agent_core.domain.people import PeopleMergeSuggestion, PeopleOperation, PeopleQuery
+
+    owner = principal()
+    common = _admission_fields()
+    erin = Person(id=uuid4(), display_name="Erin", state="active", **common)
+    written = Person(id=uuid4(), display_name="Erin Vitus", **common)
+    for row in (erin, written):
+        await store.put(row, expected_revision=0)
+    suggestion = PeopleMergeSuggestion(
+        id=uuid4(),
+        source_id=written.id,
+        target_id=erin.id,
+        reason="first_name",
+        family_name=True,
+        **common,
+    )
+    await store.put(suggestion, expected_revision=0)
+    merged = PeopleOperation(
+        id=uuid4(),
+        operation="merge",
+        state="completed",
+        automatic=True,
+        person_ids=[written.id, erin.id],
+        expires_at=NOW,
+        request_hash="d" * 64,
+        **common,
+    )
+    await store.put(merged, expected_revision=0)
+    query = PeopleQuery(
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        kinds=["merge_suggestion", "operation"],
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+        limit=100,
+    )
+    for person in (erin, written):
+        rows = await store.query(query.model_copy(update={"person_id": person.id}))
+        assert {row.id for row in rows} == {suggestion.id, merged.id}
+    stored = await store.get(owner, merged.id, ceiling=Sensitivity.RESTRICTED)
+    assert isinstance(stored, PeopleOperation) and stored.automatic
+    separated = suggestion.model_copy(
+        update={"state": "separated", "revision": 2, "updated_at": NOW + timedelta(seconds=1)}
+    )
+    await store.put(separated, expected_revision=1)
+    await store.erase(owner, [written.id], preserve_independent=True)
+    assert await store.get(owner, suggestion.id, ceiling=Sensitivity.RESTRICTED) is None
+    assert await store.get(owner, erin.id, ceiling=Sensitivity.RESTRICTED) is not None
+
+
+async def test_memory_people_merge_suggestion_contract() -> None:
+    await people_merge_suggestion_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
+async def people_generated_summary_contract(store: PeopleStore) -> None:
+    """ADR-0126: an observed email exchange waits for its summary; withholding erases it."""
+    from agent_core.domain.people import (
+        InteractionParticipant,
+        InteractionSummaryProvenance,
+        PeopleInteraction,
+    )
+
+    owner = principal()
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    source = PeopleSource(
+        id=uuid4(),
+        session_id=uuid4(),
+        event_sequence=1,
+        source_kind="email",
+        account_id="work",
+        thread_id="thread",
+        message_id="message",
+        source_revision="email@1",
+        evidence_at=NOW,
+        **common,
+    )
+    person = Person(id=uuid4(), display_name="Sam", support_ids=[source.id], **common)
+    await store.put(source, expected_revision=0)
+    await store.put(person, expected_revision=0)
+
+    def provenance(state: str) -> InteractionSummaryProvenance:
+        return InteractionSummaryProvenance.model_validate(
+            {
+                "state": state,
+                "generator": "correspondence-summary@1",
+                "source_id": source.id,
+                "passage_sha256": "a" * 64,
+                "model": "fake:scripted",
+                "recorded_at": NOW,
+            }
+        )
+
+    def exchange(summary: str = "Sent email", **extra: object) -> PeopleInteraction:
+        return PeopleInteraction.model_validate(
+            {
+                "id": uuid4(),
+                "channel": "email",
+                "interaction_kind": "exchange",
+                "attribution": "observed",
+                "direction": "outgoing",
+                "summary": summary,
+                "occurred_at": NOW - timedelta(days=1),
+                "precision": "instant",
+                "participants": [InteractionParticipant(person_id=person.id, role="recipient")],
+                "support_ids": [source.id],
+                **common,
+                **extra,
+            }
+        )
+
+    waiting = exchange()
+    retrying = exchange(summary_provenance=provenance("retry"))
+    generated = exchange(
+        summary="Sent email: Asked Sam to review the board deck.",
+        summary_provenance=provenance("generated"),
+    )
+    abstained = exchange(summary_provenance=provenance("abstained"))
+    reported = PeopleInteraction(
+        id=uuid4(),
+        channel="chat",
+        interaction_kind="meeting",
+        attribution="owner_reported",
+        direction="reported",
+        summary="Met for coffee",
+        participants=[InteractionParticipant(person_id=person.id, role="participant")],
+        **common,
+    )
+    for row in (waiting, retrying, generated, abstained, reported):
+        await store.put(row, expected_revision=0)
+    pending = PeopleQuery(
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        kinds=["interaction"],
+        person_id=person.id,
+        summary_pending=True,
+        sensitivity_ceiling=Sensitivity.RESTRICTED,
+        limit=100,
+    )
+    assert {row.id for row in await store.query(pending)} == {waiting.id, retrying.id}
+
+    # A later copy keeps the generated summary in a second stored revision.
+    later = NOW + timedelta(seconds=1)
+    await store.put(
+        generated.model_copy(update={"revision": 2, "updated_at": later}), expected_revision=1
+    )
+    before = await store.watermark(owner)
+    assert await store.withhold_generated_summaries(owner, [generated.id, waiting.id]) == 2
+    assert await store.withhold_generated_summaries(owner, [generated.id, uuid4()]) == 0
+    assert await store.watermark(owner) > before
+    current = await store.get(owner, generated.id, ceiling=Sensitivity.RESTRICTED)
+    assert isinstance(current, PeopleInteraction) and current.revision == 3
+    assert current.summary == "Sent email"
+    assert current.summary_provenance is not None
+    assert current.summary_provenance.state == "withheld"
+    for known_at in (NOW, later):
+        earlier = await store.get(
+            owner, generated.id, ceiling=Sensitivity.RESTRICTED, known_at=known_at
+        )
+        assert isinstance(earlier, PeopleInteraction)
+        assert earlier.summary == "Sent email"
+        assert earlier.summary_provenance is not None
+        assert earlier.summary_provenance.state == "withheld"
+    assert {row.id for row in await store.query(pending)} == {retrying.id}
+    # Only observed email exchanges carry a generated summary to withhold.
+    assert await store.withhold_generated_summaries(owner, [reported.id]) == 0
+    assert await store.get(owner, reported.id, ceiling=Sensitivity.RESTRICTED) == reported
+
+
+async def test_memory_people_generated_summary_contract() -> None:
+    await people_generated_summary_contract(InMemoryPeopleStore(FixedClock(NOW)))

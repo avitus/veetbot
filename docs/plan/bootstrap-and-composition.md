@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **182 configuration knobs** across the specifications;
+The corpus now declares **185 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -307,8 +307,9 @@ daily ingest cap, and the poll-back interval, plus ADR-0089's terminal schedule
 retention days, purge cadence, and purge batch; ADR-0093 adds memory model selection;
 Milestone 26 adds the two aggregate automatic-email cost allowances, Milestone 29
 adds the seven thread-folder knobs and, under ADR-0110, the judgment matcher's
-switch and probability floor, and Milestone 31 adds the unsubscribe grace
-period. The plan names **three
+switch and probability floor, Milestone 31 adds the unsubscribe grace
+period, ADR-0123 adds the deferred tool index's item and token caps, and
+ADR-0131 adds how long a tenant HTTP server's MCP discovery is reused. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -333,13 +334,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-182 falls out.
+185 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-182 tuning knobs in YAML.
+185 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -347,7 +348,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 182 knobs live, at the values the
+    module that owns it. This is where all 185 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -425,7 +426,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 182. Schema versions, profile names, rule identifiers,
+and asserts the total is 185. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -433,12 +434,12 @@ or invariants rather than knobs and are not counted.
 | --- | ---: |
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
-| `context/plan.yaml` | 28 |
-| `tools/limits.yaml` | 20 |
+| `context/plan.yaml` | 30 |
+| `tools/limits.yaml` | 21 |
 | `runtime/limits.yaml` | 60 |
 | `memory/profiles.yaml` | 38 |
 | `folders/profiles.yaml` | 9 |
-| **Total** | **182** |
+| **Total** | **185** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -509,7 +510,7 @@ model identifier.
 [sandbox-isolation.md](sandbox-isolation.md) as a production adapter in the
 sense the plan uses for the in-memory repositories, a real implementation of
 the port that runs the contract suite unchanged
-(`sandbox-isolation.md:1257`), and it is what lets the whole system be
+(`sandbox-isolation.md:1268`), and it is what lets the whole system be
 exercised without a hypervisor. Startup check 4 below refuses it in
 production beside `docker`.
 
@@ -600,7 +601,7 @@ checks run there, before any adapter exists:
 4.  `deployment_mode == "production"` implies `sandbox` is neither `docker`
     nor `fake`. ADR-0008: "Production startup must refuse to run untrusted
     code under the development fallback." `fake` is behind the same check
-    because it executes nothing (`sandbox-isolation.md:1610`), and a
+    because it executes nothing (`sandbox-isolation.md:1621`), and a
     mechanism that executes nothing isolates less than the fallback this
     rule was written for.
 5.  `config_dir`, if set, exists and contains only files that mirror a shipped
@@ -823,6 +824,12 @@ from having its own loop, so it does not build its own graph.
 
 The worker entry takes the role flag and attaches either the claim loop or
 the sweeps. One binary, three roles, one `build`.
+
+The API and the interactive worker are the two entries that pin Chat catalogs,
+so after `build` they start the MCP runtime's discovery warm-up (ADR-0131). It
+runs in the background, discovers each enabled server of the configured tenant
+within the ordinary preparation slots, and closes it. Serving does not wait for
+it, and one-shot CLI commands and tests never start it.
 
 ## Milestone 1: the in-memory tier
 
@@ -1076,10 +1083,12 @@ The set is open to a subject spec that needs one, on the same terms
 five subcommands under `agent eval` without changing the twelve: a
 subcommand under an existing command is not a new command.
 [event-log-and-persistence.md](event-log-and-persistence.md) adds `export`
-on that basis, making the reserved set four words. A spec adding one pays
-exactly two costs — a line here and one more prompt that needs `--` — and
-both are cheaper than a thirteenth top-level noun, because the twelve is a
-number Section 17 states and this document's own heading repeats.
+on that basis, making the reserved set four words. ADR-0131 adds `latency`,
+a read-only, aggregates-only latency report over recent Chat turns, making
+it five. A spec adding one pays exactly two costs — a line here and one more
+prompt that needs `--` — and both are cheaper than a thirteenth top-level
+noun, because the twelve is a number Section 17 states and this document's
+own heading repeats.
 
 Milestone 9's human-memory acceptance contract is the exception that later
 proved necessary: [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
@@ -1284,7 +1293,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 182 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 185 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1295,7 +1304,7 @@ the plan's text stands with an annotation rather than a replacement.
     Milestone 2. The port is declared once and implemented twice.
 4.  **Transaction hygiene in Milestone 0 versus Milestone 2.** The check is a
     Milestone 0 deliverable; the gate is a Milestone 2 acceptance criterion.
-5.  **`agent run <prompt>` versus `agent run get <id>`.** Three reserved
+5.  **`agent run <prompt>` versus `agent run get <id>`.** Five reserved
     subcommand words, and `--` for the literal.
 
 ## Decisions
@@ -1306,7 +1315,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 182 declared knobs into files and leaves ten fields in
+   sorts all 185 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,
@@ -1357,8 +1366,8 @@ the plan's text stands with an annotation rather than a replacement.
 15. **CLI results go to stdout and progress goes to stderr**, so the
     Milestone 1 demonstration's six flow lines and its final answer are
     separable without a flag.
-16. **`get`, `events`, `cancel`, and `export` are reserved words after
-    `agent run`.** The residual collision with a prompt that is exactly one
+16. **`get`, `events`, `cancel`, `export`, and `latency` are reserved words
+    after `agent run`.** The residual collision with a prompt that is exactly one
     of them is accepted, with `--` as the escape, rather than renaming a
     command the plan fixed. The set is open to a subject spec that needs a
     subcommand, which is not the same thing as a new command.

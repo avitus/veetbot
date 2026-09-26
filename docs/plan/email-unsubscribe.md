@@ -111,7 +111,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:712-728).
+  (email-experience.md:726-742).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -122,8 +122,8 @@ not find it here should find the reason here.
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection
-  (sandbox-isolation.md:811-816): resolve once, refuse any non-public
-  address, dial the address that was checked (sandbox-isolation.md:863-882).
+  (sandbox-isolation.md:816-821): resolve once, refuse any non-public
+  address, dial the address that was checked (sandbox-isolation.md:868-887).
   ADR-0098 already runs a dedicated public-HTTPS transport through it for the
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
@@ -286,10 +286,11 @@ leaves the ninety-day window leaves the count. When a newer message from the
 sender carries the header, evidence moves to it, because a newer token is the
 one most likely to still work.
 
-**Verification** fills the evidence block. It runs last in a refresh slice,
-after synchronization, assessment, and drafting, and only with the tool and
-step headroom the slice has left, so it can never starve the work Milestone
-26 defined. Within that headroom the task calls `get_unsubscribe` for at most
+**Verification** fills the evidence block. It runs in a refresh slice after
+synchronization, assessment, and drafting, and only with the tool and step
+headroom the slice has left, so it can never starve the work Milestone 26
+defined. It runs before the correspondence summaries of ADR-0126, so their
+backlog cannot starve it. Within that headroom the task calls `get_unsubscribe` for at most
 twenty-five subscriptions per account whose evidence is new or unverified,
 highest volume first, and stores the result; it stops quietly when the
 headroom or the read server runs out. An unverified subscription shows as
@@ -365,7 +366,7 @@ the arguments an approval of the destination.
 **Classification.** `IDEMPOTENT` is the honest class and not a convenience:
 the request is a constant, and sending it twice leaves the recipient exactly
 as unsubscribed as sending it once. Recovery may therefore re-execute
-(tool-system.md:662-671), which matters because an unsubscribe has no
+(tool-system.md:665-674), which matters because an unsubscribe has no
 read-back that could reconcile an unknown outcome. Per-target outcomes are
 persisted as each completes, so a re-execution skips targets already
 accepted rather than dialling them again.
@@ -437,7 +438,7 @@ separately auditable:
    all-numeric final label, none of the `.internal`, `.local`, `.localhost`,
    `.home`, or `.lan` suffixes.
 4. One resolution at the proxy. **Every** resolved address must be public
-   under the non-configurable denylist (sandbox-isolation.md:884-898) —
+   under the non-configurable denylist (sandbox-isolation.md:889-903) —
    private, loopback, link-local and metadata, carrier-grade NAT, unique
    local, and IPv4-mapped forms are refused, and one bad address refuses the
    connection.

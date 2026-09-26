@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -96,12 +97,42 @@ class _Connection:
     closed: bool = False
     reauthentication_attempted: bool = False
     unavailable_reason: str | None = None
+    # A pin taken from remembered discovery starts its server on first use (ADR-0131).
+    reused: bool = False
+    handshake_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class _DisconnectedServer:
     config: MCPServerConfig
     reason_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Discovered:
+    client: MCPClient | None
+    discovery: MCPDiscovery
+    report: MCPMappingReport
+    handshake_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RememberedDiscovery:
+    discovery: MCPDiscovery
+    report: MCPMappingReport
+    discovered_at: datetime
+
+
+def _discovery_key(config: MCPServerConfig) -> str:
+    """Key remembered discovery by the whole server configuration (ADR-0131)."""
+    payload = config.model_dump(mode="json")
+    payload["required_scopes"] = sorted(payload["required_scopes"])
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _elapsed_ms(started_at: datetime, finished_at: datetime) -> int:
+    return max(0, round((finished_at - started_at).total_seconds() * 1000))
 
 
 class MCPTool:
@@ -153,12 +184,19 @@ class MCPRuntime:
         *,
         connect_timeout_seconds: float = 10,
         idle_timeout_seconds: float = 900,
+        discovery_reuse_seconds: float = 3600,
         call_interceptor: CallInterceptor | None = None,
     ) -> None:
         """Share bounded preparation capacity across this runtime's sessions."""
         if not isfinite(idle_timeout_seconds) or idle_timeout_seconds <= 0:
             raise ValueError("MCP idle timeout must be finite and positive")
+        if not isfinite(discovery_reuse_seconds) or discovery_reuse_seconds <= 0:
+            raise ValueError("MCP discovery reuse must be finite and positive")
         self._idle_timeout_seconds = idle_timeout_seconds
+        self._discovery_reuse_seconds = discovery_reuse_seconds
+        # The last live discovery of each configured server in this process (ADR-0131).
+        self._discoveries: dict[str, _RememberedDiscovery] = {}
+        self._warmup_task: asyncio.Task[None] | None = None
         self._maintenance_task: asyncio.Task[None] | None = None
         self._principals: dict[UUID, Principal] = {}
         self._closing = False
@@ -291,6 +329,53 @@ class MCPRuntime:
         session_id: UUID,
         config: MCPServerConfig,
     ) -> _Connection | _DisconnectedServer:
+        """Start and discover one server for a session, remembering what it advertised."""
+        discovered = await self._discover_server(config)
+        if isinstance(discovered, _DisconnectedServer):
+            return discovered
+        return _Connection(
+            session_id=session_id,
+            config=config,
+            client=discovered.client,
+            discovery=discovered.discovery,
+            report=discovered.report,
+            last_used_at=self._clock.now(),
+            handshake_ms=discovered.handshake_ms,
+        )
+
+    async def _pin_server(
+        self,
+        session_id: UUID,
+        config: MCPServerConfig,
+        *,
+        reuse: bool,
+    ) -> _Connection | _DisconnectedServer:
+        """Pin remembered discovery without a transport, or discover live (ADR-0131)."""
+        remembered = self._remembered(config) if reuse else None
+        if remembered is None:
+            return await self._prepare_server(session_id, config)
+        return _Connection(
+            session_id=session_id,
+            config=config,
+            client=None,
+            discovery=remembered.discovery,
+            report=remembered.report,
+            last_used_at=self._clock.now(),
+            reused=True,
+        )
+
+    def _remembered(self, config: MCPServerConfig) -> _RememberedDiscovery | None:
+        """Reuse stdio discovery for the process; a tenant HTTP catalog only briefly."""
+        remembered = self._discoveries.get(_discovery_key(config))
+        if remembered is None or config.transport is MCPTransport.STDIO:
+            return remembered
+        age = (self._clock.now() - remembered.discovered_at).total_seconds()
+        return remembered if 0 <= age < self._discovery_reuse_seconds else None
+
+    def _forget(self, config: MCPServerConfig) -> None:
+        self._discoveries.pop(_discovery_key(config), None)
+
+    async def _discover_server(self, config: MCPServerConfig) -> _Discovered | _DisconnectedServer:
         """Admit bounded startup work before beginning the handshake deadline."""
         async with AsyncExitStack() as capacity:
             if config.transport is MCPTransport.STDIO:
@@ -298,6 +383,7 @@ class MCPRuntime:
             await capacity.enter_async_context(self._preparation_slots)
             client: MCPClient | None = None
             entered: MCPClient | None = None
+            started_at = self._clock.now()
             try:
                 credential = await self._credential(config)
                 client = self._clients(
@@ -309,18 +395,22 @@ class MCPRuntime:
                     entered = await client.__aenter__()
                     discovery = await entered.discover()
             except (MCPUnauthorizedError, PermissionError):
+                self._forget(config)
                 target = entered or client
                 if target is not None:
                     with suppress(Exception):
                         await self._close_preparation_client(target)
                 return _DisconnectedServer(config, "tool.auth_failed")
             except (MCPTransportError, TimeoutError):
+                self._forget(config)
                 target = entered or client
                 if target is not None:
                     with suppress(Exception):
                         await self._close_preparation_client(target)
                 return _DisconnectedServer(config, "tool.server_unreachable")
-            except BaseException:
+            except BaseException as exc:
+                if isinstance(exc, Exception):
+                    self._forget(config)
                 target = entered or client
                 if target is not None:
                     with suppress(BaseException):
@@ -328,7 +418,9 @@ class MCPRuntime:
                 raise
             try:
                 report = map_discovered_tools(config, discovery.tools)
-            except BaseException:
+            except BaseException as exc:
+                if isinstance(exc, Exception):
+                    self._forget(config)
                 with suppress(BaseException):
                     await self._close_preparation_client(entered)
                 raise
@@ -354,13 +446,15 @@ class MCPRuntime:
                             )
                         ),
                     )
-            return _Connection(
-                session_id=session_id,
-                config=config,
+            finished_at = self._clock.now()
+            self._discoveries[_discovery_key(config)] = _RememberedDiscovery(
+                discovery=discovery, report=report, discovered_at=finished_at
+            )
+            return _Discovered(
                 client=entered,
                 discovery=discovery,
                 report=report,
-                last_used_at=self._clock.now(),
+                handshake_ms=_elapsed_ms(started_at, finished_at),
             )
 
     async def _close_prepared_connections(
@@ -407,8 +501,11 @@ class MCPRuntime:
                     await uow.sessions.get(session_id, principal)
                 except NotFoundError:
                     self._deferred_events.add(session_id)
+            # Full preparation may pin remembered discovery; named servers start now (ADR-0131).
+            reuse = server_ids is None
             tasks = [
-                asyncio.create_task(self._prepare_server(session_id, config)) for config in configs
+                asyncio.create_task(self._pin_server(session_id, config, reuse=reuse))
+                for config in configs
             ]
             try:
                 prepared = await asyncio.gather(*tasks)
@@ -473,17 +570,14 @@ class MCPRuntime:
                             principal.tenant_id,
                             MCPResourceTool(self, spec),
                         )
-                    await self._event(
-                        session_id,
-                        "mcp.server.connected",
-                        {
-                            "server_id": config.server_id,
-                            "catalog_hash": report.catalog_hash,
-                            "tool_count": len(report.accepted),
-                            "rejected": list(report.rejected),
-                            "conflicts": [list(group) for group in report.conflicts],
-                        },
-                    )
+                    if connection.reused:
+                        await self._event(
+                            session_id, "mcp.server.pinned", self._catalog_payload(connection)
+                        )
+                    else:
+                        await self._event(
+                            session_id, "mcp.server.connected", self._connected_payload(connection)
+                        )
                 if self._closing:
                     raise MCPUnavailableError("tool.server_unreachable")
             except BaseException:
@@ -499,6 +593,23 @@ class MCPRuntime:
             self._principals[session_id] = principal
             if self._maintenance_task is None:
                 self._maintenance_task = asyncio.create_task(self._maintain_sessions())
+
+    @staticmethod
+    def _catalog_payload(connection: _Connection) -> dict[str, Any]:
+        report = connection.report
+        return {
+            "server_id": connection.config.server_id,
+            "transport": connection.config.transport.value,
+            "catalog_hash": report.catalog_hash,
+            "tool_count": len(report.accepted),
+            "rejected": list(report.rejected),
+            "conflicts": [list(group) for group in report.conflicts],
+        }
+
+    @classmethod
+    def _connected_payload(cls, connection: _Connection) -> dict[str, Any]:
+        """Describe one completed handshake, including its duration (ADR-0131)."""
+        return {**cls._catalog_payload(connection), "duration_ms": connection.handshake_ms}
 
     def _ready(self, session_id: UUID, server_ids: frozenset[str] | None) -> bool:
         if session_id in self._prepared:
@@ -652,6 +763,10 @@ class MCPRuntime:
             resource.uri for resource in replacement.discovery.resources
         )
         connection.client = replacement.client
+        # Every handshake is recorded with its duration, including this one (ADR-0131).
+        await self._event(
+            connection.session_id, "mcp.server.connected", self._connected_payload(replacement)
+        )
         if connection.report.catalog_hash != replacement.report.catalog_hash:
             await self._event(
                 connection.session_id,
@@ -1082,6 +1197,50 @@ class MCPRuntime:
             except Exception:
                 logger.exception("mcp_idle_cleanup_failed")
 
+    def start_discovery_warmup(self, tenant_ids: Iterable[str]) -> asyncio.Task[None]:
+        """Discover each enabled server once in the background, recording nothing (ADR-0131)."""
+        if self._warmup_task is None or self._warmup_task.done():
+            self._warmup_task = asyncio.create_task(self._warm_in_background(tuple(tenant_ids)))
+        return self._warmup_task
+
+    async def _warm_in_background(self, tenant_ids: tuple[str, ...]) -> None:
+        try:
+            await self.warm_discovery(tenant_ids)
+        except Exception as exc:
+            # The next session open discovers live; nothing waits on the warm-up.
+            logger.warning("mcp_discovery_warmup_failed", extra={"error_class": type(exc).__name__})
+
+    async def warm_discovery(self, tenant_ids: tuple[str, ...]) -> None:
+        """Remember every enabled server's catalog so new sessions start none of them."""
+        for tenant_id in tenant_ids:
+            if self._closing:
+                return
+            async with self._uow_factory() as uow:
+                configs = await uow.mcp_servers.list_enabled(tenant_id)
+            pending = [config for config in configs if self._remembered(config) is None]
+            results = await asyncio.gather(
+                *(self._warm_server(config) for config in pending), return_exceptions=True
+            )
+            for config, result in zip(pending, results, strict=True):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "mcp_discovery_warmup_failed",
+                        extra={"server_id": config.server_id, "error_class": type(result).__name__},
+                    )
+                elif isinstance(result, BaseException):
+                    raise result
+
+    async def _warm_server(self, config: MCPServerConfig) -> None:
+        discovered = await self._discover_server(config)
+        if isinstance(discovered, _DisconnectedServer):
+            logger.warning(
+                "mcp_discovery_warmup_failed",
+                extra={"server_id": config.server_id, "reason_code": discovered.reason_code},
+            )
+            return
+        if discovered.client is not None:
+            await self._close_preparation_client(discovered.client)
+
     async def close_session(self, session_id: UUID) -> None:
         """Forget a closed session only after its active calls release their leases."""
         async with self._lock(session_id):
@@ -1104,6 +1263,10 @@ class MCPRuntime:
     async def close(self) -> None:
         """Stop the sweeper before draining this process's connections."""
         self._closing = True
+        if self._warmup_task is not None:
+            self._warmup_task.cancel()
+            await asyncio.gather(self._warmup_task, return_exceptions=True)
+            self._warmup_task = None
         if self._maintenance_task is not None:
             self._maintenance_task.cancel()
             await asyncio.gather(self._maintenance_task, return_exceptions=True)

@@ -73,8 +73,11 @@ TOOL_MESSAGES: dict[str, str] = {
     "approval.expired": "Not performed. The approval expired.",
     "approval.cancelled": "Not performed. The approval was cancelled.",
     "tool.not_found.no_such_path": "No such path in the workspace.",
+    "tool.not_found.not_offered": (
+        "Not performed. No tool by that name is offered in this conversation."
+    ),
     "tool.invalid_arguments.not_text": "Not a UTF-8 text file. This tool reads text only.",
-    "tool.invalid_arguments.not_a_file": ("That path is a directory. Use workspace.list_files."),
+    "tool.invalid_arguments.not_a_file": "That path is a directory.",
     "tool.invalid_arguments.not_a_directory": ("That path is a file. Use workspace.read_text."),
     "delegation.brief_invalid": "Not performed. A delegation brief failed validation.",
     "delegation.tools_not_subset": (

@@ -26,6 +26,7 @@ from tests.gates.test_call_lifecycle import arguments
 from tests.gates.test_call_m27 import call_configuration
 from tests.gates.test_email_m18 import _credential as gmail_credential
 from tests.gates.test_email_m18 import _generated_gmail_discovery as generated_gmail_discovery
+from tests.gates.test_email_unsubscribe_m31 import Transport
 from tests.integration.m2_support import memory_settings
 from tests.unit.test_web_tools import FakeWebProvider
 
@@ -110,9 +111,15 @@ async def test_call_dispatch_occurs_only_after_the_bound_owner_approval(approved
 async def test_production_roster_offers_the_owner_the_call_tools() -> None:
     """The owner's full roster still reaches Chat's call tools, not only a reduced one.
 
-    Production runs People, Email mode, scheduling and web together. Discovered
-    tools fill what those leave, so the token cap, not the item cap, decided
-    whether calling reached the model at all.
+    Production runs People, Email mode, email unsubscribe, scheduling and web
+    together. Configured tools take their slots first and discovered tools fill
+    the rest of the thirty, reads first. What does not fit is offered through
+    the deferred tool index rather than dropped (ADR-0123), so the reads that
+    find a call keep their definitions and starting one is always offered.
+    These settings enable every flag production enables that changes the
+    default roster; activating another one in production adds it here first
+    (ADR-0124). The two-account production roster is gated in
+    `test_deferred_tools_adr0123.py`.
     """
     configuration = call_configuration()
     scripts = {
@@ -142,6 +149,7 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
         people_enabled=True,
         email_enabled=True,
         email_mode_enabled=True,
+        email_unsubscribe_enabled=True,
         schedule_api_enabled=True,
         schedule_worker_enabled=True,
         call_enabled=True,
@@ -168,6 +176,7 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
         mcp_client_factory=ScriptedMCPClientFactory(scripts),
         web_search_provider_override=provider,
         web_fetch_provider_override=provider,
+        one_click_transport_override=Transport(),
     ) as composition:
         session_id = await composition.sessions.create()
         run_id = await composition.runs.submit("List my recent phone calls.", session_id)
@@ -176,8 +185,7 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
 
     assert terminal.status is RunStatus.COMPLETED
     assert plan is not None
-    assert {
-        "mcp.bland_read.list_calls",
-        "mcp.bland_read.get_call",
-        "mcp.bland_call.start_call",
-    }.issubset(plan.tool_names)
+    missing = {"mcp.bland_read.list_calls", "mcp.bland_read.get_call"} - set(plan.tool_names)
+    assert not missing, missing
+    assert "mcp.bland_call.start_call" in {*plan.tool_names, *plan.deferred_tool_names}
+    assert plan.skipped_tool_names == ()

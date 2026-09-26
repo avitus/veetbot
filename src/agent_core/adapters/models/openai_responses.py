@@ -33,6 +33,7 @@ from agent_core.adapters.models.common import (
     text_content,
     tool_definition,
     user_segments,
+    with_internal_retries,
 )
 from agent_core.adapters.models.registry import OPENAI_CAPABILITY_CEILING
 from agent_core.domain.messages import (
@@ -164,7 +165,7 @@ class OpenAIResponsesProvider:
                             retry_stream = True
                             break
                         emitted_count = event.sequence + 1
-                        yield event
+                        yield with_internal_retries(event, internal_attempt)
                 if retry_stream:
                     continue
                 return

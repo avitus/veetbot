@@ -75,7 +75,8 @@ class SandboxRunCommandTool:
         version="1.0.0",
         description=(
             "Run an argument vector in an isolated disposable workspace. Network is off by "
-            "default. Export files worth keeping; the workspace does not survive interruption. "
+            "default. The workspace is discarded when the run finishes or pauses; use "
+            "artifact.export to give the user a file it made. "
             "Large output is truncated and retained as an artifact."
         ),
         input_schema=INPUT_SCHEMA,

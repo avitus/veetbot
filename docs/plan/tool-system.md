@@ -350,15 +350,18 @@ The first segment is the **domain**, and domains are partitioned:
 | --- | --- | --- |
 | `system` `math` `workspace` `sandbox` `artifact` | builtin | build time |
 | `demo` `delegate` | builtin | build time |
-| `conversation` `context` | builtin, control | build time |
+| `conversation` `context` `tool` | builtin, control | build time |
 | `skill` `memory` `schedule` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
 | `web` | builtin, external data | build time |
-| `email` | builtin, cached Email experience | build time, Email mode flag |
+| `browser` | builtin, external data | build time, browser provider |
+| `email` | builtin, cached Email experience | build time, Email mode or unsubscribe flag |
+| `people` | builtin, People memory | build time, People flag |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
 
-The control annotation is on the two domains that hold nothing else.
+The control annotation is on the three domains that hold nothing else; `tool`
+holds only `tool.call` (ADR-0123).
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
 `memory` holds three capability tools and no control tool.
 `schedule` holds `schedule.create` plus Milestone 23's summary-only
@@ -755,10 +758,12 @@ last line is `FAILED: 3 tests` is unreadable if only its first 8 KB survives.
 - `truncated = true`, `output_bytes`, and `artifact_id` are recorded on the
   invocation. Truncation is a metric, not an implementation detail; a tenant
   whose results are truncated constantly is paying for output nobody reads.
-- The artifact inherits the result's trust label and is tenant-scoped. Fetching
-  it back — which the model may do through `artifact.export` or a workspace
-  read — returns it inside its envelope with its label intact, which is the
-  same guarantee the context engine gives for elided untrusted spans.
+- The artifact inherits the result's trust label and is tenant-scoped. No
+  model-callable tool reads an artifact back: `artifact.export` moves bytes into
+  the store rather than out of it, and the `workspace.*` readers see only the
+  run's workspace. The elided span therefore never re-enters context outside
+  its envelope; a client reads the whole capture through the owner-scoped
+  artifact routes.
 
 Section 8.1's `maximum_output_bytes` is per-tool. The registry additionally
 enforces a global ceiling from configuration, and a `ToolSpec` declaring more
@@ -915,10 +920,10 @@ than fails.
 
 ## Control tools
 
-Four of the tool names the plan uses act on the run rather than on the world:
-`conversation.ask_user` (Section 27.3), `delegate.run` (Section 26),
-`context.update_working_state` (context-engine.md), and `skill.load`
-(skills.md). `ToolSpec` as defined in Section 8.1 cannot describe them,
+Five of the tool names the platform uses act on the run rather than on the
+world: `conversation.ask_user` (Section 27.3), `delegate.run` (Section 26),
+`context.update_working_state` (context-engine.md), `skill.load`
+(skills.md), and `tool.call` (ADR-0123). `ToolSpec` as defined in Section 8.1 cannot describe them,
 because every field on it presumes an outward-facing action: `side_effect`
 classifies an effect on an external system, `idempotency` describes whether
 repeating it is safe *out there*, and `required_scopes` names permissions on
@@ -940,6 +945,23 @@ know that the question was already asked.
 | `delegate.run` | control | spawn child run | on child terminal |
 | `context.update_working_state` | control | working-state write | immediate |
 | `skill.load` | control | load a skill into the turn | immediate |
+| `tool.call` | control | none of its own; unwrapped into the deferred tool it names | that tool's |
+
+`tool.call` reaches a tool from the deferred tool index
+([context-engine.md](context-engine.md)): pinned for the session and
+authorized like any other, but advertised by a one-line entry rather than a
+definition. It never executes. The pipeline unwraps it before step 1: the
+arguments `{name, arguments}` are validated against its own schema, the named
+tool must be in the run's pinned set and must not itself be a control tool,
+and the call continues as that tool with the model's call id. Every later
+step, event, approval and invocation row therefore carries the deferred tool's
+own name, and the result still answers the `tool.call` the provider replays. A
+malformed wrapper fails with `tool.arguments_invalid`, and a name the run does
+not offer is denied with `tool.not_found.not_offered`, both under
+`tool.call`'s name. Invalid arguments for the named tool return that tool's
+input schema, because its definition never reached the provider. The
+parallel-batch check unwraps the same way, so a batch's parallelism is decided
+by the tools it actually runs.
 
 `context.compact` is not on this list, and it is worth saying why, because
 the name does appear in the corpus. It is a span:
@@ -1054,7 +1076,9 @@ without discarding the pinned catalog or the once-per-session authentication
 ladder. The next call reconnects with freshly resolved credentials and compares
 discovery with the original pin: added tools stay unadvertised, and removed or
 changed declarations return `tool.withdrawn`. Reconnection does not reset a
-terminal unavailability decision. Shutdown drains in-progress preparation and
+terminal unavailability decision. Every handshake, this one included, emits
+`mcp.server.connected` with its duration and replaces the runtime's remembered
+discovery of that server; a failed one forgets it (ADR-0131). Shutdown drains in-progress preparation and
 closes every transport through its SDK owner task.
 
 ### Authentication, and what the reference resolves to
@@ -1226,6 +1250,20 @@ Discovery runs at session open, before the context plan is built, because the
 context engine pins the tool set and the pin must include MCP tools or they
 cannot be advertised. For each configured server: connect, `initialize`,
 `tools/list`, map, register, hash.
+
+A full catalog preparation may pin the runtime's last live discovery of the
+same server configuration instead of connecting (ADR-0131). The memory belongs
+to one API or worker process and is keyed by the whole configuration. An
+operator-configured stdio server's discovery is reused for the life of the
+process, because its catalog ships with the release and a release restarts the
+process. A tenant HTTP server's discovery is reused for at most
+`mcp.discovery_reuse_seconds`. Preparation that names its servers, as typed
+Email work below does, is always live. A reused pin records the same catalog rows,
+registrations, conflict and rejection events as a live pin, and emits
+`mcp.server.pinned` in place of `mcp.server.connected`. Its server starts on the
+first call of one of its tools, through the reconnection comparison above. The
+API and the interactive worker warm the memory in the background when they
+start; the warm-up connects, discovers and closes, and records nothing.
 
 Typed Email work is the one exception (ADR-0104). Its model requests carry no
 tools. An operational Email session's plan therefore pins none, and planning it
@@ -1688,7 +1726,8 @@ session:
 
 | Event | When | Carries |
 | --- | --- | --- |
-| `mcp.server.connected` | handshake done | server, transport, tools |
+| `mcp.server.connected` | handshake done | server, transport, tools, duration_ms |
+| `mcp.server.pinned` | remembered discovery pinned | server, transport, tools |
 | `mcp.server.disconnected` | close or failure | server, reason_code |
 | `mcp.server.reauthenticated` | ladder step 2 | server, scheme, outcome |
 | `mcp.catalog.changed` | list differs | server, old and new hash |
@@ -2025,8 +2064,9 @@ evidence that the surface is the same one.
     `tool.auth_unsupported`, for the reason sampling and roots are declined
     at negotiation: there is no consent surface, and a half-working one is
     worse than a refusal.
-25. The control-tool set is four, and it is `conversation.ask_user`,
-    `delegate.run`, `context.update_working_state`, and `skill.load`.
+25. The control-tool set is five, and it is `conversation.ask_user`,
+    `delegate.run`, `context.update_working_state`, `skill.load`, and
+    `tool.call`; ADR-0123 added the fifth.
     `context.compact` was a row naming a span rather than a tool, and
     `skill_manage` is a capability tool for the reason given above. The set
     stays closed at build time, and every member is now derivable from the

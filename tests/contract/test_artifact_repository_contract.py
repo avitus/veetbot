@@ -7,7 +7,7 @@ import pytest
 
 from agent_core.adapters.persistence.memory import InMemoryArtifactRepository
 from agent_core.domain.agents import Principal
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import NotFoundError, RunCancelledError
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 
@@ -158,3 +158,67 @@ async def test_pending_ingestion_is_listed_in_upload_order_and_recorded() -> Non
     assert [artifact.id for artifact in await repository.pending_auto_ingest(owner, limit=10)] == [
         later.id
     ]
+
+
+def _export(**overrides: object) -> ArtifactRef:
+    return _artifact().model_copy(update=overrides)
+
+
+async def test_reply_retention_keeps_a_runs_exports_for_the_conversation() -> None:
+    repository = InMemoryArtifactRepository()
+    owner = Principal(tenant_id="tenant-a", principal_id="user-a")
+    exported = await repository.create(_export())
+    written = await repository.create(
+        _export(id=UUID(int=73), origin="model_output", name="notes.md", sha256="3" * 64)
+    )
+
+    retained = await repository.retain_for_reply(
+        [written.id, exported.id], owner, run_id=UUID(int=72)
+    )
+
+    assert [artifact.id for artifact in retained] == [written.id, exported.id]
+    assert all(artifact.expires_at is None for artifact in retained)
+    assert (await repository.get(exported.id, owner)).expires_at is None
+    assert (await repository.get(written.id, owner)).expires_at is None
+    again = await repository.retain_for_reply(
+        [exported.id, exported.id], owner, run_id=UUID(int=72)
+    )
+    assert again == [retained[1]]
+
+
+@pytest.mark.parametrize(
+    ("principal", "run_id", "origin"),
+    [
+        (Principal(tenant_id="tenant-b", principal_id="user-a"), UUID(int=72), "sandbox_export"),
+        (Principal(tenant_id="tenant-a", principal_id="user-b"), UUID(int=72), "sandbox_export"),
+        (Principal(tenant_id="tenant-a", principal_id="user-a"), UUID(int=99), "sandbox_export"),
+        (Principal(tenant_id="tenant-a", principal_id="user-a"), UUID(int=72), "tool_output"),
+        (Principal(tenant_id="tenant-a", principal_id="user-a"), UUID(int=72), "upload"),
+    ],
+)
+async def test_reply_retention_refuses_anything_but_the_owners_run_exports(
+    principal: Principal, run_id: UUID, origin: str
+) -> None:
+    repository = InMemoryArtifactRepository()
+    owner = Principal(tenant_id="tenant-a", principal_id="user-a")
+    eligible = await repository.create(_export())
+    other = await repository.create(_export(id=UUID(int=74), origin=origin, sha256="4" * 64))
+
+    with pytest.raises(NotFoundError):
+        await repository.retain_for_reply([eligible.id, other.id], principal, run_id=run_id)
+
+    # Nothing is retained when any requested file is refused.
+    assert (await repository.get(eligible.id, owner)).expires_at == eligible.expires_at
+
+
+async def test_reply_retention_is_fenced_by_people_erasure() -> None:
+    repository = InMemoryArtifactRepository()
+    owner = Principal(tenant_id="tenant-a", principal_id="user-a")
+    exported = await repository.create(_export())
+    # People erasure records the fence exactly this way (people_erasure.py).
+    repository._people_erased_runs[UUID(int=72)] = datetime(2026, 1, 2, tzinfo=UTC)
+
+    with pytest.raises(RunCancelledError, match="People erasure"):
+        await repository.retain_for_reply([exported.id], owner, run_id=UUID(int=72))
+
+    assert (await repository.get(exported.id, owner)).expires_at == exported.expires_at

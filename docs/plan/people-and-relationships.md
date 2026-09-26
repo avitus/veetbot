@@ -139,7 +139,10 @@ A profile is a rebuildable view of records. It cannot become a second writable
 biography with its own unsupported facts. A summary sentence must identify its
 supporting claim or interaction revisions, and a correction invalidates every
 dependent summary. Start with deterministic grouped summaries; generated prose
-is an optional later optimization requiring its own evaluation.
+is an optional later optimization requiring its own evaluation. The one
+generated exception is the summary of an observed email exchange, bound to the
+passage it summarizes (ADR-0126). The owner accepted it ahead of that
+evaluation, which remains an open item.
 
 ### Explicit exclusions
 
@@ -169,7 +172,7 @@ number. Mutable resources have positive revisions and optimistic concurrency.
 | `PersonMemoryLink` | Person, existing belief ID, semantic role (`subject`, `object`, `speaker`, `mentioned`), source support, and revision. One belief can link several people. |
 | `RelationshipAssertion` | Backing belief ID, typed source and target references, predicate, directed roles, effective interval with precision, and assertion revision. Authority and sensitivity come from the backing evidence, not a separate confidence score. |
 | `OrganizationReference` | Scoped ID, supported name/aliases, source support. A bounded endpoint for work, board, and project relationships; no organization graph or enrichment. |
-| `Interaction` | UUID, channel, kind, event-time interval/precision, direction, bounded summary, source references, revision, and visibility. Covers observed exchanges and owner-reported events with different labels. |
+| `Interaction` | UUID, channel, kind, event-time interval/precision, direction, bounded summary, source references, revision, and visibility. Covers observed exchanges and owner-reported events with different labels. An observed email exchange's summary is its label plus a generated gist, with provenance and a withheld state (ADR-0126). |
 | `InteractionParticipant` | Interaction, person or unresolved mention, role (`sender`, `recipient`, `participant`, `mentioned`), attribution certainty, supporting source. Being mentioned is not participation. |
 | `Commitment` | Backing claim/evidence, debtor, beneficiary, task description, supported due time/precision, state, state evidence, and related interaction IDs. |
 | `PeopleSourceLink` | Source kind, owner/session/event sequence, provider account/thread/message or receipt key, original author, observation time, source revision, exclusion state, and derivation version. Content stays with its governed source. |
@@ -262,7 +265,9 @@ A person joins only from evidence the owner produced:
 Every other mention links to an existing person when resolution matches and
 otherwise stays an unresolved mention; its fact still forms. Pronouns and the
 owner's own addresses, handles, and From names never create, match, or select
-a person for context.
+a person for context. Neither does a label that is itself an address or names
+a group, department, organization or automated service, such as “Investment
+Team”, “Partners” or “API Verification” (ADR-0125).
 
 Mail from an unknown sender records one unattached address endpoint and no
 history. The owner's first reply to that address adds the person and adopts
@@ -304,6 +309,22 @@ later conflicting edits require a fresh preview, not a blind undo.
 Automatic resolution can attach new evidence to an established identity under
 the rules above. Merging two established people always requires an explicit
 owner decision. Ordinary memory formation continues autonomously.
+
+A duplicate pass merges only on decisive evidence
+([ADR-0125](../adr/0125-duplicate-people-merge-on-decisive-evidence.md)). An
+address, number or handle the owner gave one person may also be held, as an
+observed endpoint, by a provisional person created from correspondence. That
+correspondent merges into the owner's person without asking, through the
+same revision-checked operation, marked automatic and listed on the
+survivor's profile with an undo. Weaker evidence becomes a merge suggestion
+the owner confirms or dismisses: agreeing full names, a first name or
+nickname that starts another's name, or an address only correspondents
+share. A first name matching several people is suggested only for the one
+sharing the owner's family name. A dismissed suggestion, an undone merge, or a
+split keeps that pair apart for good. The weaker identity merges into the
+stronger: confirmed, pinned, owner-stated, more history, then older. The pass
+runs every 15 minutes in maintenance and on demand as
+`agent people dedupe`.
 
 ## 6. Relationships, time, and commitments
 
@@ -388,7 +409,7 @@ observed communications have visibly different attribution.
 | Source | Admission and attribution |
 | --- | --- |
 | Owner Chat and authenticated paired-surface messages | Owner assertions under existing identity and formation gates. “Maya told me…” remains an owner report of Maya's statement, not direct evidence of its truth. A named person joins People only when the claim ties them to the owner (ADR-0121). |
-| First-party Gmail received/Sent evidence | Existing account-qualified contracts, exact message spans, sender/recipient roles, quoted/forwarded attribution, and semantic-policy activation. Sent placement alone does not prove personal authorship. Bulk mail is not a source: a thread the unsubscribe census indexes, or one the assessment marks `bulk`, registers no source, forms nothing, projects no correspondence, and creates no provisional person (ADR-0116). Mail forms facts, not identities: a name in a message body links to someone already in People or stays an unresolved mention, and correspondence adds only the named recipients of mail the owner sent (ADR-0121). |
+| First-party Gmail received/Sent evidence | Existing account-qualified contracts, exact message spans, sender/recipient roles, quoted/forwarded attribution, and semantic-policy activation. Sent placement alone does not prove personal authorship. Bulk mail is not a source: a thread the unsubscribe census indexes, or one the assessment marks `bulk`, registers no source, forms nothing, projects no correspondence, and creates no provisional person (ADR-0116). Mail forms facts, not identities: a name in a message body links to someone already in People or stays an unresolved mention, and correspondence adds only the named recipients of mail the owner sent (ADR-0121). Each correspondence record carries a short summary generated from its verified message passage (ADR-0126). |
 | Device SMS | Existing admitted receipt/channel metadata. Rich body-derived facts require a separately evaluated amendment to the current metadata-only memory adapter; do not duplicate the SMS body into another event. |
 | Existing memories and integrated episodes | Deterministic indexing of valid support; re-extraction of old source text only through the explicit bounded replay/import contract. Summaries are not new independent evidence. |
 | Calendar, contacts, arbitrary web/MCP, public callers, assistant output | No new admission. Milestone 27 call-derived memory remains excluded. Generated drafts and Veetbot's own person summaries never corroborate themselves. |
@@ -509,7 +530,7 @@ delivered text follows existing session/source erasure semantics.
 | --- | --- |
 | `people.search` | Resolve a person from a name, alias, role, or selected channel endpoint; return candidates and ambiguity. |
 | `people.context` | Get a task-relevant profile for up to three explicit person IDs with current facts, relationship evidence, and open threads. |
-| `people.history` | Page dated interactions for explicit people and time filters across owned sources, with an optional historical knowledge cutoff. |
+| `people.history` | Page dated interactions for explicit people and time filters across owned sources, with an optional historical knowledge cutoff. An email item names its message; `source_id` returns that message's retained original text (ADR-0126). |
 
 All three are ordinary read-only tools requiring exact `people.read`, returning
 `TrustLevel.MEMORY`, with existing run budgets and a maximum 64 KiB response.
@@ -541,7 +562,10 @@ evidence. The default People collection lists active and provisional people:
 everyone admitted is known to the owner or written to. **Needs review** lists
 provisional, unpinned people with no owner-confirmed or channel-observed
 identifier, such as a person known only as “My brother”; a correspondent
-identified by address never lands there (ADR-0121).
+identified by address never lands there (ADR-0121). Needs review also lists
+possible duplicates, each with Merge and Not the same, and a person's detail
+asks about its own and lists merges made without asking, with an undo
+(ADR-0125).
 
 Person detail has five sections:
 
@@ -584,6 +608,8 @@ on their implemented checks and the master switch.
 | `PATCH /v1/people/{id}` | `people.write` | Label, alias assignment, or owner pin; expected revision and typed operation. |
 | `POST /v1/people/{id}/corrections` | `people.write` | Person-linked claim correction, changed fact, rejection, or supported affirmation through governed memory. |
 | `POST /v1/people/identity-operations` | `people.write` | Preview/apply merge, split, or compatible undo with exact affected revisions. |
+| `GET /v1/people/merge-suggestions` | `people.read` | Open possible duplicates with both identities and the reason; bounded pagination (ADR-0125). |
+| `POST /v1/people/merge-suggestions/{id}` | `people.write` | Merge the pair or keep it apart for good; `expected_revision` and `Idempotency-Key`. |
 | `POST /v1/people/{id}/forget` | `people.write` | Explicit derived-memory removal plan and idempotent application with a receipt. |
 | `GET /v1/people/operations/{id}` | `people.read` | Owner-bound operation/erasure receipt and completion state, including after the person is no longer readable; no deleted content. |
 | `POST /v1/people/imports` | `people.write` plus source read scopes | Explicit scoped import request, date range, exclusions, and finite budget. |
@@ -634,7 +660,7 @@ suppression information.
 | --- | --- |
 | Correct a fact | Governed replacement/rejection; retain allowed audit lineage; rebuild affected profiles. |
 | Correct identity | Reassign supporting mentions and links; retain a replayable identity constraint. |
-| Remove one fact from memory | Remove the belief and derived copies; retain minimal content-free replay suppression under existing deletion rules. |
+| Remove one fact from memory | Remove the belief and derived copies; retain minimal content-free replay suppression under existing deletion rules. A fact formed from an email also withholds that exchange's generated summary in every revision (ADR-0126). |
 | Forget a person from memory | Remove that person's identities, aliases, links, person-specific beliefs, summaries, commitments, and person-specific history projections; suppress re-formation from covered sources. |
 | Clear source learning | Apply existing source-erasure machinery and remove every dependent People contribution; retain independently supported owner facts. |
 | Delete session/principal | Extend the existing transaction family to every new row, cached projection, import, source link, and identity-operation record. |
@@ -1270,6 +1296,18 @@ authorize policy activation or production delivery.
   a conversation. Both remain readable by ID, and neither is deleted. A connection
   change dismisses People presentations, clears their transient data and pending
   retries, and prevents in-flight responses from restoring the old connection.
+- On the Mac, Memory's People collection selects the person its second column
+  shows. Its navigation links stopped responding after the first choice once
+  the directory was longer than the column, leaving the first profile open.
+  The profile keys its state to the person, and a UI test chooses people in
+  turn from a paged 72-person directory on Mac, iPhone and iPad. The profile
+  opens with the person's initials, name, relationship to the owner and main
+  address, and Prepare for a conversation as its primary action. Names and
+  contact details, relationships in plain words, a history timeline, open
+  threads, and facts and evidence follow; relationships, open threads or facts
+  with nothing recorded share one note that claims no absence. Possible
+  duplicates ask above the sections, and automatic merges, Repair identity and
+  Forget person sit under Manage person.
 - Frozen synthetic development and holdout corpora and a paired observation
   scorer exist. Retrieval scoring uses actually injected evidence separately
   from answer citations; paired intervals resample scenario averages across

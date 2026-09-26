@@ -12,6 +12,11 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
+from agent_core.domain.correspondence import (
+    CORRESPONDENCE_SUMMARIES_PER_SLICE,
+    CORRESPONDENCE_SUMMARY_DEADLINE_SECONDS,
+    EmailCorrespondenceSummary,
+)
 from agent_core.domain.email import (
     EMAIL_HISTORY_DAYS,
     EMAIL_POLICY_VERSION,
@@ -39,6 +44,7 @@ from agent_core.domain.email_semantics import (
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     AuthorizationError,
+    BudgetExceededError,
     ConflictError,
     ContextOverflow,
     ToolTrustRejectedError,
@@ -58,6 +64,10 @@ from agent_core.ports.email import EmailContextRenderer, EmailRuntimeServices, E
 from agent_core.ports.persistence import RepositoryUnitOfWork
 from agent_core.ports.tools import ToolRegistry
 from agent_core.runtime.email_assessment import assessment_instruction
+from agent_core.runtime.email_correspondence import (
+    CORRESPONDENCE_SUMMARY_INSTRUCTION,
+    correspondence_summary_evidence,
+)
 from agent_core.runtime.email_state import read_value, records, save_value, thread_summaries
 from agent_core.runtime.email_subscription_tasks import run_subscription, subscription_modes
 from agent_core.runtime.loop import RunContext, _invoke_model, checkpoint, select_final_message
@@ -988,6 +998,50 @@ class _TaskIO:
                 with suppress(EmailModelResultError):
                     await self.generate_draft(thread.id)
         await self._verify_subscriptions()
+        await self._summarize_correspondence()
+
+    async def _summarize_correspondence(self) -> None:
+        """Give observed exchanges a short summary, newest first (ADR-0126).
+
+        Assessment, drafts and subscription verification come first, so a summary
+        backlog never starves them. A summary is one metered call on one verified
+        passage; an invalid result is recorded, never kept.
+        """
+        c = self.context
+        learning = await self.service.learning_context(c.principal, None)
+        if learning.get("paused"):
+            return
+        work = await self.semantics.next_correspondence_summaries(
+            self.task.account_ids, limit=CORRESPONDENCE_SUMMARIES_PER_SLICE
+        )
+        model = f"{c.resolved_model.provider}:{c.resolved_model.model}"
+        for item in work:
+            if (
+                c.run.deadline_at is not None
+                and (c.run.deadline_at - c.clock.now()).total_seconds()
+                < CORRESPONDENCE_SUMMARY_DEADLINE_SECONDS
+            ):
+                return
+            result: EmailCorrespondenceSummary | None
+            try:
+                value = await self.model(
+                    CORRESPONDENCE_SUMMARY_INSTRUCTION,
+                    correspondence_summary_evidence(item),
+                    EmailCorrespondenceSummary,
+                )
+                result = value if isinstance(value, EmailCorrespondenceSummary) else None
+            except EmailModelResultError:
+                result = None
+            except BudgetExceededError:
+                # Summaries come last: a spent slice ends them, never the refresh.
+                return
+            except _ModelOutcomeError as exc:
+                if exc.outcome.kind is not OutcomeKind.FAILED:
+                    raise
+                return
+            await self.semantics.record_correspondence_summary(
+                item, result, model=model, run=c.run, lease=c.lease
+            )
 
     async def _census(self, account_id: str, page: dict[str, Any]) -> None:
         """Fold the summaries this slice already read; the census issues no query."""
@@ -1005,8 +1059,10 @@ class _TaskIO:
     async def _verify_subscriptions(self) -> None:
         """Read unsubscribe evidence with whatever bounded headroom the slice has left.
 
-        It runs last so it can never starve mailbox synchronization, assessment or
-        drafting, and it stops quietly: an unverified sender simply stays unselectable.
+        It runs after mailbox synchronization, assessment and drafting so it can
+        never starve them, and before the optional correspondence summaries so
+        their backlog cannot starve it. It stops quietly: an unverified sender
+        simply stays unselectable.
         """
         c = self.context
         for account_id in self.task.account_ids:

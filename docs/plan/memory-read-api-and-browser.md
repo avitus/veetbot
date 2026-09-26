@@ -233,7 +233,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1601-1618) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1606-1623) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text

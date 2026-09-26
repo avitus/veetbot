@@ -33,6 +33,8 @@
 		100000000000000000000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* Assets.xcassets */; };
 		100000000000000000000019 /* ComposerTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* ComposerTextEditor.swift */; };
 		1000000000000000000000E2 /* AttachmentChipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000E2 /* AttachmentChipsView.swift */; };
+		1000000000000000000000F1 /* MarkdownRendition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F1 /* MarkdownRendition.swift */; };
+		1000000000000000000000F2 /* MessageActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F2 /* MessageActions.swift */; };
 		10000000000000000000001A /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* AppTheme.swift */; };
 		10000000000000000000001B /* MarkdownContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001B /* MarkdownContentView.swift */; };
 		10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* ConversationNavigationUITestFixture.swift */; };
@@ -73,6 +75,7 @@
 		1000000000000000000000C4 /* PeopleDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C4 /* PeopleDetailViewModel.swift */; };
 		1000000000000000000000C5 /* PeopleBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C5 /* PeopleBrowserView.swift */; };
 		1000000000000000000000C6 /* PeopleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C6 /* PeopleDetailView.swift */; };
+		1000000000000000000000C8 /* PeopleProfileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C8 /* PeopleProfileComponents.swift */; };
 		1000000000000000000000C7 /* PeopleEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C7 /* PeopleEditors.swift */; };
 /* End PBXBuildFile section */
 
@@ -114,6 +117,8 @@
 		200000000000000000000018 /* Veetbot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Veetbot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000019 /* ComposerTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextEditor.swift; sourceTree = "<group>"; };
 		2000000000000000000000E2 /* AttachmentChipsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentChipsView.swift; sourceTree = "<group>"; };
+		2000000000000000000000F1 /* MarkdownRendition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendition.swift; sourceTree = "<group>"; };
+		2000000000000000000000F2 /* MessageActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageActions.swift; sourceTree = "<group>"; };
 		20000000000000000000001A /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		20000000000000000000001B /* MarkdownContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownContentView.swift; sourceTree = "<group>"; };
 		20000000000000000000001C /* ConversationNavigationUITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationNavigationUITestFixture.swift; sourceTree = "<group>"; };
@@ -157,6 +162,7 @@
 		2000000000000000000000C4 /* PeopleDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleDetailViewModel.swift; sourceTree = "<group>"; };
 		2000000000000000000000C5 /* PeopleBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleBrowserView.swift; sourceTree = "<group>"; };
 		2000000000000000000000C6 /* PeopleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleDetailView.swift; sourceTree = "<group>"; };
+		2000000000000000000000C8 /* PeopleProfileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleProfileComponents.swift; sourceTree = "<group>"; };
 		2000000000000000000000C7 /* PeopleEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleEditors.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -286,6 +292,7 @@
 			children = (
 				2000000000000000000000C7 /* PeopleEditors.swift */,
 				2000000000000000000000C6 /* PeopleDetailView.swift */,
+				2000000000000000000000C8 /* PeopleProfileComponents.swift */,
 				2000000000000000000000C5 /* PeopleBrowserView.swift */,
 				20000000000000000000001A /* AppTheme.swift */,
 				200000000000000000000011 /* ActivityViews.swift */,
@@ -293,6 +300,8 @@
 				200000000000000000000013 /* ChatView.swift */,
 				200000000000000000000019 /* ComposerTextEditor.swift */,
 				2000000000000000000000E2 /* AttachmentChipsView.swift */,
+				2000000000000000000000F1 /* MarkdownRendition.swift */,
+				2000000000000000000000F2 /* MessageActions.swift */,
 				200000000000000000000014 /* ConnectionSettingsView.swift */,
 				20000000000000000000001B /* MarkdownContentView.swift */,
 				200000000000000000000024 /* MemoryBrowserView.swift */,
@@ -436,6 +445,7 @@
 			files = (
 				1000000000000000000000C7 /* PeopleEditors.swift in Sources */,
 				1000000000000000000000C6 /* PeopleDetailView.swift in Sources */,
+				1000000000000000000000C8 /* PeopleProfileComponents.swift in Sources */,
 				1000000000000000000000C5 /* PeopleBrowserView.swift in Sources */,
 				1000000000000000000000C4 /* PeopleDetailViewModel.swift in Sources */,
 				1000000000000000000000C3 /* PeopleViewModel.swift in Sources */,
@@ -474,6 +484,8 @@
 				10000000000000000000001A /* AppTheme.swift in Sources */,
 				100000000000000000000019 /* ComposerTextEditor.swift in Sources */,
 				1000000000000000000000E2 /* AttachmentChipsView.swift in Sources */,
+				1000000000000000000000F1 /* MarkdownRendition.swift in Sources */,
+				1000000000000000000000F2 /* MessageActions.swift in Sources */,
 				100000000000000000000014 /* ConnectionSettingsView.swift in Sources */,
 				10000000000000000000001B /* MarkdownContentView.swift in Sources */,
 				100000000000000000000023 /* MemoryBrowserView.swift in Sources */,

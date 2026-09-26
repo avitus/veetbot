@@ -58,3 +58,42 @@ async def test_for_run_binds_platform_identity_onto_the_created_artifact(
     assert row.run_id == RUN_ID
     assert row.origin == ArtifactOrigin.SANDBOX_EXPORT.value
     assert row.trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+async def _chunks(content: bytes) -> AsyncIterator[bytes]:
+    yield content
+
+
+async def test_exporting_the_same_file_twice_in_a_run_returns_the_same_artifact(
+    tmp_path: Path,
+) -> None:
+    """builtin-tools.md: the same export in one run is one `ArtifactRef`, not two."""
+    clock, factory = await memory_uow_factory()
+    provider = ArtifactWriterFactory(
+        factory,
+        FilesystemArtifactStore(tmp_path),
+        clock,
+        SequenceIdFactory([UUID(int=8820), UUID(int=8821), UUID(int=8822), UUID(int=8823)]),
+    )
+
+    async def create(content: bytes, name: str, origin: ArtifactOrigin) -> UUID:
+        stored = await provider.for_run(
+            tenant_id=TENANT,
+            principal_id=principal().principal_id,
+            session_id=SESSION_ID,
+            run_id=RUN_ID,
+            origin=origin,
+        ).create(_chunks(content), name, "text/plain", TrustLevel.EXTERNAL_UNTRUSTED)
+        return stored.artifact_id
+
+    first = await create(b"report", "report.txt", ArtifactOrigin.SANDBOX_EXPORT)
+    again = await create(b"report", "report.txt", ArtifactOrigin.SANDBOX_EXPORT)
+    changed = await create(b"report v2", "report.txt", ArtifactOrigin.SANDBOX_EXPORT)
+    renamed = await create(b"report", "copy.txt", ArtifactOrigin.SANDBOX_EXPORT)
+    written = await create(b"report", "report.txt", ArtifactOrigin.MODEL_OUTPUT)
+
+    assert again == first
+    assert len({first, changed, renamed, written}) == 4
+    async with factory() as uow:
+        rows = await uow.artifacts.list_for_run(RUN_ID, principal())
+    assert sorted(row.id for row in rows) == sorted({first, changed, renamed, written})
