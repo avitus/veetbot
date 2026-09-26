@@ -1039,6 +1039,11 @@ async def _handoff_once(
     return response, capability
 
 
+# What each of _every_handoff_path's handoffs answers, in order: ready, two
+# malformed bodies, unconfirmed, a provider failure, then the injected failures.
+EVERY_HANDOFF_PATH_STATUSES = [200, 400, 400, 422, 409, 500, 500, 500]
+
+
 async def _every_handoff_path(root: Path) -> list[tuple[httpx.Response, str]]:
     answers = [
         await _handoff_once(root / "ready", sentinel_handoff()),
@@ -1083,16 +1088,7 @@ async def test_device_handoff_logs_nothing_from_the_payload(
 
     answers = await _every_handoff_path(tmp_path)
 
-    assert [response.status_code for response, _ in answers] == [
-        200,
-        400,
-        400,
-        422,
-        409,
-        500,
-        500,
-        500,
-    ]
+    assert [response.status_code for response, _ in answers] == EVERY_HANDOFF_PATH_STATUSES
     capabilities = tuple(capability for _, capability in answers)
     assert _leaks(caplog.records, _LOG_SENTINELS + capabilities) == []
     for response, _capability in answers:
@@ -1181,6 +1177,9 @@ async def test_device_handoff_authenticates_before_buffering_and_logs_nothing(
         root.setLevel(previous)
 
     assert unread.status_code == 401
+    # Every path reached the handoff route and was decided there, so the
+    # silence below is the route's and not a refusal before it (gate 9).
+    assert [response.status_code for response, _ in answers] == EVERY_HANDOFF_PATH_STATUSES
     capabilities = tuple(capability for _, capability in answers)
     assert _leaks(records, _LOG_SENTINELS + capabilities) == []
 

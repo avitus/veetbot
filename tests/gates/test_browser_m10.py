@@ -140,6 +140,15 @@ async def test_authentication_boundary(tmp_path: Path) -> None:
             tmp_path / "ceremony-http"
         )
     )
+    # ADR-0128: a device ceremony's session reaches only the isolated service,
+    # once, through its capability; the service filters, verifies and decides.
+    await session_service.assert_device_handoff_is_single_use_scope_filtered_and_service_decided(
+        tmp_path / "device-handoff"
+    )
+    await service_http.test_device_handoff_authenticates_before_buffering_and_logs_nothing(
+        tmp_path / "device-http"
+    )
+    await public_api_contract.test_device_ceremony_begin_passes_mode_and_returns_launch_once()
     await (
         management_contract.test_profile_authentication_is_durable_secret_free_and_runtime_decided()
     )
