@@ -21,6 +21,7 @@ from playwright.async_api import (
     Download,
     ElementHandle,
     Frame,
+    JSHandle,
     Page,
     Playwright,
     Request,
@@ -589,9 +590,12 @@ class PythonPlaywrightRuntime:
         ):
             raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
 
+        focus_guard: JSHandle | None = None
         if constraint is not None:
             assert now is not None
             await self._require_live_coverage(page, handle, action, constraint, now=now)
+            if action.kind in _KEYBOARD_KINDS:
+                focus_guard = await self._hold_focus(handle)
 
         documents_before = self._main_frame_navigations
         try:
@@ -604,17 +608,49 @@ class PythonPlaywrightRuntime:
             elif action.kind is BrowserActionKind.CHECK:
                 await handle.check(timeout=30_000)
             elif action.kind is BrowserActionKind.PRESS:
-                await handle.press(
-                    action.key.value if action.key is not None else "", timeout=30_000
-                )
+                key = action.key.value if action.key is not None else ""
+                if focus_guard is None:
+                    await handle.press(key, timeout=30_000)
+                else:
+                    # The guard focused the element and verified it holds focus;
+                    # the keyboard sends to the focused element.
+                    await page.keyboard.press(key)
             else:
                 await handle.scroll_into_view_if_needed(timeout=30_000)
                 await page.mouse.wheel(0, action.delta_y or 0)
         except PlaywrightError as exc:
+            if focus_guard is not None:
+                await _release_focus(focus_guard)
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
+        if focus_guard is not None and await _release_focus(focus_guard):
+            # A key or text went to another element and was stopped there;
+            # what the page's own listeners did with it is unknown.
+            await self._forget_observation()
+            raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
         # The action was sent; settling never turns it into a failure (ADR-0130).
         await self._settle(page, after_document=self._main_frame_navigations != documents_before)
         return await self._observation(page)
+
+    async def _hold_focus(self, handle: ElementHandle) -> JSHandle:
+        """Focus the classified element and guard the keyboard until released.
+
+        ADR-0129: a key or typed text goes to whatever holds focus, not to the
+        element the classifier read. The element must hold focus itself,
+        resolved through open shadow roots, or the act is refused before
+        dispatch. Until released, a key or text event aimed at any other
+        element is stopped with its default action, so focus moved by the page
+        between this check and the keyboard cannot redirect the action.
+        """
+        try:
+            guard = await handle.evaluate_handle(_FOCUS_GUARD_SCRIPT)
+            held = bool(await guard.evaluate("guard => typeof guard === 'function'"))
+        except PlaywrightError:
+            await self._refuse_grant()
+        if not held:
+            with suppress(PlaywrightError):
+                await guard.dispose()
+            await self._refuse_grant()
+        return guard
 
     async def _require_live_coverage(
         self,
@@ -659,12 +695,15 @@ class PythonPlaywrightRuntime:
         The model must observe again, so a stale reference can neither burn
         grant uses nor, once the owner approves it, act on a changed element.
         """
+        await self._forget_observation()
+        raise BrowserProviderError("tool.browser.grant_not_applicable", retryable=False)
+
+    async def _forget_observation(self) -> None:
         released = list(self._elements.values())
         self._revision = None
         self._elements = {}
         self._facts = None
         await _dispose(released, keep=())
-        raise BrowserProviderError("tool.browser.grant_not_applicable", retryable=False)
 
     async def storage_state(self) -> dict[str, object]:
         if self._context is None:
@@ -770,6 +809,21 @@ class PythonPlaywrightRuntime:
             self._main_frame_navigations = 0
 
 
+async def _release_focus(guard: JSHandle) -> bool:
+    """Remove the focus guard; true when it stopped a key or text aimed elsewhere.
+
+    A guard whose document is gone, because the action navigated, stopped
+    nothing that could still act.
+    """
+
+    redirected = False
+    with suppress(PlaywrightError):
+        redirected = bool(await guard.evaluate("guard => guard()"))
+    with suppress(PlaywrightError):
+        await guard.dispose()
+    return redirected
+
+
 async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHandle]) -> None:
     """Release page-side handles the runtime no longer references (ADR-0130 decision 8)."""
 
@@ -854,6 +908,50 @@ _ELEMENT_SCRIPT = """node => {
         options: tag === 'select'
             ? Array.from(node.options).slice(0, 256).map(option => [option.label, option.value])
             : [],
+    };
+}"""
+# Actions whose effect goes to the focused element rather than to the element.
+_KEYBOARD_KINDS = frozenset({BrowserActionKind.PRESS, BrowserActionKind.TYPE})
+# Focus the element and, only when it then holds focus itself (resolved through
+# open shadow roots), return a function that removes the guard and reports
+# whether it stopped a key or text event aimed at any other element. An
+# embedded document would take the keys past the guard, so it never holds
+# focus here. Key-up events elsewhere are stopped silently: Tab's own key-up
+# lands where Tab moved focus.
+_FOCUS_GUARD_SCRIPT = """node => {
+    const embedded = ['iframe', 'frame', 'object', 'embed'];
+    if (embedded.includes(node.localName)) {
+        return null;
+    }
+    const holder = () => {
+        let active = document.activeElement;
+        while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+            active = active.shadowRoot.activeElement;
+        }
+        return active;
+    };
+    if (holder() !== node) {
+        node.focus();
+    }
+    if (holder() !== node) {
+        return null;
+    }
+    let redirected = false;
+    const types = ['keydown', 'keypress', 'keyup', 'beforeinput'];
+    const guard = event => {
+        if (event.composedPath()[0] === node) {
+            return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type !== 'keyup') {
+            redirected = true;
+        }
+    };
+    types.forEach(type => window.addEventListener(type, guard, true));
+    return () => {
+        types.forEach(type => window.removeEventListener(type, guard, true));
+        return redirected;
     };
 }"""
 _INPUT_FIELD_KINDS = {

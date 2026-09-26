@@ -479,6 +479,12 @@ result. An act request may carry a dispatch constraint naming the grant kind,
 origins, an optional path prefix, an expiry, a consequence ceiling, and a text
 cap. The runtime uses it only to refuse: before dispatch it checks the expiry,
 the live page URL, and the live element's labels, consequence, and facts.
+A key press or typed text goes to whatever holds focus, so under a constraint
+the runtime focuses the element and refuses unless the element itself then
+holds focus, through open shadow roots, and never an embedded document. Until
+the key or text is sent, it stops, with its default action, any key or text
+event aimed at another element; if it had to, the act's outcome is
+`tool.browser.outcome_unknown`.
 `tool.browser.grant_not_applicable` is a refusal given before dispatch; the
 lease and its action sequence are unchanged, and the runtime forgets the
 observation's element handles, so the next action needs a new observation
@@ -903,7 +909,8 @@ browser tools. Typed text is covered only when it is at most 256 characters
 and contains no `@`, `://`, `www.`, run of four or more digits, or
 credential-shaped value. A task grant never covers a named consequence; a
 credential, one-time-code, payment, or identity field; a key press on a choice
-control, since an arrow key moves a radio group to an unclassified option; an
+control, since an arrow key moves a radio group to an unclassified option; a
+key press or typed text on an element that does not itself hold focus; an
 unnamed element; a link or form target outside the origin or prefix or with a
 sensitive path segment; a download link or file input; or a page outside the
 prefix or with a sensitive path segment. Any click on an element in a form,

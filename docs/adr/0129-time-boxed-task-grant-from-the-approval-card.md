@@ -167,6 +167,9 @@ change needs the owner's explicit approval, and the owner has given it.
      - key presses on choice controls, since an arrow key checks another
        radio in the group without classifying it; select and check still
        cover them;
+     - key presses or typed text on an element that does not itself hold
+       focus once focused, since the keyboard sends to the focused element
+       (decision 7);
      - unnamed elements;
      - links or form submissions whose target leaves the origin or the
        prefix, or has a sensitive path segment. Any click on an element in a
@@ -190,6 +193,14 @@ change needs the owner's explicit approval, and the owner has given it.
      disagree with it.
    - The runtime reads the live page URL, the live element and its live label
      sources, and runs the same classifier and coverage rules.
+   - A key press or typed text goes to whatever holds focus, not to the
+     element the classifier read. For those, the runtime focuses the element
+     and refuses before dispatch unless the element itself then holds focus,
+     resolved through open shadow roots; an embedded document never does.
+     Until the key or text is sent, the runtime stops any key or text event
+     aimed at another element, with its default action, and then reports the
+     act's outcome as unknown, so focus the page moves after the check cannot
+     redirect the action.
    - A mismatch refuses the action before dispatch with the new stable code
      `tool.browser.grant_not_applicable`. It is a refusal given before
      dispatch in the sense of ADR-0127 decision 3: the lease and its action
