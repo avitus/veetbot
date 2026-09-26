@@ -494,6 +494,12 @@ the runtime focuses the element and refuses unless the element itself then
 holds focus, through open shadow roots, and never an embedded document. Until
 the key or text is sent, it stops, with its default action, any key or text
 event aimed at another element; if it had to, the act's outcome is
+`tool.browser.outcome_unknown`. While a task-grant act runs and settles, the
+runtime also refuses every document request, in any frame, and every
+hyperlink-auditing ping whose URL is not on the grant's origin inside its
+prefix with no sensitive segment, whatever the page hid from the facts, such
+as a closed shadow root. When it refuses the page's own document, the page is
+left on the browser's error page and the act's outcome is
 `tool.browser.outcome_unknown`.
 `tool.browser.grant_not_applicable` is a refusal given before dispatch; the
 lease and its action sequence are unchanged, and the runtime forgets the

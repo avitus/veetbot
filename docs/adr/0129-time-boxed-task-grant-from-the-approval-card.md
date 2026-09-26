@@ -212,6 +212,13 @@ change needs the owner's explicit approval, and the owner has given it.
      aimed at another element, with its default action, and then reports the
      act's outcome as unknown, so focus the page moves after the check cannot
      redirect the action.
+   - Page script cannot see into a closed shadow root, so no fact can list a
+     submit button inside one. Below the DOM, while a task-grant act runs and
+     settles, the runtime refuses every document request, in any frame, and
+     every hyperlink-auditing ping whose URL is not on the grant's origin
+     inside its prefix with no sensitive segment. A refused document of the
+     page itself leaves the browser's error page, and the act's outcome is
+     reported as unknown.
    - A mismatch refuses the action before dispatch with the new stable code
      `tool.browser.grant_not_applicable`. It is a refusal given before
      dispatch in the sense of ADR-0127 decision 3: the lease and its action
@@ -333,8 +340,12 @@ change needs the owner's explicit approval, and the owner has given it.
   the DOM. A site that names its controls in another language, disguises them
   with lookalike characters, or draws a label with CSS or an image without
   alternative text can defeat name matching. The configured path prefix is
-  then the real boundary. This is why scopes are the owner's choice and are
-  suited to sites the owner trusts not to disguise their controls.
+  then the real boundary, and the runtime holds every document load and ping
+  to it while a granted act runs and settles. Page script is not bounded that
+  way: it can send its own requests on the allowed origins, and a navigation
+  it starts after the act settles is not fenced. This is why scopes are the
+  owner's choice and are suited to sites the owner trusts not to disguise
+  their controls.
 - **False positives are expected.** An answer tile that happens to be "pay",
   "post", "card" or "changed" asks for approval, and so does typed text with
   four digits in a row. This is the deny-biased direction, and the rollout
@@ -436,7 +447,12 @@ tests. The coverage required:
   runtime in real Chromium, against a synthetic HTTPS lesson site served
   locally, refuses a grant-constrained act after the page moves outside the
   prefix, after a button is renamed, and on a hidden label, and dispatches a
-  covered one.
+  covered one. The same harness serves hostile pages, and none of these may
+  send a request outside the prefix or change another control: a key on an
+  element that cannot hold focus or whose focus the page moves, forms and
+  labels in open shadow roots and slots, links and submit buttons inside the
+  element, an embedded document, an SVG link, a `javascript:` link, a closed
+  shadow root, and a hyperlink-auditing ping.
 - `tests/gates/test_browser_m10.py::test_standing_grant` gains the task-grant
   cases.
 

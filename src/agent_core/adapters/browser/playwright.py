@@ -56,6 +56,7 @@ from agent_core.domain.browser_classification import (
     dispatch_constraint_coverage,
     normalize_text,
     path_is_sensitive,
+    path_is_within_prefix,
 )
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
 from agent_core.domain.web import is_public_https_url
@@ -202,6 +203,11 @@ class PythonPlaywrightRuntime:
         self._main_frame_id: str | None = None
         self._sign_in_entered = False
         self._main_frame_navigations = 0
+        # While a task-grant act runs and settles, the origin and path prefix
+        # every document load and ping must stay inside, and whether the fence
+        # refused the page's own document (ADR-0129).
+        self._document_fence: tuple[str, str] | None = None
+        self._fence_refused_page = False
 
     async def start(
         self,
@@ -295,13 +301,16 @@ class PythonPlaywrightRuntime:
         url = str(event.get("request", {}).get("url", ""))
         frame_id = event.get("frameId")
         main_frame = frame_id == self._main_frame_id
+        fenced_out = not self._inside_document_fence(url)
         allowed = (
             bool(frame_id)
             and is_public_https_url(url)
             and (not main_frame or _origin_allowed(url, self._allowed_origins))
+            and not fenced_out
         )
         if not allowed and main_frame:
             self._disallowed_navigation = True
+            self._fence_refused_page = self._fence_refused_page or fenced_out
         parameters = {"requestId": event["requestId"]}
         if not allowed:
             parameters["errorReason"] = "BlockedByClient"
@@ -341,10 +350,35 @@ class PythonPlaywrightRuntime:
             allowed = allowed and _origin_allowed(request.url, self._allowed_origins)
             if self._page is not None and request.frame.page is not self._page:
                 allowed = False
+        fenced = self._document_fence is not None and (
+            request.is_navigation_request() or request.resource_type == "ping"
+        )
+        if fenced and not self._inside_document_fence(request.url):
+            allowed = False
+            if request.is_navigation_request() and request.frame.parent_frame is None:
+                self._fence_refused_page = True
         if allowed:
             await route.continue_()
         else:
             await route.abort("blockedbyclient")
+
+    def _inside_document_fence(self, url: str) -> bool:
+        """Whether a document or ping may be requested at ``url`` now (ADR-0129).
+
+        Outside a task-grant act there is no fence. During one, a document in
+        any frame, or a hyperlink-auditing ping, goes only to the grant's
+        origin, inside its path prefix, with no sensitive segment: whatever
+        the page hid from the facts, the act cannot submit or navigate
+        anywhere else.
+        """
+        fence = self._document_fence
+        if fence is None:
+            return True
+        origin, path_prefix = fence
+        if _origin_or_none(url) != origin:
+            return False
+        path = urlsplit(url).path
+        return path_is_within_prefix(path, path_prefix) and not path_is_sensitive(path)
 
     async def _dismiss_dialog(self, dialog: Dialog) -> None:
         await dialog.dismiss()
@@ -598,6 +632,33 @@ class PythonPlaywrightRuntime:
                 focus_guard = await self._hold_focus(handle)
 
         documents_before = self._main_frame_navigations
+        if constraint is not None and constraint.path_prefix is not None:
+            self._document_fence = (constraint.origins[0], constraint.path_prefix)
+            self._fence_refused_page = False
+        try:
+            await self._dispatch(page, handle, action, focus_guard)
+            # The action was sent; settling never turns it into a failure (ADR-0130).
+            await self._settle(
+                page, after_document=self._main_frame_navigations != documents_before
+            )
+        finally:
+            self._document_fence = None
+        if self._fence_refused_page:
+            # The action sent the page toward a document outside the grant,
+            # which never loaded; the page now shows the browser's error page.
+            self._fence_refused_page = False
+            await self._forget_observation()
+            raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
+        return await self._observation(page)
+
+    async def _dispatch(
+        self,
+        page: Page,
+        handle: ElementHandle,
+        action: BrowserAction,
+        focus_guard: JSHandle | None,
+    ) -> None:
+        """Send one action to the element; any failure makes its outcome unknown."""
         try:
             if action.kind is BrowserActionKind.CLICK:
                 await handle.click(timeout=30_000)
@@ -627,9 +688,6 @@ class PythonPlaywrightRuntime:
             # what the page's own listeners did with it is unknown.
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
-        # The action was sent; settling never turns it into a failure (ADR-0130).
-        await self._settle(page, after_document=self._main_frame_navigations != documents_before)
-        return await self._observation(page)
 
     async def _hold_focus(self, handle: ElementHandle) -> JSHandle:
         """Focus the classified element and guard the keyboard until released.
@@ -807,6 +865,8 @@ class PythonPlaywrightRuntime:
             self._main_frame_id = None
             self._sign_in_entered = False
             self._main_frame_navigations = 0
+            self._document_fence = None
+            self._fence_refused_page = False
 
 
 async def _release_focus(guard: JSHandle) -> bool:

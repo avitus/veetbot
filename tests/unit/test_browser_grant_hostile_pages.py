@@ -358,3 +358,63 @@ async def test_text_a_shadow_root_renders_is_visible_text() -> None:
 
     assert refusal.reason_code == GRANT_NOT_APPLICABLE
     assert clicks == ["next"]
+
+
+# What no page script can see: a closed shadow root, declared in the HTML,
+# wraps a light-DOM span in a submit button of its own form.
+CLOSED_SHADOW = """<!doctype html><html><head><title>Lesson</title></head><body>
+<div id="host"><template shadowrootmode="closed">
+<form method="post" action="/courses/remove-course">
+<button type="submit" style="padding:20px"><slot></slot></button></form>
+</template><span role="button">Continue</span></div>
+</body></html>"""
+CLOSED_FRAME_TARGET = """<!doctype html><html><head><title>Lesson</title></head><body>
+<iframe name="quiet" src="/lesson/blank" style="width:10px;height:10px"></iframe>
+<div id="host"><template shadowrootmode="closed">
+<form method="post" action="/courses/remove-course" target="quiet">
+<button type="submit" style="padding:20px"><slot></slot></button></form>
+</template><span role="button">Next</span></div>
+</body></html>"""
+
+
+async def test_no_document_outside_the_prefix_loads_during_a_granted_act() -> None:
+    """The runtime refuses every document load outside the prefix while a
+    granted act runs and settles, in the page or in any frame."""
+
+    pages = {
+        "/lesson/1": CLOSED_SHADOW,
+        "/lesson/2": CLOSED_FRAME_TARGET,
+        "/lesson/blank": "<!doctype html><title>Blank</title>",
+    }
+    async with lesson_pages(pages) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        with pytest.raises(BrowserProviderError) as refused_page:
+            await _covered(runtime, _click_named(page, "Continue"))
+        page = await visit("/lesson/2")
+        framed = await runtime.act(
+            _click_named(page, "Next"), constraint=lesson_constraint(), now=GRANT_NOW
+        )
+
+    # The page's own document was refused, so the page is the browser's error
+    # page and the act's outcome is unknown; a frame's refusal leaves the page.
+    assert refused_page.value.reason_code == "tool.browser.outcome_unknown"
+    assert framed.url.endswith("/lesson/2")
+    assert left == []
+
+
+PING = """<!doctype html><html><head><title>Lesson</title></head><body>
+<a href="/lesson/2" ping="/courses/remove-course">Next</a>
+</body></html>"""
+
+
+async def test_a_covered_link_sends_no_hyperlink_auditing_ping() -> None:
+    pages = {"/lesson/1": PING, "/lesson/2": "<!doctype html><title>Two</title><p>Two</p>"}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        arrived = await runtime.act(
+            _click_named(page, "Next"), constraint=lesson_constraint(), now=GRANT_NOW
+        )
+        await _page_value(runtime, "new Promise(resolve => setTimeout(resolve, 300))")
+
+    assert arrived.url.endswith("/lesson/2")
+    assert left == []
