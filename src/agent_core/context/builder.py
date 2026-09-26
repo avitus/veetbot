@@ -393,6 +393,7 @@ class BudgetedContextBuilder:
                         f"date={self._clock.now().date().isoformat()}; "
                         f"tenant={run.tenant_id}; "
                         f"scopes={','.join(sorted(principal.scopes))}"
+                        f"{_browser_origins_field(plan.browser_origins)}"
                     )
                 )
             ],
@@ -796,3 +797,17 @@ class BudgetedContextBuilder:
             )
             truncated = True
         return result, truncated
+
+
+# ADR-0130: the runtime metadata row names at most this many browser origins.
+MAXIMUM_RENDERED_BROWSER_ORIGINS = 16
+
+
+def _browser_origins_field(origins: tuple[str, ...]) -> str:
+    """The origins browser.navigate accepts, or nothing for a chat without them."""
+
+    if not origins:
+        return ""
+    shown = ",".join(origins[:MAXIMUM_RENDERED_BROWSER_ORIGINS])
+    hidden = len(origins) - MAXIMUM_RENDERED_BROWSER_ORIGINS
+    return f"; browser_origins={shown}" + (f",+{hidden} more" if hidden > 0 else "")

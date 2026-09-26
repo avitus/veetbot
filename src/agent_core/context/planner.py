@@ -71,10 +71,15 @@ _READ_SIDE_EFFECTS = frozenset(
     {SideEffectClass.NONE, SideEffectClass.WORKSPACE_READ, SideEffectClass.NETWORK_READ}
 )
 
+_BROWSER_NAVIGATE_TOOL_NAME = "browser.navigate"
+# A profile holds at most 64 origins (domain/browser.py).
+_MAXIMUM_BROWSER_ORIGINS = 64
 type SessionToolFilter = Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]
 # ADR-0130: tool names a session must define in full, ranked ahead of every
 # configured tool and never deferred.
 type SessionRequiredTools = Callable[[Session], frozenset[str]]
+# ADR-0130: the origins browser.navigate accepts in a session.
+type SessionBrowserOrigins = Callable[[Session, Principal], Awaitable[tuple[str, ...]]]
 type DeviceToolAttach = Callable[[UUID, Principal], Awaitable[None]]
 
 
@@ -169,6 +174,7 @@ class EventContextPlanner:
         memory_retriever: MemoryRetriever | None = None,
         session_tool_filter: SessionToolFilter | None = None,
         session_required_tools: SessionRequiredTools | None = None,
+        session_browser_origins: SessionBrowserOrigins | None = None,
         attach_device_tools: DeviceToolAttach | None = None,
         snapshot_profiles: SnapshotProfiles | None = None,
         cache_capacity: int = 1_024,
@@ -186,6 +192,7 @@ class EventContextPlanner:
         self._memory_retriever = memory_retriever
         self._session_tool_filter = session_tool_filter
         self._session_required_tools = session_required_tools
+        self._session_browser_origins = session_browser_origins
         self._attach_device_tools = attach_device_tools
         self._snapshot_profiles = (
             SnapshotProfiles() if snapshot_profiles is None else snapshot_profiles
@@ -706,6 +713,18 @@ class EventContextPlanner:
             memory_snapshot_tokens=memory_token_cap,
         )
         schema_bytes = canonical_json_bytes([tool.model_dump(mode="json") for tool in tools])
+        # ADR-0130: tell the model which origins browser.navigate accepts. The
+        # row is outside the prefix, so this never rotates a plan's cache.
+        offers_navigation = any(
+            tool.name == _BROWSER_NAVIGATE_TOOL_NAME for tool in (*tools, *deferred_tools)
+        )
+        browser_origins = (
+            tuple(dict.fromkeys(await self._session_browser_origins(session, principal)))[
+                :_MAXIMUM_BROWSER_ORIGINS
+            ]
+            if offers_navigation and self._session_browser_origins is not None
+            else ()
+        )
         plan = ContextPlan(
             session_id=session.id,
             epoch=epoch,
@@ -731,6 +750,7 @@ class EventContextPlanner:
             deferred_tool_names=tuple(tool.name for tool in deferred_tools),
             deferred_tool_specs=tuple(tool.model_copy(deep=True) for tool in deferred_tools),
             skipped_tool_names=tuple(tool.name for tool in skipped_tools),
+            browser_origins=browser_origins,
         )
         return await self._append(plan, event_type, reason)
 

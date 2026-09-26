@@ -21,6 +21,7 @@ from agent_core.adapters.browser.hosted_provider import (
 )
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.application.browser_leases import browser_run_state
 from agent_core.bootstrap import Composition, build
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
@@ -28,6 +29,7 @@ from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
 from agent_core.config import ConfigurationError, Settings, load_settings
+from agent_core.context.builder import _browser_origins_field
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.domain.agents import BROWSER_TASK_LIMITS_METADATA_KEY, Principal
 from agent_core.domain.approvals import ApprovalResolutionType
@@ -44,7 +46,14 @@ from agent_core.domain.browser import (
     BrowserRunState,
 )
 from agent_core.domain.errors import InvalidStateTransition, NotFoundError
-from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    StopReason,
+    TextPart,
+    UserMessage,
+)
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.tools import (
@@ -493,6 +502,62 @@ async def test_unbound_chat_keeps_its_configured_tools_under_the_same_cap(
         "browser.observe",
         "browser.act",
     }
+
+
+def runtime_metadata_rows(composition: Composition) -> list[str]:
+    # A non-routed development policy answers from the composition's scripted
+    # provider, which records every request it receives.
+    provider = cast(FakeModelProvider, composition.executor._model_provider)
+    return [
+        part.text
+        for item in provider.requests[0].conversation
+        if isinstance(item, UserMessage)
+        for part in item.content
+        if isinstance(part, TextPart) and part.text.startswith("Runtime metadata")
+    ]
+
+
+async def test_bound_chat_request_names_the_origins_navigate_accepts() -> None:
+    """ADR-0130 decision 9: the model is told which origins the profile allows."""
+
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await composition.runs.submit("Open my selected website.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+        [row] = runtime_metadata_rows(composition)
+
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert "; browser_origins=https://example.org" in row
+    assert str(PROFILE_ID) not in row
+
+
+async def test_unbound_chat_request_names_no_browser_origins() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        created = await composition.services.sessions.create(composition.principal, "general", {})
+        run_id = await composition.runs.submit("Check the weather.", created.id)
+        await composition.runs.wait_terminal(run_id)
+        [row] = runtime_metadata_rows(composition)
+
+    assert "browser_origins" not in row
+
+
+def test_the_runtime_row_names_at_most_sixteen_origins() -> None:
+    origins = tuple(f"https://site{index}.example.org" for index in range(20))
+
+    assert _browser_origins_field(()) == ""
+    assert _browser_origins_field(origins[:2]) == (
+        "; browser_origins=https://site0.example.org,https://site1.example.org"
+    )
+    rendered = _browser_origins_field(origins)
+    assert rendered.endswith(",https://site15.example.org,+4 more")
+    assert "site16" not in rendered
 
 
 async def test_session_creation_binds_only_a_ready_principal_owned_browser_profile() -> None:

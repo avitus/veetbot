@@ -792,6 +792,48 @@ def _session_tool_filter(
     return filter_tools
 
 
+def _session_browser_origins(
+    browser_provider: BrowserProvider | None,
+    settings: Settings,
+    uow_factory: UnitOfWorkFactory,
+) -> Callable[[Session, Principal], Awaitable[tuple[str, ...]]] | None:
+    """ADR-0130: the origins browser.navigate accepts, by provider mode.
+
+    A session-bound hosted provider reads the session's profile (nothing when
+    it is gone); an injected provider names its own; a pinned hosted or local
+    provider uses the configured origins. The profile id is never rendered.
+    """
+
+    if browser_provider is None:
+        return None
+    if isinstance(browser_provider, SessionBoundHostedBrowserProvider):
+
+        async def profile_origins(session: Session, principal: Principal) -> tuple[str, ...]:
+            selected = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+            if not isinstance(selected, str) or not selected:
+                return ()
+            try:
+                async with uow_factory() as uow:
+                    profile = await uow.browser_profiles.get(UUID(selected), principal)
+            except (NotFoundError, ValueError):
+                return ()
+            return profile.allowed_origins
+
+        return profile_origins
+    declared = getattr(browser_provider, "allowed_origins", None)
+    origins = (
+        tuple(declared)
+        if isinstance(declared, tuple) and all(isinstance(origin, str) for origin in declared)
+        else settings.browser_allowed_origins
+    )
+
+    async def configured_origins(session: Session, principal: Principal) -> tuple[str, ...]:
+        del session, principal
+        return origins
+
+    return configured_origins
+
+
 def _session_required_tools(session: Session) -> frozenset[str]:
     """ADR-0130: a chat bound to a website profile always defines the browser
     tools, so the item cap can never push them into the deferred index."""
@@ -3202,6 +3244,9 @@ async def _compose(
             memory_retriever=memory_retriever,
             session_tool_filter=_session_tool_filter(browser_provider),
             session_required_tools=_session_required_tools,
+            session_browser_origins=_session_browser_origins(
+                browser_provider, settings, uow_factory
+            ),
             attach_device_tools=attach_device_tools,
             snapshot_profiles=memory_profiles.snapshots,
         )
