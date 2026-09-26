@@ -90,11 +90,16 @@ async def test_a_chat_planned_by_the_key_order_index_recovers_on_its_next_messag
             stale = await planner.plan(
                 session, agent, composition.principal, composition.executor._resolved_model
             )
-        run = await _answer(composition, session_id)
+
+    # The next message reaches a new process, as after a deploy, which reads the
+    # stale plan back from PostgreSQL rather than from a planner's cache.
+    async with _composition() as restarted:
+        run = await _answer(restarted, session_id)
+        planner = cast(EventContextPlanner, restarted.executor._context_planner)
         repaired = await planner.current(session_id)
-        async with composition.uow_factory() as uow:
+        async with restarted.uow_factory() as uow:
             rotation = await uow.events.latest_before(
-                session_id, (1 << 63) - 1, "context.epoch.rotated", composition.principal
+                session_id, (1 << 63) - 1, "context.epoch.rotated", restarted.principal
             )
 
     assert run.status is RunStatus.COMPLETED
