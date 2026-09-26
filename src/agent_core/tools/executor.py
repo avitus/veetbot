@@ -1351,6 +1351,12 @@ class ToolPipeline:
             progress.extend((13, 14))
         if result.ok:
             self._apply_context_update(checkpoint, prepared_update)
+            if result.evidence_key is not None:
+                # ADR-0130: the loop reads what this call observed, once the
+                # batch completes; it never reaches the model or a stored row.
+                evidence = checkpoint.working_state.setdefault("tool_evidence", {})
+                if isinstance(evidence, dict):
+                    evidence[call.call_id] = result.evidence_key
         return result_item
 
     async def _artifactize_large_output(

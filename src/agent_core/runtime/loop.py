@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime
@@ -357,6 +357,37 @@ def _has_final_text(message: AssistantMessage | None) -> bool:
     return message is not None and any(
         isinstance(part, TextPart) and part.text for part in message.content
     )
+
+
+# ADR-0130: how many times a run's identical-call counts may restart on new
+# evidence, across all calls.
+MAXIMUM_EVIDENCE_RESETS = 32
+
+
+def apply_tool_evidence(working_state: dict[str, Any], calls: Sequence[ToolCallItem]) -> None:
+    """ADR-0130: an identical call that observed something new restarts its
+    count, at most MAXIMUM_EVIDENCE_RESETS times a run."""
+
+    evidence = working_state.pop("tool_evidence", None)
+    if not isinstance(evidence, dict):
+        return
+    counts = working_state.get("identical_calls")
+    recorded = working_state.setdefault("identical_call_evidence", {})
+    if not isinstance(counts, dict) or not isinstance(recorded, dict):
+        return
+    for call in calls:
+        key = evidence.get(call.call_id)
+        if not isinstance(key, str):
+            continue
+        fingerprint = f"{call.name}:{call.raw_arguments}"
+        previous = recorded.get(fingerprint)
+        recorded[fingerprint] = key
+        if previous is None or previous == key:
+            continue
+        resets = int(working_state.get("identical_call_resets", 0))
+        if int(counts.get(fingerprint, 0)) > 1 and resets < MAXIMUM_EVIDENCE_RESETS:
+            counts[fingerprint] = 1
+            working_state["identical_call_resets"] = resets + 1
 
 
 def _synthesis_reserve_dimension(
@@ -942,6 +973,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
         step.tool_call_count = len(results)
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
         context.checkpoint.conversation.extend(results)
+        apply_tool_evidence(context.checkpoint.working_state, fitted_calls)
         context.checkpoint.pending_tool_calls = []
         repeated_denial = await _record_denials(context, step, fitted_calls, results)
         await checkpoint(context, "tool_call")
