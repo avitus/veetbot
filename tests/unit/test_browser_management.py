@@ -20,6 +20,7 @@ from agent_core.adapters.browser.profiles import (
     InMemoryBrowserProfileRepository,
 )
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.application.browser_grants import StandingBrowserGrantAuthorizer
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
     BrowserProfileManagementService,
@@ -29,6 +30,9 @@ from agent_core.application.errors import BrowserLoginURLValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
+    BrowserAction,
+    BrowserActionConsequence,
+    BrowserActionContext,
     BrowserActionKind,
     BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
@@ -37,6 +41,7 @@ from agent_core.domain.browser import (
     BrowserProviderError,
 )
 from agent_core.domain.errors import AuthorizationError, ConflictError
+from agent_core.domain.policies import PolicyDecisionType
 from tests.contract.support import NOW, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000c7")
@@ -77,6 +82,7 @@ class FakeUnitOfWorkFactory:
 class FakeAuthenticationControlPlane:
     status: BrowserAuthenticationStatus = BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
     begun_modes: list[BrowserAuthenticationMode] = field(default_factory=list)
+    profile_id: UUID = PROFILE_ID
 
     async def begin_authentication(
         self,
@@ -108,7 +114,7 @@ class FakeAuthenticationControlPlane:
         del owner
         return BrowserAuthenticationView(
             id=ceremony_id,
-            profile_id=PROFILE_ID,
+            profile_id=self.profile_id,
             status=self.status,
             expires_at=NOW + timedelta(minutes=5),
         )
@@ -621,3 +627,211 @@ async def test_device_begin_validates_login_url_before_provider_dispatch(login_u
         mode=BrowserAuthenticationMode.DEVICE,
     )
     assert authentication.begun_modes == [BrowserAuthenticationMode.DEVICE]
+
+
+class SealedOnCancelControlPlane(FakeAuthenticationControlPlane):
+    """The service sealed the ceremony before the client's cancel arrived."""
+
+    async def cancel_authentication(
+        self,
+        ceremony_id: UUID,
+        owner: Principal,
+    ) -> BrowserAuthenticationView:
+        self.status = BrowserAuthenticationStatus.READY
+        return await self.authentication_status(ceremony_id, owner)
+
+
+class RefusingControlPlane(FakeAuthenticationControlPlane):
+    async def begin_authentication(
+        self,
+        profile_id: UUID,
+        owner: Principal,
+        provider_ref: str,
+        *,
+        login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
+    ) -> BrowserAuthenticationView:
+        del profile_id, owner, provider_ref, login_url, mode
+        raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
+
+
+def profile_service(
+    uow: FakeUnitOfWorkFactory,
+    authentication: FakeAuthenticationControlPlane,
+    **options: float,
+) -> BrowserProfileManagementService:
+    return BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=authentication,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+        **options,
+    )
+
+
+async def ready_profile_generation(uow: FakeUnitOfWorkFactory, subject: Principal) -> int:
+    """Mark the created profile READY directly, as an earlier sign-in would have."""
+
+    current = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    ready = await uow.uow.browser_profiles.transition(
+        PROFILE_ID,
+        subject,
+        expected_generation=current.generation,
+        status=BrowserProfileStatus.READY,
+        updated_at=NOW,
+    )
+    return ready.generation
+
+
+@pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))
+async def test_every_ceremony_begin_and_ready_outcome_advances_the_generation(
+    mode: BrowserAuthenticationMode,
+) -> None:
+    """ADR-0128 decision 10: grants pinned to a profile never survive a sign-in."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    ready_generation = await ready_profile_generation(uow, subject)
+
+    await service.begin_authentication(
+        subject, PROFILE_ID, login_url="https://example.org/", mode=mode
+    )
+    after_begin = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    authentication.status = BrowserAuthenticationStatus.READY
+    await service.authentication_status(subject, CEREMONY_ID)
+    after_ready = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    await service.authentication_status(subject, CEREMONY_ID)
+    after_second_read = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    assert (after_begin.status, after_begin.generation) == (
+        BrowserProfileStatus.READY,
+        ready_generation + 1,
+    )
+    assert (after_ready.status, after_ready.generation) == (
+        BrowserProfileStatus.READY,
+        ready_generation + 2,
+    )
+    assert after_second_read == after_ready
+
+
+async def test_failed_begin_leaves_the_generation_unchanged() -> None:
+    uow = FakeUnitOfWorkFactory()
+    subject = owner("browser.profile.write")
+    await profile_service(uow, FakeAuthenticationControlPlane()).create(
+        subject, ("https://example.org",)
+    )
+    generation = await ready_profile_generation(uow, subject)
+
+    with pytest.raises(BrowserProviderError):
+        await profile_service(uow, RefusingControlPlane()).begin_authentication(
+            subject, PROFILE_ID, login_url="https://example.org/"
+        )
+    assert (await uow.uow.browser_profiles.get(PROFILE_ID, subject)).generation == generation
+
+    blocking = BlockingAuthenticationControlPlane()
+    service = profile_service(uow, blocking, authentication_lock_timeout_seconds=0.01)
+    first = asyncio.create_task(
+        service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    )
+    await blocking.started.wait()
+    with pytest.raises(ConflictError):
+        await service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    assert (await uow.uow.browser_profiles.get(PROFILE_ID, subject)).generation == generation
+    blocking.release.set()
+    await asyncio.wait_for(first, timeout=1)
+    assert (await uow.uow.browser_profiles.get(PROFILE_ID, subject)).generation == generation + 1
+
+
+async def test_cancel_that_finds_a_sealed_ceremony_records_ready_once() -> None:
+    """Cancel and status record the service's outcome through the same step."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = SealedOnCancelControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    begun = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    cancelled = await service.cancel_authentication(subject, CEREMONY_ID)
+    sealed = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    await service.cancel_authentication(subject, CEREMONY_ID)
+    await service.authentication_status(subject, CEREMONY_ID)
+    unchanged = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    assert cancelled.status is BrowserAuthenticationStatus.READY
+    assert (sealed.status, sealed.generation) == (
+        BrowserProfileStatus.READY,
+        begun.generation + 1,
+    )
+    assert unchanged == sealed
+
+
+async def test_standing_grant_stops_authorizing_after_a_sign_in_begins() -> None:
+    uow = FakeUnitOfWorkFactory()
+    service = profile_service(uow, FakeAuthenticationControlPlane())
+    subject = owner(
+        "browser.profile.read",
+        "browser.profile.write",
+        "browser.grant.read",
+        "browser.grant.write",
+    )
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    grants = BrowserGrantManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([GRANT_ID]),
+        agent_version="agent-v1",
+        policy_version="policy-v1",
+    )
+    await grants.create(
+        subject,
+        profile_id=PROFILE_ID,
+        allowed_origins=("https://example.org",),
+        action_kinds=(BrowserActionKind.CLICK,),
+        element_roles=("button",),
+        element_names=("Continue",),
+        purpose=None,
+        starts_at=NOW,
+        expires_at=NOW + timedelta(days=7),
+    )
+    authorizer = StandingBrowserGrantAuthorizer(
+        grants=uow.uow.browser_grants,
+        profiles=uow.uow.browser_profiles,
+        now=lambda: NOW + timedelta(minutes=1),
+    )
+
+    async def authorize() -> str:
+        result = await authorizer.authorize(
+            grant_id=GRANT_ID,
+            profile_id=PROFILE_ID,
+            principal=subject,
+            agent_version="agent-v1",
+            policy_version="policy-v1",
+            purpose=None,
+            action_deadline=NOW + timedelta(minutes=2),
+            action=BrowserAction(
+                kind=BrowserActionKind.CLICK, expected_revision="r-1", ref="r-1:0"
+            ),
+            context=BrowserActionContext(
+                origin="https://example.org",
+                role="button",
+                name="Continue",
+                consequence=BrowserActionConsequence.ROUTINE,
+                revision="r-1",
+                ref="r-1:0",
+            ),
+            deterministic_decision=PolicyDecisionType.REQUIRE_APPROVAL,
+        )
+        return result.reason_code
+
+    before = await authorize()
+    await service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    after = await authorize()
+
+    assert (before, after) == ("browser.grant.authorized", "browser.grant.mismatch")

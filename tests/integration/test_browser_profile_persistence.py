@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
+from typing import cast
 from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.browser.profiles import InMemoryBrowserProfileControlPlane
+from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.application.browser_management import (
+    BrowserProfileManagementService,
+    BrowserUnitOfWorkFactory,
+)
 from agent_core.bootstrap import build
+from agent_core.domain.browser import (
+    BrowserAuthenticationMode,
+    BrowserAuthenticationStatus,
+    BrowserProfileStatus,
+    BrowserProviderError,
+)
 from agent_core.domain.errors import ConflictError
+from tests.contract.support import NOW
 from tests.contract.test_browser_authentication_repository_contract import (
     PROFILE_ID as AUTHENTICATION_PROFILE_ID,
 )
@@ -33,6 +48,11 @@ from tests.contract.test_browser_profile_repository_contract import (
     profile,
 )
 from tests.integration.m2_support import database_settings
+from tests.unit.test_browser_management import (
+    CEREMONY_ID,
+    FakeAuthenticationControlPlane,
+    RefusingControlPlane,
+)
 
 
 async def test_postgres_browser_profile_repository_satisfies_shared_contract() -> None:
@@ -151,3 +171,65 @@ async def test_postgres_browser_authentication_admission_lock_timeout_is_conflic
 
         assert second_rejected.is_set()
         assert not second_acquired.is_set()
+
+
+@pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))
+async def test_postgres_authentication_begin_advances_the_generation_once(
+    mode: BrowserAuthenticationMode,
+) -> None:
+    """ADR-0128 decision 10 on the PostgreSQL unit of work: a failed begin rolls
+    back, a begin advances the generation once, a ready outcome once more."""
+
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        owner = composition.principal.model_copy(
+            update={"scopes": {"browser.profile.read", "browser.profile.write"}}
+        )
+        profile_id = UUID(int=0xE9)
+        async with composition.uow_factory() as uow:
+            await uow.browser_profiles.create(profile(profile_id=profile_id, owner=owner))
+            ready = await uow.browser_profiles.transition(
+                profile_id,
+                owner,
+                expected_generation=0,
+                status=BrowserProfileStatus.READY,
+                updated_at=NOW,
+            )
+
+        def service(
+            authentication: FakeAuthenticationControlPlane,
+        ) -> BrowserProfileManagementService:
+            return BrowserProfileManagementService(
+                uow_factory=cast(BrowserUnitOfWorkFactory, composition.uow_factory),
+                lifecycle=InMemoryBrowserProfileControlPlane(),
+                authentications=authentication,
+                clock=FixedClock(NOW + timedelta(seconds=1)),
+                ids=SequenceIdFactory([profile_id]),
+            )
+
+        async def stored() -> tuple[BrowserProfileStatus, int]:
+            async with composition.uow_factory() as uow:
+                current = await uow.browser_profiles.get(profile_id, owner)
+            return current.status, current.generation
+
+        with pytest.raises(BrowserProviderError):
+            await service(RefusingControlPlane()).begin_authentication(
+                owner, profile_id, login_url="https://example.org/", mode=mode
+            )
+        after_refusal = await stored()
+
+        authentication = FakeAuthenticationControlPlane(profile_id=profile_id)
+        managed = service(authentication)
+        await managed.begin_authentication(
+            owner, profile_id, login_url="https://example.org/", mode=mode
+        )
+        after_begin = await stored()
+        authentication.status = BrowserAuthenticationStatus.READY
+        await managed.authentication_status(owner, CEREMONY_ID)
+        after_ready = await stored()
+        await managed.authentication_status(owner, CEREMONY_ID)
+        after_second_read = await stored()
+
+    assert after_refusal == (BrowserProfileStatus.READY, ready.generation)
+    assert after_begin == (BrowserProfileStatus.READY, ready.generation + 1)
+    assert after_ready == (BrowserProfileStatus.READY, ready.generation + 2)
+    assert after_second_read == after_ready

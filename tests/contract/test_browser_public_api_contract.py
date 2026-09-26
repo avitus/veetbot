@@ -662,7 +662,9 @@ async def test_browser_login_redirect_outside_allowed_origins_is_a_malformed_req
     assert len(provider_requests) == 2
     async with uow_factory() as uow:
         profile = await uow.browser_profiles.get(PROFILE_ID, owner)
-        assert profile.generation == created.generation
+        # The refused begin changed nothing; the retried begin advanced the
+        # generation once, as every sign-in attempt does (ADR-0128 decision 10).
+        assert profile.generation == created.generation + 1
         records = await uow.browser_authentications.list(owner, profile_id=PROFILE_ID)
         assert [record.id for record in records] == [AUTHENTICATION_ID]
 
