@@ -4,6 +4,56 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-25 — Sign in to a website on your own device
+
+- Website Access can now sign in on this device. The website opens inside
+  the app, you sign in as usual, and tap I'm signed in. The app hands only
+  that website's sign-in to Veetbot's isolated browser, which checks it
+  from the server before saving it, and then forgets it. Sites that refuse
+  Veetbot's remote browser, such as Duolingo, work this way.
+- Signing in again ends any permission Veetbot held to act on that website
+  without asking, so you approve its actions afresh.
+- A sign-in you finish in Veetbot's remote browser is no longer lost when
+  you do not come back to the app to check it.
+
+## 2026-09-25 — Allow Veetbot to finish a lesson without asking at every click
+
+- A website action's approval card now says what Veetbot wants to do: the
+  action, the element and the page. The website's own text appears in
+  quotes, labelled as coming from the website.
+- When you have turned it on for a site, the card also offers Allow for this
+  task. ADR-0129: Veetbot may then act inside that part of the site, in that
+  chat only, without asking again, for up to thirty minutes, two hundred
+  actions and 4,096 typed characters. A banner above the composer counts
+  them, and Stop ends the permission at once. Activity marks each action the
+  permission allowed.
+- Passwords and one-time codes are never typed. Payments, purchases,
+  subscriptions and trials, account and settings changes, messages and posts,
+  deletions, and signing out still ask every time, recognised by the
+  website's own labels. Veetbot's isolated browser checks the live page again
+  before every action it takes under the permission.
+- Task permissions stay off until the owner sets the site scopes and turns
+  them on; see Deployment.
+
+## 2026-09-25 — A chat bound to a website can finish a whole lesson
+
+- A chat started with a website profile stopped after about twenty browser
+  actions, because every chat ran under the same 24 model calls. ADR-0130: a
+  chat bound to a website profile now runs under a browser-task budget of
+  160 steps, 120 model calls, 160 tool calls and USD 30 per run, with USD 3
+  kept for the final answer. Other chats keep their limits.
+- The budget reaches chats started after this release; existing bound chats
+  keep the limits they started with. Standing browser grants must be
+  created again, because the default agent's version changed.
+- In a bound chat the three browser tools always keep their definitions.
+- Navigation and every action now wait, at most two seconds, for the page
+  to finish loading and stop changing, so the page Veetbot gets back is the
+  one its next action needs and it rarely has to look again.
+- Hidden controls no longer crowd out the visible ones on large pages.
+- Looking again at a page that changed is no longer mistaken for a loop. A
+  page that never stops changing still ends the run after at most 36 looks.
+- Veetbot is told which websites the chat's profile allows.
+
 ## 2026-09-25 — Veetbot keeps a website open while you approve its clicks
 
 - With a signed-in browser profile, Veetbot could open a page but not act on
