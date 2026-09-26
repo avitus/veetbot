@@ -650,9 +650,12 @@ class PythonPlaywrightRuntime:
                     raise
 
         documents_before = self._main_frame_navigations
+        # A refusal belongs to the act whose fence made it: every act starts
+        # without one, and one that ends early, by an error or cancellation,
+        # takes its refusal with it.
+        self._fence_refused_page = False
         if constraint is not None and constraint.path_prefix is not None:
             self._document_fence = (constraint.origins[0], constraint.path_prefix)
-            self._fence_refused_page = False
         try:
             await self._dispatch(page, handle, action, guards)
             # The action was sent; settling never turns it into a failure (ADR-0130).
@@ -661,10 +664,11 @@ class PythonPlaywrightRuntime:
             )
         finally:
             self._document_fence = None
-        if self._fence_refused_page:
+            refused_page = self._fence_refused_page
+            self._fence_refused_page = False
+        if refused_page:
             # The action sent the page toward a document outside the grant,
             # which never loaded; the page now shows the browser's error page.
-            self._fence_refused_page = False
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
         return await self._observation(page)

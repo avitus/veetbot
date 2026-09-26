@@ -8,6 +8,7 @@ the prefix, and no other control may change.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -421,6 +422,35 @@ async def test_no_document_outside_the_prefix_loads_during_a_granted_act() -> No
     # page and the act's outcome is unknown; a frame's refusal leaves the page.
     assert refused_page.value.reason_code == "tool.browser.outcome_unknown"
     assert framed.url.endswith("/lesson/2")
+    assert left == []
+
+
+LEAVING = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button type="button" onclick="location.href = '/courses/remove-course'">Continue</button>
+<button type="button" onclick="window.clicks.push('next')">Next</button>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+async def test_an_act_that_ends_early_leaves_the_fence_refusal_behind() -> None:
+    """A granted act whose page document the fence refused is cancelled while
+    it settles. The refusal was that act's; the next act reports what it did."""
+
+    async with lesson_pages({"/lesson/1": LEAVING}) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        granted = asyncio.create_task(_covered(runtime, _click_named(page, "Continue")))
+        async with asyncio.timeout(10):
+            while not runtime._current_page().url.startswith("chrome-error:"):
+                await asyncio.sleep(0.01)
+        granted.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await granted
+        page = await visit("/lesson/1")
+        after = await runtime.act(_click_named(page, "Next"))
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert after.url.endswith("/lesson/1")
+    assert clicks == ["next"]
     assert left == []
 
 
