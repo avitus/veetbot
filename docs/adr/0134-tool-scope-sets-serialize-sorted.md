@@ -4,7 +4,7 @@
 - Date: 2026-09-26
 - Related: Sections 10.1 and 11 of the engineering plan; ADR-0020, ADR-0094,
   ADR-0123, ADR-0131
-- Amends: nothing
+- Amends: nothing; it keeps ADR-0123 decision 6 through the change
 - Detailed design: `docs/plan/context-engine.md`
 
 ## Context
@@ -60,7 +60,20 @@ since Email mode (Milestone 26) and `email.unsubscribe` since Milestone 31.
      production-shaped composition registers.
    - A new plan now has one identity in every process. Scopes never reach the
      model, so the prompt does not change.
-2. **Plan identity is tested across hash seeds.** Two tests sweep hash seeds
+2. **A plan hashed unsorted is re-keyed, not re-planned.**
+   - A recorded plan whose hash matches its canonical rendering stays current.
+     This covers every plan hashed with the pair sorted, about half of them.
+   - Otherwise the planner renders the plan with each scope set in the order
+     its plan event recorded. If that matches the stored hash and nothing
+     else changed, only the plan's identity is stale.
+   - The planner then appends the same plan as a new epoch with reason
+     `prefix_hash_canonicalized`. Only the two hashes, the epoch and
+     `created_at` change. The tools, pins, snapshot, persona and builder
+     version stay the same.
+   - The provider receives the same bytes, so this rotation re-caches nothing.
+     No run's tool pins move, which keeps ADR-0123 decision 6.
+   - Any other difference rotates exactly as before.
+3. **Plan identity is tested across hash seeds.** Two tests sweep hash seeds
    covering each iteration behavior above. One checks the specification's
    JSON and hashes through copies and reloads. The other answers a
    production-shaped chat and re-renders its stored plan. Future sets or
@@ -68,32 +81,36 @@ since Email mode (Milestone 26) and `email.unsubscribe` since Milestone 31.
 
 ## Consequences
 
-- A recorded plan hashed with the pair sorted, about half of those that pin
-  either tool, stays current.
-- Each other such plan fails the planner's comparison once, at its chat's next
-  message, and rotates with `agent_prefix_changed`. That is the rotation any
-  restart causes today, and the deploy of this change restarts the workers
-  anyway, but it is the last one. It rebuilds the plan, so a run parked on an
-  approval in such a chat can fail with `tool_pin_mismatch` if its selection
-  moves, notably in a `context-builder@11` chat.
+- At its next message, each chat whose plan hashed the pair reversed, about
+  half of those that pin either tool, gains one `context.epoch.rotated` event.
+  Its epoch count rises by one, once. Nothing else about the chat changes.
+- A plan created under a seed that reverses on every rebuild recorded the
+  order after one rebuild, not the order it hashed. About half of those plans
+  rotate once with `agent_prefix_changed`, as any restart rotates them today.
+  Such seeds start about one worker in 25.
 - After the deploy, restarts no longer rotate chats or fail their first
   message over scope order.
+- The re-key path only fires for plans recorded before this change: every
+  scope list recorded after it is sorted. It stays as long as older chats
+  can resume. Removing it later would rotate the chats it would have re-keyed.
 - `ToolSpec`'s validation schema is unchanged. Its serialization schema drops
   `uniqueItems`, and nothing reads that schema.
 - `ApprovalRequest.required_scopes`, `ProposedAction.required_scopes` and
   `Principal.scopes` are sets that never reach a hash. They stay as they are.
   The ADR-0131 discovery key already sorts its server's scopes.
 - No hard gate is registered, and milestone gate counts do not change. The
-  tests are `tests/unit/test_tool_scope_order.py` and
-  `tests/gates/test_scope_order_identity_adr0134.py`.
+  tests are `tests/unit/test_tool_scope_order.py`,
+  `tests/gates/test_scope_order_identity_adr0134.py`, two planner contract
+  cases, and `tests/integration/test_scope_order_postgres.py`, which reads
+  the recorded order back from jsonb.
 
 ## Alternatives considered
 
-- **Re-key a plan hashed unsorted instead of re-planning it.** If the stored
-  hash matches the plan rendered with the scope order its event recorded, the
-  planner could append the same plan as a new epoch with canonical hashes.
-  Nothing would be rebuilt and no run's pins would move. It needs a legacy
-  path in the planner for as long as older chats can resume.
+- **Sort the scopes and let old plans rotate.** It is smaller. The deploy
+  itself would re-plan about half of the affected chats, which is what any
+  restart does today. Those include `context-builder@11` chats, whose
+  re-planning ADR-0123 decision 6 exists to avoid. Re-keying costs one event
+  per chat and moves nothing.
 - **Pin `PYTHONHASHSEED` in the systemd units.** Every worker would share
   one order, but the CLI, maintenance scripts and tests could still disagree.
   A pinned seed that reverses a pair on each rebuild would rotate those chats
@@ -105,3 +122,6 @@ since Email mode (Milestone 26) and `email.unsubscribe` since Milestone 31.
 - **Leave scopes out of the prefix identity.** They never reach the model.
   But every existing plan with any scope would rotate, not only the unsorted
   half, and the replay identity would lose a field policy depends on.
+- **Accept either order without a rotation.** The planner and the builder
+  would both need each old plan's recorded order on every request, for as
+  long as its chat lives, where re-keying needs it once.

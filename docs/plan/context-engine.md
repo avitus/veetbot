@@ -208,6 +208,17 @@ tracked metric and its target is 1.0**; a deployment averaging materially more t
 one has a configuration problem, and because the counter exists, it has one
 visibly.
 
+One rotation reason rebuilds nothing. Before
+[ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's hash
+covered each tool's scope set in whatever order its worker's hash seed gave
+it, and its plan event recorded the scopes as they stood when it was written.
+When such a plan's hash matches its prefix rendered with those recorded
+orders, and nothing else about the plan changed, the planner appends the same
+plan as a new epoch with its canonical hashes and reason
+`prefix_hash_canonicalized`. It does not rebuild the plan under a run that
+may be parked on an approval, and the provider receives the same bytes, so
+nothing is re-cached.
+
 ### The persona row
 
 Milestone 22 adds one Region A row between the agent instructions and the tool

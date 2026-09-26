@@ -14,9 +14,10 @@ title: Changelog
 - The cause was the order in which the two Email tools list their permissions.
   Each worker process could order them differently, and the order is part of
   the plan's fingerprint. They are now always listed in sorted order.
-- A chat whose plan was fingerprinted in the other order rebuilds its plan
-  once, at its next message, and keeps its history. ADR-0134 (proposed)
-  records the change.
+- A chat whose plan was fingerprinted in the other order gets a new
+  fingerprint once, at its next message. Its tools, memory and history stay
+  as they are, so an approval it is waiting for still works. ADR-0134
+  (proposed) records the change.
 
 ## 2026-09-26 — New chats answer again
 

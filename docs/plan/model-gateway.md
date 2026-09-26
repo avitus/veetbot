@@ -609,7 +609,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:978-980`). The gateway translates those hints into
+(`context-engine.md:989-991`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -647,7 +647,7 @@ because the context engine knows the session shape; the gateway does not.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:956-958` and the
+The cached-prefix ratio is defined in `context-engine.md:967-969` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -666,7 +666,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:267`
+native tool calling, how much output to reserve. `context-engine.md:278`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -725,7 +725,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:233's second half
+    default_output_reserve: int  # context-engine.md:244's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
     max_tool_count: int | None
 ```
@@ -1542,7 +1542,7 @@ the same accepted levels, and effort is not part of the pin.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:518-522` requires that a
+be answerable by a tool result; `context-engine.md:529-533` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
