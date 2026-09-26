@@ -727,6 +727,47 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert 'mv -Tf "$NEXT_WEBSITE_CURRENT" "$WEBSITE_ROOT/current"' in nginx_deploy
 
 
+_HANDOFF_LOCATION = 'location ~ "^/authentication/[0-9A-Fa-f-]{36}/handoff$" {'
+
+
+def test_browser_handoff_location_streams_its_body_and_keeps_the_vhost_limit() -> None:
+    """ADR-0128: one handoff streams up to 1 MiB and never reaches Nginx's disk."""
+
+    nginx = (ROOT / "nginx/veetbot.conf").read_text(encoding="utf-8")
+    browser = nginx.split("live/browser.veetbot.com/fullchain.pem;", 1)[1]
+    browser = browser.split("\nserver {", 1)[0]
+    assert browser.count("client_max_body_size 64k;") == 1
+    assert browser.count("client_max_body_size 1m;") == 1
+    assert nginx.count(_HANDOFF_LOCATION) == 1
+    assert _HANDOFF_LOCATION in browser
+    handoff = browser.split(_HANDOFF_LOCATION, 1)[1].split("\n    }", 1)[0]
+    for directive in (
+        "client_max_body_size 1m;",
+        "client_body_buffer_size 1m;",
+        "client_body_timeout 10s;",
+        "proxy_pass http://127.0.0.1:8081;",
+        "proxy_http_version 1.1;",
+        "proxy_buffering off;",
+        "proxy_request_buffering off;",
+        "proxy_read_timeout 60s;",
+        "proxy_send_timeout 60s;",
+    ):
+        assert directive in handoff, directive
+    assert "$request_body" not in nginx
+
+
+def test_every_tls_server_block_allows_only_tls_1_2_and_1_3() -> None:
+    """ADR-0128 D21: the floor holds whichever block is the listener's default."""
+
+    nginx = (ROOT / "nginx/veetbot.conf").read_text(encoding="utf-8")
+    blocks = ["server {" + block for block in nginx.split("server {")[1:]]
+    tls_blocks = [block for block in blocks if "listen 443" in block]
+    assert len(tls_blocks) == 5
+    for block in tls_blocks:
+        assert block.count("ssl_protocols TLSv1.2 TLSv1.3;") == 1, block.splitlines()[3]
+    assert re.findall(r"ssl_protocols[^;]*;", nginx) == ["ssl_protocols TLSv1.2 TLSv1.3;"] * 5
+
+
 def test_production_preflight_normalizes_missing_executable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
