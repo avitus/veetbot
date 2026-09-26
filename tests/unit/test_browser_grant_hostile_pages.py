@@ -18,8 +18,16 @@ from agent_core.domain.browser import (
     BrowserActionKind,
     BrowserElementFacts,
     BrowserProviderError,
+    BrowserSnapshot,
     BrowserTargetFacts,
+    browser_origin,
 )
+from agent_core.domain.browser_act_views import (
+    describe_browser_action,
+    element_labels,
+    option_texts,
+)
+from agent_core.domain.browser_classification import task_grant_coverage
 from tests.unit.test_browser_playwright import (
     GRANT_NOW,
     _click_named,
@@ -518,5 +526,47 @@ async def test_a_label_too_long_to_read_whole_is_refused() -> None:
         refusal = await _refused(runtime, _click_named(page, name))
         clicks = await _page_value(runtime, "window.clicks")
 
+    assert refusal.reason_code == GRANT_NOT_APPLICABLE
+    assert clicks == []
+
+
+# An excluded word past the 256 characters element facts carry of a label
+# source, but inside the 1,024 the runtime reads.
+LONG_TAIL = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button aria-label="Continue" onclick="window.clicks.push(1)">Continue PADDING Pay $12.99</button>
+<script>window.clicks = [];</script>
+</body></html>""".replace("PADDING", "and " * 70)
+
+
+@pytest.mark.parametrize("html", [PADDED, LONG_TAIL], ids=["past_the_live_read", "past_the_facts"])
+async def test_the_worker_covers_no_label_it_cannot_read_whole(html: str) -> None:
+    """The worker decides from the observation's facts before a use is
+    consumed. A label source the facts could not carry whole may hide an
+    excluded word the runtime reads, so the runtime would refuse an act the
+    worker paid for, and the model, told to observe again, would pay again.
+    The worker refuses it first, and the runtime still refuses it."""
+
+    async with lesson_pages({"/lesson/1": html}) as (runtime, visit, _left):
+        page = await visit("/lesson/1")
+        name = next(element.name for element in page.elements if element.role == "button")
+        action = _click_named(page, name)
+        view = describe_browser_action(
+            action, BrowserSnapshot(observation=page, facts=runtime.facts(page.revision))
+        )
+        assert view.element is not None
+        worker = task_grant_coverage(
+            action=action,
+            page_url=page.url,
+            role=view.element.role,
+            labels=element_labels(view.element, view.facts),
+            facts=view.facts,
+            option_texts=option_texts(action),
+            origin=browser_origin(page.url),
+            path_prefix="/lesson",
+        )
+        refusal = await _refused(runtime, action)
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert (worker.covered, worker.reason) == (False, "facts_unavailable")
     assert refusal.reason_code == GRANT_NOT_APPLICABLE
     assert clicks == []

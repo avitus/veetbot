@@ -455,6 +455,10 @@ def test_task_grant_coverage_names_the_first_failing_rule() -> None:
     outside_form = BrowserTargetFacts(same_origin=True, first_segment="learn", sensitive_path=False)
     cases: dict[str, tuple[tuple[bool, str | None, C], tuple[bool, str | None]]] = {
         "no facts": (cover(element=None), (False, "facts_unavailable")),
+        "a label the facts cut short": (
+            cover(element=facts(labels_truncated=True)),
+            (False, "facts_unavailable"),
+        ),
         "another origin": (
             cover(page_url="https://example.com/lesson"),
             (False, "outside_origin"),

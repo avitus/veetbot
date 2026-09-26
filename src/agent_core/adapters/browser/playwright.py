@@ -1463,11 +1463,17 @@ def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> Bro
     """Derive one element's facts from its live attributes (ADR-0129 section 4.5)."""
 
     visible_name = normalize_text(name)
-    labels = {
-        source: value[:MAXIMUM_FACT_LABEL_CHARACTERS]
+    kept = {
+        source: value
         for source, value in _live_labels(metadata).items()
         if normalize_text(value) != visible_name
     }
+    labels = {source: value[:MAXIMUM_FACT_LABEL_CHARACTERS] for source, value in kept.items()}
+    # A source past what the facts carry, or past what the runtime reads, may
+    # hold an excluded word in the part left out; a task grant never covers it.
+    truncated = metadata.get("overlong") is not False or any(
+        len(value) > MAXIMUM_FACT_LABEL_CHARACTERS for value in kept.values()
+    )
     links = metadata.get("links")
     forms = metadata.get("forms")
     link_targets = [
@@ -1493,6 +1499,7 @@ def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> Bro
             editable=metadata.get("editable") is True,
         ),
         labels=labels,
+        labels_truncated=truncated,
         link_target=_meet(link_targets),
         form_target=_meet(form_targets),
         download=metadata.get("download") is True,

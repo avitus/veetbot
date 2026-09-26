@@ -531,7 +531,9 @@ def task_grant_coverage(
     consequence = classify_browser_action(
         kind=action.kind, role=role, labels=labels, facts=facts, option_texts=option_texts
     )
-    if facts is None:
+    # A label source the facts could not carry whole may hide an excluded
+    # word, so the worker refuses it before consuming a use (ADR-0129).
+    if facts is None or facts.labels_truncated:
         return _refused(consequence, "facts_unavailable")
     if _origin_of(page_url) != origin:
         return _refused(consequence, "outside_origin")

@@ -598,6 +598,9 @@ class BrowserElementFacts(BaseModel):
 
     ``labels`` holds the label sources whose normalized text differs from the
     element's name, each cut to 256 characters, so it is usually empty.
+    ``labels_truncated`` is true when the facts and the name together do not
+    carry every label source whole: one of them was cut, or was longer than
+    the 1,024 characters the runtime reads. The runtime always sets it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -606,6 +609,7 @@ class BrowserElementFacts(BaseModel):
     labels: dict[
         BrowserLabelSource, Annotated[str, Field(max_length=MAXIMUM_FACT_LABEL_CHARACTERS)]
     ] = Field(default_factory=dict, max_length=len(BrowserLabelSource))
+    labels_truncated: bool = False
     link_target: BrowserTargetFacts | None = None
     form_target: BrowserTargetFacts | None = None
     download: bool = False

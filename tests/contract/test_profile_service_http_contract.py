@@ -1348,6 +1348,7 @@ async def test_facts_are_an_optional_sibling_of_the_observation(tmp_path: Path) 
                 "revision-1:0": {
                     "field_kind": "none",
                     "labels": {},
+                    "labels_truncated": False,
                     "link_target": None,
                     "form_target": None,
                     "download": False,

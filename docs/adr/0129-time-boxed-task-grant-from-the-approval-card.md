@@ -194,6 +194,11 @@ change needs the owner's explicit approval, and the owner has given it.
        focus once focused, since the keyboard sends to the focused element
        (decision 7);
      - unnamed elements;
+     - an element with a label source the facts do not carry whole, cut at
+       256 characters or longer than the 1,024 the runtime reads, since the
+       unread part could hold an excluded word. The worker refuses it before
+       consuming a use, rather than paying for an act the runtime then
+       refuses;
      - links or form submissions whose target leaves the origin or the
        prefix, or has a sensitive path segment. Any click on an element in a
        form, and Enter or Space pressed on one, counts as a submission,
@@ -209,8 +214,9 @@ change needs the owner's explicit approval, and the owner has given it.
    can only refuse.**
    - The worker authorizes against the observation that named the element.
      That observation now carries secret-free facts beside it: the label
-     sources, and each element's field kind, navigation target, download
-     flag and dialog name. These facts never enter a model-visible result.
+     sources, whether any was too long to carry whole, and each element's
+     field kind, navigation target, download flag and dialog name. These
+     facts never enter a model-visible result.
    - An authorized act carries a `BrowserDispatchConstraint` to the isolated
      service: the grant kind, origins, the path prefix, `not_after`, the
      consequence ceiling and the per-action text cap. The grant kind fixes

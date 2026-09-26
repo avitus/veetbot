@@ -468,7 +468,8 @@ them ignores: a closed field kind; the element's label sources (accessible-name
 attributes, associated labels, alternative text, button values, and visible
 text, each capped at 256 characters), where the associated labels include
 those of any check box or radio a click on it would change, through a label
-or inside it; whether a link or form target is
+or inside it; whether any label source was cut, or was longer than the 1,024
+characters the runtime reads; whether a link or form target is
 same-origin, its first path segment, and whether any of its path segments is
 sensitive; a download flag; and the enclosing dialog's accessible name, capped
 at 128 characters. A form target is where the browser would submit: the
@@ -962,8 +963,10 @@ credential-shaped value. A task grant never covers a named consequence; a
 credential, one-time-code, payment, or identity field; a key press on a choice
 control, since an arrow key moves a radio group to an unclassified option; a
 key press or typed text on an element that does not itself hold focus; an
-unnamed element; a link or form target outside the origin or prefix or with a
-sensitive path segment; a download link or file input; or a page outside the
+unnamed element; an element with a label source the facts do not carry
+whole, whose unread part could hold an excluded word; a link or form target
+outside the origin or prefix or with a sensitive path segment; a download
+link or file input; or a page outside the
 prefix or with a sensitive path segment. Any click on an element in a form,
 and Enter or Space pressed on one, counts as a submission whatever the
 element's role. A path segment is sensitive when it matches the exclusion
