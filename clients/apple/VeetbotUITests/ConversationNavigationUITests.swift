@@ -888,8 +888,9 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(fifth.isSelected)
         #endif
         // Maya Chen's profile links to Maya and to a fact's evidence; the
-        // directory must still replace it.
-        choosePerson(mayaChen, showing: "maya.chen@example.com", in: detail)
+        // directory must still replace it. She is second in the directory, so
+        // a short list has scrolled past her to reach the contacts.
+        choosePerson(mayaChen, showing: "maya.chen@example.com", in: detail, above: true)
         choosePerson(fifth, showing: "contact5@example.com", in: detail)
     }
 
@@ -899,27 +900,32 @@ final class ConversationNavigationUITests: XCTestCase {
 
     #if os(iOS)
     /// Drags the lazily rendered directory until the row sits clear of the
-    /// search field that floats over its lower edge.
-    private func revealDirectoryRow(_ row: XCUIElement) {
+    /// search field that floats over its lower edge. A row above the rows in
+    /// view is out of the hierarchy, so the caller says to drag the other way,
+    /// until the row also clears the list's top edge.
+    private func revealDirectoryRow(_ row: XCUIElement, above: Bool) {
         let list = app.descendants(matching: .any)["people.browser"].firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let (from, to): (CGFloat, CGFloat) = above ? (0.45, 0.7) : (0.7, 0.45)
         for _ in 0..<8 {
-            if row.exists && row.isHittable && row.frame.maxY < list.frame.maxY - 100 { return }
+            if row.exists && row.isHittable && row.frame.maxY < list.frame.maxY - 100
+                && (!above || row.frame.minY >= list.frame.minY) { return }
             // A slow drag that holds at its end moves the list without a fling.
-            list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).press(
-                forDuration: 0.1, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)),
+            list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from)).press(
+                forDuration: 0.1, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)),
                 withVelocity: .slow, thenHoldForDuration: 0.3)
         }
     }
     #endif
 
     /// Opens a person from the directory, returning to it first where a compact
-    /// layout pushed the previous profile over it.
-    private func choosePerson(_ row: XCUIElement, showing text: String, in detail: XCUIElement) {
+    /// layout pushed the previous profile over it. `above` marks a person
+    /// listed before the rows in view.
+    private func choosePerson(_ row: XCUIElement, showing text: String, in detail: XCUIElement, above: Bool = false) {
         #if os(iOS)
         // The sheet's back button, not the first button of the window's bar behind it.
         if detail.exists && !row.isHittable { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
-        revealDirectoryRow(row)
+        revealDirectoryRow(row, above: above)
         #endif
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         activate(row)
