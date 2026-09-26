@@ -473,7 +473,8 @@ at 128 characters. A form target is where the browser would submit: the
 formaction of the submit control a click activates or, for Enter in a field,
 of the form's default button, else the form's action. A fragment or empty link
 has no target only when it stays on the page, since a `<base>` element can
-send it elsewhere. Raw target URLs never leave the runtime. Facts feed the
+send it elsewhere; a `javascript:` link, and any target that is not HTTPS, is
+outside every origin. Raw target URLs never leave the runtime. Facts feed the
 action classifier and the approval view and never enter a model-visible
 result. An act request may carry a dispatch constraint naming the grant kind,
 origins, an optional path prefix, an expiry, a consequence ceiling, and a text

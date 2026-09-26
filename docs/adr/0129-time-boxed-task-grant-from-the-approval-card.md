@@ -175,7 +175,9 @@ change needs the owner's explicit approval, and the owner has given it.
        prefix, or has a sensitive path segment. Any click on an element in a
        form, and Enter or Space pressed on one, counts as a submission,
        whatever the element's role. The target is where the browser would
-       submit, including a submit button's `formaction`;
+       submit, including a submit button's `formaction`. A `javascript:` link
+       runs script that can go anywhere, so it and any other target that is
+       not HTTPS leave the origin;
      - download links and file inputs;
      - a page outside the prefix, or one with a sensitive path segment.
    - Credential and one-time-code fields stay refused outright, as before.

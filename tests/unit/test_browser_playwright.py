@@ -1515,6 +1515,21 @@ def test_a_fragment_link_has_no_target_only_on_its_own_page() -> None:
     )
 
 
+def test_a_link_to_any_other_scheme_is_a_target_outside_every_origin() -> None:
+    """Section 4.5: ``javascript:`` is not "no target"; nor is any non-HTTPS scheme."""
+
+    page = "https://site.test/lesson/1"
+    outside = BrowserTargetFacts(same_origin=False, first_segment=None, sensitive_path=True)
+
+    def link(raw: str) -> BrowserTargetFacts | None:
+        return playwright_adapter._link_target({"linkHref": raw, "link": raw}, page_url=page)
+
+    assert link("javascript:location='/settings'") == outside
+    assert link("JAVASCRIPT:void(0)") == outside
+    assert link("data:text/html,hi") == outside
+    assert link("http://site.test/lesson/2") == outside
+
+
 RADIO_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
 <label><input type="radio" name="plan" id="keep" checked> Keep learning</label>
 <label><input type="radio" name="plan" id="trial"> Start Super trial $12.99</label>

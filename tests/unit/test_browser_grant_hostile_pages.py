@@ -164,3 +164,22 @@ async def test_covered_keys_still_reach_the_element_they_name() -> None:
 
     assert clicks == ["next", "later"]
     assert left == []
+
+
+SCRIPT_LINKS = """<!doctype html><html><head><title>Lesson</title></head><body>
+<a href="javascript:location='/settings/delete'">Continue</a>
+<a href="JavaScript:void(0)" onclick="location='/courses/remove-course'">Next</a>
+</body></html>"""
+
+
+async def test_a_script_link_is_a_target_outside_the_prefix() -> None:
+    """A ``javascript:`` URL runs script that can go anywhere, so it never stays."""
+
+    async with lesson_pages({"/lesson/1": SCRIPT_LINKS}) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        script = await _refused(runtime, _click_named(page, "Continue"))
+        page = await runtime.observe()
+        mixed_case = await _refused(runtime, _press(page, "Next", "Enter"))
+
+    assert script.reason_code == mixed_case.reason_code == GRANT_NOT_APPLICABLE
+    assert left == []

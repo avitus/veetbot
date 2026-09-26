@@ -1046,11 +1046,18 @@ def _origin_or_none(url: str) -> str | None:
         return None
 
 
+# A target on no HTTPS origin: ``javascript:``, whose script can go anywhere,
+# or any other scheme. It is inside no origin and no prefix.
+_OUTSIDE_EVERY_ORIGIN = BrowserTargetFacts(same_origin=False, first_segment=None)
+
+
 def _target_facts(url: str, *, page_url: str) -> BrowserTargetFacts:
     """A navigation target reduced to facts; the raw URL never leaves the runtime."""
 
     origin = _origin_or_none(url)
-    same_origin = origin is not None and origin == _origin_or_none(page_url)
+    if origin is None:
+        return _OUTSIDE_EVERY_ORIGIN
+    same_origin = origin == _origin_or_none(page_url)
     path = urlsplit(url).path if url else ""
     segments = [segment for segment in path.split("/") if segment]
     first = segments[0] if segments else None
@@ -1071,14 +1078,13 @@ def _link_target(metadata: dict[str, Any], *, page_url: str) -> BrowserTargetFac
     """A link's target facts; a fragment or empty href that stays on the page has none.
 
     A ``<base>`` element can send even ``#next`` to another document, so the
-    resolved URL decides, not the written one.
+    resolved URL decides, not the written one. A ``javascript:`` link is a
+    target outside every origin, never "no target".
     """
 
     raw = metadata.get("linkHref")
     resolved = metadata.get("link")
     if not isinstance(raw, str) or not isinstance(resolved, str):
-        return None
-    if urlsplit(resolved).scheme.lower() == "javascript":
         return None
     raw = raw.strip()
     if (not raw or raw.startswith("#")) and _without_fragment(resolved) == _without_fragment(
