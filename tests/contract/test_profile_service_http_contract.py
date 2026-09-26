@@ -26,6 +26,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserPageEvidence,
 )
 from agent_core.domain.credentials import SecretValue
 from tests.contract.support import NOW, principal
@@ -61,6 +62,11 @@ class FakeRuntime:
     async def act(self, action: BrowserAction) -> BrowserObservation:
         del action
         return BrowserObservation(url=self.origins[0], revision="revision-2")
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        return BrowserPageEvidence(
+            on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
 
     async def storage_state(self) -> bytes:
         return b'{"format_version":1,"wire":true}'

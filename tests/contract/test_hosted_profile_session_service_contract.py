@@ -7,6 +7,7 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import pytest
@@ -22,6 +23,7 @@ from agent_core.domain.browser import (
     BrowserInteractiveEvent,
     BrowserLease,
     BrowserObservation,
+    BrowserPageEvidence,
     BrowserProviderError,
 )
 from agent_core.domain.errors import ConflictError
@@ -77,6 +79,11 @@ class FakeSessionRuntime:
         return BrowserObservation(
             url=self.allowed_origins[0] + "/current",
             revision="revision-2",
+        )
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        return BrowserPageEvidence(
+            on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
         )
 
     async def storage_state(self) -> bytes:

@@ -31,6 +31,7 @@ from agent_core.domain.browser import (
     BrowserInteractiveEvent,
     BrowserLease,
     BrowserObservation,
+    BrowserPageEvidence,
     BrowserProviderError,
     browser_origin,
     require_service_origin,
@@ -109,6 +110,8 @@ class BrowserSessionRuntime(Protocol):
     async def observe(self) -> BrowserObservation: ...
 
     async def act(self, action: BrowserAction) -> BrowserObservation: ...
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
 
     async def storage_state(self) -> bytes: ...
 

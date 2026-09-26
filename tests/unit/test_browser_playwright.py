@@ -23,6 +23,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserPageEvidence,
     BrowserProviderError,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
@@ -717,3 +718,99 @@ async def test_text_sent_beside_hidden_challenge_text_is_not_sign_in_evidence() 
     status = await runtime.authentication_status()
 
     assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+
+
+class FakeEvidencePage(FakeCeremonyPage):
+    """A page that loads one URL, optionally redirected, and reports its challenge."""
+
+    def __init__(self, *, lands_on: str | None = None, refused_hop: str | None = None) -> None:
+        super().__init__("about:blank")
+        self.lands_on = lands_on
+        self.refused_hop = refused_hop
+        self.failure: PlaywrightError | None = None
+        self.handlers: dict[str, list[Callable[[Any], None]]] = {}
+        self.loads: list[tuple[str, str, int]] = []
+        self.idle_waits: list[tuple[str, int]] = []
+
+    def on(self, event: str, handler: Callable[[Any], None]) -> None:
+        self.handlers.setdefault(event, []).append(handler)
+
+    async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+        self.loads.append((url, wait_until, timeout))
+        if self.refused_hop is not None:
+            for handler in self.handlers.get("request", ()):
+                handler(FakeNavigationRequest(self.refused_hop))
+            raise PlaywrightError(f"net::ERR_BLOCKED_BY_CLIENT at {self.refused_hop}")
+        if self.failure is not None:
+            raise self.failure
+        self.url = self.lands_on or url
+
+    async def wait_for_load_state(self, state: str, *, timeout: int) -> None:
+        self.idle_waits.append((state, timeout))
+        raise PlaywrightError("Timeout 5000ms exceeded.")
+
+
+def evidence_runtime(page: FakeEvidencePage) -> PythonPlaywrightRuntime:
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://www.duolingo.com",)
+    runtime._attach_page(page)  # type: ignore[arg-type]
+    return runtime
+
+
+async def test_page_evidence_reports_origin_path_and_challenge() -> None:
+    """ADR-0128: a verification load reports where it landed and whether it asks to sign in."""
+
+    members = FakeEvidencePage()
+    signed_out = FakeEvidencePage(lands_on="https://www.duolingo.com/log-in?next=/learn")
+    signed_out.password_visible = True
+    refused = FakeEvidencePage(refused_hop="https://accounts.example.net/login")
+
+    kept = await evidence_runtime(members).load_page_evidence("https://www.duolingo.com/learn")
+    challenged = await evidence_runtime(signed_out).load_page_evidence(
+        "https://www.duolingo.com/learn"
+    )
+    left = await evidence_runtime(refused).load_page_evidence("https://www.duolingo.com/learn")
+
+    assert kept == BrowserPageEvidence(
+        on_allowed_origin=True, path="/learn", challenge_visible=False
+    )
+    assert challenged == BrowserPageEvidence(
+        on_allowed_origin=True, path="/log-in", challenge_visible=True
+    )
+    assert left.on_allowed_origin is False
+    assert members.loads == [("https://www.duolingo.com/learn", "load", 20_000)]
+    assert members.idle_waits == [("networkidle", 5_000)]
+    assert "learn" not in repr(kept)
+
+
+async def test_page_evidence_normalizes_other_load_failures() -> None:
+    page = FakeEvidencePage()
+    page.failure = PlaywrightError("net::ERR_CONNECTION_RESET at https://www.duolingo.com/learn")
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await evidence_runtime(page).load_page_evidence("https://www.duolingo.com/learn")
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert "duolingo" not in str(raised.value)
+
+
+async def test_the_context_seam_carries_todays_arguments_and_only_a_subclass_extends_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production never ignores certificate errors; a test runtime may (ADR-0128 R-4)."""
+
+    class TestOnlyRuntime(PythonPlaywrightRuntime):
+        def _context_options(self, storage_state: dict[str, object] | None) -> dict[str, Any]:
+            return super()._context_options(storage_state) | {"ignore_https_errors": True}
+
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    await PythonPlaywrightRuntime().start("http://127.0.0.1:9", ("https://site.example",))
+    await TestOnlyRuntime().start("http://127.0.0.1:9", ("https://site.example",))
+
+    assert chromium.contexts[0] == {
+        "accept_downloads": False,
+        "service_workers": "block",
+        "storage_state": None,
+    }
+    assert chromium.contexts[1] == {**chromium.contexts[0], "ignore_https_errors": True}

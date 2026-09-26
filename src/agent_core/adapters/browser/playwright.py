@@ -36,6 +36,7 @@ from agent_core.domain.browser import (
     BrowserElement,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserPageEvidence,
     BrowserProviderError,
     browser_origin,
     normalize_browser_origin,
@@ -145,11 +146,7 @@ class PythonPlaywrightRuntime:
             ],
             env=environment,
         )
-        self._context = await self._browser.new_context(
-            accept_downloads=False,
-            service_workers="block",
-            storage_state=(None if storage_state is None else cast(StorageState, storage_state)),
-        )
+        self._context = await self._browser.new_context(**self._context_options(storage_state))
         await self._context.route("**/*", self._route)
         self._attach_page(await self._context.new_page())
         self._document_session = await self._context.new_cdp_session(self._current_page())
@@ -165,6 +162,15 @@ class PythonPlaywrightRuntime:
             },
         )
         self._context.on("page", self._close_popup)
+
+    def _context_options(self, storage_state: dict[str, object] | None) -> dict[str, Any]:
+        """The arguments of the one browser context; a test subclass may extend them."""
+
+        return {
+            "accept_downloads": False,
+            "service_workers": "block",
+            "storage_state": (None if storage_state is None else cast(StorageState, storage_state)),
+        }
 
     async def _start_virtual_display(self) -> str | None:
         """Start the ceremony's private display, or use the platform's native one."""
@@ -272,6 +278,43 @@ class PythonPlaywrightRuntime:
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
         return await self._observation(page)
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        """Load one page and report where it landed and whether it asks to sign in.
+
+        ADR-0128 verifies a device handoff by loading the page the owner
+        confirmed with and without the session. A navigation the origin guard
+        refuses is evidence (the page left the allowed origins), not a failure;
+        any other load failure is ``provider_unavailable``. Nothing from the
+        page or Playwright's message leaves this method but the evidence.
+        """
+        page = self._current_page()
+        self._disallowed_navigation = False
+        try:
+            await page.goto(url, wait_until="load", timeout=20_000)
+        except PlaywrightError as exc:
+            if self._disallowed_navigation:
+                return BrowserPageEvidence(
+                    on_allowed_origin=False, path="/", challenge_visible=False
+                )
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
+        with suppress(PlaywrightError):
+            await page.wait_for_load_state("networkidle", timeout=5_000)
+        try:
+            challenge_visible = await self._sign_in_challenge_visible(page)
+        except PlaywrightError as exc:
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
+        return BrowserPageEvidence(
+            on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
+            path=(urlsplit(page.url).path or "/")[:4096],
+            challenge_visible=challenge_visible,
+        )
 
     async def observe(self) -> BrowserObservation:
         page = self._current_page()

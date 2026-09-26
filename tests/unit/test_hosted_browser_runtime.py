@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -16,6 +17,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserPageEvidence,
     BrowserProviderError,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
@@ -55,6 +57,11 @@ class FakeStatefulRuntime:
     async def act(self, action: BrowserAction) -> BrowserObservation:
         del action
         return BrowserObservation(url="https://example.org", revision="r2")
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        return BrowserPageEvidence(
+            on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
 
     async def storage_state(self) -> dict[str, object]:
         return self.storage
@@ -212,3 +219,31 @@ async def test_hosted_runtime_normalizes_low_level_navigation_failures() -> None
     assert unavailable.value.retryable is True
     assert "provider-private-diagnostic" not in str(unavailable.value)
     assert disallowed.value is low_level.error
+
+
+async def test_hosted_runtime_forwards_page_evidence_and_normalizes_failures() -> None:
+    """ADR-0128: verification evidence passes through; raw failures become stable codes."""
+
+    class FailingEvidenceRuntime(FakeStatefulRuntime):
+        error: Exception | None = None
+
+        async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+            if self.error is not None:
+                raise self.error
+            return await super().load_page_evidence(url)
+
+    low_level = FailingEvidenceRuntime()
+    runtime = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=low_level,
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+
+    evidence = await runtime.load_page_evidence("https://example.org/learn")
+    low_level.error = RuntimeError("provider-private-diagnostic")
+    with pytest.raises(BrowserProviderError) as raised:
+        await runtime.load_page_evidence("https://example.org/learn")
+
+    assert evidence.path == "/learn"
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert "provider-private-diagnostic" not in str(raised.value)
