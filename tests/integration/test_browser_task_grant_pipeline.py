@@ -11,8 +11,9 @@ scope dispatch without asking, each consuming one use under the task
 constraint. Every case below that falls outside the grant asks again.
 
 These cases need no database, so the module replaces the directory's
-PostgreSQL reset; the PostgreSQL case at the end runs only with
-``DATABASE_URL`` and resets the tables itself.
+PostgreSQL reset. The PostgreSQL case at the end reaches and resets its
+database only through ``tests/integration/disposable_database.py``, so it
+runs only against a database the run marks disposable.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import itertools
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -30,13 +30,10 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 import pytest
-from sqlalchemy import text
 
 from agent_core.adapters.browser.hosted_provider import SessionBoundHostedBrowserProvider
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileControlPlane
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
-from agent_core.adapters.persistence.database import create_engine
-from agent_core.adapters.persistence.sqlalchemy_models import Base
 from agent_core.application.browser_leases import browser_run_state
 from agent_core.application.browser_management import (
     BrowserProfileManagementService,
@@ -91,6 +88,10 @@ from agent_core.ports.browser import GRANT_NOT_APPLICABLE
 from agent_core.runtime.worker import DurableWorker
 from tests.contract.support import principal as contract_principal
 from tests.contract.test_hosted_profile_session_service_contract import FakeSessionRuntime
+from tests.integration.disposable_database import (
+    disposable_database_url,
+    truncate_application_tables,
+)
 from tests.unit.test_browser_management import FakeAuthenticationControlPlane
 from tests.unit.test_config import base_environment
 
@@ -1098,24 +1099,13 @@ async def test_a_runtime_refusal_keeps_the_lease_and_forces_an_observe(tmp_path:
     await assert_a_runtime_refusal_keeps_the_lease_and_forces_an_observe(tmp_path)
 
 
-async def _reset_postgres(database_url: str) -> None:
-    engine = create_engine(database_url)
-    try:
-        async with engine.begin() as connection:
-            names = ", ".join(f'"{table.name}"' for table in Base.metadata.sorted_tables)
-            await connection.execute(text(f"TRUNCATE TABLE {names} RESTART IDENTITY CASCADE"))
-    finally:
-        await engine.dispose()
-
-
 async def test_allowed_task_on_postgresql(tmp_path: Path) -> None:
     """The durable path: the grant is created with the resolution and each
-    use is a guarded update under row-level security."""
+    use is a guarded update under row-level security. The module replaces the
+    directory's reset, so the case runs the guarded one itself."""
 
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        pytest.skip("DATABASE_URL is required for the PostgreSQL pipeline case")
-    await _reset_postgres(database_url)
+    database_url = disposable_database_url()
+    await truncate_application_tables()
     settings = task_grant_settings(DATABASE_URL=database_url)
     turns = [*allow_turns(), act(2, CONTINUE), act(3, CONTINUE), FINAL]
     async with pipeline(tmp_path, turns, settings=settings, storage="postgres") as harness:

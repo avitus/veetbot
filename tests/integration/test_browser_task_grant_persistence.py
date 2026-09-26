@@ -1,7 +1,8 @@
 """ADR-0129: PostgreSQL task grants satisfy the shared contract and the schema.
 
-Runs only against a scratch database (DATABASE_URL); never the shared local
-agent database.
+Runs only against a scratch database the run marks disposable
+(tests/integration/disposable_database.py); never the shared local agent
+database.
 """
 
 from __future__ import annotations
