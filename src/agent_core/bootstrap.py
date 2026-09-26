@@ -257,6 +257,14 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.browser_task_grants import (
+    BrowserTaskGrantAuthorizer,
+    CompositeStandingAuthorizer,
+    PublicBrowserTaskGrantService,
+    TaskGrantResolution,
+    read_task_grant_context,
+    sweep_expired_task_grants,
+)
 from agent_core.application.call_worker import CallWorker
 from agent_core.application.calling import CallService
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
@@ -402,6 +410,7 @@ from agent_core.domain.agents import (
 )
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile, BrowserRunState
+from agent_core.domain.browser_act_views import TaskGrantSessionContext
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -556,7 +565,7 @@ from agent_core.ports.persistence import (
     TransactionCallbackRegistrar,
     UnitOfWorkFactory,
 )
-from agent_core.ports.policies import PolicyEngine
+from agent_core.ports.policies import PolicyEngine, StandingAuthorizer
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.tools import DeviceChannel
 from agent_core.ports.unsubscribe import OneClickTransport
@@ -575,7 +584,7 @@ from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
 from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
-from agent_core.tools.browser_act import BrowserActTool
+from agent_core.tools.browser_act import BrowserActApprovalPresenter, BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.calculator import CalculatorTool
@@ -797,6 +806,25 @@ def _session_tool_filter(
         return [tool for tool in tools if tool.name not in _BROWSER_TOOL_NAMES]
 
     return filter_tools
+
+
+def _task_grants_composed(settings: Settings, browser_provider: BrowserProvider) -> bool:
+    """ADR-0129: task grants need the flag and a provider that resolves each
+    session's own profile."""
+
+    return settings.browser_task_grants_enabled and isinstance(
+        browser_provider, SessionBoundHostedBrowserProvider
+    )
+
+
+def _task_grant_context_reader(
+    uow_factory: UnitOfWorkFactory, clock: Clock
+) -> Callable[[UUID, Principal], Awaitable[TaskGrantSessionContext]]:
+    async def read(session_id: UUID, principal: Principal) -> TaskGrantSessionContext:
+        async with uow_factory() as uow:
+            return await read_task_grant_context(uow, session_id, principal, now=clock.now())
+
+    return read
 
 
 def _session_browser_origins(
@@ -2506,7 +2534,20 @@ async def _compose(
     if browser_provider is not None:
         registry.register(BrowserNavigateTool(browser_provider))
         registry.register(BrowserObserveTool(browser_provider))
-        registry.register(BrowserActTool(browser_provider))
+        # ADR-0129: the approval card describes the action whatever the flag;
+        # it offers a task grant only when task grants are enabled.
+        registry.register(
+            BrowserActTool(
+                browser_provider,
+                presenter=BrowserActApprovalPresenter(
+                    browser_provider,
+                    context_reader=_task_grant_context_reader(uow_factory, clock),
+                    scopes=settings.browser_task_grant_scopes,
+                    enabled=_task_grants_composed(settings, browser_provider),
+                    now=clock.now,
+                ),
+            )
+        )
     if settings.delegation_enabled:
         registry.register(LegacyDelegateRunTool())
         registry.register(DelegateRunTool())
@@ -3384,19 +3425,35 @@ async def _compose(
                     clock=clock,
                     observer=AdvisoryMetrics(),
                 )
-        standing_authorizer = None
+        # ADR-0129 D18: the pinned standing grant first, then the task grant.
+        standing_authorizers: list[StandingAuthorizer] = []
         if settings.browser_grant_id is not None:
             if browser_provider is None or settings.browser_profile_id is None:
                 raise ConfigurationError("standing browser grant composition is incomplete")
-            standing_authorizer = ConfiguredBrowserStandingAuthorizer(
-                grant_id=settings.browser_grant_id,
-                profile_id=settings.browser_profile_id,
-                purpose=settings.browser_run_purpose,
-                provider=browser_provider,
-                uow_factory=uow_factory,
-                policy=deterministic_engine,
-                now=clock.now,
+            standing_authorizers.append(
+                ConfiguredBrowserStandingAuthorizer(
+                    grant_id=settings.browser_grant_id,
+                    profile_id=settings.browser_profile_id,
+                    purpose=settings.browser_run_purpose,
+                    provider=browser_provider,
+                    uow_factory=uow_factory,
+                    policy=deterministic_engine,
+                    now=clock.now,
+                )
             )
+        if browser_provider is not None and _task_grants_composed(settings, browser_provider):
+            standing_authorizers.append(
+                BrowserTaskGrantAuthorizer(
+                    provider=browser_provider,
+                    uow_factory=uow_factory,
+                    policy=deterministic_engine,
+                    scopes=settings.browser_task_grant_scopes,
+                    now=clock.now,
+                )
+            )
+        standing_authorizer = (
+            CompositeStandingAuthorizer(standing_authorizers) if standing_authorizers else None
+        )
         checkpoint_seeder = DurableCheckpointSeeder(clock)
         delegation_materializer = (
             DelegationMaterializer(
@@ -4043,11 +4100,19 @@ async def _compose(
 
         people_erasure.set_cleanup(cleanup_email_artifacts)
 
+        task_grants_enabled = browser_provider is not None and _task_grants_composed(
+            settings, browser_provider
+        )
         archive_approval_service = PublicApprovalService(
             uow_factory=uow_factory,
             dispatcher=dispatcher,
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
+            task_grants=(
+                TaskGrantResolution(scopes=settings.browser_task_grant_scopes, clock=clock)
+                if task_grants_enabled
+                else None
+            ),
         )
         folder_proposal_pass: FolderProposalPass | None = None
         if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:
@@ -4109,6 +4174,11 @@ async def _compose(
                 uow_factory=uow_factory, clock=clock, ids=ids, catalog=model_settings_catalog
             ),
             folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),
+            browser_task_grants=(
+                PublicBrowserTaskGrantService(uow_factory=uow_factory, clock=clock)
+                if task_grants_enabled
+                else None
+            ),
             calls=call_service,
             email=EmailExperienceService(
                 uow_factory=uow_factory,
@@ -4271,6 +4341,16 @@ async def _compose(
                     folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
+                    ),
+                    sweep_browser_task_grants=(
+                        partial(
+                            sweep_expired_task_grants,
+                            uow_factory,
+                            clock,
+                            tenant_id=principal.tenant_id,
+                        )
+                        if task_grants_enabled
+                        else None
                     ),
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds

@@ -22,7 +22,7 @@ from dotenv import dotenv_values
 from pydantic import SecretStr, ValidationError
 
 from agent_core.domain.browser import normalize_browser_origin
-from agent_core.domain.browser_task_grants import BrowserTaskGrantScope
+from agent_core.domain.browser_task_grants import BrowserTaskGrantScope, parse_task_grant_scopes
 from agent_core.domain.calls import CallConfiguration
 from agent_core.domain.memory import (
     MemoryDistillationEvidence,
@@ -1425,6 +1425,13 @@ def validate_settings(
         raise ConfigurationError("BROWSER_GRANT_ID requires BROWSER_PROFILE_ID")
     if settings.browser_run_purpose is not None and settings.browser_grant_id is None:
         raise ConfigurationError("BROWSER_RUN_PURPOSE requires BROWSER_GRANT_ID")
+    if (
+        settings.browser_task_grants_enabled
+        and settings.browser_provider is not BrowserProviderKind.HOSTED
+    ):
+        raise ConfigurationError("BROWSER_TASK_GRANTS_ENABLED requires BROWSER_PROVIDER=hosted")
+    if settings.browser_task_grant_scopes and not settings.browser_task_grants_enabled:
+        raise ConfigurationError("BROWSER_TASK_GRANT_SCOPES requires BROWSER_TASK_GRANTS_ENABLED=1")
 
 
 def validate_runtime_identity(
@@ -1792,6 +1799,15 @@ def _load_settings(
         values.get("JUDGMENT_PROVIDER", "disabled").strip(),
         "JUDGMENT_PROVIDER",
     )
+    # ADR-0129: task grants from the approval card, off by default; each scope
+    # an exact public-HTTPS origin and one path segment.
+    browser_task_grants_enabled = _parse_flag(values, "BROWSER_TASK_GRANTS_ENABLED")
+    try:
+        browser_task_grant_scopes = parse_task_grant_scopes(
+            values.get("BROWSER_TASK_GRANT_SCOPES", "")
+        )
+    except ValueError as exc:
+        raise ConfigurationError(f"BROWSER_TASK_GRANT_SCOPES {exc}") from None
     raw_browser_origins = tuple(
         value.strip()
         for value in values.get("BROWSER_ALLOWED_ORIGINS", "").split(",")
@@ -1905,6 +1921,8 @@ def _load_settings(
         browser_provider=browser_provider,
         judgment_provider=judgment_provider,
         browser_allowed_origins=browser_allowed_origins,
+        browser_task_grants_enabled=browser_task_grants_enabled,
+        browser_task_grant_scopes=browser_task_grant_scopes,
         browser_profile_service_url=browser_profile_service_url,
         browser_profile_id=browser_profile_id,
         browser_grant_id=browser_grant_id,

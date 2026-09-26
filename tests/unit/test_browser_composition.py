@@ -22,7 +22,12 @@ from agent_core.adapters.browser.hosted_provider import (
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.fake import FakeModelProvider
+from agent_core.api import create_app
 from agent_core.application.browser_leases import browser_run_state
+from agent_core.application.browser_task_grants import (
+    BrowserTaskGrantAuthorizer,
+    CompositeStandingAuthorizer,
+)
 from agent_core.bootstrap import Composition, build
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
@@ -1178,3 +1183,102 @@ async def test_run_workers_keep_hosted_leases_on_a_periodic_upkeep() -> None:
             await asyncio.wait_for(worker.run_forever(), timeout=5)
 
     assert provider.calls == 2
+
+
+def task_grant_settings(**extra: str) -> Settings:
+    return load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            **extra,
+        }
+    )
+
+
+def _task_grant_paths(composition: Composition) -> set[str]:
+    app = create_app(
+        composition.services,
+        composition.settings,
+        composition.principal,
+        composition.new_request_id,
+        composition.readiness_probe,
+    )
+    return {path for path in app.openapi()["paths"] if "browser-task-grants" in path}
+
+
+async def test_task_grants_flag_off_composes_nothing() -> None:
+    """ADR-0129 D20: off by default; no authorizer, offer, resolver or route."""
+
+    async with build(settings=task_grant_settings()) as composition:
+        registered = cast(RegisteredTool, composition.tool_pipeline._registry.get("browser.act"))
+        act = cast(BrowserActTool, registered.implementation)
+        paths = _task_grant_paths(composition)
+        standing = composition.tool_pipeline._standing_authorizer
+
+    assert standing is None
+    assert act._presenter._enabled is False
+    assert composition.services.browser_task_grants is None
+    assert composition.services.approvals._task_grants is None  # type: ignore[attr-defined]
+    assert paths == set()
+
+
+async def test_task_grants_flag_on_composes_every_part() -> None:
+    settings = task_grant_settings(
+        BROWSER_TASK_GRANTS_ENABLED="1",
+        BROWSER_TASK_GRANT_SCOPES="https://www.example.org/lesson",
+    )
+    async with build(settings=settings) as composition:
+        registered = cast(RegisteredTool, composition.tool_pipeline._registry.get("browser.act"))
+        act = cast(BrowserActTool, registered.implementation)
+        paths = _task_grant_paths(composition)
+        standing = composition.tool_pipeline._standing_authorizer
+        worker = composition.maintenance_factory()
+
+    assert isinstance(standing, CompositeStandingAuthorizer)
+    assert any(
+        isinstance(authorizer, BrowserTaskGrantAuthorizer) for authorizer in standing._authorizers
+    )
+    assert act._presenter._enabled is True
+    assert act._presenter._scopes == settings.browser_task_grant_scopes
+    assert composition.services.browser_task_grants is not None
+    assert composition.services.approvals._task_grants is not None  # type: ignore[attr-defined]
+    assert paths == {
+        "/v1/browser-task-grants",
+        "/v1/browser-task-grants/{grant_id}",
+        "/v1/browser-task-grants/{grant_id}/revoke",
+    }
+    assert worker._sweep_browser_task_grants is not None  # type: ignore[attr-defined]
+
+
+def test_task_grants_require_the_hosted_provider() -> None:
+    with pytest.raises(ConfigurationError, match="BROWSER_TASK_GRANTS_ENABLED"):
+        load_settings(
+            {
+                **base_environment(),
+                "SANDBOX_MECHANISM": "fake",
+                "BROWSER_PROVIDER": "playwright",
+                "BROWSER_ALLOWED_ORIGINS": "https://www.example.org",
+                "BROWSER_TASK_GRANTS_ENABLED": "1",
+            }
+        )
+
+
+def test_task_grant_scopes_require_the_flag() -> None:
+    with pytest.raises(ConfigurationError, match="BROWSER_TASK_GRANTS_ENABLED"):
+        task_grant_settings(BROWSER_TASK_GRANT_SCOPES="https://www.example.org/lesson")
+
+
+def test_env_examples_list_the_task_grant_settings() -> None:
+    """Both examples name the two settings, off, right after the purpose."""
+
+    root = Path(__file__).resolve().parents[2]
+    for relative in (".env.example", "deploy/veetbot.env.example"):
+        lines = (root / relative).read_text(encoding="utf-8").splitlines()
+        purpose = lines.index("BROWSER_RUN_PURPOSE=")
+        following = [line for line in lines[purpose + 1 :] if not line.startswith("#")][:2]
+        assert following == ["BROWSER_TASK_GRANTS_ENABLED=0", "BROWSER_TASK_GRANT_SCOPES="], (
+            relative
+        )

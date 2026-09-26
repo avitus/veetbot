@@ -30,6 +30,7 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
+from agent_core.domain.browser_task_grants import parse_task_grant_scopes
 
 PROFILE_ID = "00000000-0000-0000-0000-0000000000e7"
 GRANT_ID = "00000000-0000-0000-0000-0000000000e8"
@@ -1358,3 +1359,56 @@ def test_required_mode_judges_evidence_under_the_operator_pin(tmp_path: Path) ->
     assert (
         settings.memory_formation_policy_pin is MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED
     )
+
+
+def _hosted(**extra: str) -> dict[str, str]:
+    return {
+        **base_environment(),
+        "SANDBOX_MECHANISM": "fake",
+        "BROWSER_PROVIDER": "hosted",
+        "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+        "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        **extra,
+    }
+
+
+def test_task_grant_scopes_parse_and_refuse() -> None:
+    """ADR-0129 D2/D20: exact origin-and-segment scopes behind a hosted-only flag."""
+
+    configured = load_settings(
+        _hosted(
+            BROWSER_TASK_GRANTS_ENABLED="1",
+            BROWSER_TASK_GRANT_SCOPES="https://www.duolingo.com/lesson",
+        )
+    )
+    default = load_settings(_hosted())
+
+    assert configured.browser_task_grants_enabled is True
+    assert configured.browser_task_grant_scopes == parse_task_grant_scopes(
+        "https://www.duolingo.com/lesson"
+    )
+    assert (default.browser_task_grants_enabled, default.browser_task_grant_scopes) == (False, ())
+    refusals = {
+        "an http entry": _hosted(
+            BROWSER_TASK_GRANTS_ENABLED="1",
+            BROWSER_TASK_GRANT_SCOPES="https://www.duolingo.com/lesson,http://example.org/a",
+        ),
+        "a sensitive segment": _hosted(
+            BROWSER_TASK_GRANTS_ENABLED="1", BROWSER_TASK_GRANT_SCOPES="https://example.org/billing"
+        ),
+        "scopes without the flag": _hosted(
+            BROWSER_TASK_GRANT_SCOPES="https://www.duolingo.com/lesson"
+        ),
+        "a word for the flag": _hosted(BROWSER_TASK_GRANTS_ENABLED="yes"),
+    }
+    messages = {}
+    for name, environment in refusals.items():
+        with pytest.raises(ConfigurationError) as refused:
+            load_settings(environment)
+        messages[name] = str(refused.value)
+
+    assert "BROWSER_TASK_GRANT_SCOPES" in messages["an http entry"]
+    assert "entry 2" in messages["an http entry"]
+    assert "entry 1" in messages["a sensitive segment"]
+    assert "BROWSER_TASK_GRANTS_ENABLED" in messages["scopes without the flag"]
+    assert "BROWSER_TASK_GRANTS_ENABLED" in messages["a word for the flag"]
