@@ -28,7 +28,12 @@ from agent_core.application.errors import (
 from agent_core.application.folder_service import unfile_deleted_session
 from agent_core.application.session_service import bootstrap_session
 from agent_core.application.surfaces import PreparedSurfaceSubmission
-from agent_core.domain.agents import AgentSpec, Principal, chat_model_variant
+from agent_core.domain.agents import (
+    AgentSpec,
+    Principal,
+    chat_model_variant,
+    run_limits_for_session,
+)
 from agent_core.domain.approvals import (
     ApprovalCursor,
     ApprovalRequest,
@@ -836,6 +841,9 @@ class PublicRunService:
             if title is not None:
                 session = await uow.sessions.set_title_if_missing(session.id, principal, title)
         agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+        # ADR-0130: a chat bound to a website profile runs under its pinned
+        # version's browser-task limits.
+        limits = run_limits_for_session(agent, session)
         consent = await uow.export_consent.get(principal.tenant_id, principal.principal_id)
         now = self._clock.now()
         run = Run(
@@ -846,10 +854,10 @@ class PublicRunService:
             agent_id=session.agent_id,
             agent_version=session.agent_version,
             status=RunStatus.QUEUED,
-            limits=agent.limits.model_copy(deep=True),
+            limits=limits,
             priority=0,
             scheduled_for=now,
-            deadline_at=agent.limits.deadline_at,
+            deadline_at=limits.deadline_at,
             export_consent=(
                 self._trajectory_export_enabled and consent is not None and consent.active
             ),

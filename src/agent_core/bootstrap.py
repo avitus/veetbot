@@ -389,6 +389,7 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import (
+    BROWSER_TASK_LIMITS_METADATA_KEY,
     DEFERRED_TOOLS_METADATA_KEY,
     AgentSpec,
     Principal,
@@ -799,6 +800,38 @@ def _run_limits_from_defaults(run_defaults: Mapping[str, Any]) -> RunLimits:
         synthesis_reserve_model_calls=int(run_defaults.get("synthesis_reserve_model_calls", 0)),
         synthesis_reserve_tool_calls=int(run_defaults.get("synthesis_reserve_tool_calls", 0)),
     )
+
+
+_BROWSER_TASK_COUNT_LIMITS = ("max_steps", "max_model_calls", "max_tool_calls")
+
+
+def _browser_task_limits(
+    run_defaults: Mapping[str, Any], browser_task: Mapping[str, Any]
+) -> RunLimits:
+    """ADR-0130: run_defaults with the browser_task block's keys replaced.
+
+    Built at every start, whatever the browser setting, so a bad overlay
+    fails startup. The model-call and tool-call reserves stay inherited.
+    """
+
+    defaults = _run_limits_from_defaults(run_defaults)
+    for name in _BROWSER_TASK_COUNT_LIMITS:
+        value = int(browser_task[name])
+        if value < getattr(defaults, name):
+            raise ConfigurationError(f"browser_task.{name} must not be below run_defaults.{name}")
+    try:
+        return RunLimits(
+            **(
+                defaults.model_dump()
+                | {name: int(browser_task[name]) for name in _BROWSER_TASK_COUNT_LIMITS}
+                | {
+                    "max_cost": Decimal(str(browser_task["max_cost"])),
+                    "synthesis_reserve_cost": Decimal(str(browser_task["synthesis_reserve_cost"])),
+                }
+            )
+        )
+    except ValueError as exc:
+        raise ConfigurationError(f"browser_task limits are invalid: {exc}") from None
 
 
 def default_run_limits(settings: Settings) -> RunLimits:
@@ -4717,6 +4750,7 @@ async def build(
         load_config_document(effective_settings, "folders/profiles.yaml")
     )
     run_defaults = runtime_config["run_defaults"]
+    browser_task_limits = _browser_task_limits(run_defaults, runtime_config["browser_task"])
     email_budget_limits = EmailBudgetLimits.model_validate(runtime_config["email"])
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
@@ -4878,11 +4912,21 @@ async def build(
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits or _run_limits_from_defaults(run_defaults),
-        metadata=(
-            {DEFERRED_TOOLS_METADATA_KEY: default_deferred_tools}
-            if enabled_tools is None and default_deferred_tools
-            else {}
-        ),
+        metadata={
+            **(
+                {DEFERRED_TOOLS_METADATA_KEY: default_deferred_tools}
+                if enabled_tools is None and default_deferred_tools
+                else {}
+            ),
+            # ADR-0130: the default agent's version pins the limits a chat
+            # bound to a website profile runs under. Compositions that pin
+            # their own limits or tools keep exactly what they asked for.
+            **(
+                {BROWSER_TASK_LIMITS_METADATA_KEY: browser_task_limits.model_dump(mode="json")}
+                if browser_enabled and enabled_tools is None and limits is None
+                else {}
+            ),
+        },
     )
     if storage == "postgres":
         agent = agent.model_copy(

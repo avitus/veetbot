@@ -10,11 +10,15 @@ from uuid import UUID, uuid5
 from pydantic import BaseModel, Field
 
 from agent_core.domain.runs import RunLimits
+from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY, Session
 
 # ADR-0123: configured tools this agent offers through the deferred tool index
 # rather than as full definitions. Listed in agent metadata so the agent's
 # content-addressed version covers it.
 DEFERRED_TOOLS_METADATA_KEY = "deferred_tools"
+# ADR-0130: the run limits a chat bound to a website profile runs under, in
+# agent metadata so the content-addressed version pins them.
+BROWSER_TASK_LIMITS_METADATA_KEY = "browser_task_limits"
 
 
 class AgentSpec(BaseModel):
@@ -30,6 +34,17 @@ class AgentSpec(BaseModel):
     policy_profile: str
     limits: RunLimits
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def run_limits_for_session(agent: AgentSpec, session: Session) -> RunLimits:
+    """ADR-0130: a chat bound to a website profile runs under the overlay its
+    pinned agent version carries; every other chat under the agent's limits."""
+
+    selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+    overlay = agent.metadata.get(BROWSER_TASK_LIMITS_METADATA_KEY)
+    if isinstance(selected_profile, str) and selected_profile and overlay is not None:
+        return RunLimits.model_validate(overlay)
+    return agent.limits.model_copy(deep=True)
 
 
 def content_addressed_agent_version(agent: AgentSpec) -> str:

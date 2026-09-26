@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -26,9 +27,9 @@ from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfi
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
-from agent_core.config import Settings, load_settings
+from agent_core.config import ConfigurationError, Settings, load_settings
 from agent_core.context.estimator import ConservativeTokenEstimator
-from agent_core.domain.agents import Principal
+from agent_core.domain.agents import BROWSER_TASK_LIMITS_METADATA_KEY, Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserAction,
@@ -45,7 +46,7 @@ from agent_core.domain.browser import (
 from agent_core.domain.errors import InvalidStateTransition, NotFoundError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolInvocation,
@@ -297,6 +298,120 @@ async def test_selected_profile_browser_plan_stays_within_the_tool_definition_ca
         for value in cast(list[dict[str, object]], plan["tool_specs"])
     ]
     assert ConservativeTokenEstimator().estimate_tools(tool_specs, "fake:scripted") <= 6_000
+
+
+BROWSER_TASK_LIMITS = RunLimits(
+    max_steps=160,
+    max_model_calls=120,
+    max_tool_calls=160,
+    max_cost=Decimal("30"),
+    synthesis_reserve_model_calls=2,
+    synthesis_reserve_tool_calls=4,
+    synthesis_reserve_cost=Decimal("3"),
+)
+INTERACTIVE_LIMITS = RunLimits(
+    max_steps=32,
+    max_model_calls=24,
+    max_tool_calls=64,
+    synthesis_reserve_model_calls=2,
+    synthesis_reserve_tool_calls=4,
+)
+
+
+def one_text_turn() -> FakeModelScript:
+    return FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+
+
+async def test_bound_chat_runs_under_the_browser_task_limits() -> None:
+    """ADR-0130 decision 1: a chat bound to a website profile gets the overlay."""
+
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await composition.runs.submit("Open my selected website.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+
+    assert run.status is RunStatus.COMPLETED
+    assert run.limits == BROWSER_TASK_LIMITS
+
+
+async def test_the_default_agent_version_pins_the_overlay() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        created = await composition.services.sessions.create(composition.principal, "general", {})
+        async with composition.uow_factory() as uow:
+            session = await uow.sessions.get(created.id, composition.principal)
+            agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+
+    assert BROWSER_TASK_LIMITS_METADATA_KEY in agent.metadata
+    assert RunLimits.model_validate(agent.metadata[BROWSER_TASK_LIMITS_METADATA_KEY]) == (
+        BROWSER_TASK_LIMITS
+    )
+    assert agent.limits == INTERACTIVE_LIMITS
+
+
+async def test_an_overlay_below_the_defaults_is_refused_at_startup(tmp_path: Path) -> None:
+    overlay = tmp_path / "runtime" / "limits.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("browser_task:\n  max_model_calls: 2\n", encoding="utf-8")
+    settings = load_settings(
+        {**base_environment(), "SANDBOX_MECHANISM": "fake", "AGENT_CONFIG_DIR": str(tmp_path)}
+    )
+
+    with pytest.raises(ConfigurationError, match=r"browser_task\.max_model_calls"):
+        async with build(settings=settings):
+            pass
+
+
+async def test_unbound_chat_keeps_the_interactive_limits() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        created = await composition.services.sessions.create(composition.principal, "general", {})
+        run_id = await composition.runs.submit("Check the weather.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+
+    assert run.limits == INTERACTIVE_LIMITS
+
+
+async def test_chat_pinned_before_the_overlay_keeps_the_interactive_limits() -> None:
+    """A bound session pinned to a version without the overlay keeps 32/24/64."""
+
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        async with composition.uow_factory() as uow:
+            session = await uow.sessions.get(created.id, composition.principal)
+            current = await uow.agents.get_version(session.agent_id, session.agent_version)
+            earlier = current.model_copy(
+                update={
+                    "version": "0.9.0",
+                    "metadata": {
+                        key: value
+                        for key, value in current.metadata.items()
+                        if key != BROWSER_TASK_LIMITS_METADATA_KEY
+                    },
+                },
+                deep=True,
+            )
+            await uow.agents.put(earlier)
+            pinned = session.model_copy(
+                update={"id": UUID(int=0xF0F0), "agent_version": "0.9.0"}, deep=True
+            )
+            await uow.sessions.create(pinned)
+        run_id = await composition.runs.submit("Open my selected website.", pinned.id)
+        run = await composition.runs.wait_terminal(run_id)
+
+    assert run.limits == INTERACTIVE_LIMITS
 
 
 async def test_session_creation_binds_only_a_ready_principal_owned_browser_profile() -> None:
