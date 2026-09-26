@@ -367,6 +367,49 @@ async def test_hosted_provider_keeps_the_run_attempt_lease_from_navigation_to_ac
     assert sessions.sequence == [1]
 
 
+@dataclass
+class SettledPageSessions(FakeSessions):
+    """Each act returns the page it settled on, with a new revision and refs."""
+
+    async def act(
+        self,
+        lease_ref: str,
+        action: BrowserAction,
+        *,
+        sequence: int,
+    ) -> BrowserObservation:
+        await super().act(lease_ref, action, sequence=sequence)
+        revision = f"revision-{sequence + 1}"
+        return BrowserObservation(
+            url="https://example.org/lesson",
+            revision=revision,
+            elements=(BrowserElement(ref=f"{revision}:0", role="button", name="Continue"),),
+        )
+
+
+async def test_an_act_can_follow_an_act_on_its_returned_revision() -> None:
+    """ADR-0130 decision 6 in hosted mode: act on the page act returned, no observe."""
+
+    sessions = SettledPageSessions()
+    provider = ready_provider(sessions)
+    call = replace(tool_context(), deadline_at=NOW + timedelta(seconds=30))
+    second = BrowserAction(
+        kind=BrowserActionKind.CLICK, expected_revision="revision-2", ref="revision-2:0"
+    )
+
+    await provider.bind_execution(call)
+    await provider.navigate("https://example.org/lesson")
+    await provider.action_context(CLICK)
+    returned = await provider.act(CLICK)
+    context = await provider.action_context(second)
+    await provider.act(second)
+
+    assert returned.revision == "revision-2"
+    assert (context.revision, context.ref) == ("revision-2", "revision-2:0")
+    assert sessions.sequence == [1, 2]
+    assert len(sessions.acquisitions) == 1
+
+
 async def test_hosted_provider_bounds_the_lease_by_a_nearer_run_deadline() -> None:
     sessions = FakeSessions()
     provider = ready_provider(sessions)
