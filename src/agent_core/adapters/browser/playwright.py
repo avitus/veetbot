@@ -729,6 +729,10 @@ class PythonPlaywrightRuntime:
             metadata = await handle.evaluate(_ELEMENT_SCRIPT)
         except PlaywrightError:
             await self._refuse_grant()
+        if metadata.get("overlong") is not False:
+            # A label source past what the live check reads could hold an
+            # excluded word in its unread tail.
+            await self._refuse_grant()
         name = str(metadata.get("name") or "")[:1024]
         role = str(metadata.get("role") or "") or _default_role(
             str(metadata.get("tag") or ""), metadata.get("inputType")
@@ -906,14 +910,16 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
 # too. Past the walk's bounds, or with an embedded document inside, the element
 # is opaque: its targets cannot be listed.
 _ELEMENT_SCRIPT = """node => {
-    const clean = value => Array.from(String(value || '').replace(/\\s+/g, ' ').trim())
-        .slice(0, 1024).join('');
-    const tree = node.getRootNode();
-    const byId = id => (tree.getElementById ? tree.getElementById(id) : null)
-        || document.getElementById(id);
-    const referenced = ids => String(ids || '').split(/\\s+/).filter(Boolean).slice(0, 8)
-        .map(id => {
-            const target = byId(id);
+    const collapse = value => Array.from(String(value || '').replace(/\\s+/g, ' ').trim());
+    const clean = value => collapse(value).slice(0, 1024).join('');
+    const byId = (element, id) => {
+        const tree = element.getRootNode();
+        return (tree.getElementById ? tree.getElementById(id) : null)
+            || document.getElementById(id);
+    };
+    const referenced = (element, ids) => String(ids || '').split(/\\s+/).filter(Boolean)
+        .slice(0, 8).map(id => {
+            const target = byId(element, id);
             return target ? target.textContent : '';
         }).join(' ');
     const resolve = value => {
@@ -987,6 +993,21 @@ _ELEMENT_SCRIPT = """node => {
     // its form through the form's default button.
     const own = [...ancestors, ...ownControls].filter(submits);
     const inner = [...descendants, ...controlsOf(descendants)].filter(submits);
+    // Check boxes and radios a click changes besides the node: its label's
+    // control, and any inside it or reached through a label inside it.
+    const toggled = [...new Set([...ownControls, ...descendants, ...controlsOf(descendants)])]
+        .filter(element => element !== node && element.localName === 'input'
+            && ['checkbox', 'radio'].includes(element.type));
+    if (toggled.length > 16) {
+        opaque = true;
+    }
+    const described = toggled.slice(0, 16).map(element => [
+        element.getAttribute('aria-label'),
+        referenced(element, element.getAttribute('aria-labelledby')),
+        Array.from(element.labels || []).map(label => label.innerText).join(' '),
+        element.getAttribute('title'),
+        element.getAttribute('value'),
+    ].filter(Boolean).join(' '));
     const actionOf = submitter => resolve(
         (submitter.hasAttribute('formaction')
             ? submitter.getAttribute('formaction')
@@ -1021,6 +1042,21 @@ _ELEMENT_SCRIPT = """node => {
     const type = (node.getAttribute('type') || '').toLowerCase();
     const valued = tag === 'button'
         || (tag === 'input' && ['submit', 'button', 'reset'].includes(type));
+    // Each label source at full length; one past 1,024 characters cannot be
+    // read whole, and the live check refuses it.
+    const sources = {
+        aria_label: node.getAttribute('aria-label'),
+        aria_labelledby: referenced(node, node.getAttribute('aria-labelledby')),
+        label: [...Array.from(node.labels || []).map(label => label.innerText), ...described]
+            .join(' '),
+        title: node.getAttribute('title'),
+        placeholder: node.getAttribute('placeholder'),
+        alt: [node.getAttribute('alt') || '', ...images].join(' '),
+        value: valued ? node.getAttribute('value') : '',
+        visible_text: [node.innerText || '', ...shadowText].join(' '),
+    };
+    const labels = Object.fromEntries(
+        Object.entries(sources).map(([source, value]) => [source, clean(value)]));
     return {
         tag,
         role: node.getAttribute('role'),
@@ -1030,22 +1066,14 @@ _ELEMENT_SCRIPT = """node => {
             .slice(0, 1024).join(''),
         autocomplete: node.getAttribute('autocomplete') || '',
         editable: node.isContentEditable === true,
-        labels: {
-            aria_label: clean(node.getAttribute('aria-label')),
-            aria_labelledby: clean(referenced(node.getAttribute('aria-labelledby'))),
-            label: clean(Array.from(node.labels || []).map(label => label.innerText).join(' ')),
-            title: clean(node.getAttribute('title')),
-            placeholder: clean(node.getAttribute('placeholder')),
-            alt: clean([node.getAttribute('alt') || '', ...images].join(' ')),
-            value: valued ? clean(node.getAttribute('value')) : '',
-            visible_text: clean([node.innerText || '', ...shadowText].join(' ')),
-        },
+        labels,
+        overlong: Object.values(sources).some(value => collapse(value).length > 1024),
         links: links.slice(0, 64),
         forms: forms.slice(0, 64),
         opaque,
         download: flat.some(element => anchor(element) && element.hasAttribute('download')),
         context: dialog ? clean(dialog.getAttribute('aria-label')
-            || referenced(dialog.getAttribute('aria-labelledby'))
+            || referenced(dialog, dialog.getAttribute('aria-labelledby'))
             || (heading ? heading.textContent : '')) : '',
         options: tag === 'select'
             ? Array.from(node.options).slice(0, 256).map(option => [option.label, option.value])

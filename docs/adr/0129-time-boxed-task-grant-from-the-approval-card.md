@@ -126,7 +126,9 @@ change needs the owner's explicit approval, and the owner has given it.
      - the element's role and every label source it has: `aria-label`, the
        text of its `aria-labelledby` targets, its associated `<label>`
        elements, `title`, `placeholder`, `alt`, a button's `value`, and its
-       visible text;
+       visible text. When a click on it would change another check box or
+       radio, through a label or one inside it, that control's own labels
+       join its associated labels;
      - the accessible name of any enclosing dialog;
      - for a select, the chosen option's label and value;
      - a closed field kind;
@@ -203,7 +205,9 @@ change needs the owner's explicit approval, and the owner has given it.
      the last two, and the service refuses a constraint whose fields
      disagree with it.
    - The runtime reads the live page URL, the live element and its live label
-     sources, and runs the same classifier and coverage rules.
+     sources, and runs the same classifier and coverage rules. It refuses an
+     element with a label source longer than the 1,024 characters it reads,
+     whose unread tail could hold an excluded word.
    - A key press or typed text goes to whatever holds focus, not to the
      element the classifier read. For those, the runtime focuses the element
      and refuses before dispatch unless the element itself then holds focus,

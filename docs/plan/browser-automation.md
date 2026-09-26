@@ -466,7 +466,9 @@ Navigate, observe, and act responses may also carry secret-free element facts
 as an optional sibling of the observation, which a caller that does not know
 them ignores: a closed field kind; the element's label sources (accessible-name
 attributes, associated labels, alternative text, button values, and visible
-text, each capped at 256 characters); whether a link or form target is
+text, each capped at 256 characters), where the associated labels include
+those of any check box or radio a click on it would change, through a label
+or inside it; whether a link or form target is
 same-origin, its first path segment, and whether any of its path segments is
 sensitive; a download flag; and the enclosing dialog's accessible name, capped
 at 128 characters. A form target is where the browser would submit: the
@@ -488,7 +490,9 @@ action classifier and the approval view and never enter a model-visible
 result. An act request may carry a dispatch constraint naming the grant kind,
 origins, an optional path prefix, an expiry, a consequence ceiling, and a text
 cap. The runtime uses it only to refuse: before dispatch it checks the expiry,
-the live page URL, and the live element's labels, consequence, and facts.
+the live page URL, and the live element's labels, consequence, and facts, and
+it refuses an element with a label source longer than the 1,024 characters it
+reads.
 A key press or typed text goes to whatever holds focus, so under a constraint
 the runtime focuses the element and refuses unless the element itself then
 holds focus, through open shadow roots, and never an embedded document. Until

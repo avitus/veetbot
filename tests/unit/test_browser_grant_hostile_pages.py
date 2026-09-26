@@ -418,3 +418,53 @@ async def test_a_covered_link_sends_no_hyperlink_auditing_ping() -> None:
 
     assert arrived.url.endswith("/lesson/2")
     assert left == []
+
+
+# A click on a label, or on an element holding a check box, changes a control
+# whose own labels say what it is.
+TOGGLES = """<!doctype html><html><head><title>Lesson</title></head><body>
+<input type="radio" name="plan" id="keep" aria-label="Keep learning">
+<input type="radio" name="plan" id="trial" aria-label="Start Super trial $12.99">
+<label role="button" for="trial">Keep going</label>
+<label role="button" id="wrapped"><input type="checkbox" id="renew"
+ aria-label="Renew my subscription">Continue</label>
+<div role="button" style="position:relative;width:200px;height:60px">Next
+<input type="checkbox" id="auto" aria-label="Auto-renew membership"
+ style="position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0.01"></div>
+<label role="button" for="keep">Stay</label>
+</body></html>"""
+
+
+async def test_a_control_a_click_would_change_is_classified_by_its_own_labels() -> None:
+    async with lesson_pages({"/lesson/1": TOGGLES}) as (runtime, visit, _left):
+        page = await visit("/lesson/1")
+        refusals = []
+        for name in ("Keep going", "Continue", "Next"):
+            refusals.append((await _refused(runtime, _click_named(page, name))).reason_code)
+            page = await runtime.observe()
+        await _covered(runtime, _click_named(page, "Stay"))
+        state = await _page_value(
+            runtime,
+            "['keep', 'trial', 'renew', 'auto'].map(id => document.getElementById(id).checked)",
+        )
+
+    assert refusals == [GRANT_NOT_APPLICABLE] * 3
+    assert state == [True, False, False, False]
+
+
+# An excluded word past the 1,024 characters the runtime reads.
+PADDED = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button aria-label="Continue PADDING Buy 500 gems" onclick="window.clicks.push(1)">Continue</button>
+<script>window.clicks = [];</script>
+</body></html>""".replace("PADDING", "and " * 300)
+
+
+async def test_a_label_too_long_to_read_whole_is_refused() -> None:
+    async with lesson_pages({"/lesson/1": PADDED}) as (runtime, visit, _left):
+        page = await visit("/lesson/1")
+        name = next(element.name for element in page.elements if element.role == "button")
+        refusal = await _refused(runtime, _click_named(page, name))
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert refusal.reason_code == GRANT_NOT_APPLICABLE
+    assert clicks == []
