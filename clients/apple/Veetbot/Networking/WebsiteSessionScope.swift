@@ -21,6 +21,8 @@ public struct WebsiteSessionScope: Sendable {
     static let maximumCookies = 300
     static let maximumOrigins = 64
     static let maximumStorageItems = 2_000
+    /// Length bounds count Unicode code points, as the service's `max_length`
+    /// does, never Swift characters: one character can be several code points.
     static let maximumStorageNameCharacters = 1_024
     static let maximumCookieBytes = 4_096
     static let maximumConfirmedURLCharacters = 4_096
@@ -134,7 +136,7 @@ public struct WebsiteSessionScope: Sendable {
             else { return nil }
             var seenNames: Set<String> = []
             let items = (localStorage[rawOrigin] ?? []).filter { item in
-                item.name.count <= Self.maximumStorageNameCharacters
+                item.name.unicodeScalars.count <= Self.maximumStorageNameCharacters
                     && seenNames.insert(item.name).inserted
             }
             return items.isEmpty ? nil : HandoffOrigin(origin: origin, localStorage: items)
@@ -145,7 +147,7 @@ public struct WebsiteSessionScope: Sendable {
     /// The request body, refused unless every §2.3 rule holds, so nothing the
     /// service would reject, and nothing over 1 MiB, ever leaves the device.
     public func encode(_ handoff: DeviceSessionHandoff) throws -> Data {
-        guard handoff.confirmedURL.count <= Self.maximumConfirmedURLCharacters,
+        guard handoff.confirmedURL.unicodeScalars.count <= Self.maximumConfirmedURLCharacters,
             let confirmed = URL(string: handoff.confirmedURL), allows(confirmed),
             !handoff.confirmedURL.contains("#")
         else { throw WebsiteSessionScopeError.invalid("confirmed_url") }
@@ -171,7 +173,7 @@ public struct WebsiteSessionScope: Sendable {
             else { throw WebsiteSessionScopeError.invalid("origin") }
             var names: Set<String> = []
             for item in origin.localStorage {
-                guard item.name.count <= Self.maximumStorageNameCharacters,
+                guard item.name.unicodeScalars.count <= Self.maximumStorageNameCharacters,
                     names.insert(item.name).inserted
                 else { throw WebsiteSessionScopeError.invalid("storage name") }
             }
@@ -199,7 +201,7 @@ public struct WebsiteSessionScope: Sendable {
             cookie.name.utf8.count + cookie.value.utf8.count <= maximumCookieBytes
         else { return "cookie value" }
         guard isValidDomain(cookie.domain) else { return "cookie domain" }
-        guard (1...1_024).contains(cookie.path.count), cookie.path.hasPrefix("/"),
+        guard (1...1_024).contains(cookie.path.unicodeScalars.count), cookie.path.hasPrefix("/"),
             cookie.path.unicodeScalars.allSatisfy({
                 $0.value >= 0x20 && $0.value != 0x7F && $0.value != 0x3B
             })
@@ -220,7 +222,7 @@ public struct WebsiteSessionScope: Sendable {
     /// Lowercase LDH labels with at least one inner dot, at most one leading
     /// dot and no trailing dot.
     static func isValidDomain(_ domain: String) -> Bool {
-        guard (1...255).contains(domain.count) else { return false }
+        guard (1...255).contains(domain.unicodeScalars.count) else { return false }
         let body = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
         let labels = body.split(separator: ".", omittingEmptySubsequences: false)
         guard labels.count >= 2 else { return false }

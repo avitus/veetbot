@@ -242,6 +242,61 @@ import Testing
         )
     }
 
+    /// The service's `max_length` counts code points, as Python's `len` does.
+    /// Swift's `count` counts characters, so a name of combining marks can be
+    /// short in characters and still too long for the service.
+    @Test
+    func lengthBoundsCountCodePointsAsTheServiceDoes() throws {
+        func marks(_ characters: Int) -> String { String(repeating: "e\u{0301}", count: characters) }
+        let tooLong = marks(700)
+        #expect(tooLong.count == 700)
+        #expect(tooLong.unicodeScalars.count == 1_400)
+        let atLimit = marks(512)
+        #expect(atLimit.unicodeScalars.count == WebsiteSessionScope.maximumStorageNameCharacters)
+
+        let learn = try #require(URL(string: "https://www.example.org/learn"))
+        let filtered = try #require(
+            scope.handoff(
+                confirmedURL: learn,
+                cookies: [],
+                localStorage: [
+                    "https://www.example.org": [
+                        HandoffStorageItem(name: tooLong, value: "v"),
+                        HandoffStorageItem(name: atLimit, value: "v"),
+                    ]
+                ],
+                now: now
+            )
+        )
+        #expect(filtered.origins.first?.localStorage.map(\.name.unicodeScalars.count) == [1_024])
+
+        func storage(_ name: String) -> DeviceSessionHandoff {
+            DeviceSessionHandoff(
+                confirmedURL: "https://www.example.org/learn",
+                cookies: [],
+                origins: [
+                    HandoffOrigin(
+                        origin: "https://www.example.org",
+                        localStorage: [HandoffStorageItem(name: name, value: "v")]
+                    )
+                ]
+            )
+        }
+        #expect(throws: WebsiteSessionScopeError.invalid("storage name")) {
+            try scope.encode(storage(tooLong))
+        }
+        #expect((try? scope.encode(storage(atLimit))) != nil)
+
+        func cookie(path: String) -> HandoffCookie {
+            HandoffCookie(
+                name: "sid", value: "v", domain: "www.example.org", path: path, expires: -1,
+                httpOnly: false, secure: true, sameSite: .lax
+            )
+        }
+        #expect(WebsiteSessionScope.cookieProblem(cookie(path: "/" + marks(600))) == "cookie path")
+        #expect(WebsiteSessionScope.cookieProblem(cookie(path: "/" + marks(511))) == nil)
+    }
+
     @Test
     func storageJSONMustBeAListOfNameValuePairs() throws {
         #expect(
