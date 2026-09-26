@@ -7,6 +7,8 @@ The resolve body carries ``task_grant`` exactly when the decision is
 
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -367,6 +369,13 @@ async def post(app: Any, path: str, body: dict[str, Any] | None = None) -> httpx
         return await client.post(path, json=body)
 
 
+def _cursor(payload: dict[str, Any]) -> str:
+    """A list cursor encoded the way the service encodes one, around any payload."""
+
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(encoded).decode().rstrip("=")
+
+
 async def get(app: Any, path: str, **params: Any) -> httpx.Response:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
@@ -579,10 +588,15 @@ async def test_task_grant_routes_validate_their_input() -> None:
 
     bad_status = await get(app, GRANTS, status="finished")
     bad_cursor = await get(app, GRANTS, cursor="not-a-cursor")
+    # Well-formed JSON whose fields are not strings is as malformed as noise.
+    numeric_id = await get(
+        app, GRANTS, cursor=_cursor({"created_at": "2026-09-25T00:00:00+00:00", "id": 1})
+    )
+    numeric_time = await get(app, GRANTS, cursor=_cursor({"created_at": 5, "id": str(_grant_id)}))
     bad_limit = await get(app, GRANTS, limit=0)
     bad_id = await get(app, f"{GRANTS}/not-a-uuid")
 
-    for response in (bad_status, bad_cursor, bad_limit, bad_id):
+    for response in (bad_status, bad_cursor, numeric_id, numeric_time, bad_limit, bad_id):
         assert response.status_code == 400, response.text
         assert response.json()["error"]["code"] == "malformed_request"
 

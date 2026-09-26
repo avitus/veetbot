@@ -455,6 +455,10 @@ def _decode_task_grant_cursor(value: str | None) -> tuple[datetime | None, UUID 
         decoded = json.loads(base64.urlsafe_b64decode(padded.encode()))
         if not isinstance(decoded, dict) or set(decoded) != {"created_at", "id"}:
             raise ValueError
+        # The cursor is the client's: a field of any other type is malformed,
+        # never an internal error.
+        if not isinstance(decoded["created_at"], str) or not isinstance(decoded["id"], str):
+            raise ValueError
         created_at = datetime.fromisoformat(decoded["created_at"])
         if created_at.tzinfo is None:
             raise ValueError
