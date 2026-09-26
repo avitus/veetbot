@@ -19,6 +19,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_core.api.attachments import attachments_router
 from agent_core.api.auth import Authenticator
+from agent_core.api.boundary import MalformedRequestError
+from agent_core.api.browser_task_grants import browser_task_grants_router
 from agent_core.api.calls import call_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
@@ -125,10 +127,6 @@ IDEMPOTENCY_KEY_MAX_LENGTH = 255
 APPROVAL_REASON_MAX_LENGTH = 4096
 # What a principal-scoped body carrying user content tells caches to do with it.
 PRIVATE_NO_STORE = "private, no-store"
-
-
-class MalformedRequestError(ValueError):
-    """A syntactically invalid value detected at the HTTP boundary."""
 
 
 def _content_disposition(filename: str) -> str:
@@ -1958,5 +1956,8 @@ def create_app(
         app.include_router(call_router(services.calls, secured))
     if settings.attachment_uploads_enabled:
         app.include_router(attachments_router(services.artifacts, secured))
+    task_grants = getattr(services, "browser_task_grants", None)
+    if settings.browser_task_grants_enabled and task_grants is not None:
+        app.include_router(browser_task_grants_router(task_grants, secured))
 
     return app

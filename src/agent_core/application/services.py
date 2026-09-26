@@ -17,7 +17,7 @@ from agent_core.domain.browser import (
     BrowserGrantView,
     BrowserProfileView,
 )
-from agent_core.domain.browser_task_grants import TaskGrantEcho
+from agent_core.domain.browser_task_grants import BrowserTaskGrantView, TaskGrantEcho
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
@@ -146,6 +146,24 @@ class RunService(Protocol):
         run_id: UUID,
         after_sequence: int | None,
     ) -> AsyncIterator[StreamFrame]: ...
+
+
+class BrowserTaskGrantService(Protocol):
+    """ADR-0129: read and stop the owner's task grants; there is no create."""
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None,
+        status: Literal["active", "all"],
+        limit: int,
+        cursor: str | None,
+    ) -> Page[BrowserTaskGrantView]: ...
+
+    async def get(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView: ...
+
+    async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView: ...
 
 
 class ApprovalService(Protocol):

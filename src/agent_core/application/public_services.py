@@ -20,6 +20,11 @@ from agent_core.application.attachments import (
     claim_attachments,
 )
 from agent_core.application.authorization import require_scope
+from agent_core.application.browser_task_grants import (
+    TaskGrantResolution,
+    read_task_grant_context,
+    task_grant_ended_event,
+)
 from agent_core.application.errors import (
     MemoryCursorError,
     SessionMessageCursorError,
@@ -50,7 +55,17 @@ from agent_core.domain.artifacts import (
 )
 from agent_core.domain.attachments import upload_key, upload_media_type, upload_name
 from agent_core.domain.browser import BrowserProfileStatus
-from agent_core.domain.browser_task_grants import TaskGrantEcho
+from agent_core.domain.browser_act_views import session_allows_task_grant
+from agent_core.domain.browser_task_grants import (
+    TASK_GRANT_DURATION,
+    TASK_GRANT_MAX_ACTIONS,
+    TASK_GRANT_MAX_TYPED_CHARACTERS,
+    BrowserTaskGrant,
+    BrowserTaskGrantEndReason,
+    BrowserTaskGrantOffer,
+    TaskGrantEcho,
+    task_grant_id_for_approval,
+)
 from agent_core.domain.canonical import canonical_json
 from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
@@ -1320,11 +1335,14 @@ class PublicApprovalService:
         dispatcher: RunDispatcher,
         resume_waiting_run: ResumeWaitingRun,
         self_approval_enabled: bool,
+        task_grants: TaskGrantResolution | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
         self._resume_waiting_run = resume_waiting_run
         self._self_approval_enabled = self_approval_enabled
+        # ADR-0129: composed only when BROWSER_TASK_GRANTS_ENABLED is set.
+        self._task_grants = task_grants
 
     async def list(
         self,
@@ -1376,10 +1394,10 @@ class PublicApprovalService:
             # ADR-0129: creating a task grant needs the grant scope too, checked
             # before any read; with no task grants composed nothing is read.
             require_scope(principal, "browser.grant.write")
-            raise ConflictError(
-                "Allow for this task is not available.",
-                reason="task_grant_unavailable",
-                details={"approval_id": str(approval_id)},
+            if self._task_grants is None or task_grant is None:
+                raise _task_grant_unavailable(approval_id)
+            return await self._resolve_for_task(
+                principal, approval_id, reason, task_grant, self._task_grants
             )
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
@@ -1443,6 +1461,187 @@ class PublicApprovalService:
         if dispatch_run is not None:
             await self._dispatcher.resume(dispatch_run)
         return _approval_view(outcome.approval)
+
+    async def _resolve_for_task(
+        self,
+        principal: Principal,
+        approval_id: UUID,
+        reason: str | None,
+        echo: TaskGrantEcho,
+        resolution: TaskGrantResolution,
+    ) -> ApprovalView:
+        """ADR-0129 section 8.1: approve the action once and create the grant
+        in one unit of work; any refusal leaves the approval pending."""
+
+        dispatch_run: UUID | None = None
+        async with self._uow_factory() as uow:
+            visible = await uow.approvals.get(approval_id, principal)
+            if visible.principal_id != principal.principal_id:
+                # The grant belongs to the owner of the chat: another principal
+                # cannot allow a task for it, and does not learn it exists.
+                raise NotFoundError("approval not found")
+            if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
+                raise ConflictError(
+                    "The approval is no longer pending.",
+                    details={"status": visible.status.value},
+                )
+            if not self._self_approval_enabled:
+                raise AuthorizationError("approval requires a distinct resolver")
+            offer = visible.task_grant_offer
+            if visible.status is not ApprovalStatus.PENDING:
+                return self._already_resolved_for_task(visible, echo)
+            owner = Principal(tenant_id=visible.tenant_id, principal_id=visible.principal_id)
+            run = await uow.runs.get(visible.run_id, owner)
+            context = await read_task_grant_context(
+                uow, visible.session_id, principal, now=resolution.clock.now()
+            )
+            session, profile = context.session, context.profile
+            if (
+                visible.tool_name != "browser.act"
+                or offer is None
+                or session is None
+                or not any(
+                    (scope.origin, scope.path_prefix) == (offer.origin, offer.path_prefix)
+                    for scope in resolution.scopes
+                )
+                or run.status is not RunStatus.WAITING_FOR_APPROVAL
+                or not session_allows_task_grant(
+                    run,
+                    session_tenant_id=session.tenant_id,
+                    session_principal_id=session.principal_id,
+                    session_metadata=session.metadata,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                )
+                or profile is None
+                or profile.status is not BrowserProfileStatus.READY
+                or offer.origin not in profile.allowed_origins
+            ):
+                raise _task_grant_unavailable(approval_id)
+            if not _echoes(offer, echo):
+                raise _task_grant_offer_mismatch(approval_id)
+            grant_id = task_grant_id_for_approval(approval_id)
+            outcome = await uow.approvals.resolve(
+                approval_id,
+                principal,
+                ApprovalResolutionType.APPROVE_FOR_TASK,
+                reason,
+                task_grant_id=grant_id,
+            )
+            if outcome.state is not ApprovalResolutionState.APPLIED:
+                return self._already_resolved_for_task(outcome.approval, echo)
+            now = resolution.clock.now()
+            # D9: one grant per session; a new one supersedes the old.
+            for previous in await uow.browser_task_grants.list(
+                principal, session_id=session.id, now=now, limit=1
+            ):
+                ended, transitioned = await uow.browser_task_grants.end(
+                    previous.id, principal, reason=BrowserTaskGrantEndReason.SUPERSEDED, now=now
+                )
+                if transitioned:
+                    await uow.events.append(
+                        task_grant_ended_event(ended, run_id=run.id, actor_type="application")
+                    )
+            grant = await uow.browser_task_grants.create(
+                BrowserTaskGrant(
+                    id=grant_id,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    session_id=session.id,
+                    profile_id=profile.id,
+                    profile_generation=profile.generation,
+                    agent_version=visible.agent_version,
+                    policy_version=visible.policy_version,
+                    origin=offer.origin,
+                    path_prefix=offer.path_prefix,
+                    max_actions=TASK_GRANT_MAX_ACTIONS,
+                    actions_used=0,
+                    typed_characters=0,
+                    approval_id=approval_id,
+                    approved_by=principal.principal_id,
+                    created_at=now,
+                    expires_at=now + TASK_GRANT_DURATION,
+                )
+            )
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="approval.resolved",
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload={
+                        "approval_id": str(approval_id),
+                        "resolution": ApprovalResolutionType.APPROVE_FOR_TASK.value,
+                        "task_grant_id": str(grant_id),
+                    },
+                )
+            )
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="browser.task_grant.created",
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload={
+                        "grant_id": str(grant.id),
+                        "approval_id": str(approval_id),
+                        "origin": grant.origin,
+                        "path_prefix": grant.path_prefix,
+                        "expires_at": grant.expires_at.isoformat(),
+                        "max_actions": grant.max_actions,
+                        "max_typed_characters": TASK_GRANT_MAX_TYPED_CHARACTERS,
+                    },
+                )
+            )
+            if run.status is RunStatus.WAITING_FOR_APPROVAL:
+                await self._resume_waiting_run(uow, run)
+                dispatch_run = run.id
+        if dispatch_run is not None:
+            await self._dispatcher.resume(dispatch_run)
+        return _approval_view(outcome.approval)
+
+    @staticmethod
+    def _already_resolved_for_task(approval: ApprovalRequest, echo: TaskGrantEcho) -> ApprovalView:
+        """A retry of the same allow returns the stored view; anything else
+        conflicts, naming why."""
+
+        if approval.resolution is ApprovalResolutionType.APPROVE_FOR_TASK:
+            if _echoes(approval.task_grant_offer, echo):
+                return _approval_view(approval)
+            raise _task_grant_offer_mismatch(approval.id)
+        raise ConflictError(
+            "The approval was already resolved differently.",
+            reason="approval_already_resolved",
+            details={
+                "approval_id": str(approval.id),
+                "decision": None if approval.resolution is None else approval.resolution.value,
+            },
+        )
+
+
+def _task_grant_unavailable(approval_id: UUID) -> ConflictError:
+    return ConflictError(
+        "Allow for this task is not available.",
+        reason="task_grant_unavailable",
+        details={"approval_id": str(approval_id)},
+    )
+
+
+def _task_grant_offer_mismatch(approval_id: UUID) -> ConflictError:
+    return ConflictError(
+        "The task permission does not match the one offered.",
+        reason="task_grant_offer_mismatch",
+        details={"approval_id": str(approval_id)},
+    )
+
+
+def _echoes(offer: BrowserTaskGrantOffer | None, echo: TaskGrantEcho) -> bool:
+    return offer is not None and (echo.origin, echo.path_prefix) == (
+        offer.origin,
+        offer.path_prefix,
+    )
 
 
 class _UploadRaceError(Exception):

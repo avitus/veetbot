@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
+from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
 from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.browser import (
@@ -33,6 +37,7 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskGrant,
     BrowserTaskGrantEndReason,
     BrowserTaskGrantScope,
+    BrowserTaskGrantView,
 )
 from agent_core.domain.errors import AgentCoreError, NotFoundError
 from agent_core.domain.events import NewEvent
@@ -45,7 +50,9 @@ from agent_core.domain.policies import (
 )
 from agent_core.domain.runs import Run
 from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY, Session
+from agent_core.domain.views import Page
 from agent_core.ports.browser import BrowserProvider, browser_snapshot_in_session
+from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.policies import PolicyEngine, StandingAuthorizer
 
@@ -357,3 +364,109 @@ class CompositeStandingAuthorizer:
         if denials:
             return denials[0]
         return StandingAuthorization(allowed=False, reason_code="standing.unavailable")
+
+
+@dataclass(frozen=True, slots=True)
+class TaskGrantResolution:
+    """What the public approval service needs to allow a task (section 8.1):
+    the configured scopes and the clock that stamps the grant's window."""
+
+    scopes: tuple[BrowserTaskGrantScope, ...]
+    clock: Clock
+
+
+class PublicBrowserTaskGrantService:
+    """List, read and revoke the principal's task grants (section 8.3)."""
+
+    def __init__(self, *, uow_factory: UnitOfWorkFactory, clock: Clock) -> None:
+        self._uow_factory = uow_factory
+        self._clock = clock
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None,
+        status: Literal["active", "all"],
+        limit: int,
+        cursor: str | None,
+    ) -> Page[BrowserTaskGrantView]:
+        """Newest first; an unowned session is not found, a bad cursor a
+        ValueError the route answers with 400."""
+
+        require_scope(principal, "browser.grant.read")
+        if not 1 <= limit <= 200:
+            raise ValueError("task grant list limit must be between 1 and 200")
+        after_created_at, after_id = _decode_task_grant_cursor(cursor)
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            if session_id is not None:
+                await uow.sessions.get(session_id, principal)
+            rows = await uow.browser_task_grants.list(
+                principal,
+                session_id=session_id,
+                active_only=status == "active",
+                now=now,
+                limit=limit + 1,
+                after_created_at=after_created_at,
+                after_id=after_id,
+            )
+        page = rows[:limit]
+        return Page[BrowserTaskGrantView](
+            items=[BrowserTaskGrantView.from_grant(row, now=now) for row in page],
+            next_cursor=(
+                _encode_task_grant_cursor(page[-1]) if len(rows) > limit and page else None
+            ),
+        )
+
+    async def get(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView:
+        require_scope(principal, "browser.grant.read")
+        async with self._uow_factory() as uow:
+            grant = await uow.browser_task_grants.get(grant_id, principal)
+        return BrowserTaskGrantView.from_grant(grant, now=self._clock.now())
+
+    async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView:
+        """End an active grant at once; an ended one returns unchanged, so a
+        retry is safe and appends no second event."""
+
+        require_scope(principal, "browser.grant.write")
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            grant, transitioned = await uow.browser_task_grants.end(
+                grant_id, principal, reason=BrowserTaskGrantEndReason.REVOKED, now=now
+            )
+            if transitioned:
+                await uow.events.append(
+                    task_grant_ended_event(
+                        grant,
+                        run_id=None,
+                        actor_type="principal",
+                        actor_id=principal.principal_id,
+                    )
+                )
+        return BrowserTaskGrantView.from_grant(grant, now=now)
+
+
+def _encode_task_grant_cursor(grant: BrowserTaskGrant) -> str:
+    payload = json.dumps(
+        {"created_at": grant.created_at.isoformat(), "id": str(grant.id)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_task_grant_cursor(value: str | None) -> tuple[datetime | None, UUID | None]:
+    if value is None:
+        return None, None
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        if not isinstance(decoded, dict) or set(decoded) != {"created_at", "id"}:
+            raise ValueError
+        created_at = datetime.fromisoformat(decoded["created_at"])
+        if created_at.tzinfo is None:
+            raise ValueError
+        return created_at, UUID(decoded["id"])
+    except (TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("task grant cursor is malformed") from exc

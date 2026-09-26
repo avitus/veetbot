@@ -303,6 +303,9 @@ from agent_core.application.services import (
     BrowserProfileService as PublicBrowserProfileServiceContract,
 )
 from agent_core.application.services import (
+    BrowserTaskGrantService as PublicBrowserTaskGrantServiceContract,
+)
+from agent_core.application.services import (
     DeviceIngestService as PublicDeviceIngestServiceContract,
 )
 from agent_core.application.services import (
@@ -696,6 +699,8 @@ class ApplicationServices:
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
     model_settings: PublicModelSettingsServiceContract | None = None
+    # ADR-0129: present only when BROWSER_TASK_GRANTS_ENABLED is set.
+    browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
 
 
 @dataclass(frozen=True, slots=True)

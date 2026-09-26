@@ -255,7 +255,7 @@ def task_grant_offer_summary(scope: BrowserTaskGrantScope) -> str:
     )
 
 
-def session_is_task_grant_eligible(
+def session_allows_task_grant(
     run: Run,
     *,
     session_tenant_id: str,
@@ -263,9 +263,9 @@ def session_is_task_grant_eligible(
     session_metadata: Mapping[str, Any],
     tenant_id: str,
     principal_id: str,
-    turn: AuthorizationTurn | None,
 ) -> bool:
-    """D1: an owner-driven, top-level interactive run of a profile-bound chat."""
+    """D1 without the turn: a top-level interactive run of the principal's
+    own chat bound to a website profile, never a scheduled one."""
 
     selected = session_metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
     return (
@@ -276,6 +276,31 @@ def session_is_task_grant_eligible(
         and isinstance(selected, str)
         and bool(selected)
         and SESSION_SCHEDULE_ID_METADATA_KEY not in session_metadata
+    )
+
+
+def session_is_task_grant_eligible(
+    run: Run,
+    *,
+    session_tenant_id: str,
+    session_principal_id: str,
+    session_metadata: Mapping[str, Any],
+    tenant_id: str,
+    principal_id: str,
+    turn: AuthorizationTurn | None,
+) -> bool:
+    """D1: an owner-driven, top-level interactive run of a profile-bound chat,
+    in a turn opened by the owner's own message."""
+
+    return (
+        session_allows_task_grant(
+            run,
+            session_tenant_id=session_tenant_id,
+            session_principal_id=session_principal_id,
+            session_metadata=session_metadata,
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+        )
         and turn is not None
         and turn.newest_user_trust is TrustLevel.USER
     )

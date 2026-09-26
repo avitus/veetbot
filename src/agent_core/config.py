@@ -22,6 +22,7 @@ from dotenv import dotenv_values
 from pydantic import SecretStr, ValidationError
 
 from agent_core.domain.browser import normalize_browser_origin
+from agent_core.domain.browser_task_grants import BrowserTaskGrantScope
 from agent_core.domain.calls import CallConfiguration
 from agent_core.domain.memory import (
     MemoryDistillationEvidence,
@@ -180,6 +181,10 @@ class Settings:
     browser_provider: BrowserProviderKind = BrowserProviderKind.DISABLED
     judgment_provider: JudgmentProviderKind = JudgmentProviderKind.DISABLED
     browser_allowed_origins: tuple[str, ...] = ()
+    # ADR-0129: task grants from the browser.act approval card, and the exact
+    # site scopes an owner may allow; environment-layer deployment controls.
+    browser_task_grants_enabled: bool = False
+    browser_task_grant_scopes: tuple[BrowserTaskGrantScope, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
     browser_grant_id: UUID | None = None
