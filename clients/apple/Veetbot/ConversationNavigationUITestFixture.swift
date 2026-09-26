@@ -588,6 +588,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = """
                 {"id":"\(Self.authenticationID)","profile_id":"\(Self.browserProfileID)","status":"authentication_required","expires_at":"2026-08-23T12:05:00Z","launch_url":"https://browser.example/authentication/\(Self.authenticationID)#capability=opaque"}
                 """
+        case ("GET", "/v1/browser-authentication-ceremonies/\(Self.authenticationID)"):
+            // Returning to the app re-reads an open remote ceremony (ADR-0128 D16).
+            statusCode = 200
+            body = """
+                {"id":"\(Self.authenticationID)","profile_id":"\(Self.browserProfileID)","status":"authentication_required","expires_at":"2026-08-23T12:05:00Z","launch_url":null}
+                """
         default:
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
             return

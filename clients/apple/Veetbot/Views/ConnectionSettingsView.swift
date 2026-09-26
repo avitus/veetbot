@@ -45,6 +45,7 @@ public struct ConnectionSettingsView: View {
     private let closeAction: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appearance: AppearancePreferences
     #if os(iOS)
     @EnvironmentObject private var smsIntegration: SmsIntegrationPreferences
@@ -92,9 +93,27 @@ public struct ConnectionSettingsView: View {
         .onAppear {
             if baseURL.isEmpty { baseURL = model.baseURL?.absoluteString ?? "" }
             if model.isConfigured {
-                Task { await model.refreshBrowserProfiles() }
+                Task {
+                    await model.refreshBrowserProfiles()
+                    await model.refreshOpenRemoteAuthentication()
+                }
             }
         }
+        // A remote sign-in finished in the web browser is read back when the
+        // app returns, without polling (ADR-0128 D16).
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                Task { await model.refreshOpenRemoteAuthentication() }
+            }
+        }
+        .deviceSignInPresentation(model: model)
+    }
+
+    /// No second sign-in starts while a remote one is open (either mode).
+    private var websiteAccessBlocked: Bool {
+        model.isManagingWebsiteAccess
+            || websiteURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || (model.browserAuthentication.map { $0.status != .ready } ?? false)
     }
 
     private var header: some View {
@@ -187,7 +206,7 @@ public struct ConnectionSettingsView: View {
                         settingsField(
                             title: "Website URL",
                             help:
-                                "Enter the website’s home page or login page. Veetbot opens it in an isolated browser where you sign in privately. HTTPS is added if omitted."
+                                "Enter the website’s home page or login page. Sign in on this device opens it in a private window here; Veetbot's remote browser opens it in an isolated browser instead. HTTPS is added if omitted."
                         ) {
                             TextField("example.com or https://example.com/login", text: $websiteURL)
                                 .textFieldStyle(.roundedBorder)
@@ -205,18 +224,22 @@ public struct ConnectionSettingsView: View {
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         Button {
-                            addWebsiteAccess()
+                            model.beginDeviceSignIn(websiteURL: websiteURL)
                         } label: {
-                            Label("Create secure login", systemImage: "person.badge.key.fill")
+                            Label("Sign in on this device", systemImage: "person.badge.key.fill")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(AppTheme.turquoise)
-                        .disabled(
-                            model.isManagingWebsiteAccess
-                                || websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty
-                                || (model.browserAuthentication.map { $0.status != .ready } ?? false)
-                        )
+                        .disabled(websiteAccessBlocked)
+                        .accessibilityIdentifier("website-access.sign-in-on-device")
+                        Button {
+                            addWebsiteAccess()
+                        } label: {
+                            Label("Use Veetbot's remote browser", systemImage: "globe")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(websiteAccessBlocked)
+                        .accessibilityIdentifier("website-access.remote-browser")
 
                         if let authenticationLaunchURL = model.websiteAuthenticationLaunchURL {
                             VStack(alignment: .leading, spacing: 10) {
@@ -453,6 +476,13 @@ public struct ConnectionSettingsView: View {
                     .foregroundColor(.secondary)
             }
             Spacer(minLength: 8)
+            if WebsiteAccessActions.offersSignInAgain(profile.status) {
+                Button("Sign in again") {
+                    model.beginDeviceSignIn(profile: profile)
+                }
+                .disabled(model.isManagingWebsiteAccess)
+                .accessibilityIdentifier("website-access.sign-in-again.\(profile.id.uuidString)")
+            }
             if profile.status == .ready {
                 if model.selectedBrowserProfileID == profile.id {
                     Label("Used for new chats", systemImage: "checkmark.circle.fill")

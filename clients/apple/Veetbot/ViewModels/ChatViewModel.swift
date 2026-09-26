@@ -139,6 +139,10 @@ public final class ChatViewModel: ObservableObject {
     /// ceremony so no view can offer it after the ceremony ends.
     @Published public private(set) var websiteAuthenticationLaunchURL: URL?
     @Published public private(set) var isManagingWebsiteAccess = false
+    /// The device sign-in window on screen, if any (ADR-0128). It carries no
+    /// launch URL, capability or session value: those live only in the locals
+    /// of `completeDeviceSignIn`.
+    @Published public private(set) var deviceSignInRequest: DeviceSignInRequest?
     /// The `device.sms.send` invocation whose compose sheet the owner should
     /// see now, if any. Its recipient and body live only here and in the sheet.
     @Published public private(set) var pendingSmsInvocation: SmsInvocation?
@@ -176,6 +180,11 @@ public final class ChatViewModel: ObservableObject {
     private let artifactCache: ArtifactCache
     private let deviceRegistrationCoordinator: DeviceRegistrationCoordinator
     private let urlSession: URLSession?
+    private let deviceHandoffClient: DeviceSignInHandoffClient
+    private let deviceSignInTiming: DeviceSignInTiming
+    /// The profile a device sign-in window created and that has not become
+    /// ready, so closing the window can remove it.
+    private var deviceSignInCreatedProfile: (requestID: UUID, profileID: UUID)?
     private var api: VeetbotAPIClient?
     private var eventStream: ReconnectingEventStream?
     private let watchTasks = WatchTaskBox()
@@ -207,7 +216,9 @@ public final class ChatViewModel: ObservableObject {
         deviceRegistrationCoordinator: DeviceRegistrationCoordinator =
             DeviceRegistrationCoordinator(),
         runState: RunStateReducer? = nil,
-        urlSession: URLSession? = nil
+        urlSession: URLSession? = nil,
+        deviceHandoffClient: DeviceSignInHandoffClient? = nil,
+        deviceSignInTiming: DeviceSignInTiming = .standard
     ) {
         self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
@@ -216,6 +227,8 @@ public final class ChatViewModel: ObservableObject {
         self.deviceRegistrationCoordinator = deviceRegistrationCoordinator
         self.runState = runState ?? RunStateReducer()
         self.urlSession = urlSession
+        self.deviceHandoffClient = deviceHandoffClient ?? DeviceSignInHandoffClient()
+        self.deviceSignInTiming = deviceSignInTiming
         Task { await bootstrap() }
     }
 
@@ -1432,6 +1445,36 @@ public final class ChatViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             present(error)
+            return
+        }
+        await reconcileOpenCeremonies(using: api)
+    }
+
+    /// A sign-in the owner finished without checking its status would stay
+    /// unknown: for each profile that is not ready, read the status of its
+    /// newest open, unexpired ceremony, which records a ready outcome (D16).
+    /// Best effort and silent; there is no timer.
+    private func reconcileOpenCeremonies(using api: VeetbotAPIClient) async {
+        let generation = connectionGeneration
+        let now = Date()
+        var becameReady = false
+        for profile in browserProfiles where profile.status != .ready && profile.status != .revoked {
+            guard
+                let ceremonies = try? await api.listBrowserAuthentications(profileID: profile.id),
+                let open = ceremonies
+                    .filter({ !$0.status.isTerminal && $0.expiresAt > now })
+                    .max(by: { $0.expiresAt < $1.expiresAt }),
+                let refreshed = try? await api.getBrowserAuthentication(open.id),
+                generation == connectionGeneration
+            else { continue }
+            if browserAuthentication?.id == refreshed.id {
+                browserAuthentication = refreshed
+                if refreshed.status.isTerminal { websiteAuthenticationLaunchURL = nil }
+            }
+            becameReady = becameReady || refreshed.status == .ready
+        }
+        if becameReady, generation == connectionGeneration {
+            try? await reloadBrowserProfiles(using: api)
         }
     }
 
@@ -1441,33 +1484,12 @@ public final class ChatViewModel: ObservableObject {
         additionalOrigins: String = ""
     ) async -> URL? {
         guard let api else { return nil }
-        let input = websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasScheme = input.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
-        let candidate = hasScheme ? input : "https://" + input
-        guard
-            var components = URLComponents(string: candidate),
-            components.scheme?.lowercased() == "https",
-            let host = components.host, !host.isEmpty,
-            components.user == nil, components.password == nil,
-            components.port == nil || components.port == 443
-        else {
+        guard let target = Self.websiteLoginTarget(websiteURL) else {
             errorMessage = "Enter a valid HTTPS website URL without a username or password."
             return nil
         }
-        components.scheme = "https"
-        components.host = host.lowercased()
-        components.port = nil
-        guard let normalizedLoginURL = components.url?.absoluteString else {
-            errorMessage = "Enter a valid HTTPS website URL."
-            return nil
-        }
-        components.path = ""
-        components.query = nil
-        components.fragment = nil
-        guard let primaryOrigin = components.url?.absoluteString else {
-            errorMessage = "Enter a valid HTTPS website URL."
-            return nil
-        }
+        let normalizedLoginURL = target.loginURL
+        let primaryOrigin = target.origin
         let extraOrigins = additionalOrigins
             .components(separatedBy: CharacterSet(charactersIn: ",\n\r"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1566,6 +1588,320 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Device sign-in (ADR-0128)
+
+    /// Opens the sign-in window for a new website; same URL rules as the
+    /// remote path. The window first loads the address as typed.
+    @discardableResult
+    public func beginDeviceSignIn(websiteURL: String) -> DeviceSignInRequest? {
+        guard api != nil else { return nil }
+        guard let target = Self.websiteLoginTarget(websiteURL),
+            let startURL = URL(string: target.loginURL)
+        else {
+            errorMessage = "Enter a valid HTTPS website URL without a username or password."
+            return nil
+        }
+        let request = DeviceSignInRequest(
+            startURL: startURL,
+            allowedOrigins: [target.origin],
+            profileID: nil,
+            adoptableOrigin: DeviceSignInNavigationPolicy.adoptableOrigin(for: target.origin)
+        )
+        openDeviceSignIn(request)
+        return request
+    }
+
+    /// Opens the sign-in window to sign in again to an existing, unrevoked
+    /// profile, at the root of its first origin.
+    @discardableResult
+    public func beginDeviceSignIn(profile: BrowserProfileView) -> DeviceSignInRequest? {
+        guard api != nil, profile.status != .revoked,
+            let origin = profile.allowedOrigins.first,
+            let startURL = URL(string: origin + "/")
+        else { return nil }
+        let request = DeviceSignInRequest(
+            startURL: startURL,
+            allowedOrigins: profile.allowedOrigins,
+            profileID: profile.id,
+            adoptableOrigin: nil
+        )
+        openDeviceSignIn(request)
+        return request
+    }
+
+    /// The owner tapped I'm signed in: create the profile if it is new, begin
+    /// a device ceremony, hand the session over once and learn the outcome
+    /// (0128-design §5.2). The launch URL and its capability exist only in
+    /// this function's locals.
+    public func completeDeviceSignIn(
+        _ request: DeviceSignInRequest,
+        handoff: DeviceSessionHandoff,
+        adoptedOrigin: String?
+    ) async -> DeviceSignInResult {
+        let offersRemote = request.profileID == nil
+        // The remote browser is the alternative when this device cannot start
+        // or carry the sign-in of a new website (B5).
+        func failure(_ message: String, canRetry: Bool = true) -> DeviceSignInResult {
+            let remoteMayHelp =
+                message == DeviceSignInMessage.couldNotStart
+                || message == DeviceSignInMessage.tooMuchData
+            return .failed(
+                DeviceSignInFailure(
+                    message: message,
+                    canRetry: canRetry,
+                    offersRemoteBrowser: offersRemote && remoteMayHelp
+                )
+            )
+        }
+        guard let api else { return failure(DeviceSignInMessage.couldNotStart) }
+        let generation = connectionGeneration
+        let origins = request.profileID == nil
+            ? (adoptedOrigin.map { [$0] } ?? request.allowedOrigins)
+            : request.allowedOrigins
+        let body: Data
+        do {
+            body = try WebsiteSessionScope(allowedOrigins: origins).encode(handoff)
+        } catch WebsiteSessionScopeError.tooLarge {
+            return failure(DeviceSignInMessage.tooMuchData, canRetry: false)
+        } catch {
+            return failure(DeviceSignInMessage.couldNotStart)
+        }
+        guard let confirmed = URL(string: handoff.confirmedURL),
+            let confirmedOrigin = WebsiteSessionScope.origin(of: confirmed)
+        else { return failure(DeviceSignInMessage.couldNotStart) }
+
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+
+        let profileID: UUID
+        if let existing = request.profileID {
+            profileID = existing
+        } else if let created = deviceSignInCreatedProfile, created.requestID == request.id {
+            profileID = created.profileID
+        } else {
+            do {
+                let profile = try await api.createBrowserProfile(allowedOrigins: origins)
+                guard generation == connectionGeneration else {
+                    return failure(DeviceSignInMessage.couldNotStart)
+                }
+                deviceSignInCreatedProfile = (request.id, profile.id)
+                profileID = profile.id
+            } catch {
+                return failure(DeviceSignInMessage.couldNotStart)
+            }
+        }
+
+        // D19: the begin names the root of the confirmed page's origin, which
+        // is allowed by construction and keeps the page's path and query off
+        // the API.
+        let ceremony: BrowserAuthenticationView
+        switch await beginDeviceCeremony(
+            using: api, profileID: profileID, loginURL: confirmedOrigin + "/"
+        ) {
+        case .success(let begun):
+            ceremony = begun
+        case .failure(let error):
+            return failure(error.message)
+        }
+        guard let target = DeviceSignInHandoffTarget(launchURL: ceremony.launchURL) else {
+            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+            return failure(DeviceSignInMessage.couldNotStart)
+        }
+
+        let status: BrowserAuthenticationStatus?
+        switch await deviceHandoffClient.send(body, to: target) {
+        case .sealed, .transportFailed:
+            status = await deviceCeremonyStatus(using: api, id: ceremony.id, polling: true)
+        case .capabilityRejected:
+            status = await deviceCeremonyStatus(using: api, id: ceremony.id, polling: false)
+        case .tooLarge:
+            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+            return failure(DeviceSignInMessage.tooMuchData, canRetry: false)
+        case .rejected(let code) where code == "internal_error" || code.hasPrefix("http_5"):
+            status = await deviceCeremonyStatus(using: api, id: ceremony.id, polling: false)
+        case .rejected(let code):
+            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+            if code == "tool.browser.profile_unavailable" {
+                try? await reloadBrowserProfiles(using: api)
+                return failure(DeviceSignInMessage.profileUnavailable, canRetry: false)
+            }
+            return failure(Self.deviceSignInMessage(for: code))
+        }
+
+        guard status == .ready else {
+            if !(status?.isTerminal ?? false) {
+                _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+            }
+            return failure(DeviceSignInMessage.couldNotConfirm)
+        }
+        guard generation == connectionGeneration else {
+            return failure(DeviceSignInMessage.couldNotConfirm)
+        }
+        if deviceSignInCreatedProfile?.profileID == profileID {
+            deviceSignInCreatedProfile = nil
+        }
+        try? await reloadBrowserProfiles(using: api)
+        if browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready }) {
+            selectedBrowserProfileID = profileID
+            await configurationStore.saveBrowserProfileID(profileID)
+        }
+        errorMessage = nil
+        return .signedIn(profileID: profileID)
+    }
+
+    /// The window closed after a successful sign-in.
+    public func finishDeviceSignIn() {
+        deviceSignInRequest = nil
+        deviceSignInCreatedProfile = nil
+    }
+
+    /// The window closed without a sign-in: a profile it created and that never
+    /// became ready is removed.
+    public func abandonDeviceSignIn() async {
+        let created = deviceSignInCreatedProfile?.profileID
+        deviceSignInRequest = nil
+        deviceSignInCreatedProfile = nil
+        guard let api, let created else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        let cleanupError = await discardUnusedBrowserProfile(
+            using: api, profileID: created, authenticationID: nil
+        )
+        browserProfiles.removeAll { $0.id == created }
+        try? await reloadBrowserProfiles(using: api)
+        if let cleanupError {
+            errorMessage =
+                "The unused website login could not be fully removed: \(displayMessage(for: cleanupError)). Refresh Website Access and use the trash button to try again."
+        }
+    }
+
+    /// The owner chose the remote browser from the sign-in window of a new
+    /// website: the device attempt is abandoned and today's remote path begins.
+    @discardableResult
+    public func switchDeviceSignInToRemoteBrowser(_ request: DeviceSignInRequest) async -> URL? {
+        await abandonDeviceSignIn()
+        guard request.profileID == nil else { return nil }
+        return await createWebsiteAccess(websiteURL: request.startURL.absoluteString)
+    }
+
+    /// The app became active or Website Access appeared: re-read an open remote
+    /// ceremony, whose outcome the owner may have finished elsewhere (D16).
+    public func refreshOpenRemoteAuthentication() async {
+        guard let browserAuthentication, !browserAuthentication.status.isTerminal else { return }
+        await refreshBrowserAuthentication()
+    }
+
+    private func openDeviceSignIn(_ request: DeviceSignInRequest) {
+        deviceSignInCreatedProfile = nil
+        deviceSignInRequest = request
+        errorMessage = nil
+    }
+
+    /// Begin, recovering once from a lost answer or an open ceremony by
+    /// cancelling the newest open one (D20, 0128-design §2.5 item 9).
+    private func beginDeviceCeremony(
+        using api: VeetbotAPIClient,
+        profileID: UUID,
+        loginURL: String
+    ) async -> Result<BrowserAuthenticationView, DeviceSignInError> {
+        func begin() async throws -> BrowserAuthenticationView {
+            try await api.beginBrowserAuthentication(
+                profileID: profileID, loginURL: loginURL, mode: .device
+            )
+        }
+        let conflict: Bool
+        do {
+            return .success(try await begin())
+        } catch HTTPTransportError.connection {
+            conflict = false
+        } catch {
+            guard apiError(from: error)?.statusCode == 409 else {
+                return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+            }
+            conflict = true
+        }
+        let ceremonies: [BrowserAuthenticationView]
+        do {
+            ceremonies = try await api.listBrowserAuthentications(profileID: profileID)
+        } catch {
+            return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+        }
+        let now = Date()
+        let open = ceremonies
+            .filter {
+                ($0.status == .authenticationRequired || $0.status == .needsUser) && $0.expiresAt > now
+            }
+            .max { $0.expiresAt < $1.expiresAt }
+        if let open {
+            do {
+                _ = try await api.cancelBrowserAuthentication(open.id)
+            } catch {
+                return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+            }
+        } else if conflict {
+            return .failure(DeviceSignInError(DeviceSignInMessage.websiteInUse))
+        }
+        do {
+            return .success(try await begin())
+        } catch {
+            return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+        }
+    }
+
+    /// The ceremony's status after a handoff whose answer is missing or says
+    /// nothing final: polled every interval up to the limit, or read once.
+    /// Nil when it never answered.
+    private func deviceCeremonyStatus(
+        using api: VeetbotAPIClient,
+        id: UUID,
+        polling: Bool
+    ) async -> BrowserAuthenticationStatus? {
+        let deadline = Date().addingTimeInterval(deviceSignInTiming.pollLimit)
+        var last: BrowserAuthenticationStatus?
+        while true {
+            if let view = try? await api.getBrowserAuthentication(id) {
+                last = view.status
+                if view.status.isTerminal { return view.status }
+            }
+            guard polling, Date() < deadline, !Task.isCancelled else { return last }
+            try? await Task.sleep(nanoseconds: UInt64(deviceSignInTiming.pollInterval * 1_000_000_000))
+        }
+    }
+
+    private static func deviceSignInMessage(for code: String) -> String {
+        switch code {
+        case "session_empty": return DeviceSignInMessage.sessionEmpty
+        case "session_signed_out": return DeviceSignInMessage.sessionSignedOut
+        case "session_unconfirmed": return DeviceSignInMessage.sessionUnconfirmed
+        case "tool.browser.provider_unavailable": return DeviceSignInMessage.couldNotCheck
+        default: return DeviceSignInMessage.couldNotFinish
+        }
+    }
+
+    /// The login URL and primary origin a typed website names: HTTPS is
+    /// added when omitted; credentials and ports other than 443 are refused.
+    static func websiteLoginTarget(_ websiteURL: String) -> (loginURL: String, origin: String)? {
+        let input = websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasScheme = input.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
+        let candidate = hasScheme ? input : "https://" + input
+        guard
+            var components = URLComponents(string: candidate),
+            components.scheme?.lowercased() == "https",
+            let host = components.host, !host.isEmpty,
+            components.user == nil, components.password == nil,
+            components.port == nil || components.port == 443
+        else { return nil }
+        components.scheme = "https"
+        components.host = host.lowercased()
+        components.port = nil
+        guard let loginURL = components.url?.absoluteString else { return nil }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        guard let origin = components.url?.absoluteString else { return nil }
+        return (loginURL, origin)
+    }
+
     public func selectBrowserProfile(_ profileID: UUID?) async {
         guard profileID == nil
             || browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready })
@@ -1645,8 +1981,17 @@ public final class ChatViewModel: ObservableObject {
     /// forgets the ceremony either way, so nothing can offer the capability.
     private func abandonWebsiteAuthenticationCeremony() async {
         let ceremony = browserAuthentication
+        let createdByDeviceSignIn = deviceSignInCreatedProfile?.profileID
         clearWebsiteAuthenticationState()
-        guard let api, let ceremony, !ceremony.status.isTerminal else { return }
+        deviceSignInRequest = nil
+        deviceSignInCreatedProfile = nil
+        guard let api else { return }
+        if let createdByDeviceSignIn {
+            _ = await discardUnusedBrowserProfile(
+                using: api, profileID: createdByDeviceSignIn, authenticationID: nil
+            )
+        }
+        guard let ceremony, !ceremony.status.isTerminal else { return }
         _ = try? await api.cancelBrowserAuthentication(ceremony.id)
     }
 
@@ -1902,6 +2247,13 @@ public final class ChatViewModel: ObservableObject {
     private func displayMessage(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
+}
+
+/// A device sign-in failure message, carried through begin recovery.
+private struct DeviceSignInError: Error {
+    let message: String
+
+    init(_ message: String) { self.message = message }
 }
 
 /// Main-actor callers own all task reads and writes; `deinit` may only cancel off-actor.

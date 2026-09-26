@@ -1387,7 +1387,12 @@ final class ConversationNavigationUITests: XCTestCase {
             app.keyboards.buttons["Return"].tap()
         }
 
-        let create = app.buttons["Create secure login"]
+        // Sign in on this device is the primary action (ADR-0128); the remote
+        // browser keeps the recoverable handoff this journey checks.
+        let signInHere = app.buttons["website-access.sign-in-on-device"]
+        scrollUntilVisible(signInHere)
+        XCTAssertTrue(signInHere.isEnabled)
+        let create = app.buttons["website-access.remote-browser"]
         scrollUntilVisible(create)
         XCTAssertTrue(create.isEnabled)
         create.tap()
