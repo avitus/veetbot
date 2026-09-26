@@ -40,9 +40,7 @@ def upgrade() -> None:
         sa.Column("path_prefix", sa.Text(), nullable=False),
         sa.Column("max_actions", sa.Integer(), nullable=False),
         sa.Column("actions_used", sa.Integer(), nullable=False),
-        sa.Column(
-            "typed_characters", sa.Integer(), server_default=sa.text("0"), nullable=False
-        ),
+        sa.Column("typed_characters", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.Column("approval_id", sa.Uuid(), nullable=False),
         sa.Column("approved_by", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
