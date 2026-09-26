@@ -42,7 +42,7 @@ in `scripts/architecture_checks.py` derives the minimum lane from changed paths.
 
 The lane is a floor, not a ceiling: escalate as the diff grows. Declare the
 lane in the completion report and a `Reading-Lane: A|B|C` git trailer; CI
-validates the floor, and no trailer means lane A.
+checks it per commit; no trailer means lane A.
 
 ## Where each subject is designed
 

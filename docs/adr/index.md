@@ -137,4 +137,5 @@ implementation without one.
 - [ADR-0126 — Email correspondence carries a short summary, and Chat can read the original (Accepted; amends ADR-0121)](0126-correspondence-summaries-and-original-email.md)
 - [ADR-0127 — Browser leases renew while the run needs them (Accepted; amends ADR-0058)](0127-browser-leases-renew-while-the-run-needs-them.md)
 - [ADR-0131 — New chats pin MCP catalogs from the last discovery and start servers on first use (Accepted; amends ADR-0103)](0131-new-chats-reuse-mcp-discovery.md)
+- [ADR-0133 — Each commit answers for its own reading lane (Accepted; amends ADR-0060)](0133-each-commit-answers-for-its-own-reading-lane.md)
 - [ADR-0134 — Tool scope sets serialize sorted (Accepted)](0134-tool-scope-sets-serialize-sorted.md)

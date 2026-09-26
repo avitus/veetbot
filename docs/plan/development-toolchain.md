@@ -494,9 +494,16 @@ defines the credential boundaries, serialization, and external App Store
 Connect prerequisites.
 
 Job 1 also runs the reading-lane floor first:
-`python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git
-trailer in the pushed range and fails when the declared lane sits below the
-minimum that `reading_lane_errors` derives from the changed paths. The base
+`python -m scripts.check_reading_lane` compares each commit's
+`Reading-Lane:` git trailer in the pushed range with the minimum that
+`reading_lane_errors` derives from the paths that commit changed (ADR-0133).
+A merge commit answers only for the paths where its result differs from every
+parent; the work it merged answers through its own commits. The range also
+passes when its newest trailer covers every path the range changed, so a new
+commit declaring the range's floor repairs one that fell short without
+rewriting shared history. A failing run lists each path whose floor exceeds
+its commit's declaration, names that commit when the range holds several, and
+prints the lane a repairing commit must declare. The base
 of the range is CircleCI's `pipeline.git.base_revision` when the pipeline
 supplies one, then `origin/dev`, then `origin/main`, then the parent commit.
 No trailer means lane A, the full reading order, so the check constrains only

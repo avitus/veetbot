@@ -36,6 +36,18 @@ title: Changelog
   management tools. Every earlier test of the index ran on the in-memory
   store, which keeps key order.
 
+## 2026-09-26 — Each commit answers for its own reading lane
+
+- The reading-lane check judged a whole promotion by the newest
+  `Reading-Lane:` trailer on `dev`. A correct lane-B commit at the tip failed
+  hosted verification whenever earlier commits touched lane-A paths, as
+  c50c2df did before PR 135 merged.
+- Each commit's trailer is now checked against that commit's own changes, and a
+  merge only against what it changed itself. A range whose newest trailer
+  covers everything still passes, so a new lane-A commit still repairs one that
+  under-declared. When a range of several commits fails, the report names
+  each commit that fell short (ADR-0133).
+
 ## 2026-09-25 — Veetbot keeps a website open while you approve its clicks
 
 - With a signed-in browser profile, Veetbot could open a page but not act on
