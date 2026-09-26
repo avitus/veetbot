@@ -760,8 +760,24 @@ _ELEMENT_SCRIPT = """node => {
     const tag = node.tagName.toLowerCase();
     const type = (node.getAttribute('type') || '').toLowerCase();
     const link = node.closest('a[href]');
-    const form = node.form || node.closest('form');
-    const formAction = node.getAttribute('formaction');
+    const submits = element => !!element && !!element.form && (
+        (element.tagName === 'BUTTON' && element.type === 'submit')
+        || (element.tagName === 'INPUT' && ['submit', 'image'].includes(element.type)));
+    const labelled = node.closest('label');
+    const control = labelled ? labelled.control : null;
+    // The submit control a click activates: the node, its button, or its
+    // label's control. Otherwise Enter submits through the default button.
+    const submitter = [node.closest('button'), node.closest('input'), control]
+        .find(submits) || null;
+    const form = submitter ? submitter.form
+        : (node.form || (control ? control.form : null) || node.closest('form'));
+    const defaultButton = form && !submitter
+        ? Array.from(document.querySelectorAll('button,input'))
+            .find(element => element.form === form && submits(element)) || null
+        : null;
+    // Only a submit control's formaction counts; a field's is ignored.
+    const through = submitter || defaultButton;
+    const formAction = through ? through.getAttribute('formaction') : null;
     const dialog = node.closest('dialog,[role=dialog],[role=alertdialog]');
     const heading = dialog ? dialog.querySelector('h1,h2,h3') : null;
     const images = Array.from(node.querySelectorAll('img')).slice(0, 8)
@@ -910,13 +926,27 @@ def _target_facts(url: str, *, page_url: str) -> BrowserTargetFacts:
     )
 
 
+def _without_fragment(url: str) -> str:
+    return urlsplit(url)._replace(fragment="").geturl()
+
+
 def _link_target(metadata: dict[str, Any], *, page_url: str) -> BrowserTargetFacts | None:
+    """A link's target facts; a fragment or empty href that stays on the page has none.
+
+    A ``<base>`` element can send even ``#next`` to another document, so the
+    resolved URL decides, not the written one.
+    """
+
     raw = metadata.get("linkHref")
     resolved = metadata.get("link")
     if not isinstance(raw, str) or not isinstance(resolved, str):
         return None
+    if urlsplit(resolved).scheme.lower() == "javascript":
+        return None
     raw = raw.strip()
-    if not raw or raw.startswith("#") or urlsplit(resolved).scheme.lower() == "javascript":
+    if (not raw or raw.startswith("#")) and _without_fragment(resolved) == _without_fragment(
+        page_url
+    ):
         return None
     return _target_facts(resolved, page_url=page_url)
 

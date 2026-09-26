@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -1330,8 +1330,14 @@ async def test_refusal_forgets_the_revision() -> None:
 @asynccontextmanager
 async def lesson_pages(
     pages: dict[str, str],
-) -> AsyncIterator[tuple[RealBrowserRuntime, dict[str, BrowserObservation], list[str]]]:
-    """Serve ``pages`` on the lesson prefix and record every request that leaves them."""
+) -> AsyncIterator[
+    tuple[RealBrowserRuntime, Callable[[str], Awaitable[BrowserObservation]], list[str]]
+]:
+    """Serve ``pages`` and record every request for any other path.
+
+    Yields the runtime, a function that opens one of the pages, and the
+    requests that left them.
+    """
 
     require_real_browser()
     left: list[str] = []
@@ -1350,8 +1356,7 @@ async def lesson_pages(
         runtime = RealBrowserRuntime()
         await runtime.start(site.proxy_url, (site.origin,))
         try:
-            observed = {path: await runtime.navigate(site.url(path)) for path in pages}
-            yield runtime, observed, left
+            yield runtime, lambda path: runtime.navigate(site.url(path)), left
         finally:
             await runtime.close()
 
@@ -1396,11 +1401,113 @@ SUBMITTING_PAGE = """<!doctype html><html><head><title>Lesson</title></head><bod
 async def test_space_and_choice_role_submissions_off_the_prefix_are_refused() -> None:
     """Rule 11: Space on a submit button, or a click on one with a choice role, submits."""
 
-    async with lesson_pages({"/lesson/1": SUBMITTING_PAGE}) as (runtime, observed, left):
-        page = observed["/lesson/1"]
+    async with lesson_pages({"/lesson/1": SUBMITTING_PAGE}) as (runtime, visit, left):
+        page = await visit("/lesson/1")
         space = await _refused(runtime, _press(page, "Check", "Space"))
         page = await runtime.observe()
         choice = await _refused(runtime, _click_named(page, "Spanish"))
 
     assert space.reason_code == choice.reason_code == "tool.browser.grant_not_applicable"
     assert left == []
+
+
+TARGETS_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<form method="post" action="/lesson/check">
+<input type="text" aria-label="Answer">
+<button type="submit" formaction="/settings/delete">Go</button>
+</form>
+<form method="post" action="/lesson/check">
+<button type="submit" formaction="/courses/remove"><span role="radio">Spanish</span></button>
+</form>
+<form id="away" method="post" action="/courses/leave"></form>
+<button type="submit" form="away" aria-label="Outer"><span role="radio">French</span></button>
+<form id="quiz" method="post" action="/lesson/check">
+<button id="quit" type="submit" formaction="/courses/quit">Quit</button>
+</form>
+<label role="button" for="quit">Keep going</label>
+<form method="post" action="/courses/delete">
+<input type="text" formaction="/lesson/check" aria-label="Word">
+</form>
+<a href="#top">Top</a>
+<a href="">Here</a>
+</body></html>"""
+BASE_PAGE = """<!doctype html><html><head><title>Lesson</title>
+<base href="/courses/remove-course"></head><body>
+<a href="#next">Continue</a>
+</body></html>"""
+
+
+async def test_facts_record_the_target_the_browser_submits_to() -> None:
+    """Section 4.5: the default button's formaction, the activated submitter's own
+    target, and a fragment link under a ``<base>`` elsewhere (review finding)."""
+
+    pages = {"/lesson/1": TARGETS_PAGE, "/lesson/2": BASE_PAGE}
+    async with lesson_pages(pages) as (runtime, visit, _left):
+        targets = await visit("/lesson/1")
+        targets_facts = runtime.facts(targets.revision)
+        based = await visit("/lesson/2")
+        based_facts = runtime.facts(based.revision)
+
+    assert targets_facts is not None and based_facts is not None
+
+    def fact(observation: BrowserObservation, name: str, role: str | None = None) -> Any:
+        facts = targets_facts if observation is targets else based_facts
+        assert facts is not None
+        return facts.elements[_ref(observation, name, role=role)]
+
+    def target(first_segment: str, *, sensitive: bool) -> BrowserTargetFacts:
+        return BrowserTargetFacts(
+            same_origin=True, first_segment=first_segment, sensitive_path=sensitive
+        )
+
+    found = {
+        "Answer": fact(targets, "Answer").form_target,
+        "Spanish": fact(targets, "Spanish", "radio").form_target,
+        "French": fact(targets, "French", "radio").form_target,
+        "Keep going": fact(targets, "Keep going").form_target,
+        "Word": fact(targets, "Word").form_target,
+        "Top": fact(targets, "Top").link_target,
+        "Here": fact(targets, "Here").link_target,
+        "Continue": fact(based, "Continue").link_target,
+    }
+    assert found == {
+        "Answer": target("settings", sensitive=True),
+        "Spanish": target("courses", sensitive=True),
+        "French": target("courses", sensitive=False),
+        "Keep going": target("courses", sensitive=False),
+        "Word": target("courses", sensitive=True),
+        "Top": None,
+        "Here": None,
+        "Continue": target("courses", sensitive=True),
+    }
+
+
+async def test_enter_and_a_based_fragment_link_off_the_prefix_are_refused() -> None:
+    """Enter submits through the default button; ``<base>`` moves a fragment link."""
+
+    pages = {"/lesson/1": TARGETS_PAGE, "/lesson/2": BASE_PAGE}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        enter = await _refused(runtime, _press(page, "Answer", "Enter"))
+        page = await visit("/lesson/2")
+        link = await _refused(runtime, _click_named(page, "Continue"))
+
+    assert enter.reason_code == link.reason_code == "tool.browser.grant_not_applicable"
+    assert left == []
+
+
+def test_a_fragment_link_has_no_target_only_on_its_own_page() -> None:
+    page = "https://site.test/lesson/1"
+
+    def link(raw: str, resolved: str) -> BrowserTargetFacts | None:
+        metadata = {"linkHref": raw, "link": resolved}
+        return playwright_adapter._link_target(metadata, page_url=page)
+
+    assert link("#top", f"{page}#top") is None
+    assert link("", page) is None
+    assert link("#next", "https://site.test/courses/remove-course#next") == BrowserTargetFacts(
+        same_origin=True, first_segment="courses", sensitive_path=True
+    )
+    assert link("", "https://elsewhere.test/lesson/1") == BrowserTargetFacts(
+        same_origin=False, first_segment="lesson", sensitive_path=False
+    )
