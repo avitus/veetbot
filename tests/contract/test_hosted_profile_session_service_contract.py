@@ -464,6 +464,39 @@ async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
     )
 
 
+async def test_restarted_service_never_reissues_a_ceremony_capability(tmp_path: Path) -> None:
+    """A capability that can write profile material must never repeat (ADR-0128 D3).
+
+    A restarted service keeps its store and process secret, so a capability
+    derived from them and a per-process counter would be issued again.
+    """
+
+    lifecycle, first, _runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    before = await first.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+    await first.cancel_authentication(before.id, principal())
+    _lifecycle, restarted, _restarted_runtimes, _restarted_times = services(tmp_path)
+
+    after = await restarted.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+
+    assert before.launch_url is not None and after.launch_url is not None
+    before_capability = before.launch_url.split("#capability=", 1)[1]
+    after_capability = after.launch_url.split("#capability=", 1)[1]
+    assert before_capability != after_capability
+    assert before.id != after.id
+    assert len(after_capability) == 43
+
+
 async def test_authentication_scope_mismatch_and_caller_asserted_success_are_absent(
     tmp_path: Path,
 ) -> None:

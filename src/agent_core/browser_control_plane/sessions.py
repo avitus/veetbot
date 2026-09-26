@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
@@ -139,7 +140,6 @@ class HostedProfileSessionService:
         self._leases: dict[bytes, _LeaseState] = {}
         self._ceremonies: dict[UUID, _CeremonyState] = {}
         self._terminal_ceremonies: dict[UUID, _TerminalCeremonyState] = {}
-        self._ceremony_counter = 0
         self._lock = asyncio.Lock()
 
     async def acquire(
@@ -329,8 +329,7 @@ class HostedProfileSessionService:
                 raise ConflictError("browser profile already has an active lease")
             if self._active_ceremony_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile already has an authentication ceremony")
-            self._ceremony_counter += 1
-            capability = self._ceremony_capability(profile_id, self._ceremony_counter)
+            capability = _ceremony_capability()
             ceremony_id = UUID(bytes=self._mac(b"ceremony-id:" + capability.encode())[:16])
             expires_at = self._now() + timedelta(seconds=AUTHENTICATION_CEREMONY_SECONDS)
             identity = metadata.identity()
@@ -488,10 +487,6 @@ class HostedProfileSessionService:
         ).encode()
         return base64.urlsafe_b64encode(self._mac(b"lease:" + encoded)).decode().rstrip("=")
 
-    def _ceremony_capability(self, profile_id: UUID, counter: int) -> str:
-        digest = self._mac(f"ceremony:{profile_id}:{counter}".encode())
-        return base64.urlsafe_b64encode(digest).decode().rstrip("=")
-
     def _lookup_digest(self, secret_ref: str) -> bytes:
         return self._mac(b"lookup:" + secret_ref.encode())
 
@@ -638,6 +633,12 @@ class HostedProfileSessionService:
         ):
             raise ConflictError("browser profile session scope mismatch")
         return by_profile
+
+
+def _ceremony_capability() -> str:
+    """256 random bits: a restarted service never issues one again (ADR-0128 D3)."""
+
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
 
 
 _TERMINAL_AUTH_STATUSES = frozenset(
