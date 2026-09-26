@@ -177,6 +177,11 @@ change needs the owner's explicit approval, and the owner has given it.
    rules.**
    - It covers click, select, check, press, scroll, and typing into text,
      search and multi-line fields. It never covers a named consequence.
+   - Each action covers only what the runtime acts on: typing only into an
+     `input` or a `textarea`, never a region the page made editable, which
+     still takes keys; select only in a `select`; and check only a native
+     check box or radio, never a choice control the page built from another
+     element, which still takes clicks.
    - Typed text is covered only when it is at most 256 characters, contains
      no `@`, `://` or `www.`, no run of four or more digits and nothing shaped
      like a credential, and fits the grant's remaining 4,096 characters.
@@ -187,9 +192,11 @@ change needs the owner's explicit approval, and the owner has given it.
      the approval card.
    - It never covers:
      - credential, one-time-code, payment or identity fields;
-     - key presses on choice controls, since an arrow key checks another
-       radio in the group without classifying it; select and check still
-       cover them;
+     - key presses on choice controls or a `select`, since an arrow key
+       checks another radio in the group, or chooses another option, without
+       classifying it; select and check still cover them;
+     - a disabled element, natively or through ARIA, which the runtime never
+       acts on;
      - key presses or typed text on an element that does not itself hold
        focus once focused, since the keyboard sends to the focused element
        (decision 7);
@@ -217,6 +224,19 @@ change needs the owner's explicit approval, and the owner has given it.
      sources, whether any was too long to carry whole, and each element's
      field kind, navigation target, download flag and dialog name. These
      facts never enter a model-visible result.
+   - A use is consumed before dispatch and never refunded, so on a page that
+     has not changed the worker covers nothing the runtime then refuses. The
+     facts leave out a label source only when the classifier reads it
+     exactly as the element's name; one that only normalizes to the name,
+     such as "Continue $" beside "Continue", or text a right-to-left override
+     displays differently, is carried. The field kinds follow the runtime's
+     act rules: a text area, a region the page made editable, a `select`, a
+     native check box or radio, and a choice control the page built are each
+     a kind of their own. The observation already says whether an element is
+     disabled. Two refusals stay beyond what the worker can see, so each can
+     still consume a use: a key or text for an element that does not hold
+     focus once the runtime focuses it, and a selection whose options the
+     runtime reads.
    - An authorized act carries a `BrowserDispatchConstraint` to the isolated
      service: the grant kind, origins, the path prefix, `not_after`, the
      consequence ceiling and the per-action text cap. The grant kind fixes
@@ -507,7 +527,11 @@ tests. The coverage required:
   before and during the click, handlers that act on another element, new
   windows, and excluded words behind zero-width characters, overrides and
   lookalike letters. Tests pin the two page-script limits: a check box a
-  handler clicks, and a delayed refresh.
+  handler clicks, and a delayed refresh. On an unchanged page the worker's
+  coverage matches the runtime's decision for a disabled element, typing
+  into an editable region, a select or check aimed at the wrong kind of
+  control, and a label source that normalizes to the name but reads
+  differently.
 - `tests/gates/test_browser_m10.py::test_standing_grant` gains the task-grant
   cases.
 

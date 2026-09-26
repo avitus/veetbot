@@ -98,6 +98,7 @@ public struct BrowserActionApprovalPresentation: Equatable, Sendable {
             "outside_prefix": "the page is \(outside).",
             "sensitive_path": "the page looks like an account, settings or payment page.",
             "unnamed_element": "the control has no name Veetbot can read.",
+            "element_disabled": "the control is disabled.",
             "field_not_covered": "it doesn't cover this kind of field.",
             "text_too_long": "the text is too long.",
             "text_not_covered": "the text looks like an address, a link, a number or a password.",

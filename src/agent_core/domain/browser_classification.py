@@ -117,12 +117,20 @@ _FIELD_CONSEQUENCES: dict[BrowserFieldKind, BrowserActionConsequence] = {
     BrowserFieldKind.TELEPHONE: C.SECURITY_CHANGE,
     BrowserFieldKind.FILE: C.FILE_TRANSFER,
 }
+# The runtime types only into an input or a text area, so never EDITABLE.
 _TYPED_FIELDS = frozenset(
     {BrowserFieldKind.TEXT, BrowserFieldKind.SEARCH, BrowserFieldKind.MULTILINE}
 )
-# Never CHOICE: an arrow key checks another radio in the group, whose labels
-# nobody classified. Select and check cover choice controls instead.
-_PRESSED_FIELDS = _TYPED_FIELDS | {BrowserFieldKind.NONE}
+# Never a choice or a select: an arrow key checks another radio in the group,
+# or chooses another option, whose labels nobody classified. Select and check
+# cover them instead.
+_PRESSED_FIELDS = _TYPED_FIELDS | {BrowserFieldKind.NONE, BrowserFieldKind.EDITABLE}
+# The one field kind each of select and check covers: the runtime selects only
+# in a select, and checks only a native check box or radio.
+_CHOSEN_FIELDS = {
+    BrowserActionKind.SELECT: BrowserFieldKind.SELECT,
+    BrowserActionKind.CHECK: BrowserFieldKind.CHOICE,
+}
 _UNCLICKABLE_FIELDS = frozenset(
     {
         BrowserFieldKind.PASSWORD,
@@ -369,6 +377,25 @@ def _has_currency_symbol(value: str) -> bool:
     )
 
 
+def label_reads_as(text: str, other: str) -> bool:
+    """Whether the classifier reads ``text`` exactly as it reads ``other``.
+
+    It reads a label for its currency symbols, its normalized text and every
+    reading of it, so a label that agrees on all three adds nothing beside the
+    other: a consequence, the routine check and the unnamed check come out the
+    same without it. Normalized text alone is not enough, since it drops a
+    currency symbol and the order a right-to-left override displays.
+    """
+
+    if text == other:
+        return True
+    return (_has_currency_symbol(text), normalize_text(text), _readings(text)) == (
+        _has_currency_symbol(other),
+        normalize_text(other),
+        _readings(other),
+    )
+
+
 def _named_consequence(text: str) -> BrowserActionConsequence | None:
     """The first category whose vocabulary ``text`` hits, or a currency symbol."""
 
@@ -521,11 +548,15 @@ def task_grant_coverage(
     option_texts: Sequence[str],
     origin: str,
     path_prefix: str,
+    disabled: bool,
 ) -> BrowserCoverage:
     """Whether a task grant for ``origin`` and ``path_prefix`` covers ``action``.
 
     Rules run in the design's order and the first that fails names the reason.
-    The worker and the isolated runtime run the same rules.
+    The worker and the isolated runtime run the same rules. ``disabled`` is
+    whether the element is disabled, natively or through ARIA, which the
+    runtime never acts on. On a page that has not changed, the worker covers
+    nothing the runtime then refuses, so no grant use is spent on a refusal.
     """
 
     consequence = classify_browser_action(
@@ -549,13 +580,12 @@ def task_grant_coverage(
         return _refused(consequence, "unnamed_element")
     if consequence not in {C.ROUTINE, C.UNKNOWN}:
         return _refused(consequence, f"excluded.{consequence.value}")
+    if disabled:
+        return _refused(consequence, "element_disabled")
     field = facts.field_kind
     field_covered = (
         (kind is BrowserActionKind.TYPE and field in _TYPED_FIELDS)
-        or (
-            kind in {BrowserActionKind.SELECT, BrowserActionKind.CHECK}
-            and field is BrowserFieldKind.CHOICE
-        )
+        or (kind in _CHOSEN_FIELDS and field is _CHOSEN_FIELDS[kind])
         or (kind is BrowserActionKind.PRESS and field in _PRESSED_FIELDS)
         or (kind is BrowserActionKind.CLICK and field not in _UNCLICKABLE_FIELDS)
         or kind is BrowserActionKind.SCROLL
@@ -629,6 +659,7 @@ def dispatch_constraint_coverage(
     option_texts: Sequence[str],
     runtime_origins: Sequence[str],
     now: datetime,
+    disabled: bool,
 ) -> BrowserCoverage:
     """The isolated runtime's check of a grant-authorized act against the live page.
 
@@ -657,6 +688,7 @@ def dispatch_constraint_coverage(
             option_texts=option_texts,
             origin=constraint.origins[0],
             path_prefix=constraint.path_prefix,
+            disabled=disabled,
         )
     if constraint.grant_kind == "standing":
         return standing_ceiling_coverage(

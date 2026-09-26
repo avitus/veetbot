@@ -26,12 +26,10 @@ from agent_core.domain.browser_act_views import (
     TASK_GRANT_AUTHORIZED_REASON,
     TaskGrantSessionContext,
     describe_browser_action,
-    element_labels,
-    option_texts,
     session_is_task_grant_eligible,
+    task_grant_view_coverage,
     turn_is_browser_only,
 )
-from agent_core.domain.browser_classification import task_grant_coverage
 from agent_core.domain.browser_task_grants import (
     TASK_GRANT_MAX_TYPED_CHARACTERS,
     BrowserTaskGrant,
@@ -200,15 +198,8 @@ class BrowserTaskGrantAuthorizer:
         if pin is not None:
             await self._end(grant, principal, run, pin)
             return _not_covered(grant, pin.value)
-        coverage = task_grant_coverage(
-            action=browser_action,
-            page_url=view.observation.url,
-            role=view.element.role,
-            labels=element_labels(view.element, view.facts),
-            facts=view.facts,
-            option_texts=option_texts(browser_action),
-            origin=grant.origin,
-            path_prefix=grant.path_prefix,
+        coverage = task_grant_view_coverage(
+            view, browser_action, origin=grant.origin, path_prefix=grant.path_prefix
         )
         if not coverage.covered:
             assert coverage.reason is not None

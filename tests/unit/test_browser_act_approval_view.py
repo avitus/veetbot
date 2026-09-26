@@ -82,6 +82,7 @@ def snapshot(
     role: str = "button",
     facts: BrowserElementFacts | None = None,
     title: str = "Lesson",
+    disabled: bool = False,
 ) -> BrowserSnapshot:
     return BrowserSnapshot(
         observation=BrowserObservation(
@@ -89,7 +90,7 @@ def snapshot(
             title=title,
             revision="revision-7",
             text="Exercise",
-            elements=(BrowserElement(ref="revision-7:0", role=role, name=name),),
+            elements=(BrowserElement(ref="revision-7:0", role=role, name=name, disabled=disabled),),
         ),
         facts=BrowserObservationFacts(
             revision="revision-7",
@@ -326,6 +327,7 @@ OFFERLESS_CASES: dict[str, dict[str, Any]] = {
     "an unconfigured origin": {"page": snapshot(url="https://example.org/lesson")},
     "a sensitive segment": {"page": snapshot(url=f"{ORIGIN}/lesson/settings")},
     "an excluded action": {"page": snapshot(name="Buy gems")},
+    "a disabled element": {"page": snapshot(disabled=True)},
     "a scheduled session": {
         "context": TaskGrantSessionContext(
             session=bound_session(schedule_id="00000000-0000-0000-0000-00000000cafe"),

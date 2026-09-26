@@ -489,6 +489,7 @@
   ],
   "not_covered_reasons": [
     "browser.task_grant.agent_changed",
+    "browser.task_grant.element_disabled",
     "browser.task_grant.ended",
     "browser.task_grant.excluded.account_recovery",
     "browser.task_grant.excluded.authentication_change",

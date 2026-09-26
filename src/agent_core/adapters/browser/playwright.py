@@ -54,7 +54,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.browser_classification import (
     dispatch_constraint_coverage,
-    normalize_text,
+    label_reads_as,
     path_is_sensitive,
     path_is_within_prefix,
 )
@@ -617,6 +617,8 @@ class PythonPlaywrightRuntime:
             raise BrowserProviderError("tool.browser.element_not_found", retryable=False)
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+        # The observation offered only visible elements and reported each
+        # one's disabled state, so the worker covers neither case (ADR-0129).
         if not await handle.is_visible() or not await handle.is_enabled():
             raise BrowserProviderError("tool.browser.element_not_found", retryable=False)
 
@@ -797,6 +799,8 @@ class PythonPlaywrightRuntime:
             option_texts=option_texts,
             runtime_origins=self._allowed_origins,
             now=now,
+            # ``act`` refused a disabled element before this check.
+            disabled=False,
         )
         return coverage.covered
 
@@ -1384,12 +1388,19 @@ def _field_kind(
         if token in _IDENTITY_TOKENS or token.startswith(_IDENTITY_PREFIXES):
             return BrowserFieldKind.IDENTITY
         return BrowserFieldKind.OTHER
+    # The runtime types only into an input or a text area, selects only in a
+    # select and checks only a native check box or radio (``act``), so a kind
+    # never lets the worker cover what the runtime refuses.
     if tag == "input":
         return _INPUT_FIELD_KINDS.get(input_type.lower(), BrowserFieldKind.OTHER)
-    if tag == "textarea" or editable:
+    if tag == "textarea":
         return BrowserFieldKind.MULTILINE
-    if tag == "select" or role.lower() in _CHOICE_ROLES:
-        return BrowserFieldKind.CHOICE
+    if tag == "select":
+        return BrowserFieldKind.SELECT
+    if editable:
+        return BrowserFieldKind.EDITABLE
+    if role.lower() in _CHOICE_ROLES:
+        return BrowserFieldKind.CUSTOM_CHOICE
     return BrowserFieldKind.NONE
 
 
@@ -1462,11 +1473,14 @@ def _live_labels(metadata: dict[str, Any]) -> dict[BrowserLabelSource, str]:
 def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> BrowserElementFacts:
     """Derive one element's facts from its live attributes (ADR-0129 section 4.5)."""
 
-    visible_name = normalize_text(name)
+    # A source is left out only when the classifier reads it exactly as the
+    # name, which the worker classifies whole; one that merely normalizes to
+    # the name, such as "Continue $" beside "Continue", is kept, because the
+    # runtime's live check classifies every source as written.
     kept = {
         source: value
         for source, value in _live_labels(metadata).items()
-        if normalize_text(value) != visible_name
+        if not label_reads_as(value, name)
     }
     labels = {source: value[:MAXIMUM_FACT_LABEL_CHARACTERS] for source, value in kept.items()}
     # A source past what the facts carry, or past what the runtime reads, may

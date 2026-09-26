@@ -51,6 +51,7 @@ TASK_GRANT_NOT_COVERED_REASONS: frozenset[str] = frozenset(
             "outside_prefix",
             "sensitive_path",
             "unnamed_element",
+            "element_disabled",
             "field_not_covered",
             "text_too_long",
             "text_not_covered",

@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserCoverage,
     BrowserElement,
     BrowserElementFacts,
     BrowserFieldKind,
@@ -153,6 +154,31 @@ def option_texts(action: BrowserAction) -> tuple[str, ...]:
     if action.kind is BrowserActionKind.SELECT and action.value is not None:
         return (action.value,)
     return ()
+
+
+def task_grant_view_coverage(
+    view: BrowserActView, action: BrowserAction, *, origin: str, path_prefix: str
+) -> BrowserCoverage:
+    """The worker's task-grant check of ``action``, from the observation that
+    named its element and that element's facts (ADR-0129 decision 7).
+
+    The offer and the authorizer both decide through it, before a use is
+    consumed; the view must describe the action.
+    """
+
+    if view.observation is None or view.element is None:
+        raise ValueError("an undescribed browser action has no task-grant coverage")
+    return task_grant_coverage(
+        action=action,
+        page_url=view.observation.url,
+        role=view.element.role,
+        labels=element_labels(view.element, view.facts),
+        facts=view.facts,
+        option_texts=option_texts(action),
+        origin=origin,
+        path_prefix=path_prefix,
+        disabled=view.element.disabled,
+    )
 
 
 def undescribed_view(action: BrowserAction) -> BrowserActView:
@@ -343,15 +369,8 @@ def task_grant_offer(
         or scope.origin not in profile.allowed_origins
     ):
         return None
-    coverage = task_grant_coverage(
-        action=action,
-        page_url=url,
-        role=view.element.role,
-        labels=element_labels(view.element, view.facts),
-        facts=view.facts,
-        option_texts=option_texts(action),
-        origin=scope.origin,
-        path_prefix=scope.path_prefix,
+    coverage = task_grant_view_coverage(
+        view, action, origin=scope.origin, path_prefix=scope.path_prefix
     )
     if not coverage.covered:
         return None

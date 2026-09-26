@@ -464,9 +464,14 @@ never retried after dispatch; an ambiguous response is
 
 Navigate, observe, and act responses may also carry secret-free element facts
 as an optional sibling of the observation, which a caller that does not know
-them ignores: a closed field kind; the element's label sources (accessible-name
+them ignores: a closed field kind, which follows what the runtime acts on, so
+a text area, a region the page made editable, a select, a native check box or
+radio, and a choice control the page built from another element are each a
+kind of their own; the element's label sources (accessible-name
 attributes, associated labels, alternative text, button values, and visible
-text, each capped at 256 characters), where the associated labels include
+text, each capped at 256 characters), leaving out only a source the classifier
+reads exactly as the element's name, so one that merely normalizes to it, such
+as "Continue $" beside "Continue", is carried, where the associated labels include
 those of any check box or radio a click on it would change, through a label
 or inside it; whether any label source was cut, or was longer than the 1,024
 characters the runtime reads; whether a link or form target is
@@ -957,11 +962,15 @@ eligible run with a `READY` hosted profile.
 A task grant covers click, select, check, press, scroll, and typing into text,
 search, and multi-line fields, including `unknown`-consequence actions, and
 only in a model turn whose tool calls since the owner's newest message are all
-browser tools. Typed text is covered only when it is at most 256 characters
+browser tools. Each covers only what the runtime acts on: typing into an input
+or a text area, not a region the page made editable; select in a select; and
+check on a native check box or radio, not a choice control the page built.
+Typed text is covered only when it is at most 256 characters
 and contains no `@`, `://`, `www.`, run of four or more digits, or
 credential-shaped value. A task grant never covers a named consequence; a
 credential, one-time-code, payment, or identity field; a key press on a choice
-control, since an arrow key moves a radio group to an unclassified option; a
+control or a select, since an arrow key moves a radio group or a list to an
+unclassified option; a disabled element; a
 key press or typed text on an element that does not itself hold focus; an
 unnamed element; an element with a label source the facts do not carry
 whole, whose unread part could hold an excluded word; a link or form target
@@ -973,7 +982,11 @@ element's role. A path segment is sensitive when it matches the exclusion
 vocabulary or names an administrative, authentication, pricing, or messaging
 area. The worker checks coverage against the observation that named the
 element; the isolated runtime repeats it against the live page and refuses
-with `tool.browser.grant_not_applicable`.
+with `tool.browser.grant_not_applicable`. The worker decides before it
+consumes a use, which is never refunded, so on a page that has not changed it
+covers nothing the runtime refuses; the exceptions are what the observation
+cannot show, an element that does not hold focus once focused and the options
+a selection reads, and each can still cost a use.
 
 `browser.task_grant.created`, `tool.call.authorized` (with the grant id, use
 ordinal, and the approval view of the action), and exactly one

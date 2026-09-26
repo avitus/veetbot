@@ -27,6 +27,7 @@ from agent_core.domain.browser import (
 from agent_core.domain.browser_classification import (
     classify_browser_action,
     dispatch_constraint_coverage,
+    label_reads_as,
     path_is_sensitive,
     segment_is_sensitive,
     standing_ceiling_coverage,
@@ -168,6 +169,7 @@ def cover(
     element: BrowserElementFacts | str | None = "default",
     page_url: str = LESSON,
     role: str = "button",
+    disabled: bool = False,
 ) -> tuple[bool, str | None, C]:
     chosen = facts() if element == "default" else element
     assert not isinstance(chosen, str)
@@ -181,6 +183,7 @@ def cover(
         option_texts=(act.value,) if act.kind is BrowserActionKind.SELECT and act.value else (),
         origin=ORIGIN,
         path_prefix="/lesson",
+        disabled=disabled,
     )
     return coverage.covered, coverage.reason, coverage.consequence
 
@@ -447,6 +450,33 @@ def test_typed_text_shapes_are_refused() -> None:
     assert [text for text in allowed if not typed_text_allowed(text)] == []
 
 
+def test_a_label_left_out_of_the_facts_must_read_exactly_as_the_name() -> None:
+    """Facts leave out a label source only when the classifier would read it
+    exactly as the name; normalizing alone drops a currency symbol and the
+    order a right-to-left override displays (ADR-0129)."""
+
+    pairs = {
+        "the same text": ("Continue", "Continue"),
+        "spacing and case": ("  CONTINUE ", "Continue"),
+        "a currency symbol": ("Continue $", "Continue"),
+        "an override": ("\u202ewon yub", "won yub"),
+        "an override the other way": ("\u202eab", "\u202eba"),
+        "another word": ("Next", "Continue"),
+    }
+    found = {name: label_reads_as(text, other) for name, (text, other) in pairs.items()}
+
+    assert found == {
+        "the same text": True,
+        "spacing and case": True,
+        "a currency symbol": False,
+        "an override": False,
+        "an override the other way": False,
+        "another word": False,
+    }
+    assert classify("\u202ewon yub") is C.PURCHASE
+    assert classify("won yub") is C.UNKNOWN
+
+
 def test_task_grant_coverage_names_the_first_failing_rule() -> None:
     def typed(value: str) -> BrowserAction:
         return click(kind=BrowserActionKind.TYPE, value=value)
@@ -474,6 +504,15 @@ def test_task_grant_coverage_names_the_first_failing_rule() -> None:
         ),
         "an unnamed element": (cover(labels=("", "  ")), (False, "unnamed_element")),
         "a purchase": (cover(labels=("Buy now",)), (False, "excluded.purchase")),
+        "a disabled purchase": (
+            cover(labels=("Buy now",), disabled=True),
+            (False, "excluded.purchase"),
+        ),
+        "a disabled element": (cover(disabled=True), (False, "element_disabled")),
+        "a scroll over a disabled element": (
+            cover(click(kind=BrowserActionKind.SCROLL, delta_y=400), disabled=True),
+            (False, "element_disabled"),
+        ),
         "a hidden payment": (
             cover(element=facts(labels={BrowserLabelSource.VISIBLE_TEXT: "Pay $12.99"})),
             (False, "excluded.payment"),
@@ -492,6 +531,46 @@ def test_task_grant_coverage_names_the_first_failing_rule() -> None:
         ),
         "checking a button": (
             cover(click(kind=BrowserActionKind.CHECK)),
+            (False, "field_not_covered"),
+        ),
+        "choosing in a check box": (
+            cover(
+                click(kind=BrowserActionKind.SELECT, value="gato"),
+                labels=("Sound",),
+                element=facts(field_kind=BrowserFieldKind.CHOICE),
+            ),
+            (False, "field_not_covered"),
+        ),
+        "choosing in a choice the page built": (
+            cover(
+                click(kind=BrowserActionKind.SELECT, value="gato"),
+                labels=("Hints",),
+                element=facts(field_kind=BrowserFieldKind.CUSTOM_CHOICE),
+            ),
+            (False, "field_not_covered"),
+        ),
+        "checking a select": (
+            cover(
+                click(kind=BrowserActionKind.CHECK),
+                labels=("Word",),
+                element=facts(field_kind=BrowserFieldKind.SELECT),
+            ),
+            (False, "field_not_covered"),
+        ),
+        "checking a choice the page built": (
+            cover(
+                click(kind=BrowserActionKind.CHECK),
+                labels=("Hints",),
+                element=facts(field_kind=BrowserFieldKind.CUSTOM_CHOICE),
+            ),
+            (False, "field_not_covered"),
+        ),
+        "typing into an editable region": (
+            cover(
+                typed("hola"),
+                labels=("Answer",),
+                element=facts(field_kind=BrowserFieldKind.EDITABLE),
+            ),
             (False, "field_not_covered"),
         ),
         "pressing in a URL field": (
@@ -560,7 +639,23 @@ def test_task_grant_coverage_names_the_first_failing_rule() -> None:
             cover(
                 click(kind=BrowserActionKind.SELECT, value="gato"),
                 labels=("Word",),
-                element=facts(field_kind=BrowserFieldKind.CHOICE),
+                element=facts(field_kind=BrowserFieldKind.SELECT),
+            ),
+            (True, None),
+        ),
+        "a key in an editable region": (
+            cover(
+                click(kind=BrowserActionKind.PRESS, key=BrowserKey.ARROW_LEFT),
+                labels=("Answer",),
+                element=facts(field_kind=BrowserFieldKind.EDITABLE),
+            ),
+            (True, None),
+        ),
+        "clicking a choice the page built": (
+            cover(
+                labels=("Hints",),
+                role="checkbox",
+                element=facts(field_kind=BrowserFieldKind.CUSTOM_CHOICE),
             ),
             (True, None),
         ),
@@ -667,16 +762,22 @@ def test_a_key_press_on_a_choice_control_is_not_covered() -> None:
     """
 
     choice = facts(field_kind=BrowserFieldKind.CHOICE)
+    choices = (BrowserFieldKind.CHOICE, BrowserFieldKind.SELECT, BrowserFieldKind.CUSTOM_CHOICE)
     found = {
-        key.value: cover(
+        (field.value, key.value): cover(
             click(kind=BrowserActionKind.PRESS, key=key),
             labels=("Keep learning",),
             role="radio",
-            element=choice,
+            element=facts(field_kind=field),
         )[:2]
+        for field in choices
         for key in BrowserKey
     }
-    assert found == {key.value: (False, "field_not_covered") for key in BrowserKey}
+    assert found == {
+        (field.value, key.value): (False, "field_not_covered")
+        for field in choices
+        for key in BrowserKey
+    }
     assert cover(click(kind=BrowserActionKind.CHECK), labels=("Keep learning",), element=choice)[
         :2
     ] == (True, None)
@@ -736,6 +837,7 @@ def test_dispatch_constraints_check_expiry_and_origins_before_coverage() -> None
             option_texts=(),
             runtime_origins=origins,
             now=NOW + now_offset,
+            disabled=False,
         )
         return coverage.covered, coverage.reason
 

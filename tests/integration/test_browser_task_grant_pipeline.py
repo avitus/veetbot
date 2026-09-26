@@ -220,6 +220,7 @@ class LessonRuntime(FakeSessionRuntime):
             option_texts=(),
             runtime_origins=self.allowed_origins,
             now=now,
+            disabled=False,
         )
         if not coverage.covered:
             self.forgotten = True

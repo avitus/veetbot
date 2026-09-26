@@ -546,13 +546,28 @@ def require_task_grant_path_prefix(value: str) -> str:
 
 
 class BrowserFieldKind(StrEnum):
-    """The closed kind of an element's entry control, derived by the runtime."""
+    """The closed kind of an element's entry control, derived by the runtime.
+
+    The kinds follow what the runtime will act on (ADR-0129): it types only
+    into an ``input`` or a ``textarea``, selects only in a ``select``, and
+    checks only a native check box or radio, so a control the page built from
+    another element has a kind of its own.
+    """
 
     NONE = "none"
     TEXT = "text"
     SEARCH = "search"
+    # A ``textarea``.
     MULTILINE = "multiline"
+    # A region the page made editable (``contenteditable``), not an ``input``
+    # or a ``textarea``: keys reach it, typed text does not.
+    EDITABLE = "editable"
+    # A native check box or radio (``input type=checkbox|radio``).
     CHOICE = "choice"
+    # A ``select``.
+    SELECT = "select"
+    # Any other element with a check box, radio, option or menu radio role.
+    CUSTOM_CHOICE = "custom_choice"
     EMAIL = "email"
     TELEPHONE = "telephone"
     URL = "url"
@@ -596,8 +611,9 @@ class BrowserTargetFacts(BaseModel):
 class BrowserElementFacts(BaseModel):
     """Secret-free facts about one observed element; never model-visible.
 
-    ``labels`` holds the label sources whose normalized text differs from the
-    element's name, each cut to 256 characters, so it is usually empty.
+    ``labels`` holds the label sources the classifier reads differently from
+    the element's name, each cut to 256 characters, so it is usually empty; a
+    source left out reads exactly as the name does.
     ``labels_truncated`` is true when the facts and the name together do not
     carry every label source whole: one of them was cut, or was longer than
     the 1,024 characters the runtime reads. The runtime always sets it.

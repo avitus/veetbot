@@ -9,6 +9,7 @@ the prefix, and no other control may change.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -16,18 +17,15 @@ import pytest
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserCoverage,
     BrowserElementFacts,
+    BrowserObservation,
     BrowserProviderError,
     BrowserSnapshot,
     BrowserTargetFacts,
     browser_origin,
 )
-from agent_core.domain.browser_act_views import (
-    describe_browser_action,
-    element_labels,
-    option_texts,
-)
-from agent_core.domain.browser_classification import task_grant_coverage
+from agent_core.domain.browser_act_views import describe_browser_action, task_grant_view_coverage
 from tests.unit.test_browser_playwright import (
     GRANT_NOW,
     _click_named,
@@ -39,6 +37,9 @@ from tests.unit.test_browser_playwright import (
 )
 
 GRANT_NOT_APPLICABLE = "tool.browser.grant_not_applicable"
+ACTION_NOT_ALLOWED = "tool.browser.action_not_allowed"
+ELEMENT_NOT_FOUND = "tool.browser.element_not_found"
+DISPATCHED = "dispatched"
 
 
 async def _covered(runtime: Any, action: BrowserAction) -> None:
@@ -47,6 +48,49 @@ async def _covered(runtime: Any, action: BrowserAction) -> None:
 
 async def _page_value(runtime: Any, script: str) -> Any:
     return await runtime._current_page().evaluate(script)
+
+
+def _worker_coverage(
+    runtime: Any, page: BrowserObservation, action: BrowserAction
+) -> BrowserCoverage:
+    """The worker's decision, from the observation and its facts, made before
+    the authorizer consumes a grant use."""
+
+    view = describe_browser_action(
+        action, BrowserSnapshot(observation=page, facts=runtime.facts(page.revision))
+    )
+    assert view.element is not None
+    return task_grant_view_coverage(
+        view, action, origin=browser_origin(page.url), path_prefix="/lesson"
+    )
+
+
+async def _worker_and_runtime(
+    runtime: Any, choose: Callable[[BrowserObservation], BrowserAction]
+) -> tuple[bool, str]:
+    """Observe, then ask the worker and the runtime about the same act on the
+    same, unchanged page: whether the worker covers it, and whether the runtime
+    dispatched it under the grant or which refusal it gave."""
+
+    page = await runtime.observe()
+    action = choose(page)
+    covered = _worker_coverage(runtime, page, action).covered
+    try:
+        await _covered(runtime, action)
+    except BrowserProviderError as error:
+        return covered, error.reason_code
+    return covered, DISPATCHED
+
+
+def _acting(
+    kind: BrowserActionKind, name: str, **fields: Any
+) -> Callable[[BrowserObservation], BrowserAction]:
+    def choose(page: BrowserObservation) -> BrowserAction:
+        return BrowserAction(
+            kind=kind, expected_revision=page.revision, ref=_ref(page, name), **fields
+        )
+
+    return choose
 
 
 # Tab on a covered field moves focus to a submit button outside the prefix.
@@ -550,23 +594,155 @@ async def test_the_worker_covers_no_label_it_cannot_read_whole(html: str) -> Non
         page = await visit("/lesson/1")
         name = next(element.name for element in page.elements if element.role == "button")
         action = _click_named(page, name)
-        view = describe_browser_action(
-            action, BrowserSnapshot(observation=page, facts=runtime.facts(page.revision))
-        )
-        assert view.element is not None
-        worker = task_grant_coverage(
-            action=action,
-            page_url=page.url,
-            role=view.element.role,
-            labels=element_labels(view.element, view.facts),
-            facts=view.facts,
-            option_texts=option_texts(action),
-            origin=browser_origin(page.url),
-            path_prefix="/lesson",
-        )
+        worker = _worker_coverage(runtime, page, action)
         refusal = await _refused(runtime, action)
         clicks = await _page_value(runtime, "window.clicks")
 
     assert (worker.covered, worker.reason) == (False, "facts_unavailable")
     assert refusal.reason_code == GRANT_NOT_APPLICABLE
     assert clicks == []
+
+
+# The worker must be at least as strict as the runtime on a page that has not
+# changed: every act the runtime would refuse, the worker declines before a
+# use is consumed, and the act goes to the ordinary approval card (ADR-0129).
+CLICK = BrowserActionKind.CLICK
+
+# A label source reads as the name once normalized, but not as displayed: a
+# currency symbol, or a right-to-left override that shows "buy now".
+SAME_WHEN_NORMALIZED = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button aria-label="Continue" onclick="window.clicks.push('pay')">Continue $</button>
+<button aria-label="won yub" onclick="window.clicks.push('buy')">\u202ewon yub</button>
+<button aria-label="Next" onclick="window.clicks.push('next')">Next</button>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+async def test_the_worker_classifies_every_label_source_the_runtime_does() -> None:
+    """A label source that normalizes to the name may still read differently."""
+
+    async with lesson_pages({"/lesson/1": SAME_WHEN_NORMALIZED}) as (runtime, visit, _left):
+        await visit("/lesson/1")
+        decisions = {
+            name: await _worker_and_runtime(runtime, _acting(CLICK, name))
+            for name in ("Continue", "won yub", "Next")
+        }
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert decisions == {
+        "Continue": (False, GRANT_NOT_APPLICABLE),
+        "won yub": (False, GRANT_NOT_APPLICABLE),
+        "Next": (True, DISPATCHED),
+    }
+    assert clicks == ["next"]
+
+
+DISABLED = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button disabled>Next</button>
+<div role="button" tabindex="0" aria-disabled="true">Skip</div>
+<button onclick="window.clicks.push('continue')">Continue</button>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+async def test_the_worker_covers_no_disabled_element() -> None:
+    """The runtime acts on no disabled element, natively or through ARIA."""
+
+    async with lesson_pages({"/lesson/1": DISABLED}) as (runtime, visit, _left):
+        await visit("/lesson/1")
+        decisions = {
+            name: await _worker_and_runtime(runtime, _acting(CLICK, name))
+            for name in ("Next", "Skip", "Continue")
+        }
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert decisions == {
+        "Next": (False, ELEMENT_NOT_FOUND),
+        "Skip": (False, ELEMENT_NOT_FOUND),
+        "Continue": (True, DISPATCHED),
+    }
+    assert clicks == ["continue"]
+
+
+EDITABLE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<div role="textbox" contenteditable="true" aria-label="Answer" style="min-height:40px"></div>
+<textarea aria-label="Notes"></textarea>
+</body></html>"""
+
+
+async def test_the_worker_covers_no_typing_into_an_editable_region() -> None:
+    """The runtime types only into an input or a text area; keys still reach
+    an editable region."""
+
+    async with lesson_pages({"/lesson/1": EDITABLE}) as (runtime, visit, _left):
+        await visit("/lesson/1")
+        typed = BrowserActionKind.TYPE
+        decisions = {
+            "type into the region": await _worker_and_runtime(
+                runtime, _acting(typed, "Answer", value="hola")
+            ),
+            "press in the region": await _worker_and_runtime(
+                runtime,
+                lambda page: _press(page, "Answer", "ArrowLeft"),
+            ),
+            "type into the text area": await _worker_and_runtime(
+                runtime, _acting(typed, "Notes", value="hola")
+            ),
+        }
+        notes = await _page_value(runtime, "document.querySelector('textarea').value")
+
+    assert decisions == {
+        "type into the region": (False, ACTION_NOT_ALLOWED),
+        "press in the region": (True, DISPATCHED),
+        "type into the text area": (True, DISPATCHED),
+    }
+    assert notes == "hola"
+
+
+CHOICES = """<!doctype html><html><head><title>Lesson</title></head><body>
+<input type="checkbox" aria-label="Sound">
+<select aria-label="Word"><option>gato</option><option>perro</option></select>
+<div role="checkbox" aria-checked="false" tabindex="0"
+ onclick="window.clicks.push('hints')">Hints</div>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+async def test_the_worker_selects_only_in_a_select_and_checks_only_a_check_box() -> None:
+    """The runtime selects only in a ``select`` and checks only a native check
+    box or radio; a click still reaches a choice the page built itself."""
+
+    select, check = BrowserActionKind.SELECT, BrowserActionKind.CHECK
+    async with lesson_pages({"/lesson/1": CHOICES}) as (runtime, visit, _left):
+        await visit("/lesson/1")
+        decisions = {
+            "select in a check box": await _worker_and_runtime(
+                runtime, _acting(select, "Sound", value="gato")
+            ),
+            "check a select": await _worker_and_runtime(runtime, _acting(check, "Word")),
+            "check a built choice": await _worker_and_runtime(runtime, _acting(check, "Hints")),
+            "select in a built choice": await _worker_and_runtime(
+                runtime, _acting(select, "Hints", value="gato")
+            ),
+            "click a built choice": await _worker_and_runtime(runtime, _acting(CLICK, "Hints")),
+            "check the check box": await _worker_and_runtime(runtime, _acting(check, "Sound")),
+            "select in the select": await _worker_and_runtime(
+                runtime, _acting(select, "Word", value="perro")
+            ),
+        }
+        state = await _page_value(
+            runtime,
+            "[document.querySelector('input').checked, document.querySelector('select').value,"
+            " window.clicks]",
+        )
+
+    assert decisions == {
+        "select in a check box": (False, ACTION_NOT_ALLOWED),
+        "check a select": (False, ACTION_NOT_ALLOWED),
+        "check a built choice": (False, ACTION_NOT_ALLOWED),
+        "select in a built choice": (False, ACTION_NOT_ALLOWED),
+        "click a built choice": (True, DISPATCHED),
+        "check the check box": (True, DISPATCHED),
+        "select in the select": (True, DISPATCHED),
+    }
+    assert state == [True, "perro", ["hints"]]

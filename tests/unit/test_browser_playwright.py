@@ -1108,6 +1108,11 @@ FACTS_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
 <a href="/lesson/2">Next lesson</a>
 <a href="#top">Top</a>
 <a href="mailto:owner@example.org">Write</a>
+<div role="textbox" contenteditable="true" aria-label="Story" style="min-height:20px"></div>
+<input type="checkbox" aria-label="Sound">
+<select aria-label="Word"><option>gato</option></select>
+<div role="checkbox" aria-checked="false" aria-label="Hints">Hints</div>
+<button aria-label="Next">Next $</button>
 </body></html>"""
 
 
@@ -1138,6 +1143,12 @@ async def test_element_facts_classify_fields_links_forms_dialogs() -> None:
     assert by_name["Card number"].field_kind is BrowserFieldKind.PAYMENT
     assert by_name["Email"].field_kind is BrowserFieldKind.EMAIL
     assert by_name["Answer"].field_kind is BrowserFieldKind.MULTILINE
+    # Kinds follow what the runtime acts on: it types only into an input or a
+    # text area, selects only in a select and checks only a native check box.
+    assert by_name["Story"].field_kind is BrowserFieldKind.EDITABLE
+    assert by_name["Sound"].field_kind is BrowserFieldKind.CHOICE
+    assert by_name["Word"].field_kind is BrowserFieldKind.SELECT
+    assert by_name["Hints"].field_kind is BrowserFieldKind.CUSTOM_CHOICE
     assert by_name["Settings"].link_target == BrowserTargetFacts(
         same_origin=True, first_segment="settings", sensitive_path=True
     )
@@ -1147,6 +1158,9 @@ async def test_element_facts_classify_fields_links_forms_dialogs() -> None:
     assert by_name["Report"].download is True
     assert by_name["Keep going"].context_name == "Try Super free"
     assert by_name["Continue"].labels == {BrowserLabelSource.VISIBLE_TEXT: "Pay $12.99"}
+    # A source that normalizes to the name but reads differently is carried.
+    assert by_name["Next"].labels == {BrowserLabelSource.VISIBLE_TEXT: "Next $"}
+    assert by_name["Hints"].labels == {}
     assert by_name["Next lesson"].link_target == BrowserTargetFacts(
         same_origin=True, first_segment="lesson", sensitive_path=False
     )
