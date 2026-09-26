@@ -18,6 +18,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationRecord,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
@@ -293,6 +294,7 @@ class BrowserProfileManagementService:
         profile_id: UUID,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         """Start one scoped login ceremony and preserve safe navigation failures."""
         require_scope(principal, "browser.profile.write")
@@ -351,6 +353,7 @@ class BrowserProfileManagementService:
                             principal,
                             profile.provider_ref,
                             login_url=login_url,
+                            mode=mode,
                         )
                 except TimeoutError as exc:
                     raise BrowserProviderError(

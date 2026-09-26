@@ -9,6 +9,7 @@ from uuid import UUID
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
     BrowserLease,
     BrowserObservation,
@@ -52,6 +53,7 @@ class BrowserAuthenticationControlPlane(Protocol):
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView: ...
 
     async def authentication_status(

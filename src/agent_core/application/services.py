@@ -12,6 +12,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
     BrowserGrantView,
     BrowserProfileView,
@@ -215,6 +216,7 @@ class BrowserProfileService(Protocol):
         profile_id: UUID,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView: ...
 
     async def list_authentications(

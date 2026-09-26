@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from types import TracebackType
 from typing import Self, cast
@@ -30,6 +30,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
     BrowserProfileStatus,
@@ -75,6 +76,7 @@ class FakeUnitOfWorkFactory:
 @dataclass
 class FakeAuthenticationControlPlane:
     status: BrowserAuthenticationStatus = BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    begun_modes: list[BrowserAuthenticationMode] = field(default_factory=list)
 
     async def begin_authentication(
         self,
@@ -83,8 +85,10 @@ class FakeAuthenticationControlPlane:
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         del owner, provider_ref, login_url
+        self.begun_modes.append(mode)
         return BrowserAuthenticationView(
             id=CEREMONY_ID,
             profile_id=profile_id,
@@ -132,6 +136,7 @@ class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         self.begin_calls += 1
         self.started.set()
@@ -141,6 +146,7 @@ class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
             owner,
             provider_ref,
             login_url=login_url,
+            mode=mode,
         )
 
 
@@ -468,8 +474,9 @@ async def test_authentication_provider_launch_has_total_deadline() -> None:
             provider_ref: str,
             *,
             login_url: str,
+            mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
         ) -> BrowserAuthenticationView:
-            del profile_id, owner, provider_ref, login_url
+            del profile_id, owner, provider_ref, login_url, mode
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
 
@@ -541,9 +548,10 @@ async def test_authentication_redirect_outside_allowed_origins_is_a_login_error(
             provider_ref: str,
             *,
             login_url: str,
+            mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
         ) -> BrowserAuthenticationView:
             """Simulate a refused authentication launch for safe error-mapping assertions."""
-            del profile_id, owner, provider_ref, login_url
+            del profile_id, owner, provider_ref, login_url, mode
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
 
     uow = FakeUnitOfWorkFactory()
@@ -572,3 +580,44 @@ async def test_authentication_redirect_outside_allowed_origins_is_a_login_error(
     assert unchanged.generation == created.generation
     assert unchanged.status == created.status
     assert await uow.uow.browser_authentications.list(subject, profile_id=PROFILE_ID) == []
+
+
+@pytest.mark.parametrize(
+    "login_url",
+    ["https://other.example/login", "http://example.org/login", "https://127.0.0.1/"],
+)
+async def test_device_begin_validates_login_url_before_provider_dispatch(login_url: str) -> None:
+    """ADR-0128: device mode keeps the login-URL rules and never dispatches first."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=authentication,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.write")
+    created = await service.create(subject, ("https://example.org",))
+
+    with pytest.raises(BrowserLoginURLValidationError):
+        await service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url=login_url,
+            mode=BrowserAuthenticationMode.DEVICE,
+        )
+
+    assert authentication.begun_modes == []
+    unchanged = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    assert unchanged.generation == created.generation
+    assert await uow.uow.browser_authentications.list(subject, profile_id=PROFILE_ID) == []
+
+    await service.begin_authentication(
+        subject,
+        PROFILE_ID,
+        login_url="https://example.org/",
+        mode=BrowserAuthenticationMode.DEVICE,
+    )
+    assert authentication.begun_modes == [BrowserAuthenticationMode.DEVICE]

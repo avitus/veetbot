@@ -26,6 +26,7 @@ from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settin
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
     BrowserGrantView,
@@ -42,6 +43,9 @@ GRANT_ID = UUID("00000000-0000-0000-0000-0000000000d9")
 
 
 class Profiles:
+    def __init__(self) -> None:
+        self.begun_modes: list[BrowserAuthenticationMode] = []
+
     async def create(
         self,
         owner: Principal,
@@ -88,15 +92,22 @@ class Profiles:
         profile_id: UUID,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         del owner, login_url
+        self.begun_modes.append(mode)
+        return self._ceremony(profile_id, mode)
+
+    @staticmethod
+    def _ceremony(profile_id: UUID, mode: BrowserAuthenticationMode) -> BrowserAuthenticationView:
+        suffix = "/handoff" if mode is BrowserAuthenticationMode.DEVICE else ""
         return BrowserAuthenticationView(
             id=AUTHENTICATION_ID,
             profile_id=profile_id,
             status=BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
             expires_at=NOW + timedelta(minutes=5),
             launch_url=(
-                f"https://login.example.test/authentication/{AUTHENTICATION_ID}"
+                f"https://login.example.test/authentication/{AUTHENTICATION_ID}{suffix}"
                 "#capability=one-time-capability"
             ),
         )
@@ -106,7 +117,8 @@ class Profiles:
         owner: Principal,
         profile_id: UUID,
     ) -> builtins.list[BrowserAuthenticationView]:
-        result = await self.begin_authentication(owner, profile_id, login_url="unused")
+        del owner
+        result = self._ceremony(profile_id, BrowserAuthenticationMode.REMOTE)
         return [result.model_copy(update={"launch_url": None})]
 
     async def authentication_status(
@@ -418,6 +430,7 @@ async def test_browser_write_requests_reject_malformed_origins_and_grant_windows
     assert inverted_window.status_code == 400
 
 
+@pytest.mark.parametrize("mode", [None, "device"])
 @pytest.mark.parametrize(
     ("login_url", "request_owner", "expected_status", "expected_code"),
     [
@@ -437,7 +450,9 @@ async def test_browser_login_validation_precedes_provider_dispatch_and_allows_re
     request_owner: str,
     expected_status: int,
     expected_code: str,
+    mode: str | None,
 ) -> None:
+    mode_field = {} if mode is None else {"mode": mode}
     clock, uow_factory = await memory_uow_factory()
     owner = principal().model_copy(update={"scopes": {"browser.profile.write"}})
     requesting = owner
@@ -485,7 +500,7 @@ async def test_browser_login_validation_precedes_provider_dispatch_and_allows_re
             transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
             base_url="http://127.0.0.1",
         ) as client:
-            rejected = await client.post(path, json={"login_url": login_url})
+            rejected = await client.post(path, json={"login_url": login_url, **mode_field})
 
         assert rejected.status_code == expected_status
         assert "Check the Website origin and Login page fields" not in rejected.text
@@ -510,11 +525,13 @@ async def test_browser_login_validation_precedes_provider_dispatch_and_allows_re
             base_url="http://127.0.0.1",
         ) as client:
             retried = await client.post(
-                path, json={"login_url": "https://duolingo.com/?isLoggingIn=true"}
+                path,
+                json={"login_url": "https://duolingo.com/?isLoggingIn=true", **mode_field},
             )
         assert retried.status_code == 201
         assert retried.json()["launch_url"] is not None
         assert len(provider_requests) == 1
+        assert json.loads(provider_requests[0].content).get("mode") == mode
 
 
 async def test_browser_write_routes_reject_principals_without_exact_scopes() -> None:
@@ -648,3 +665,77 @@ async def test_browser_login_redirect_outside_allowed_origins_is_a_malformed_req
         assert profile.generation == created.generation
         records = await uow.browser_authentications.list(owner, profile_id=PROFILE_ID)
         assert [record.id for record in records] == [AUTHENTICATION_ID]
+
+
+def _profile_services(profiles: Profiles) -> SimpleNamespace:
+    return SimpleNamespace(
+        sessions=None,
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=profiles,
+        browser_grants=Grants(),
+    )
+
+
+async def test_device_ceremony_begin_passes_mode_and_returns_launch_once() -> None:
+    """ADR-0128 section 2.1: device mode rides on the existing begin route."""
+
+    profiles = Profiles()
+    owner = principal().model_copy(
+        update={"scopes": {"browser.profile.read", "browser.profile.write"}}
+    )
+    app = create_app(
+        _profile_services(profiles), settings(), owner, lambda: str(PROFILE_ID), _ready
+    )
+    path = f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        device = await client.post(
+            path, json={"login_url": "https://example.org/", "mode": "device"}
+        )
+        remote = await client.post(path, json={"login_url": "https://example.org/"})
+        bogus = await client.post(path, json={"login_url": "https://example.org/", "mode": "bogus"})
+        status = await client.get(f"/v1/browser-authentication-ceremonies/{AUTHENTICATION_ID}")
+        listed = await client.get(path)
+
+    assert device.status_code == 201, device.text
+    assert (
+        device.json()["launch_url"]
+        .split("#")[0]
+        .endswith(f"/authentication/{AUTHENTICATION_ID}/handoff")
+    )
+    assert remote.status_code == 201, remote.text
+    assert "/handoff" not in remote.json()["launch_url"]
+    assert bogus.status_code == 400
+    assert bogus.json()["error"]["code"] == "malformed_request"
+    assert "bogus" not in bogus.text
+    assert profiles.begun_modes == [
+        BrowserAuthenticationMode.DEVICE,
+        BrowserAuthenticationMode.REMOTE,
+    ]
+    assert status.json()["launch_url"] is None
+    assert [item["launch_url"] for item in listed.json()] == [None]
+
+
+@pytest.mark.parametrize("mode", [None, "remote", "device"])
+async def test_begin_response_is_private_no_store(mode: str | None) -> None:
+    """ADR-0128 (S4): the begin body carries a capability, so no cache keeps it."""
+
+    owner = principal().model_copy(update={"scopes": {"browser.profile.write"}})
+    app = create_app(
+        _profile_services(Profiles()), settings(), owner, lambda: str(PROFILE_ID), _ready
+    )
+    body: dict[str, str] = {"login_url": "https://example.org/"}
+    if mode is not None:
+        body["mode"] = mode
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        response = await client.post(
+            f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies", json=body
+        )
+
+    assert response.status_code == 201, response.text
+    assert response.headers.get("cache-control") == "private, no-store"

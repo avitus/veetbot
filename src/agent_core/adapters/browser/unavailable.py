@@ -6,6 +6,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
     BrowserProfileControlPlaneError,
     BrowserProfileProvisioning,
@@ -49,8 +50,9 @@ class UnavailableBrowserAuthenticationControlPlane:
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
-        del profile_id, principal, provider_ref, login_url
+        del profile_id, principal, provider_ref, login_url, mode
         raise BrowserProviderError("tool.browser.provider_unavailable", retryable=False)
 
     async def authentication_status(

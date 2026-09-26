@@ -63,6 +63,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
     BrowserGrantView,
     BrowserProfileView,
@@ -309,6 +310,9 @@ class BeginBrowserAuthenticationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     login_url: str = Field(min_length=1, max_length=4096)
+    # ADR-0128: "device" hands a session from the owner's own client to the
+    # isolated service; "remote" (the default) drives its headed browser.
+    mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE
 
 
 class CreateBrowserGrantRequest(BaseModel):
@@ -1028,17 +1032,23 @@ def create_app(
     async def begin_browser_authentication(
         profile_id: UUID,
         body: BeginBrowserAuthenticationRequest,
+        response: Response,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> BrowserAuthenticationView:
         """Create a scoped login ceremony and return its one-time launch response."""
         try:
-            return await services.browser_profiles.begin_authentication(
+            launched = await services.browser_profiles.begin_authentication(
                 authenticated,
                 profile_id,
                 login_url=body.login_url,
+                mode=body.mode,
             )
         except BrowserLoginURLValidationError as exc:
             raise MalformedRequestError(str(exc)) from exc
+        # The launch URL carries a capability that can write profile material
+        # in device mode; no cache may keep it (ADR-0128, S4).
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return launched
 
     @app.get(
         "/v1/browser-profiles/{profile_id}/authentication-ceremonies",

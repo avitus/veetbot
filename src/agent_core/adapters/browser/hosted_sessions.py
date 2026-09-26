@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
     BrowserLease,
     BrowserObservation,
@@ -207,13 +208,18 @@ class HostedBrowserSessionControlPlane:
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
+        # ADR-0128: only a device begin names its mode, so a remote begin stays
+        # byte-compatible with a service that predates device sign-in.
+        device = {"mode": mode.value} if mode is BrowserAuthenticationMode.DEVICE else {}
         result = await self._post(
             "/v1/browser-authentications:begin",
             payload={
                 "profile_id": str(profile_id),
                 "provider_ref": provider_ref,
                 "login_url": login_url,
+                **device,
                 **self._principal_payload(principal),
             },
             response_model=BrowserAuthenticationView,
