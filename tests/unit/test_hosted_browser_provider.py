@@ -26,15 +26,20 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserElement,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProviderError,
     BrowserRunState,
+    BrowserSnapshot,
 )
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.tools import ToolExecutionContext
+from agent_core.ports.browser import browser_action_context_in_session, browser_snapshot_in_session
 from agent_core.ports.browser_sessions import BrowserSessionControlPlane
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, principal, tool_context
@@ -867,3 +872,126 @@ async def test_session_bound_provider_releases_another_sessions_lease_once_its_r
     )
 
     assert sessions.closes == [lease_ref(1)]
+
+
+@dataclass
+class RefusingSessions(FakeSessions):
+    """The isolated runtime refuses a grant-authorized act before dispatch."""
+
+    refusals: list[str] = field(default_factory=list)
+
+    async def act(
+        self,
+        lease_ref: str,
+        action: BrowserAction,
+        *,
+        sequence: int,
+    ) -> BrowserObservation:
+        if self.refusals:
+            self.act_started.set()
+            raise BrowserProviderError(self.refusals.pop(0), retryable=False)
+        return await super().act(lease_ref, action, sequence=sequence)
+
+
+async def test_grant_refusal_keeps_the_lease_and_sequence() -> None:
+    """ADR-0129 (B2): grant_not_applicable is a pre-dispatch refusal."""
+
+    sessions = RefusingSessions(refusals=["tool.browser.grant_not_applicable"])
+    provider = ready_provider(sessions)
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+
+    with pytest.raises(BrowserProviderError) as refused:
+        await provider.act(CLICK)
+
+    assert (refused.value.reason_code, sessions.closes) == (
+        "tool.browser.grant_not_applicable",
+        [],
+    )
+    await provider.navigate("https://example.org/lesson")
+    await provider.act(CLICK)
+    assert len(sessions.acquisitions) == 1
+    assert sessions.sequence == [1]
+
+
+async def test_grant_refusal_discards_the_cached_observation() -> None:
+    """D16: the model must observe again before it can act or be granted."""
+
+    sessions = RefusingSessions(refusals=["tool.browser.grant_not_applicable"])
+    provider = ready_provider(sessions)
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+
+    with pytest.raises(BrowserProviderError):
+        await provider.act(CLICK)
+    with pytest.raises(BrowserProviderError) as stale:
+        await provider.action_context(CLICK)
+
+    assert stale.value.reason_code == "tool.browser.page_changed"
+    assert provider.snapshot() is None
+
+
+FACTS = BrowserElementFacts(field_kind=BrowserFieldKind.NONE)
+
+
+@dataclass
+class FactSessions(FakeSessions):
+    """A newer service: every page carries element facts beside it."""
+
+    async def navigate(self, lease_ref: str, url: str) -> BrowserSnapshot:  # type: ignore[override]
+        observation = await super().navigate(lease_ref, url)
+        revision = f"revision-{url.rsplit('/', 1)[-1]}"
+        observation = observation.model_copy(
+            update={
+                "revision": revision,
+                "elements": (BrowserElement(ref=f"{revision}:0", role="button", name="Continue"),),
+            }
+        )
+        return BrowserSnapshot(
+            observation=observation,
+            facts=BrowserObservationFacts(revision=revision, elements={f"{revision}:0": FACTS}),
+        )
+
+
+async def test_facts_are_cached_beside_the_observation_per_session() -> None:
+    sessions = FactSessions()
+
+    async def load(owner: Principal, profile_id: UUID) -> BrowserProfile:
+        del owner, profile_id
+        return profile()
+
+    async def select(context: ToolExecutionContext) -> UUID:
+        del context
+        return PROFILE_ID
+
+    provider = SessionBoundHostedBrowserProvider(
+        principal=principal(),
+        profiles=load,
+        profile_selector=select,
+        sessions=sessions,
+        now=lambda: NOW,
+    )
+    other_session = UUID("00000000-0000-0000-0000-0000000000f5")
+    first = call_at(NOW)
+    second = call_at(NOW, session_id=other_session, run_id=UUID(int=0xF6))
+    await provider.bind_execution(first)
+    returned = await provider.navigate("https://example.org/a")
+    await provider.bind_execution(second)
+    await provider.navigate("https://example.org/b")
+
+    mine = await browser_snapshot_in_session(provider, SESSION_ID)
+    theirs = await browser_snapshot_in_session(provider, other_session)
+    context = await browser_action_context_in_session(
+        provider,
+        SESSION_ID,
+        BrowserAction(
+            kind=BrowserActionKind.CLICK, expected_revision="revision-a", ref="revision-a:0"
+        ),
+    )
+
+    assert isinstance(returned, BrowserObservation)
+    assert mine is not None and theirs is not None
+    assert (mine.observation.revision, theirs.observation.revision) == ("revision-a", "revision-b")
+    assert mine.facts is not None and mine.facts.elements == {"revision-a:0": FACTS}
+    assert context is not None and context.revision == "revision-a"
+    assert await browser_snapshot_in_session(provider, UUID(int=0xF7)) is None

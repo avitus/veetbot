@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from agent_core.adapters.browser.hosted_sessions import BrowserSessionObservation
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS,
@@ -21,17 +22,19 @@ from agent_core.domain.browser import (
     BrowserElement,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProviderError,
     BrowserRunState,
+    BrowserSnapshot,
     browser_origin,
     normalize_browser_origin,
 )
 from agent_core.domain.browser_classification import classify_browser_action
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.tools import ToolExecutionContext
-from agent_core.ports.browser_sessions import BrowserSessionControlPlane
+from agent_core.ports.browser_sessions import BrowserSessionControlPlane, BrowserSessionPage
 
 ProfileLoader = Callable[[Principal, UUID], Awaitable[BrowserProfile]]
 ProfileSelector = Callable[[ToolExecutionContext], Awaitable[UUID]]
@@ -49,6 +52,10 @@ _RENEWABLE_RUN_STATES = frozenset(
 _LEASE_FAILURES = frozenset(
     {"tool.browser.profile_unavailable", "tool.browser.provider_unavailable"}
 )
+# ADR-0129: the isolated runtime refused a grant-authorized act against the
+# live page. A pre-dispatch refusal like the others, and it also ends the
+# cached observation, so the model must observe again (D16).
+GRANT_NOT_APPLICABLE = "tool.browser.grant_not_applicable"
 # Refusals the runtime gives before it dispatches an action; the lease and its
 # action sequence are unchanged.
 _ACTION_REFUSALS = frozenset(
@@ -57,6 +64,7 @@ _ACTION_REFUSALS = frozenset(
         "tool.browser.element_not_found",
         "tool.browser.action_not_allowed",
         "tool.browser.url_disallowed",
+        GRANT_NOT_APPLICABLE,
     }
 )
 
@@ -112,6 +120,8 @@ class HostedBrowserProvider:
         self._renewal_exhausted = False
         self._sequence = 0
         self._observation: BrowserObservation | None = None
+        # ADR-0129: element facts for the cached observation's revision.
+        self._facts: BrowserObservationFacts | None = None
         # Leases this provider gave up on but has not yet closed on the service.
         self._unclosed: list[str] = []
         self._lock = asyncio.Lock()
@@ -179,7 +189,7 @@ class HostedBrowserProvider:
         async with self._lock:
             lease = self._required_lease()
             try:
-                observation = await self._sessions.navigate(lease.lease_ref, url)
+                page = await self._sessions.navigate(lease.lease_ref, url)
             except BrowserProviderError as error:
                 if error.reason_code in _LEASE_FAILURES:
                     await self._close_locked(strict=False)
@@ -187,14 +197,13 @@ class HostedBrowserProvider:
             except Exception:
                 await self._close_locked(strict=False)
                 raise
-            self._observation = self._validated_observation(observation)
-            return self._observation
+            return self._cache_page(page)
 
     async def observe(self) -> BrowserObservation:
         async with self._lock:
             lease = self._required_lease()
             try:
-                observation = await self._sessions.observe(lease.lease_ref)
+                page = await self._sessions.observe(lease.lease_ref)
             except BrowserProviderError as error:
                 if error.reason_code in _LEASE_FAILURES:
                     await self._close_locked(strict=False)
@@ -202,21 +211,25 @@ class HostedBrowserProvider:
             except Exception:
                 await self._close_locked(strict=False)
                 raise
-            self._observation = self._validated_observation(observation)
-            return self._observation
+            return self._cache_page(page)
 
     async def act(self, action: BrowserAction) -> BrowserObservation:
         async with self._lock:
             lease = self._required_lease()
             sequence = self._sequence + 1
             try:
-                observation = await self._sessions.act(
+                page = await self._sessions.act(
                     lease.lease_ref,
                     action,
                     sequence=sequence,
                 )
             except BrowserProviderError as error:
                 if error.reason_code in _ACTION_REFUSALS:
+                    if error.reason_code == GRANT_NOT_APPLICABLE:
+                        # D16: the lease and sequence stay; the observation the
+                        # refused action named does not.
+                        self._observation = None
+                        self._facts = None
                     raise
                 # Without a definite refusal the action may have landed and the
                 # service's sequence moved on: give the lease up, never retry.
@@ -237,8 +250,7 @@ class HostedBrowserProvider:
                     retryable=False,
                 ) from exc
             self._sequence = sequence
-            self._observation = self._validated_observation(observation)
-            return self._observation
+            return self._cache_page(page)
 
     async def action_context(self, action: BrowserAction) -> BrowserActionContext:
         async with self._lock:
@@ -256,6 +268,13 @@ class HostedBrowserProvider:
                 revision=observation.revision,
                 ref=element.ref,
             )
+
+    def snapshot(self) -> BrowserSnapshot | None:
+        """The cached observation and its facts (ADR-0129); never model-visible."""
+
+        if self._observation is None:
+            return None
+        return BrowserSnapshot(observation=self._observation, facts=self._facts)
 
     async def release_run(self, run_id: UUID) -> None:
         """Close, and so seal, the lease an ended run held; leave any other run's."""
@@ -368,6 +387,21 @@ class HostedBrowserProvider:
             raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
         return observation
 
+    def _cache_page(self, page: BrowserSessionPage) -> BrowserObservation:
+        """Cache a page's observation and, when they describe it, its facts."""
+
+        if isinstance(page, BrowserSessionObservation):
+            page = page.snapshot()
+        if isinstance(page, BrowserSnapshot):
+            observation, facts = page.observation, page.facts
+        else:
+            observation, facts = page, None
+        self._observation = self._validated_observation(observation)
+        self._facts = (
+            facts if facts is not None and facts.revision == observation.revision else None
+        )
+        return self._observation
+
     def _forget_locked(self) -> None:
         self._lease = None
         self._lease_scope = None
@@ -376,6 +410,7 @@ class HostedBrowserProvider:
         self._renewal_exhausted = False
         self._sequence = 0
         self._observation = None
+        self._facts = None
 
     def _abandon_locked(self) -> None:
         """Stop using the lease now and queue it for closing; no I/O."""
@@ -502,6 +537,23 @@ class SessionBoundHostedBrowserProvider:
 
     async def action_context(self, action: BrowserAction) -> BrowserActionContext:
         return await self._required_provider().action_context(action)
+
+    async def snapshot_in_session(self, session_id: UUID) -> BrowserSnapshot | None:
+        """One session's cached observation and facts, whichever session's call
+        bound this provider last (ADR-0129)."""
+
+        async with self._lock:
+            binding = self._bindings.get(session_id)
+        return None if binding is None else binding.provider.snapshot()
+
+    async def action_context_in_session(
+        self, session_id: UUID, action: BrowserAction
+    ) -> BrowserActionContext | None:
+        async with self._lock:
+            binding = self._bindings.get(session_id)
+        if binding is None:
+            return None
+        return await binding.provider.action_context(action)
 
     async def release_run(self, run_id: UUID) -> None:
         async with self._lock:

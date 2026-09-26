@@ -13,7 +13,12 @@ from agent_core.domain.browser import (
     BrowserAuthenticationView,
     BrowserLease,
     BrowserObservation,
+    BrowserSnapshot,
 )
+
+# ADR-0129: a page from the isolated service. A newer service returns the
+# observation with element facts beside it; an older one, the observation.
+type BrowserSessionPage = BrowserObservation | BrowserSnapshot
 
 
 class BrowserSessionControlPlane(Protocol):
@@ -28,9 +33,9 @@ class BrowserSessionControlPlane(Protocol):
         deadline_at: datetime,
     ) -> BrowserLease: ...
 
-    async def navigate(self, lease_ref: str, url: str) -> BrowserObservation: ...
+    async def navigate(self, lease_ref: str, url: str) -> BrowserSessionPage: ...
 
-    async def observe(self, lease_ref: str) -> BrowserObservation: ...
+    async def observe(self, lease_ref: str) -> BrowserSessionPage: ...
 
     async def act(
         self,
@@ -38,7 +43,7 @@ class BrowserSessionControlPlane(Protocol):
         action: BrowserAction,
         *,
         sequence: int,
-    ) -> BrowserObservation: ...
+    ) -> BrowserSessionPage: ...
 
     async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease: ...
 

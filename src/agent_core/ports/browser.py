@@ -6,7 +6,12 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
 from uuid import UUID
 
-from agent_core.domain.browser import BrowserAction, BrowserActionContext, BrowserObservation
+from agent_core.domain.browser import (
+    BrowserAction,
+    BrowserActionContext,
+    BrowserObservation,
+    BrowserSnapshot,
+)
 from agent_core.domain.tools import ToolExecutionContext
 
 
@@ -67,3 +72,33 @@ async def browser_action_context(
         return None
     resolver = cast(Callable[[BrowserAction], Awaitable[BrowserActionContext]], candidate)
     return await resolver(action)
+
+
+async def browser_snapshot_in_session(
+    provider: BrowserProvider, session_id: UUID
+) -> BrowserSnapshot | None:
+    """The observation and facts a hosted provider cached for one session.
+
+    Explicit by session, so an authorizer does not depend on which session's
+    call bound the provider last (ADR-0129).
+    """
+
+    candidate = getattr(provider, "snapshot_in_session", None)
+    if candidate is None:
+        return None
+    resolver = cast(Callable[[UUID], Awaitable[BrowserSnapshot | None]], candidate)
+    return await resolver(session_id)
+
+
+async def browser_action_context_in_session(
+    provider: BrowserProvider, session_id: UUID, action: BrowserAction
+) -> BrowserActionContext | None:
+    """``action_context`` against one session's cached observation (ADR-0129)."""
+
+    candidate = getattr(provider, "action_context_in_session", None)
+    if candidate is None:
+        return None
+    resolver = cast(
+        Callable[[UUID, BrowserAction], Awaitable[BrowserActionContext | None]], candidate
+    )
+    return await resolver(session_id, action)

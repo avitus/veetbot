@@ -9,7 +9,16 @@ import pytest
 
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
 from agent_core.adapters.credentials import MappingCredentialResolver
-from agent_core.domain.browser import BrowserAuthenticationMode
+from agent_core.domain.browser import (
+    BrowserAction,
+    BrowserActionKind,
+    BrowserAuthenticationMode,
+    BrowserElementFacts,
+    BrowserFieldKind,
+    BrowserObservation,
+    BrowserObservationFacts,
+    BrowserSnapshot,
+)
 from tests.contract.support import NOW, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000e1")
@@ -95,3 +104,68 @@ async def test_hosted_client_sends_mode_only_for_device(
         "tenant_id",
         "principal_id",
     }
+
+
+LEASE_REF = "lease-reference-" + "0" * 32
+
+
+def _page(revision: str) -> dict[str, object]:
+    return {
+        "url": "https://www.example.org/lesson",
+        "title": "Lesson",
+        "revision": revision,
+        "text": "Exercise 1",
+        "elements": [{"ref": f"{revision}:0", "role": "button", "name": "Continue"}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("facts", "expected"),
+    [
+        (None, None),
+        (
+            {"revision": "r-1", "elements": {"r-1:0": {"field_kind": "none"}}},
+            BrowserObservationFacts(
+                revision="r-1",
+                elements={"r-1:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)},
+            ),
+        ),
+        # Facts for another revision, or malformed facts, give no coverage.
+        ({"revision": "r-0", "elements": {}}, None),
+        ({"revision": "r-1", "elements": {"r-1:0": {"field_kind": "rocket"}}}, None),
+    ],
+)
+async def test_old_and_new_session_response_shapes_parse(
+    facts: dict[str, object] | None, expected: BrowserObservationFacts | None
+) -> None:
+    """ADR-0129 D26: facts are an optional sibling of the observation's fields."""
+
+    def service(request: httpx.Request) -> httpx.Response:
+        del request
+        body = _page("r-1")
+        if facts is not None:
+            body["facts"] = facts
+        return httpx.Response(200, json=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as client:
+        control_plane = HostedBrowserSessionControlPlane(
+            base_url="https://browser.example.test",
+            credentials=MappingCredentialResolver({"browser_profile_control_plane": "test"}),
+            client=client,
+        )
+        pages = [
+            await control_plane.navigate(LEASE_REF, "https://www.example.org/lesson"),
+            await control_plane.observe(LEASE_REF),
+            await control_plane.act(
+                LEASE_REF,
+                BrowserAction(kind=BrowserActionKind.CLICK, expected_revision="r-1", ref="r-1:0"),
+                sequence=1,
+            ),
+        ]
+
+    for page in pages:
+        # Still an observation to every caller that knows nothing of facts.
+        assert isinstance(page, BrowserObservation)
+        assert page.snapshot() == BrowserSnapshot(
+            observation=BrowserObservation.model_validate(_page("r-1")), facts=expected
+        )

@@ -10,7 +10,11 @@ import pytest
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserElement,
+    BrowserElementFacts,
+    BrowserFieldKind,
+    BrowserLabelSource,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserProviderError,
 )
 from agent_core.domain.messages import TextPart
@@ -338,3 +342,46 @@ async def test_browser_act_normalizes_stale_and_ambiguous_failures() -> None:
     assert uncertain_result.failure is not None
     assert uncertain_result.failure.kind is ToolFailureKind.OUTCOME_UNKNOWN
     assert uncertain_result.failure.reason_code == "tool.browser.outcome_unknown"
+
+
+async def test_model_visible_observation_excludes_facts() -> None:
+    """ADR-0129 D14: facts never reach a model-visible result."""
+
+    @dataclass
+    class FactCachingProvider(FakeBrowserProvider):
+        facts: BrowserObservationFacts | None = None
+
+        async def navigate(self, url: str) -> BrowserObservation:
+            observation = await super().navigate(url)
+            self.facts = BrowserObservationFacts(
+                revision=observation.revision,
+                elements={
+                    "element-1": BrowserElementFacts(
+                        field_kind=BrowserFieldKind.NONE,
+                        labels={BrowserLabelSource.VISIBLE_TEXT: "Pay $12.99"},
+                        context_name="Try Super free",
+                    )
+                },
+            )
+            return observation
+
+    plain = await BrowserNavigateTool(FakeBrowserProvider()).execute(
+        {"url": "https://example.org/account"}, tool_context()
+    )
+    with_facts = await BrowserNavigateTool(FactCachingProvider()).execute(
+        {"url": "https://example.org/account"}, tool_context()
+    )
+
+    assert with_facts.model_dump_json() == plain.model_dump_json()
+    assert "Pay $12.99" not in with_facts.model_dump_json()
+    schema = BrowserNavigateTool.spec.output_schema
+    assert schema is not None
+    assert "facts" not in json.dumps(schema)
+    assert set(schema["properties"]) == {
+        "provider",
+        "url",
+        "title",
+        "revision",
+        "text",
+        "elements",
+    }
