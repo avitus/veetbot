@@ -57,6 +57,28 @@ title: Changelog
   Repair identity and Forget person sit under Manage person, with Forget in
   red. Buttons stay legible in dark appearance and at the largest text sizes.
 
+## 2026-09-25 — Email exchanges are summarized, and Chat can read the original
+
+- Asked about someone you had written to, Chat could say only that an email
+  went out on a date to a list of recipients. ADR-0126: each observed email
+  exchange now gets a short summary in that person's history, such as "Sent
+  email: …" or "Received email: …". Each Email refresh writes up to four,
+  newest first, after it assesses mail, prepares drafts and verifies
+  unsubscribe evidence. Each summary is one small model call, billed to the
+  approved Email allowance.
+- A summary is kept only when its supporting quote appears word for word in
+  the message or its subject, and when it passes the injection and
+  secret-material checks People already applies to what it shows. Mail older
+  than ninety days, bulk mail, and excluded or suppressed sources are never
+  summarized, and nothing is summarized while email learning is paused.
+  Deleting a fact formed from the same message withholds its summary for good.
+  Excluding or erasing the source, deleting the session that fetched it, or
+  forgetting anyone in the exchange removes it.
+- `people.history@1.1.0` names each email's message and Gmail thread, and
+  returns the retained original text of one message, 8,000 characters at a
+  time, to an owner with `email.read`. Version 1.0.0 stays registered for
+  chats pinned to it.
+
 ## 2026-09-25 — Duplicate people merge, and teams stop being people
 
 - After the People cleanup, the directory still held "Investment Team",
