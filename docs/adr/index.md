@@ -141,3 +141,5 @@ implementation without one.
 - [ADR-0130 — Chats bound to a website profile get a browser task budget (Accepted; amends ADR-0123)](0130-browser-task-budget.md)
 - [ADR-0131 — New chats pin MCP catalogs from the last discovery and start servers on first use (Accepted; amends ADR-0103)](0131-new-chats-reuse-mcp-discovery.md)
 - [ADR-0132 — Scheduled runs cache their prefix for an hour (Accepted)](0132-scheduled-runs-cache-their-prefix-for-an-hour.md)
+- [ADR-0133 — Each commit answers for its own reading lane (Accepted; amends ADR-0060)](0133-each-commit-answers-for-its-own-reading-lane.md)
+- [ADR-0134 — Tool scope sets serialize sorted (Accepted)](0134-tool-scope-sets-serialize-sorted.md)

@@ -6,10 +6,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PlainSerializer, model_validator
 
 from agent_core.domain.browser import BrowserDispatchConstraint
 from agent_core.domain.messages import ContentPart, ToolResultItem
@@ -38,6 +38,17 @@ class ToolSource(StrEnum):
     SANDBOX = "sandbox"
 
 
+def _sorted_scopes(scopes: set[str]) -> list[str]:
+    return sorted(scopes)
+
+
+# A set iterates in an order that depends on the process's hash seed and on how
+# it was built, and every copy or reload rebuilds it. Its JSON form is sorted
+# because the frozen prefix and tool schema hashes are taken over JSON dumps
+# (ADR-0134).
+ScopeSet = Annotated[set[str], PlainSerializer(_sorted_scopes, when_used="json")]
+
+
 class ToolSpec(BaseModel):
     name: str
     version: str
@@ -47,7 +58,7 @@ class ToolSpec(BaseModel):
     side_effect: SideEffectClass
     risk: RiskLevel
     idempotency: IdempotencyClass
-    required_scopes: set[str] = Field(default_factory=set)
+    required_scopes: ScopeSet = Field(default_factory=set)
     timeout_seconds: int
     maximum_output_bytes: int
     allow_parallel: bool

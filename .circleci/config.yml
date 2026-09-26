@@ -194,6 +194,10 @@ jobs:
     resource_class: small
     environment:
       DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent
+      # This job's secondary container is created empty for the run. The URL
+      # matches the shared local database, so only this opt-in lets the suite
+      # erase it (docs/plan/development-toolchain.md).
+      VEETBOT_TEST_DATABASE_DISPOSABLE: "1"
     steps:
       - checkout
       - skip_verified_tree:

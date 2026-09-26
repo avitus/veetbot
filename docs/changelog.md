@@ -4,6 +4,34 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — Integration tests erase only a database marked disposable
+
+- Every integration test emptied every application table in whatever database
+  `DATABASE_URL` named. CI's URL is the same as the shared local development
+  database's, so a local run with the default URL wiped development data.
+- The reset now runs only when `VEETBOT_TEST_DATABASE_DISPOSABLE=1`. Without it,
+  each case skips and says how to create a scratch database. CI's integration
+  job sets the opt-in for its throwaway container; the README shows the local
+  recipe.
+- A static test keeps every truncate, table drop, and `DATABASE_URL` read in
+  `tests/integration` behind the one guarded helper, so a module that brings
+  its own reset fails the fast suite.
+
+## 2026-09-26 — Chats keep their plan when Veetbot restarts
+
+- Each restart could quietly rebuild the plan of about half the chats that can
+  use Email feedback or unsubscribe. A rebuild recalls memory again and pays
+  full price for the next prompt. In about one restart in 25, the next message
+  in each of those chats failed with "the frozen context prefix no longer
+  matches its plan".
+- The cause was the order in which the two Email tools list their permissions.
+  Each worker process could order them differently, and the order is part of
+  the plan's fingerprint. They are now always listed in sorted order.
+- A chat whose plan was fingerprinted in the other order gets a new
+  fingerprint once, at its next message. Its tools, memory and history stay
+  as they are, so an approval it is waiting for still works. ADR-0134
+  records the change.
+
 ## 2026-09-26 — New chats answer again
 
 - After the 2026-09-25 release, the first message of every new chat failed
@@ -20,6 +48,18 @@ title: Changelog
 - A PostgreSQL test now sends a new chat's first message with the deferred
   management tools. Every earlier test of the index ran on the in-memory
   store, which keeps key order.
+
+## 2026-09-26 — Each commit answers for its own reading lane
+
+- The reading-lane check judged a whole promotion by the newest
+  `Reading-Lane:` trailer on `dev`. A correct lane-B commit at the tip failed
+  hosted verification whenever earlier commits touched lane-A paths, as
+  c50c2df did before PR 135 merged.
+- Each commit's trailer is now checked against that commit's own changes, and a
+  merge only against what it changed itself. A range whose newest trailer
+  covers everything still passes, so a new lane-A commit still repairs one that
+  under-declared. When a range of several commits fails, the report names
+  each commit that fell short (ADR-0133).
 
 ## 2026-09-25 — Sign in to a website on your own device
 

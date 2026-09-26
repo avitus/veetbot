@@ -208,6 +208,17 @@ tracked metric and its target is 1.0**; a deployment averaging materially more t
 one has a configuration problem, and because the counter exists, it has one
 visibly.
 
+One rotation reason rebuilds nothing. Before
+[ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's hash
+covered each tool's scope set in whatever order its worker's hash seed gave
+it, and its plan event recorded the scopes as they stood when it was written.
+When such a plan's hash matches its prefix rendered with those recorded
+orders, and nothing else about the plan changed, the planner appends the same
+plan as a new epoch with its canonical hashes and reason
+`prefix_hash_canonicalized`. It does not rebuild the plan under a run that
+may be parked on an approval, and the provider receives the same bytes, so
+nothing is re-cached.
+
 ### The history cache window
 
 Region A is cached by the plan's `after_system` and `after_tools` breakpoints.
@@ -245,8 +256,9 @@ delegated children included. The history window keeps the default in every
 session: its markers move every step, so a one-hour write there would pay the
 premium on each request, and a shorter entry after a longer one is the order
 the provider requires. The TTL is not prefix identity either. It never rotates
-an epoch, and a plan built before ADR-0132 keeps the default until it rotates
-for another reason.
+an epoch, and a plan built before ADR-0132 keeps the default until a rotation
+for another reason rebuilds it; a `prefix_hash_canonicalized` epoch copies the
+plan and keeps its breakpoints.
 
 ### The persona row
 
@@ -393,7 +405,11 @@ and empty default annotations while retaining every validation keyword and
 meaningful non-empty default. The complete pinned `ToolSpec` still participates in the
 prefix hash and replay identity, but its output schema, policy classification,
 timeouts, and execution limits are not sent to the model and therefore do not
-consume this prompt class. A session-bound capability is also a runtime-environment
+consume this prompt class. Its `required_scopes` set serializes sorted: a set
+iterates in an order that follows each process's hash seed and can change
+whenever it is copied, so an unsorted dump could give one plan a different
+hash in another worker
+([ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md)). A session-bound capability is also a runtime-environment
 filter: when trusted session metadata has no selected binding, its definitions are
 absent before the plan is pinned rather than advertised as unusable tools.
 
@@ -955,7 +971,7 @@ usage events. Explicitly authored persona entries remain a separate source.
 
 | Failure | How it happens | Defense |
 | --- | --- | --- |
-| **Cache thrash** | A volatile byte reaches the prefix — a date, a counter, a re-serialized tool schema with unstable key order | Region declared per item type; canonical serialization; `prefix_sha256` on every request; the fifty-turn stability gate |
+| **Cache thrash** | A volatile byte reaches the prefix — a date, a counter, a re-serialized tool schema with unstable key order, a set dumped in its process's iteration order | Region declared per item type; canonical serialization (sorted keys and sets, ADR-0134); `prefix_sha256` on every request; the fifty-turn stability gate; one plan identity across hash seeds |
 | **Label laundering** | Compaction paraphrases untrusted content into unlabeled prose | Untrusted spans are elided to typed pointers, never summarized; canary eval |
 | **Envelope forgery** | Tool output contains the closing delimiter | Per-item nonce; delimiter escaping at render; injection eval |
 | **Orphaned tool pair** | The allocator drops a call or a result independently | Pairs are atomic budget units; a validator rejects orphans before send |

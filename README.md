@@ -187,7 +187,7 @@ its own [setup guide](clients/apple/README.md).
 | `make test` | Run every non-live Python test |
 | `make test-static` | Run unit and structural tests with two workers |
 | `make test-contract` | Run shared contracts against in-memory and fake adapters |
-| `make test-integration` | Run tests that need PostgreSQL or another local service |
+| `make test-integration` | Run tests that need PostgreSQL or another local service, against a scratch database (below) |
 | `make docs` | Build the MkDocs site and standalone HTML documentation |
 | `make docs-serve` | Serve the documentation locally with live reload |
 | `make test-website` | Reuse matching local dependencies, build, test, and lint the public static website |
@@ -205,6 +205,29 @@ use `make check CHECK_JOBS=1 STATIC_TEST_WORKERS=0`. Website installs are reused
 only when the manifests, Node/npm runtime, npm configuration, and dependency
 tree checks match. CI always installs cleanly; locally force a reinstall with
 `WEBSITE_INSTALL_FORCE=1 make website-install`.
+
+Integration tests erase every application table in the database they use, so
+they run only against a scratch database the run marks disposable with
+`VEETBOT_TEST_DATABASE_DISPOSABLE=1`. Without that opt-in they skip and say
+why. Never set it for the development database from step 2: its URL is the same
+as CI's, so the opt-in is the only thing that tells them apart. With the
+database from step 2 running:
+
+```bash
+docker compose exec postgres createdb -U agent agent_scratch
+```
+
+```bash
+DATABASE_URL=postgresql+asyncpg://agent:agent@localhost:5432/agent_scratch make migrate
+```
+
+```bash
+DATABASE_URL=postgresql+asyncpg://agent:agent@localhost:5432/agent_scratch VEETBOT_TEST_DATABASE_DISPOSABLE=1 make test-integration
+```
+
+```bash
+docker compose exec postgres dropdb -U agent agent_scratch
+```
 
 ### Configuration and project conventions
 
