@@ -1151,13 +1151,41 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_185_versioned_knobs_are_present_and_non_null() -> None:
+def test_browser_task_overlay_raises_only_bound_chat_limits() -> None:
+    """ADR-0130: bound chats get their own block; run_defaults stays as it was."""
+
+    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
+
+    assert loaded.get("browser_task") == {
+        "max_steps": 160,
+        "max_model_calls": 120,
+        "max_tool_calls": 160,
+        "max_cost": 30,
+        "synthesis_reserve_cost": 3,
+    }
+    assert loaded["run_defaults"] == {
+        "max_steps": 32,
+        "max_model_calls": 24,
+        "max_tool_calls": 64,
+        "synthesis_reserve_model_calls": 2,
+        "synthesis_reserve_tool_calls": 4,
+    }
+
+
+def test_all_190_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 185
+    assert len(qualified_paths) == 190
+    assert {
+        "runtime/limits.yaml:browser_task.max_steps",
+        "runtime/limits.yaml:browser_task.max_model_calls",
+        "runtime/limits.yaml:browser_task.max_tool_calls",
+        "runtime/limits.yaml:browser_task.max_cost",
+        "runtime/limits.yaml:browser_task.synthesis_reserve_cost",
+    } <= qualified_paths
     assert "runtime/limits.yaml:email.unsubscribe_grace_days" in qualified_paths
     assert {
         "folders/profiles.yaml:proposals.threshold",
