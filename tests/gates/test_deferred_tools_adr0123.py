@@ -7,6 +7,7 @@ production adds it here first.
 """
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
@@ -20,6 +21,7 @@ from pydantic import SecretStr
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.bootstrap import Composition, build
 from agent_core.config import load_settings
+from agent_core.context.rendering import build_prefix, prefix_bytes
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.events import EventEnvelope
@@ -45,6 +47,7 @@ from tests.gates.test_email_m18 import (
     _generated_gmail_discovery,
 )
 from tests.gates.test_email_unsubscribe_m31 import Transport
+from tests.unit.test_deferred_tool_index import jsonb_key_order
 from tests.unit.test_web_tools import FakeWebProvider
 
 MANAGEMENT_TOOLS = frozenset(
@@ -202,6 +205,37 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     }
     assert START_CALL in writes
     assert writes <= deferred
+
+
+async def test_the_production_plan_renders_its_prefix_again_from_jsonb(tmp_path: Path) -> None:
+    """The builder re-renders the plan event PostgreSQL returns, with object keys reordered."""
+    _factory, context = await _production(
+        tmp_path, [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)]
+    )
+    async with context as app:
+        session_id = await app.sessions.create()
+        run_id = await app.runs.submit("What can you do for me?", session_id)
+        await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=30)
+        async with app.uow_factory() as uow:
+            session = await uow.sessions.get(session_id, app.principal)
+            agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+            event = await uow.events.latest_before(
+                session_id, (1 << 63) - 1, "context.plan.created", app.principal
+            )
+    assert event is not None
+    stored = ContextPlan.model_validate(jsonb_key_order(event.payload["plan"]))
+    assert stored.deferred_tool_names
+
+    prefix = build_prefix(
+        agent,
+        stored.tool_specs,
+        stored.skill_catalog,
+        stored.memory_snapshot,
+        persona=stored.persona_text,
+        deferred_tools=stored.deferred_tool_specs,
+    )
+    encoded = prefix_bytes(prefix, stored.tool_specs, stored.deferred_tool_specs)
+    assert hashlib.sha256(encoded).hexdigest() == stored.prefix_sha256
 
 
 async def test_an_agent_without_tool_call_records_what_it_cannot_offer(tmp_path: Path) -> None:
