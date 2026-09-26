@@ -110,7 +110,14 @@ single-use capability and never with the Veetbot API credential. It then
 clears the window's data. No cookie, storage value, capability, or confirmed
 page address is persisted, logged, or kept in view state. The service filters
 and verifies the session and decides the outcome. Passkeys and identity
-providers on other origins do not work in that window.
+providers on other origins do not work in that window. Every profile row that
+is not revoked has Sign in again, which opens the same window for that
+profile. When a new website's sign-in cannot start on this device, or its
+session is too large to hand over, the window offers Use Veetbot's remote
+browser: it clears the window's data and continues with the remote ceremony
+below. While any task permission is active (ADR-0129), a compact Task
+permissions row at the end of Website Access shows how many, and its menu
+stops any one of them at once.
 
 Use Veetbot's remote browser remains the alternative. It sends the exact
 public-HTTPS primary origin, optional `additionalOrigins` included in

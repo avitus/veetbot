@@ -85,10 +85,12 @@ this device: it opens the website in a private sign-in window that Veetbot
 does not read or keep, the user signs in there, and after I'm signed in the
 app hands only that website's session to Veetbot's isolated browser service,
 once, and clears the window. Passkeys and sign-in through another website's
-identity provider do not work in that window. Use Veetbot's remote browser
-remains available: the app opens the server-provided isolated login ceremony
-only after a separate Continue in web browser action, where the user enters
-website credentials directly. In either mode, usernames, passwords, cookies,
+identity provider do not work in that window. Sign in again on a profile row
+opens the same window for a profile that is not revoked. Use Veetbot's remote
+browser remains available, and the sign-in window offers it when a new
+website's sign-in cannot start on this device: the app opens the
+server-provided isolated login ceremony only after a separate Continue in web
+browser action, where the user enters website credentials directly. In either mode, usernames, passwords, cookies,
 and browser storage never pass through chat, the Veetbot API, or the agent.
 Selecting a ready profile binds only its opaque UUID to newly created
 conversations.
@@ -110,8 +112,9 @@ and shows the website's own text in quotes, labelled as coming from the
 website. When the server offers it, Allow for this task lets Veetbot act
 inside that site scope without asking again, for up to thirty minutes and
 two hundred actions. A banner above the composer counts them, and Stop ends
-the permission at once. Passwords, payments, purchases, account changes and
-messages still ask every time.
+the permission at once; Website Access lists active permissions in a compact
+Task permissions row whose menu stops each one. Passwords, payments,
+purchases, account changes and messages still ask every time.
 
 In Email feedback, **This kind of content** offers the topics identified on the
 selected thread. Choose a topic before marking it Important or Less important;
