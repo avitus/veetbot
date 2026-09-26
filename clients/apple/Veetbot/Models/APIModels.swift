@@ -247,6 +247,14 @@ public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// How the owner signs in to a website profile (ADR-0128). `remote` opens the
+/// isolated service's own browser; `device` signs in on this device and hands
+/// the session to the service.
+public enum BrowserAuthenticationMode: String, Codable, Hashable, Sendable {
+    case remote
+    case device
+}
+
 public enum BrowserAuthenticationStatus: String, Codable, Hashable, Sendable {
     case authenticationRequired = "authentication_required"
     case needsUser = "needs_user"

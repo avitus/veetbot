@@ -77,6 +77,11 @@
 		1000000000000000000000C6 /* PeopleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C6 /* PeopleDetailView.swift */; };
 		1000000000000000000000C8 /* PeopleProfileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C8 /* PeopleProfileComponents.swift */; };
 		1000000000000000000000C7 /* PeopleEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C7 /* PeopleEditors.swift */; };
+		10000000000000000000A001 /* DeviceSessionHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A001 /* DeviceSessionHandoff.swift */; };
+		10000000000000000000A002 /* WebsiteSessionScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A002 /* WebsiteSessionScope.swift */; };
+		10000000000000000000A003 /* DeviceSignInHandoffClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A003 /* DeviceSignInHandoffClient.swift */; };
+		10000000000000000000A004 /* DeviceSignInNavigationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A004 /* DeviceSignInNavigationPolicy.swift */; };
+		10000000000000000000A005 /* DeviceSignInSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A005 /* DeviceSignInSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -164,6 +169,11 @@
 		2000000000000000000000C6 /* PeopleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleDetailView.swift; sourceTree = "<group>"; };
 		2000000000000000000000C8 /* PeopleProfileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleProfileComponents.swift; sourceTree = "<group>"; };
 		2000000000000000000000C7 /* PeopleEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleEditors.swift; sourceTree = "<group>"; };
+		20000000000000000000A001 /* DeviceSessionHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSessionHandoff.swift; sourceTree = "<group>"; };
+		20000000000000000000A002 /* WebsiteSessionScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteSessionScope.swift; sourceTree = "<group>"; };
+		20000000000000000000A003 /* DeviceSignInHandoffClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSignInHandoffClient.swift; sourceTree = "<group>"; };
+		20000000000000000000A004 /* DeviceSignInNavigationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSignInNavigationPolicy.swift; sourceTree = "<group>"; };
+		20000000000000000000A005 /* DeviceSignInSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSignInSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -216,6 +226,7 @@
 		400000000000000000000003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000A001 /* DeviceSessionHandoff.swift */,
 				2000000000000000000000C1 /* PeopleModels.swift */,
 				200000000000000000000001 /* APIError.swift */,
 				200000000000000000000002 /* APIModels.swift */,
@@ -232,6 +243,8 @@
 		400000000000000000000004 /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000A003 /* DeviceSignInHandoffClient.swift */,
+				20000000000000000000A002 /* WebsiteSessionScope.swift */,
 				2000000000000000000000C2 /* PeopleAPIClient.swift */,
 				200000000000000000000005 /* ConnectionConfiguration.swift */,
 				200000000000000000000006 /* HTTPTransport.swift */,
@@ -290,6 +303,8 @@
 		400000000000000000000008 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000A005 /* DeviceSignInSheet.swift */,
+				20000000000000000000A004 /* DeviceSignInNavigationPolicy.swift */,
 				2000000000000000000000C7 /* PeopleEditors.swift */,
 				2000000000000000000000C6 /* PeopleDetailView.swift */,
 				2000000000000000000000C8 /* PeopleProfileComponents.swift */,
@@ -443,6 +458,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				10000000000000000000A005 /* DeviceSignInSheet.swift in Sources */,
+				10000000000000000000A004 /* DeviceSignInNavigationPolicy.swift in Sources */,
+				10000000000000000000A003 /* DeviceSignInHandoffClient.swift in Sources */,
+				10000000000000000000A002 /* WebsiteSessionScope.swift in Sources */,
+				10000000000000000000A001 /* DeviceSessionHandoff.swift in Sources */,
 				1000000000000000000000C7 /* PeopleEditors.swift in Sources */,
 				1000000000000000000000C6 /* PeopleDetailView.swift in Sources */,
 				1000000000000000000000C8 /* PeopleProfileComponents.swift in Sources */,

@@ -400,15 +400,29 @@ public struct VeetbotAPIClient: Sendable {
 
     public func beginBrowserAuthentication(
         profileID: UUID,
-        loginURL: String
+        loginURL: String,
+        mode: BrowserAuthenticationMode = .remote
     ) async throws -> BrowserAuthenticationView {
         try await transport.send(
             TransportRequest(
                 method: .post,
                 path: "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies",
                 body: try JSONEncoder.server.encode(
-                    BeginBrowserAuthenticationBody(loginURL: loginURL)
+                    BeginBrowserAuthenticationBody(loginURL: loginURL, mode: mode)
                 )
+            )
+        )
+    }
+
+    /// The profile's ceremonies, without launch URLs. Begin recovery and the
+    /// remote reconcile read it (ADR-0128).
+    public func listBrowserAuthentications(
+        profileID: UUID
+    ) async throws -> [BrowserAuthenticationView] {
+        try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"
             )
         )
     }
@@ -884,11 +898,23 @@ private struct CreateBrowserProfileBody: Encodable {
     }
 }
 
-private struct BeginBrowserAuthenticationBody: Encodable {
+/// The begin body. `mode` is sent only for a device sign-in, so a remote begin
+/// keeps today's bytes and stays compatible with an older server (ADR-0128).
+struct BeginBrowserAuthenticationBody: Encodable {
     let loginURL: String
+    let mode: BrowserAuthenticationMode
 
     enum CodingKeys: String, CodingKey {
         case loginURL = "login_url"
+        case mode
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(loginURL, forKey: .loginURL)
+        if mode == .device {
+            try container.encode(mode, forKey: .mode)
+        }
     }
 }
 

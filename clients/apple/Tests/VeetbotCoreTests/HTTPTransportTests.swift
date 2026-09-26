@@ -136,6 +136,60 @@ import Testing
         #expect(sessionJSON["password"] == nil)
     }
 
+    /// ADR-0128: begin recovery and the remote reconcile read a profile's
+    /// ceremonies; a device begin names its mode on the wire.
+    @Test
+    func listsBrowserAuthenticationsForAProfile() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let profileID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000000a1"))
+        let openID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000000a4"))
+        let cancelledID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000000a5"))
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let body: String
+            let statusCode: Int
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                statusCode = 200
+                body = #"[{"id":"\#(openID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-09-25T12:05:00Z","launch_url":null},{"id":"\#(cancelledID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"cancelled","expires_at":"2026-09-25T12:00:00Z"}]"#
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                statusCode = 201
+                body = #"{"id":"\#(openID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-09-25T12:05:00Z","launch_url":"https://browser.example/authentication/\#(openID.uuidString)/handoff#capability=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}"#
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                statusCode = 500
+                body = "{}"
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: statusCode, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+
+        let client = try makeClient(token: "valid")
+        let ceremonies = try await client.listBrowserAuthentications(profileID: profileID)
+        let begun = try await client.beginBrowserAuthentication(
+            profileID: profileID, loginURL: "https://www.example.org/", mode: .device
+        )
+
+        #expect(ceremonies.map(\.id) == [openID, cancelledID])
+        #expect(ceremonies.map(\.status) == [.authenticationRequired, .cancelled])
+        #expect(ceremonies.allSatisfy { $0.launchURL == nil })
+        #expect(begun.launchURL?.path.hasSuffix("/handoff") == true)
+        let captured = lock.withLock { requests }
+        #expect(captured.count == 2)
+        #expect(captured.first?.httpMethod == "GET")
+        #expect(captured.first?.httpBody == nil)
+        let beginJSON = try requestJSONObject(try #require(captured.last))
+        #expect(beginJSON["mode"] as? String == "device")
+        #expect(beginJSON["login_url"] as? String == "https://www.example.org/")
+    }
+
     @Test
     func testKeychainStoreUsesLocalDataProtectionKeychain() {
         let query = KeychainTokenStore.makeBaseQuery(

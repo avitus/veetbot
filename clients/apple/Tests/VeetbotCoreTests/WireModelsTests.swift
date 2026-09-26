@@ -398,4 +398,24 @@ import Testing
         #expect(unknown.reasoningEffort?.rawValue == "turbo")
         #expect(unknown.reasoningEffort?.displayName == "Turbo")
     }
+
+    /// ADR-0128: a remote begin keeps today's bytes, so an older server still
+    /// accepts it; only a device begin names its mode.
+    @Test
+    func beginBodyEncodesModeOnlyForDevice() throws {
+        let remote = try JSONEncoder.server.encode(
+            BeginBrowserAuthenticationBody(loginURL: "https://example.org/login", mode: .remote)
+        )
+        let device = try JSONEncoder.server.encode(
+            BeginBrowserAuthenticationBody(loginURL: "https://www.example.org/", mode: .device)
+        )
+
+        #expect(String(decoding: remote, as: UTF8.self) == #"{"login_url":"https://example.org/login"}"#)
+        #expect(
+            String(decoding: device, as: UTF8.self)
+                == #"{"login_url":"https://www.example.org/","mode":"device"}"#
+        )
+        #expect(BrowserAuthenticationMode(rawValue: "device") == .device)
+        #expect(BrowserAuthenticationMode(rawValue: "remote") == .remote)
+    }
 }
