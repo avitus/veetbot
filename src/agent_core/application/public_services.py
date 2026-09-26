@@ -54,7 +54,7 @@ from agent_core.domain.artifacts import (
     StoredArtifactRef,
 )
 from agent_core.domain.attachments import upload_key, upload_media_type, upload_name
-from agent_core.domain.browser import BrowserProfileStatus
+from agent_core.domain.browser import BrowserProfileStatus, sign_in_outcome_unrecorded
 from agent_core.domain.browser_act_views import session_allows_task_grant
 from agent_core.domain.browser_task_grants import (
     TASK_GRANT_DURATION,
@@ -1496,6 +1496,11 @@ class PublicApprovalService:
                 uow, visible.session_id, principal, now=resolution.clock.now()
             )
             session, profile = context.session, context.profile
+            # ADR-0128 D10: read after the profile, so a begin that committed
+            # the generation this grant would pin is seen here too.
+            sign_in_open = profile is not None and sign_in_outcome_unrecorded(
+                await uow.browser_authentications.list(principal, profile_id=profile.id)
+            )
             if (
                 visible.tool_name != "browser.act"
                 or offer is None
@@ -1516,6 +1521,7 @@ class PublicApprovalService:
                 or profile is None
                 or profile.status is not BrowserProfileStatus.READY
                 or offer.origin not in profile.allowed_origins
+                or sign_in_open
             ):
                 raise _task_grant_unavailable(approval_id)
             if not _echoes(offer, echo):

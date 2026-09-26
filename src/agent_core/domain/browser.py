@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -347,6 +348,37 @@ class BrowserAuthenticationRecord(BaseModel):
         if self.updated_at < self.created_at:
             raise ValueError("browser authentication update precedes creation")
         return self
+
+
+TERMINAL_BROWSER_AUTHENTICATION_STATUSES = frozenset(
+    {
+        BrowserAuthenticationStatus.READY,
+        BrowserAuthenticationStatus.EXPIRED,
+        BrowserAuthenticationStatus.CANCELLED,
+    }
+)
+
+
+def sign_in_outcome_unrecorded(records: Sequence[BrowserAuthenticationRecord]) -> bool:
+    """Whether a profile's newest sign-in has no recorded outcome (ADR-0128 D10).
+
+    A begin advances the generation that grants pin, and only a ``ready``
+    outcome, once recorded, advances it again. A grant created in between
+    would pin the begin's generation and keep authorizing on the session the
+    service seals if no client ever records that outcome. The service holds
+    one open ceremony per profile, so only the newest record can still seal.
+    Its expiry settles nothing: a handoff accepted before it seals after it,
+    and a sealed outcome may never be read.
+    """
+
+    if not records:
+        return False
+    newest = max(record.created_at for record in records)
+    return any(
+        record.created_at == newest
+        and record.status not in TERMINAL_BROWSER_AUTHENTICATION_STATUSES
+        for record in records
+    )
 
 
 class BrowserAction(BaseModel):

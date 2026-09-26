@@ -75,6 +75,7 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskGrantEndReason,
     TaskGrantEcho,
 )
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.messages import (
     FakeModelScript,
@@ -891,6 +892,69 @@ async def assert_a_sign_in_ends_the_grant(tmp_path: Path) -> None:
 
 async def test_a_sign_in_ends_the_grant(tmp_path: Path) -> None:
     await assert_a_sign_in_ends_the_grant(tmp_path)
+
+
+async def assert_allow_for_task_waits_for_the_sign_in_outcome(tmp_path: Path) -> None:
+    """ADR-0128 decision 10: a sign-in begun while a card is pending leaves
+    the profile READY at the generation the begin set. A task grant created
+    then would pin that generation and keep authorizing on the session the
+    service seals, whenever no client records the outcome, so the allow is
+    refused until the outcome is recorded, even after the ceremony expires."""
+
+    turns = [*allow_turns(), FINAL]
+    async with pipeline(tmp_path, turns) as harness:
+        run_id = await harness.submit("Do one lesson.")
+        approval = await harness.pending(run_id)
+        assert approval.task_grant_offer is not None
+        echo = TaskGrantEcho(
+            origin=approval.task_grant_offer.origin,
+            path_prefix=approval.task_grant_offer.path_prefix,
+        )
+        management = BrowserProfileManagementService(
+            uow_factory=cast(BrowserUnitOfWorkFactory, harness.composition.uow_factory),
+            lifecycle=InMemoryBrowserProfileControlPlane(),
+            authentications=DeviceSignIn(clock=harness.clock, profile_id=PROFILE_ID),
+            clock=harness.clock,
+            ids=SequenceIdFactory(),
+        )
+        begun = await management.begin_authentication(
+            harness.owner,
+            PROFILE_ID,
+            login_url=f"{ORIGIN}/",
+            mode=BrowserAuthenticationMode.DEVICE,
+        )
+        harness.clock.advance(timedelta(minutes=10))
+        with pytest.raises(ConflictError) as refused:
+            await harness.composition.services.approvals.resolve(
+                harness.owner,
+                approval.id,
+                ApprovalResolutionType.APPROVE_FOR_TASK,
+                None,
+                task_grant=echo,
+            )
+        unresolved = await harness.composition.approvals.get(approval.id)
+        created_while_open = [
+            event
+            for event in await harness.events()
+            if event.event_type == "browser.task_grant.created"
+        ]
+        await management.cancel_authentication(harness.owner, begun.id)
+        allowed = await harness.composition.services.approvals.resolve(
+            harness.owner,
+            approval.id,
+            ApprovalResolutionType.APPROVE_FOR_TASK,
+            None,
+            task_grant=echo,
+        )
+
+    assert refused.value.reason == "task_grant_unavailable"
+    assert (unresolved.resolution, unresolved.task_grant_id) == (None, None)
+    assert created_while_open == []
+    assert allowed.task_grant_id is not None
+
+
+async def test_allow_for_task_waits_for_the_sign_in_outcome(tmp_path: Path) -> None:
+    await assert_allow_for_task_waits_for_the_sign_in_outcome(tmp_path)
 
 
 async def assert_a_credential_shaped_type_is_denied_not_granted(tmp_path: Path) -> None:

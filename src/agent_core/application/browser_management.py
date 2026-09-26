@@ -31,6 +31,7 @@ from agent_core.domain.browser import (
     BrowserProviderError,
     browser_origin,
     normalize_browser_origin,
+    sign_in_outcome_unrecorded,
 )
 from agent_core.domain.browser_task_grants import BrowserTaskGrantEndReason
 from agent_core.domain.errors import ConflictError, NotFoundError
@@ -584,6 +585,12 @@ class BrowserGrantManagementService:
             profile = await uow.browser_profiles.get(profile_id, principal)
             if profile.status is not BrowserProfileStatus.READY:
                 raise ConflictError("browser profile must be ready before granting authority")
+            # ADR-0128 D10: read after the profile, so a begin that committed
+            # the generation this grant pins is seen here too.
+            if sign_in_outcome_unrecorded(
+                await uow.browser_authentications.list(principal, profile_id=profile.id)
+            ):
+                raise ConflictError("browser profile sign-in must finish before granting authority")
             normalized = tuple(normalize_browser_origin(origin) for origin in allowed_origins)
             if not set(normalized).issubset(profile.allowed_origins):
                 raise ConflictError("browser grant origin exceeds profile scope")

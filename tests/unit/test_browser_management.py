@@ -851,6 +851,62 @@ async def test_standing_grant_stops_authorizing_after_a_sign_in_begins() -> None
     assert (before, after) == ("browser.grant.authorized", "browser.grant.mismatch")
 
 
+@pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))
+async def test_no_standing_grant_is_created_before_a_sign_in_outcome_is_recorded(
+    mode: BrowserAuthenticationMode,
+) -> None:
+    """ADR-0128 decision 10: after a begin the profile stays READY at the
+    generation the begin set. A grant created then would pin it and keep
+    authorizing on the session the service seals whenever no client records
+    the outcome, so creation waits for the outcome, even past the expiry."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner(
+        "browser.profile.read",
+        "browser.profile.write",
+        "browser.grant.read",
+        "browser.grant.write",
+    )
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    await service.begin_authentication(
+        subject, PROFILE_ID, login_url="https://example.org/", mode=mode
+    )
+    grants = BrowserGrantManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        clock=FixedClock(NOW + timedelta(minutes=10)),
+        ids=SequenceIdFactory([GRANT_ID]),
+        agent_version="agent-v1",
+        policy_version="policy-v1",
+    )
+
+    async def create() -> int:
+        created = await grants.create(
+            subject,
+            profile_id=PROFILE_ID,
+            allowed_origins=("https://example.org",),
+            action_kinds=(BrowserActionKind.CLICK,),
+            element_roles=("button",),
+            element_names=("Continue",),
+            purpose=None,
+            starts_at=NOW,
+            expires_at=NOW + timedelta(days=7),
+        )
+        return created.profile_generation
+
+    with pytest.raises(ConflictError):
+        await create()
+    listed = await grants.list(subject, profile_id=PROFILE_ID)
+    authentication.status = BrowserAuthenticationStatus.READY
+    await service.authentication_status(subject, CEREMONY_ID)
+    sealed = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    assert listed.items == []
+    assert await create() == sealed.generation
+
+
 TASK_SESSION = UUID("00000000-0000-0000-0000-0000000000cb")
 
 

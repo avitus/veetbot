@@ -205,7 +205,12 @@ without changing status (ADR-0128): beginning a ceremony in either mode does so
 in the unit of work that records the ceremony, and a `ready` outcome recorded
 for a profile that is already `READY` does so again. Grants pin the
 generation, so none survives a sign-in, including one that replaces a ready
-profile's session with another account's.
+profile's session with another account's. No standing or task grant is
+created while the profile's newest ceremony has no recorded outcome, whether
+or not it has expired: such a grant would pin the generation the begin set and
+keep authorizing on a session the service seals if no client ever reads the
+outcome. Recording that outcome through status or cancel, or recording the
+outcome of a later sign-in, lifts the refusal.
 
 Revocation first commits `REVOKED` metadata with a new generation and then asks
 the control plane to revoke every provider lease. From the metadata commit
@@ -800,9 +805,10 @@ action kinds, optional element-role/name constraints, optional purpose, start,
 expiry, revocation, approval actor, and timestamps live in PostgreSQL. It stores
 no browser material. The public grant surface requires `browser.grant.read` or
 `browser.grant.write`; creation itself is the explicit authenticated approval
-surface and records the authenticated principal as approver. A model, tool,
-page, scheduled prompt, or ordinary conversation endpoint cannot create,
-broaden, select, or revoke a grant.
+surface and records the authenticated principal as approver. Creation needs a
+`READY` profile whose newest sign-in has a recorded outcome, and is otherwise
+`409`. A model, tool, page, scheduled prompt, or ordinary conversation endpoint
+cannot create, broaden, select, or revoke a grant.
 
 Trusted run composition may pin one grant id and one profile id. Immediately
 after deterministic policy returns `REQUIRE_APPROVAL` for `browser.act`, and
@@ -863,7 +869,10 @@ origin and prefix are the configured entry, never values taken from the page.
 The owner accepts it by resolving the approval with `approve_for_task`, which
 approves the pending action once and, in the same transaction, creates a
 `BrowserTaskGrant`; the request repeats the offered origin and prefix and
-also requires `browser.grant.write`. Nothing else creates a task grant.
+also requires `browser.grant.write`. Nothing else creates a task grant. While
+the profile's newest sign-in has no recorded outcome, the resolution is
+`task_grant_unavailable` and leaves the approval pending (ADR-0128 decision
+10).
 
 A task grant is bound to the tenant, principal, session, browser profile and
 its generation, agent version, policy version, origin, path prefix, creation

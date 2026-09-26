@@ -178,7 +178,11 @@ the owner's device to the isolated service.
     the generation, so no grant survives a sign-in, including one that replaces
     a ready profile's session with another account's. The begin step holds
     even when no client ever reads the outcome, as with a ceremony the
-    service's sweep seals. An open or verifying device ceremony excludes a
+    service's sweep seals. So that no grant can be created in between and pin
+    the begin's generation, neither kind of grant is created while the
+    profile's newest ceremony has no recorded outcome, expired or not. Status
+    or cancel recording that outcome, or the outcome of a later sign-in, lifts
+    the refusal. An open or verifying device ceremony excludes a
     lease for its profile, as a remote ceremony does. Lease reuse and renewal
     are ADR-0127's.
 
@@ -213,7 +217,10 @@ the owner's device to the isolated service.
   grants and resolve approvals, so no new cross-principal path exists.
 - A standing grant must be created again after any sign-in. A remote sign-in
   whose status polling passed through `AUTHENTICATION_REQUIRED` already ended
-  one; decision 10 makes that true of every sign-in.
+  one; decision 10 makes that true of every sign-in. It can be created again
+  only once that sign-in's outcome is recorded. A ceremony the service no
+  longer knows, after a restart or past the twenty-four-hour retention, never
+  records one, so the owner signs in again before granting on that profile.
 - A session made by WebKit is replayed by Chromium from another address. Sites
   that bind sessions to a user agent, a device key or an IP address will fail
   verification with `session_signed_out`. That is the correct outcome, and the
@@ -322,7 +329,9 @@ Automated verification, all red first:
   on a `READY` profile advances the generation once without changing status, a
   failed begin leaves it unchanged, and recording a `ready` outcome through
   status or cancel advances it once more. A standing grant created before the
-  begin no longer authorizes.
+  begin no longer authorizes. Neither a standing grant nor an
+  `approve_for_task` succeeds while the newest ceremony's outcome is
+  unrecorded, even after it expires, and both succeed once it is recorded.
 - Hard gate 9 (`tests/gates/test_browser_m10.py::test_authentication_boundary`)
   aggregates the device-ceremony contract beside the remote one.
 - Remote outcome-loss tests: the sweep seals on two ready samples and not on
