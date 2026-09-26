@@ -31,6 +31,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.people import PeopleImportJob, PeopleQuery, PersonIdentifier
 from agent_core.domain.people_sources import identifier_occurs, source_id
 from agent_core.domain.runs import BudgetScope, OutcomeKind, RunOutcome, RunStatus, Step
+from agent_core.model.cost import highest_input_rate
 from agent_core.ports.email import EmailStore
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.people_runtime import PeopleImportControl, PeopleImportFormation
@@ -67,9 +68,7 @@ def email_evidence_time(record: EmailRecord) -> datetime:
 def reservation_cost(request: ModelRequest, model: ResolvedModel) -> Decimal:
     """Reserve the advertised context/output maximum, including cache and reasoning."""
     price = model.pricing
-    input_rate = max(
-        price.input_per_mtok, price.cached_input_per_mtok, price.cache_write_per_mtok or Decimal(0)
-    )
+    input_rate = highest_input_rate(price, request.cache_hints)
     output_rate = price.output_per_mtok
     if price.reasoning_priced_separately:
         if price.reasoning_per_mtok is None:

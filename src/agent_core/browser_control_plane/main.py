@@ -11,6 +11,7 @@ from agent_core.adapters.determinism import SystemClock
 from agent_core.browser_control_plane.api import create_profile_service_app
 from agent_core.browser_control_plane.configuration import load_profile_service_settings
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
+from agent_core.browser_control_plane.log_redaction import profile_service_log_config
 from agent_core.browser_control_plane.runtime import HostedPlaywrightSessionRuntime
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
@@ -31,6 +32,7 @@ def main() -> None:
         now=clock.now,
         process_secret=settings.session_secret.reveal().encode(),
         ceremony_base_url=settings.ceremony_base_url,
+        device_sign_in_enabled=settings.device_sign_in_enabled,
     )
     lifecycle = HostedProfileLifecycleService(
         store,
@@ -47,4 +49,5 @@ def main() -> None:
         host=settings.bind_host,
         port=settings.bind_port,
         access_log=False,
+        log_config=profile_service_log_config(),
     )

@@ -239,8 +239,9 @@ those Python checks plus the independent Node website lane are CI jobs 1,
 credential, partitioned rather than overlapping. This is the whole of
 the reconciliation the governing rule demands. A developer with no Docker
 daemon running can still satisfy the criterion in Section 24 that says
-"`make check` succeeds"; a developer with one runs `make db-up migrate
-test-integration` and has run the third job as well.
+"`make check` succeeds"; a developer with one runs `make db-up`, migrates a
+scratch database, and runs `make test-integration` against it with the
+disposable opt-in described below, and has run the third job as well.
 
 Locally, `make check` schedules two independent Make jobs by default, starting
 the Python and website lanes first. Static tests use two load-scope workers;
@@ -269,9 +270,20 @@ suite that can run locally, including integration if a database is up;
 integration suite from being quietly deleted from `check` the first
 time a laptop has no Docker.
 
-Integration tests use a disposable database. The per-test fixture clears prior
-synthetic application records before migration round trips too, considering only
-tables present in an empty or older schema and retaining `alembic_version`.
+Integration tests use a disposable database, and a run must say so. The
+per-test fixture clears prior synthetic application records before migration
+round trips too, considering only tables present in an empty or older schema and
+retaining `alembic_version`. CI's `DATABASE_URL` is the same as the compose
+database's, so no property of the URL can tell a scratch database from the
+shared development one. The reset therefore runs only when
+`VEETBOT_TEST_DATABASE_DISPOSABLE` is exactly `1`; otherwise every case skips
+with a message naming the opt-in and how to create a scratch database. The CI
+integration job sets it for its secondary container, which exists only for that
+run; no shared local file sets it. `tests/integration/disposable_database.py` is
+the only module in that directory that reads `DATABASE_URL` or issues `TRUNCATE`
+or `DROP TABLE`, `DROP SCHEMA`, or `DROP DATABASE`, and a module that replaces
+the directory's reset fixture runs no destructive statement of its own; a static
+test enforces all three.
 Production downgrade guards remain enforced; tests of populated migrations
 create their own records after isolation and verify that data loss is refused.
 Large SQL fixtures refresh planner statistics between related-table insert
@@ -333,8 +345,8 @@ while validate sends a git bundle into a real repository. Xcode suites
 The sidecar is the gate for every branch except `main` (ADR-0107). Hosted
 verification no longer starts when such a branch is pushed, so a change reaches
 `dev` on a passing `chunk validate`, plus the local suites the sidecar cannot
-run when the change touches them: `make test-integration` against the
-disposable PostgreSQL, `make test-sandbox`, and the Xcode suites. The workflow
+run when the change touches them: `make test-integration` against a scratch
+PostgreSQL database marked disposable, `make test-sandbox`, and the Xcode suites. The workflow
 section below defines when the hosted jobs still run.
 
 ## The compose file
@@ -494,9 +506,16 @@ defines the credential boundaries, serialization, and external App Store
 Connect prerequisites.
 
 Job 1 also runs the reading-lane floor first:
-`python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git
-trailer in the pushed range and fails when the declared lane sits below the
-minimum that `reading_lane_errors` derives from the changed paths. The base
+`python -m scripts.check_reading_lane` compares each commit's
+`Reading-Lane:` git trailer in the pushed range with the minimum that
+`reading_lane_errors` derives from the paths that commit changed (ADR-0133).
+A merge commit answers only for the paths where its result differs from every
+parent; the work it merged answers through its own commits. The range also
+passes when its newest trailer covers every path the range changed, so a new
+commit declaring the range's floor repairs one that fell short without
+rewriting shared history. A failing run lists each path whose floor exceeds
+its commit's declaration, names that commit when the range holds several, and
+prints the lane a repairing commit must declare. The base
 of the range is CircleCI's `pipeline.git.base_revision` when the pipeline
 supplies one, then `origin/dev`, then `origin/main`, then the parent commit.
 No trailer means lane A, the full reading order, so the check constrains only
@@ -508,7 +527,9 @@ Job 3 uses `postgres:16-alpine` as a secondary CircleCI Docker image rather
 than the compose file, because the compose file publishes a port on the
 developer's host and a secondary container does not need to. The database
 name, user, and password are the same three values, which keeps `DATABASE_URL`
-construction identical in both places.
+construction identical in both places. Because the URLs match, the job also sets
+`VEETBOT_TEST_DATABASE_DISPOSABLE=1`: its container starts empty for each run,
+and that opt-in, not the URL, is what lets the suite erase it.
 
 Job 4 does not run on a pull request. Live tests cost money and
 require a credential that a fork's pull request cannot have, so the

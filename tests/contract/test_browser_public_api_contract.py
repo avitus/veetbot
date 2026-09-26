@@ -26,6 +26,7 @@ from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settin
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
     BrowserGrantView,
@@ -42,6 +43,9 @@ GRANT_ID = UUID("00000000-0000-0000-0000-0000000000d9")
 
 
 class Profiles:
+    def __init__(self) -> None:
+        self.begun_modes: list[BrowserAuthenticationMode] = []
+
     async def create(
         self,
         owner: Principal,
@@ -88,15 +92,22 @@ class Profiles:
         profile_id: UUID,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         del owner, login_url
+        self.begun_modes.append(mode)
+        return self._ceremony(profile_id, mode)
+
+    @staticmethod
+    def _ceremony(profile_id: UUID, mode: BrowserAuthenticationMode) -> BrowserAuthenticationView:
+        suffix = "/handoff" if mode is BrowserAuthenticationMode.DEVICE else ""
         return BrowserAuthenticationView(
             id=AUTHENTICATION_ID,
             profile_id=profile_id,
             status=BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
             expires_at=NOW + timedelta(minutes=5),
             launch_url=(
-                f"https://login.example.test/authentication/{AUTHENTICATION_ID}"
+                f"https://login.example.test/authentication/{AUTHENTICATION_ID}{suffix}"
                 "#capability=one-time-capability"
             ),
         )
@@ -106,7 +117,8 @@ class Profiles:
         owner: Principal,
         profile_id: UUID,
     ) -> builtins.list[BrowserAuthenticationView]:
-        result = await self.begin_authentication(owner, profile_id, login_url="unused")
+        del owner
+        result = self._ceremony(profile_id, BrowserAuthenticationMode.REMOTE)
         return [result.model_copy(update={"launch_url": None})]
 
     async def authentication_status(
@@ -418,6 +430,7 @@ async def test_browser_write_requests_reject_malformed_origins_and_grant_windows
     assert inverted_window.status_code == 400
 
 
+@pytest.mark.parametrize("mode", [None, "device"])
 @pytest.mark.parametrize(
     ("login_url", "request_owner", "expected_status", "expected_code"),
     [
@@ -437,7 +450,9 @@ async def test_browser_login_validation_precedes_provider_dispatch_and_allows_re
     request_owner: str,
     expected_status: int,
     expected_code: str,
+    mode: str | None,
 ) -> None:
+    mode_field = {} if mode is None else {"mode": mode}
     clock, uow_factory = await memory_uow_factory()
     owner = principal().model_copy(update={"scopes": {"browser.profile.write"}})
     requesting = owner
@@ -485,7 +500,7 @@ async def test_browser_login_validation_precedes_provider_dispatch_and_allows_re
             transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
             base_url="http://127.0.0.1",
         ) as client:
-            rejected = await client.post(path, json={"login_url": login_url})
+            rejected = await client.post(path, json={"login_url": login_url, **mode_field})
 
         assert rejected.status_code == expected_status
         assert "Check the Website origin and Login page fields" not in rejected.text
@@ -510,11 +525,13 @@ async def test_browser_login_validation_precedes_provider_dispatch_and_allows_re
             base_url="http://127.0.0.1",
         ) as client:
             retried = await client.post(
-                path, json={"login_url": "https://duolingo.com/?isLoggingIn=true"}
+                path,
+                json={"login_url": "https://duolingo.com/?isLoggingIn=true", **mode_field},
             )
         assert retried.status_code == 201
         assert retried.json()["launch_url"] is not None
         assert len(provider_requests) == 1
+        assert json.loads(provider_requests[0].content).get("mode") == mode
 
 
 async def test_browser_write_routes_reject_principals_without_exact_scopes() -> None:
@@ -645,6 +662,236 @@ async def test_browser_login_redirect_outside_allowed_origins_is_a_malformed_req
     assert len(provider_requests) == 2
     async with uow_factory() as uow:
         profile = await uow.browser_profiles.get(PROFILE_ID, owner)
-        assert profile.generation == created.generation
+        # The refused begin changed nothing; the retried begin advanced the
+        # generation once, as every sign-in attempt does (ADR-0128 decision 10).
+        assert profile.generation == created.generation + 1
         records = await uow.browser_authentications.list(owner, profile_id=PROFILE_ID)
         assert [record.id for record in records] == [AUTHENTICATION_ID]
+
+
+def _profile_services(profiles: Profiles) -> SimpleNamespace:
+    return SimpleNamespace(
+        sessions=None,
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=profiles,
+        browser_grants=Grants(),
+    )
+
+
+async def test_device_ceremony_begin_passes_mode_and_returns_launch_once() -> None:
+    """ADR-0128 section 2.1: device mode rides on the existing begin route."""
+
+    profiles = Profiles()
+    owner = principal().model_copy(
+        update={"scopes": {"browser.profile.read", "browser.profile.write"}}
+    )
+    app = create_app(
+        _profile_services(profiles), settings(), owner, lambda: str(PROFILE_ID), _ready
+    )
+    path = f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        device = await client.post(
+            path, json={"login_url": "https://example.org/", "mode": "device"}
+        )
+        remote = await client.post(path, json={"login_url": "https://example.org/"})
+        bogus = await client.post(path, json={"login_url": "https://example.org/", "mode": "bogus"})
+        status = await client.get(f"/v1/browser-authentication-ceremonies/{AUTHENTICATION_ID}")
+        listed = await client.get(path)
+
+    assert device.status_code == 201, device.text
+    assert (
+        device.json()["launch_url"]
+        .split("#")[0]
+        .endswith(f"/authentication/{AUTHENTICATION_ID}/handoff")
+    )
+    assert remote.status_code == 201, remote.text
+    assert "/handoff" not in remote.json()["launch_url"]
+    assert bogus.status_code == 400
+    assert bogus.json()["error"]["code"] == "malformed_request"
+    assert "bogus" not in bogus.text
+    assert profiles.begun_modes == [
+        BrowserAuthenticationMode.DEVICE,
+        BrowserAuthenticationMode.REMOTE,
+    ]
+    assert status.json()["launch_url"] is None
+    assert [item["launch_url"] for item in listed.json()] == [None]
+
+
+@pytest.mark.parametrize("mode", [None, "remote", "device"])
+async def test_begin_response_is_private_no_store(mode: str | None) -> None:
+    """ADR-0128 (S4): the begin body carries a capability, so no cache keeps it."""
+
+    owner = principal().model_copy(update={"scopes": {"browser.profile.write"}})
+    app = create_app(
+        _profile_services(Profiles()), settings(), owner, lambda: str(PROFILE_ID), _ready
+    )
+    body: dict[str, str] = {"login_url": "https://example.org/"}
+    if mode is not None:
+        body["mode"] = mode
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        response = await client.post(
+            f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies", json=body
+        )
+
+    assert response.status_code == 201, response.text
+    assert response.headers.get("cache-control") == "private, no-store"
+
+
+class DeviceCeremonyService:
+    """A stateful isolated service behind MockTransport (ADR-0128 section 2.4).
+
+    Each begin opens a new ceremony. ``reject_handoffs`` models the owner's
+    client posting a handoff the service refused: the service already
+    records the ceremony ``cancelled``, which orchestration learns only
+    through status or cancel.
+    """
+
+    def __init__(self) -> None:
+        self.statuses: dict[UUID, str] = {}
+        self.begun: list[dict[str, object]] = []
+        self.reject_handoffs = False
+
+    def _view(self, ceremony_id: UUID, *, launch: bool) -> dict[str, object]:
+        view: dict[str, object] = {
+            "id": str(ceremony_id),
+            "profile_id": str(PROFILE_ID),
+            "status": self.statuses[ceremony_id],
+            "expires_at": (NOW + timedelta(minutes=5)).isoformat(),
+        }
+        if launch:
+            view["launch_url"] = (
+                f"https://browser.example.test/authentication/{ceremony_id}/handoff"
+                "#capability=one-time"
+            )
+        return view
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if request.url.path.endswith(":begin"):
+            self.begun.append(body)
+            ceremony_id = UUID(int=0xD100 + len(self.begun))
+            self.statuses[ceremony_id] = (
+                "cancelled" if self.reject_handoffs else "authentication_required"
+            )
+            view = self._view(ceremony_id, launch=True)
+            view["status"] = "authentication_required"
+            return httpx.Response(201, json=view)
+        ceremony_id = UUID(body["ceremony_id"])
+        if request.url.path.endswith(":cancel") and self.statuses[ceremony_id] in {
+            "authentication_required",
+            "needs_user",
+        }:
+            self.statuses[ceremony_id] = "cancelled"
+        return httpx.Response(200, json=self._view(ceremony_id, launch=False))
+
+
+async def _device_begin_client(
+    service: DeviceCeremonyService,
+) -> tuple[httpx.AsyncClient, httpx.AsyncClient]:
+    clock, uow_factory = await memory_uow_factory()
+    owner = principal().model_copy(
+        update={"scopes": {"browser.profile.read", "browser.profile.write"}}
+    )
+    provider = httpx.AsyncClient(transport=httpx.MockTransport(service))
+    profiles = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow_factory),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=HostedBrowserSessionControlPlane(
+            base_url="https://browser.example.test",
+            credentials=MappingCredentialResolver({"browser_profile_control_plane": "test"}),
+            client=provider,
+        ),
+        clock=clock,
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    await profiles.create(owner, ("https://www.example.org",))
+    app = create_app(
+        SimpleNamespace(browser_profiles=profiles),
+        settings(),
+        owner,
+        lambda: str(PROFILE_ID),
+        _ready,
+    )
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://127.0.0.1",
+    )
+    return provider, client
+
+
+DEVICE_BEGIN = {"login_url": "https://www.example.org/", "mode": "device"}
+CEREMONIES = f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies"
+
+
+async def test_device_begin_after_a_rejected_handoff_is_409_until_cancelled() -> None:
+    """ADR-0128 D20: a refused handoff leaves the record open until cancel."""
+
+    service = DeviceCeremonyService()
+    service.reject_handoffs = True
+    provider, client = await _device_begin_client(service)
+    async with provider, client:
+        first = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        blocked = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        cancelled = await client.post(
+            f"/v1/browser-authentication-ceremonies/{first.json()['id']}/cancel"
+        )
+        service.reject_handoffs = False
+        retried = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+
+    assert first.status_code == 201, first.text
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "conflict"
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert retried.status_code == 201, retried.text
+    assert retried.json()["id"] != first.json()["id"]
+    assert [body.get("mode") for body in service.begun] == ["device", "device"]
+
+
+async def test_device_begin_after_reading_a_cancelled_status_is_admitted() -> None:
+    service = DeviceCeremonyService()
+    service.reject_handoffs = True
+    provider, client = await _device_begin_client(service)
+    async with provider, client:
+        first = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        status = await client.get(f"/v1/browser-authentication-ceremonies/{first.json()['id']}")
+        service.reject_handoffs = False
+        retried = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+
+    assert status.json()["status"] == "cancelled"
+    assert status.json()["launch_url"] is None
+    assert retried.status_code == 201, retried.text
+
+
+async def test_lost_device_begin_is_recovered_by_list_cancel_and_begin() -> None:
+    """ADR-0128 D20 (B6): the client never saw the id, so it lists, cancels
+    the newest open ceremony and begins once more."""
+
+    service = DeviceCeremonyService()
+    provider, client = await _device_begin_client(service)
+    async with provider, client:
+        lost = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        del lost  # The response never reached the client.
+        listed = await client.get(CEREMONIES)
+        open_ceremonies = [
+            item
+            for item in listed.json()
+            if item["status"] in {"authentication_required", "needs_user"}
+        ]
+        newest = max(open_ceremonies, key=lambda item: item["expires_at"])
+        cancelled = await client.post(
+            f"/v1/browser-authentication-ceremonies/{newest['id']}/cancel"
+        )
+        retried = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+
+    assert len(open_ceremonies) == 1
+    assert all(item["launch_url"] is None for item in listed.json())
+    assert cancelled.json()["status"] == "cancelled"
+    assert retried.status_code == 201, retried.text
+    assert "/handoff#capability=" in retried.json()["launch_url"]

@@ -17,9 +17,15 @@ from typing import Any, Protocol, cast
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.approvals import ApprovalRequest, ApprovalStatus
+from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest, ApprovalStatus
 from agent_core.domain.argument_views import approval_argument_digests, approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
+from agent_core.domain.browser_act_views import TASK_GRANT_AUTHORIZATION_KIND
+from agent_core.domain.browser_task_grants import (
+    TASK_GRANT_NOT_COVERED_REASONS,
+    BrowserTaskGrantOffer,
+    TaskGrantNotCovered,
+)
 from agent_core.domain.delegations import Delegation, DelegationRequest
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND
 from agent_core.domain.errors import (
@@ -48,6 +54,7 @@ from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
     POLICY_DECISION_RANK,
     ActionKind,
+    AuthorizationTurn,
     ExecutionTarget,
     IdempotencyClass,
     PolicyDecision,
@@ -290,6 +297,59 @@ def _action_kind(tool: Tool) -> ActionKind:
     if tool.spec.name == SKILL_MANAGE_TOOL_NAME:
         return ActionKind.SKILL_AUTHORING
     return ActionKind.TOOL_CALL
+
+
+def _active_turn_facts(checkpoint: RunCheckpoint) -> AuthorizationTurn:
+    """ADR-0129: the newest user message's trust and the tools called since.
+
+    A ``tool.call`` wrapper counts as the tool it names; one that does not
+    parse counts as ``tool.call``, which is not a browser tool. The loop
+    appends a step's calls before running them, so the current step's other
+    calls are included.
+    """
+
+    names: set[str] = set()
+    for item in reversed(checkpoint.conversation):
+        if isinstance(item, UserMessage):
+            return AuthorizationTurn(newest_user_trust=item.trust, tool_names=frozenset(names))
+        if isinstance(item, ToolCallItem):
+            names.add(_unwrapped_call_name(item))
+    return AuthorizationTurn(
+        newest_user_trust=TrustLevel.EXTERNAL_UNTRUSTED, tool_names=frozenset(names)
+    )
+
+
+def _unwrapped_call_name(call: ToolCallItem) -> str:
+    if call.name != TOOL_CALL_TOOL_NAME:
+        return call.name
+    try:
+        wrapper, _rendered, _hash = validate_and_normalize(call.arguments, TOOL_CALL_INPUT_SCHEMA)
+    except ToolValidationError:
+        return TOOL_CALL_TOOL_NAME
+    name = wrapper.get("name")
+    return name if isinstance(name, str) and name else TOOL_CALL_TOOL_NAME
+
+
+def _task_grant_not_covered(
+    standing: StandingAuthorization | None,
+) -> TaskGrantNotCovered | None:
+    """Why the session's active task grant did not cover this action, when a
+    task grant was consulted and named itself; nothing otherwise (ADR-0129)."""
+
+    if (
+        standing is None
+        or standing.allowed
+        or standing.authorization_kind != TASK_GRANT_AUTHORIZATION_KIND
+        or standing.authorization_ref is None
+        or standing.reason_code not in TASK_GRANT_NOT_COVERED_REASONS
+    ):
+        return None
+    try:
+        return TaskGrantNotCovered(
+            grant_id=UUID(standing.authorization_ref), reason=standing.reason_code
+        )
+    except ValueError:
+        return None
 
 
 def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive") -> TrustLevel:
@@ -920,7 +980,16 @@ class ToolPipeline:
                     standing_authorization = None
                 if standing_authorization is None or not standing_authorization.allowed:
                     approval = await self._request_approval(
-                        run, call, principal, agent, tool, invocation, decision, lease
+                        run,
+                        call,
+                        principal,
+                        agent,
+                        tool,
+                        invocation,
+                        decision,
+                        lease,
+                        turn=_active_turn_facts(checkpoint),
+                        standing=standing_authorization,
                     )
                     raise ApprovalRequiredError(approval.id)
 
@@ -941,6 +1010,16 @@ class ToolPipeline:
                             "authorization_reason": standing_authorization.reason_code,
                         }
                     )
+                    # ADR-0129 G7: which use of a task grant this was, and the
+                    # view of the unreviewed action it authorized.
+                    if standing_authorization.use_ordinal is not None:
+                        authorization_payload["authorization_use"] = (
+                            standing_authorization.use_ordinal
+                        )
+                    if standing_authorization.authorization_view is not None:
+                        authorization_payload["authorization_view"] = (
+                            standing_authorization.authorization_view
+                        )
                 await self._event_in(
                     uow,
                     run,
@@ -1177,6 +1256,11 @@ class ToolPipeline:
             idempotency_key=key,
             deadline_at=deadline,
             run_deadline_at=run.deadline_at,
+            dispatch_constraint=(
+                standing_authorization.dispatch_constraint
+                if standing_authorization is not None and standing_authorization.allowed
+                else None
+            ),
             timeout_seconds=effective_timeout,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(
@@ -1351,6 +1435,12 @@ class ToolPipeline:
             progress.extend((13, 14))
         if result.ok:
             self._apply_context_update(checkpoint, prepared_update)
+            if result.evidence_key is not None:
+                # ADR-0130: the loop reads what this call observed, once the
+                # batch completes; it never reaches the model or a stored row.
+                evidence = checkpoint.working_state.setdefault("tool_evidence", {})
+                if isinstance(evidence, dict):
+                    evidence[call.call_id] = result.evidence_key
         return result_item
 
     async def _artifactize_large_output(
@@ -1540,6 +1630,7 @@ class ToolPipeline:
                 run=run,
                 agent_version=agent.version,
                 action_deadline=action_deadline,
+                turn=_active_turn_facts(checkpoint),
             )
         except Exception:
             logger.exception(
@@ -1567,28 +1658,50 @@ class ToolPipeline:
         invocation: ToolInvocation,
         decision: PolicyDecision,
         lease: WorkerLease | None,
+        *,
+        turn: AuthorizationTurn | None = None,
+        standing: StandingAuthorization | None = None,
     ) -> ApprovalRequest:
         if invocation.normalized_arguments is None or invocation.normalized_arguments_hash is None:
             raise ConflictError("approval action has no normalized arguments")
         now = self._clock.now()
         action_summary = f"Run {tool.spec.name} with validated arguments."
         approval_arguments = dict(invocation.normalized_arguments)
+        offer: BrowserTaskGrantOffer | None = None
+        not_covered = _task_grant_not_covered(standing)
+        in_session = getattr(tool, "approval_view_in_session", None)
         approval_view = getattr(tool, "approval_view", None)
-        if approval_view is not None:
-            try:
+        try:
+            if in_session is not None:
+                presentation = cast(
+                    ApprovalPresentation,
+                    await in_session(
+                        approval_arguments,
+                        run=run,
+                        principal=principal,
+                        turn=turn,
+                        not_covered=not_covered,
+                    ),
+                )
+                action_summary = presentation.summary
+                approval_arguments = dict(presentation.arguments)
+                offer = presentation.task_grant_offer
+            elif approval_view is not None:
                 action_summary, approval_arguments = await approval_view(
                     approval_arguments,
                     tenant_id=run.tenant_id,
                 )
-            except (RunCancelledError, BudgetExceededError):
-                raise
-            except Exception:
-                logger.exception(
-                    "approval_view_failed",
-                    extra={"tool_name": tool.spec.name},
-                )
-                action_summary = f"Run {tool.spec.name} with validated arguments."
-                approval_arguments = dict(invocation.normalized_arguments)
+        except (RunCancelledError, BudgetExceededError):
+            raise
+        except Exception:
+            # A presenter that fails keeps the legacy card and makes no offer.
+            logger.exception(
+                "approval_view_failed",
+                extra={"tool_name": tool.spec.name},
+            )
+            action_summary = f"Run {tool.spec.name} with validated arguments."
+            approval_arguments = dict(invocation.normalized_arguments)
+            offer = None
         approval = ApprovalRequest(
             id=self._ids.new_id(),
             tenant_id=run.tenant_id,
@@ -1612,6 +1725,8 @@ class ToolPipeline:
             policy_version=decision.policy_version,
             expires_at=now + timedelta(seconds=self._approval_expiry_seconds[tool.spec.risk]),
             created_at=now,
+            task_grant_offer=offer,
+            task_grant_not_covered=not_covered,
         )
         waiting = invocation.model_copy(
             update={

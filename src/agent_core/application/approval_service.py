@@ -72,6 +72,10 @@ class ApprovalService:
         reason: str | None = None,
     ) -> ApprovalRequest:
         self._require("approval.resolve")
+        if resolution is ApprovalResolutionType.APPROVE_FOR_TASK:
+            # ADR-0129: a task grant is created only through the public
+            # resolution service, which checks the offer and the grant scope.
+            raise ValueError("approve_for_task resolves only through the public approval service")
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
             visible = await uow.approvals.get(approval_id, self._principal)

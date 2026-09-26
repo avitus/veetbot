@@ -32,7 +32,11 @@ class BrowserNavigateTool:
     spec = ToolSpec(
         name="browser.navigate",
         version="1.0.0",
-        description="Navigate the bound browser profile to one allowed public HTTPS page.",
+        description=(
+            "Open one page in this chat's website profile and return it once it settles. "
+            "Use a full https:// URL on an origin listed as browser_origins in the runtime "
+            "metadata."
+        ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
         side_effect=SideEffectClass.NETWORK_READ,

@@ -30,6 +30,7 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
+from agent_core.domain.browser_task_grants import parse_task_grant_scopes
 
 PROFILE_ID = "00000000-0000-0000-0000-0000000000e7"
 GRANT_ID = "00000000-0000-0000-0000-0000000000e8"
@@ -1151,13 +1152,41 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_185_versioned_knobs_are_present_and_non_null() -> None:
+def test_browser_task_overlay_raises_only_bound_chat_limits() -> None:
+    """ADR-0130: bound chats get their own block; run_defaults stays as it was."""
+
+    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
+
+    assert loaded.get("browser_task") == {
+        "max_steps": 160,
+        "max_model_calls": 120,
+        "max_tool_calls": 160,
+        "max_cost": 30,
+        "synthesis_reserve_cost": 3,
+    }
+    assert loaded["run_defaults"] == {
+        "max_steps": 32,
+        "max_model_calls": 24,
+        "max_tool_calls": 64,
+        "synthesis_reserve_model_calls": 2,
+        "synthesis_reserve_tool_calls": 4,
+    }
+
+
+def test_all_190_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 185
+    assert len(qualified_paths) == 190
+    assert {
+        "runtime/limits.yaml:browser_task.max_steps",
+        "runtime/limits.yaml:browser_task.max_model_calls",
+        "runtime/limits.yaml:browser_task.max_tool_calls",
+        "runtime/limits.yaml:browser_task.max_cost",
+        "runtime/limits.yaml:browser_task.synthesis_reserve_cost",
+    } <= qualified_paths
     assert "runtime/limits.yaml:email.unsubscribe_grace_days" in qualified_paths
     assert {
         "folders/profiles.yaml:proposals.threshold",
@@ -1330,3 +1359,56 @@ def test_required_mode_judges_evidence_under_the_operator_pin(tmp_path: Path) ->
     assert (
         settings.memory_formation_policy_pin is MemoryFormationPolicyPin.REPAIRED_PROVIDER_ASSISTED
     )
+
+
+def _hosted(**extra: str) -> dict[str, str]:
+    return {
+        **base_environment(),
+        "SANDBOX_MECHANISM": "fake",
+        "BROWSER_PROVIDER": "hosted",
+        "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+        "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        **extra,
+    }
+
+
+def test_task_grant_scopes_parse_and_refuse() -> None:
+    """ADR-0129 D2/D20: exact origin-and-segment scopes behind a hosted-only flag."""
+
+    configured = load_settings(
+        _hosted(
+            BROWSER_TASK_GRANTS_ENABLED="1",
+            BROWSER_TASK_GRANT_SCOPES="https://www.duolingo.com/lesson",
+        )
+    )
+    default = load_settings(_hosted())
+
+    assert configured.browser_task_grants_enabled is True
+    assert configured.browser_task_grant_scopes == parse_task_grant_scopes(
+        "https://www.duolingo.com/lesson"
+    )
+    assert (default.browser_task_grants_enabled, default.browser_task_grant_scopes) == (False, ())
+    refusals = {
+        "an http entry": _hosted(
+            BROWSER_TASK_GRANTS_ENABLED="1",
+            BROWSER_TASK_GRANT_SCOPES="https://www.duolingo.com/lesson,http://example.org/a",
+        ),
+        "a sensitive segment": _hosted(
+            BROWSER_TASK_GRANTS_ENABLED="1", BROWSER_TASK_GRANT_SCOPES="https://example.org/billing"
+        ),
+        "scopes without the flag": _hosted(
+            BROWSER_TASK_GRANT_SCOPES="https://www.duolingo.com/lesson"
+        ),
+        "a word for the flag": _hosted(BROWSER_TASK_GRANTS_ENABLED="yes"),
+    }
+    messages = {}
+    for name, environment in refusals.items():
+        with pytest.raises(ConfigurationError) as refused:
+            load_settings(environment)
+        messages[name] = str(refused.value)
+
+    assert "BROWSER_TASK_GRANT_SCOPES" in messages["an http entry"]
+    assert "entry 2" in messages["an http entry"]
+    assert "entry 1" in messages["a sensitive segment"]
+    assert "BROWSER_TASK_GRANTS_ENABLED" in messages["scopes without the flag"]
+    assert "BROWSER_TASK_GRANTS_ENABLED" in messages["a word for the flag"]

@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.browser.task_grants import InMemoryBrowserTaskGrantRepository
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.memory.in_memory import (
     InMemoryIntegratedEpisodeStore,
@@ -43,6 +44,7 @@ from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
+from tests.contract.test_browser_task_grant_repository_contract import grant as task_grant
 from tests.contract.test_delegation_repository_contract import delegation
 from tests.contract.test_integrated_episode_store_contract import integrated_episode
 from tests.contract.test_schedule_repository_contract import revision, schedule
@@ -94,6 +96,7 @@ async def _repository() -> tuple[
         schedules=schedules,
         notification_outbox=notification_outbox,
         delegations=delegations,
+        browser_task_grants=InMemoryBrowserTaskGrantRepository(),
     )
     return (
         repository,
@@ -343,3 +346,53 @@ async def test_in_memory_deletion_of_the_parent_session_erases_child_sessions() 
         SESSION_ID,
         child_session_id,
     }
+
+
+async def test_session_deletion_removes_task_grants() -> None:
+    """ADR-0129: a deleted chat takes its task grants with it, as the
+    session foreign key cascades in PostgreSQL."""
+
+    clock, sessions, runs, events = await memory_stack()
+    task_grants = InMemoryBrowserTaskGrantRepository()
+    repository = InMemorySessionDeletionRepository(
+        sessions=sessions,
+        runs=runs,
+        events=events,
+        invocations=InMemoryToolInvocationRepository(runs),
+        approvals=InMemoryApprovalRepository(clock),
+        checkpoints=InMemoryCheckpointRepository(),
+        idempotency=InMemoryIdempotencyRepository(clock),
+        usage=InMemoryUsageRepository(runs),
+        trajectory_exports=InMemoryTrajectoryExportRepository(),
+        artifacts=InMemoryArtifactRepository(),
+        memories=InMemoryMemoryStore(clock),
+        people=InMemoryPeopleStore(FixedClock(NOW)),
+        episodes=InMemoryIntegratedEpisodeStore(),
+        traces=InMemoryTraceStore(),
+        knowledge=InMemoryKnowledgeStore(clock),
+        schedules=InMemoryScheduleRepository(),
+        notification_outbox=InMemoryNotificationOutbox(clock, InMemoryDeviceRegistry()),
+        delegations=InMemoryDelegationRepository(),
+        browser_task_grants=task_grants,
+    )
+    kept_session = UUID(int=0x5E55)
+    await sessions.create(
+        Session(
+            id=kept_session,
+            tenant_id=principal().tenant_id,
+            principal_id=principal().principal_id,
+            agent_id=UUID(int=1),
+            agent_version="1.0.0",
+            status=SessionStatus.ACTIVE,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    deleted = await task_grants.create(task_grant(1, session_id=SESSION_ID))
+    kept = await task_grants.create(task_grant(2, session_id=kept_session))
+
+    assert await repository.delete(SESSION_ID, principal(), NOW + timedelta(minutes=1))
+
+    with pytest.raises(NotFoundError):
+        await task_grants.get(deleted.id, principal())
+    assert await task_grants.get(kept.id, principal()) == kept

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+import httpx
 import pytest
 
 from agent_core.adapters.browser.hosted_provider import (
@@ -17,6 +19,8 @@ from agent_core.adapters.browser.hosted_provider import (
     RunStateReader,
     SessionBoundHostedBrowserProvider,
 )
+from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
+from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
@@ -25,16 +29,22 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserDispatchConstraint,
     BrowserElement,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProviderError,
     BrowserRunState,
+    BrowserSnapshot,
 )
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.tools import ToolExecutionContext
+from agent_core.ports.browser import browser_action_context_in_session, browser_snapshot_in_session
 from agent_core.ports.browser_sessions import BrowserSessionControlPlane
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, principal, tool_context
@@ -70,6 +80,7 @@ class FakeSessions:
     sequence: list[int] = field(default_factory=list)
     act_started: asyncio.Event = field(default_factory=asyncio.Event)
     act_gate: asyncio.Event | None = None
+    constraints: list[BrowserDispatchConstraint | None] = field(default_factory=list)
 
     async def acquire(
         self,
@@ -107,8 +118,10 @@ class FakeSessions:
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
         del lease_ref, action
+        self.constraints.append(constraint)
         self.act_started.set()
         if self.act_gate is not None:
             await self.act_gate.wait()
@@ -208,7 +221,10 @@ class LossySessions:
         action: BrowserAction,
         *,
         sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
+        # The in-process service learns the constraint in Track R (ADR-0129 R2).
+        assert constraint is None
         observation = await self.service.act(lease_ref, action, sequence=sequence)
         self._answer("act")
         return observation
@@ -365,6 +381,50 @@ async def test_hosted_provider_keeps_the_run_attempt_lease_from_navigation_to_ac
     assert sessions.acquisitions == [(PROFILE_ID, navigate_call.run_id, 1)]
     assert sessions.closes == []
     assert sessions.sequence == [1]
+
+
+@dataclass
+class SettledPageSessions(FakeSessions):
+    """Each act returns the page it settled on, with a new revision and refs."""
+
+    async def act(
+        self,
+        lease_ref: str,
+        action: BrowserAction,
+        *,
+        sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        await super().act(lease_ref, action, sequence=sequence, constraint=constraint)
+        revision = f"revision-{sequence + 1}"
+        return BrowserObservation(
+            url="https://example.org/lesson",
+            revision=revision,
+            elements=(BrowserElement(ref=f"{revision}:0", role="button", name="Continue"),),
+        )
+
+
+async def test_an_act_can_follow_an_act_on_its_returned_revision() -> None:
+    """ADR-0130 decision 6 in hosted mode: act on the page act returned, no observe."""
+
+    sessions = SettledPageSessions()
+    provider = ready_provider(sessions)
+    call = replace(tool_context(), deadline_at=NOW + timedelta(seconds=30))
+    second = BrowserAction(
+        kind=BrowserActionKind.CLICK, expected_revision="revision-2", ref="revision-2:0"
+    )
+
+    await provider.bind_execution(call)
+    await provider.navigate("https://example.org/lesson")
+    await provider.action_context(CLICK)
+    returned = await provider.act(CLICK)
+    context = await provider.action_context(second)
+    await provider.act(second)
+
+    assert returned.revision == "revision-2"
+    assert (context.revision, context.ref) == ("revision-2", "revision-2:0")
+    assert sessions.sequence == [1, 2]
+    assert len(sessions.acquisitions) == 1
 
 
 async def test_hosted_provider_bounds_the_lease_by_a_nearer_run_deadline() -> None:
@@ -824,3 +884,181 @@ async def test_session_bound_provider_releases_another_sessions_lease_once_its_r
     )
 
     assert sessions.closes == [lease_ref(1)]
+
+
+@dataclass
+class RefusingSessions(FakeSessions):
+    """The isolated runtime refuses a grant-authorized act before dispatch."""
+
+    refusals: list[str] = field(default_factory=list)
+
+    async def act(
+        self,
+        lease_ref: str,
+        action: BrowserAction,
+        *,
+        sequence: int,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        if self.refusals:
+            self.act_started.set()
+            raise BrowserProviderError(self.refusals.pop(0), retryable=False)
+        return await super().act(lease_ref, action, sequence=sequence, constraint=constraint)
+
+
+async def test_grant_refusal_keeps_the_lease_and_sequence() -> None:
+    """ADR-0129 (B2): grant_not_applicable is a pre-dispatch refusal."""
+
+    sessions = RefusingSessions(refusals=["tool.browser.grant_not_applicable"])
+    provider = ready_provider(sessions)
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+
+    with pytest.raises(BrowserProviderError) as refused:
+        await provider.act(CLICK)
+
+    assert (refused.value.reason_code, sessions.closes) == (
+        "tool.browser.grant_not_applicable",
+        [],
+    )
+    await provider.navigate("https://example.org/lesson")
+    await provider.act(CLICK)
+    assert len(sessions.acquisitions) == 1
+    assert sessions.sequence == [1]
+
+
+async def test_grant_refusal_discards_the_cached_observation() -> None:
+    """D16: the model must observe again before it can act or be granted."""
+
+    sessions = RefusingSessions(refusals=["tool.browser.grant_not_applicable"])
+    provider = ready_provider(sessions)
+    await provider.bind_execution(call_at(NOW))
+    await provider.navigate("https://example.org/lesson")
+
+    with pytest.raises(BrowserProviderError):
+        await provider.act(CLICK)
+    with pytest.raises(BrowserProviderError) as stale:
+        await provider.action_context(CLICK)
+
+    assert stale.value.reason_code == "tool.browser.page_changed"
+    assert provider.snapshot() is None
+
+
+FACTS = BrowserElementFacts(field_kind=BrowserFieldKind.NONE)
+
+
+@dataclass
+class FactSessions(FakeSessions):
+    """A newer service: every page carries element facts beside it."""
+
+    async def navigate(self, lease_ref: str, url: str) -> BrowserSnapshot:  # type: ignore[override]
+        observation = await super().navigate(lease_ref, url)
+        revision = f"revision-{url.rsplit('/', 1)[-1]}"
+        observation = observation.model_copy(
+            update={
+                "revision": revision,
+                "elements": (BrowserElement(ref=f"{revision}:0", role="button", name="Continue"),),
+            }
+        )
+        return BrowserSnapshot(
+            observation=observation,
+            facts=BrowserObservationFacts(revision=revision, elements={f"{revision}:0": FACTS}),
+        )
+
+
+async def test_facts_are_cached_beside_the_observation_per_session() -> None:
+    sessions = FactSessions()
+
+    async def load(owner: Principal, profile_id: UUID) -> BrowserProfile:
+        del owner, profile_id
+        return profile()
+
+    async def select(context: ToolExecutionContext) -> UUID:
+        del context
+        return PROFILE_ID
+
+    provider = SessionBoundHostedBrowserProvider(
+        principal=principal(),
+        profiles=load,
+        profile_selector=select,
+        sessions=sessions,
+        now=lambda: NOW,
+    )
+    other_session = UUID("00000000-0000-0000-0000-0000000000f5")
+    first = call_at(NOW)
+    second = call_at(NOW, session_id=other_session, run_id=UUID(int=0xF6))
+    await provider.bind_execution(first)
+    returned = await provider.navigate("https://example.org/a")
+    await provider.bind_execution(second)
+    await provider.navigate("https://example.org/b")
+
+    mine = await browser_snapshot_in_session(provider, SESSION_ID)
+    theirs = await browser_snapshot_in_session(provider, other_session)
+    context = await browser_action_context_in_session(
+        provider,
+        SESSION_ID,
+        BrowserAction(
+            kind=BrowserActionKind.CLICK, expected_revision="revision-a", ref="revision-a:0"
+        ),
+    )
+
+    assert isinstance(returned, BrowserObservation)
+    assert mine is not None and theirs is not None
+    assert (mine.observation.revision, theirs.observation.revision) == ("revision-a", "revision-b")
+    assert mine.facts is not None and mine.facts.elements == {"revision-a:0": FACTS}
+    assert context is not None and context.revision == "revision-a"
+    assert await browser_snapshot_in_session(provider, UUID(int=0xF7)) is None
+
+
+async def test_act_sends_the_constraint_in_the_request_body() -> None:
+    """ADR-0129 section 8.4: the constraint rides in the act body, and only
+    when a grant authorized the act."""
+
+    bodies: list[dict[str, object]] = []
+
+    def service(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if request.url.path.endswith(":acquire"):
+            return httpx.Response(
+                200,
+                json={
+                    "lease_ref": "lease-reference-" + "1" * 32,
+                    "expires_at": body["deadline_at"],
+                },
+            )
+        page = {
+            "url": "https://example.org/lesson",
+            "revision": "revision-1",
+            "elements": [{"ref": "revision-1:0", "role": "button", "name": "Continue"}],
+        }
+        if request.url.path.endswith(":act"):
+            bodies.append(body)
+        return httpx.Response(200, json=page)
+
+    constraint = BrowserDispatchConstraint(
+        grant_kind="task",
+        origins=("https://example.org",),
+        path_prefix="/lesson",
+        not_after=NOW + timedelta(minutes=30),
+        consequence_ceiling="unknown",
+        max_text_characters=256,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as client:
+        provider = ready_provider(
+            HostedBrowserSessionControlPlane(
+                base_url="https://browser.example.test",
+                credentials=MappingCredentialResolver({"browser_profile_control_plane": "test"}),
+                client=client,
+            )
+        )
+        await provider.bind_execution(call_at(NOW))
+        await provider.navigate("https://example.org/lesson")
+        await provider.act(CLICK, constraint=constraint)
+        await provider.act(CLICK)
+
+    assert [body.get("constraint") for body in bodies] == [
+        constraint.model_dump(mode="json"),
+        None,
+    ]
+    assert "constraint" not in bodies[1]
+    assert [body["sequence"] for body in bodies] == [1, 2]

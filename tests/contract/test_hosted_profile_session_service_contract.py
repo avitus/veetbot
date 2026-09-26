@@ -4,24 +4,43 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import pytest
 
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
+from agent_core.browser_control_plane.handoff import DeviceSessionHandoff
+from agent_core.browser_control_plane.models import (
+    ProfileMaterialIdentity,
+    ProfileMaterialMetadata,
+)
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
-from agent_core.browser_control_plane.sessions import HostedProfileSessionService
+from agent_core.browser_control_plane.sessions import (
+    CeremonyCapabilityRejected,
+    DeviceHandoffInvalid,
+    DeviceSessionRejected,
+    HostedProfileSessionService,
+)
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
+    BrowserLabelSource,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
+    BrowserPageEvidence,
     BrowserProviderError,
 )
 from agent_core.domain.errors import ConflictError
@@ -30,6 +49,25 @@ from tests.contract.support import NOW, principal
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000f4")
 RUN_ID = UUID("00000000-0000-0000-0000-0000000000f5")
 PROVIDER_REF = "opaque-session-reference-0000000000000001"
+
+
+NO_SESSION = b'{"format_version":1}'
+SIGNED_OUT = BrowserPageEvidence(on_allowed_origin=True, path="/log-in", challenge_visible=True)
+
+
+@dataclass
+class HandoffScenario:
+    """What a device handoff's two verification loads see (ADR-0128 section 4.4)."""
+
+    with_session: BrowserPageEvidence | BaseException | str | None = None
+    without_session: BrowserPageEvidence | BaseException | str | None = SIGNED_OUT
+    start_error: Exception | None = None
+    storage_error: Exception | None = None
+    gate: asyncio.Event | None = None
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+    # The signed-out browser's start waits on this, if set, and records cancellation.
+    signed_out_start_gate: asyncio.Event | None = None
+    signed_out_start_cancelled: bool = False
 
 
 @dataclass
@@ -44,6 +82,17 @@ class FakeSessionRuntime:
     observe_started: asyncio.Event | None = None
     observe_release: asyncio.Event | None = None
     navigate_error: Exception | None = None
+    # Device-handoff verification: what each load shows, keyed by whether the
+    # runtime started with a session, and the failures a scenario injects.
+    scenario: HandoffScenario | None = None
+    evidence_urls: list[str] = field(default_factory=list)
+    # Successive answers to authentication_status, then ``authentication``.
+    authentication_samples: list[BrowserAuthenticationStatus] = field(default_factory=list)
+    status_checks: int = 0
+    # ADR-0129: the facts this runtime reports, by observation revision.
+    known_facts: dict[str, BrowserObservationFacts] = field(default_factory=dict)
+    # ADR-0129: every grant-constrained act, with the service clock it carried.
+    constrained: list[tuple[BrowserDispatchConstraint, datetime]] = field(default_factory=list)
 
     async def start(
         self,
@@ -55,6 +104,18 @@ class FakeSessionRuntime:
         self.initial_material = material
         self.allowed_origins = allowed_origins
         self.interactive = interactive
+        scenario = self.scenario
+        if scenario is not None and scenario.signed_out_start_gate is not None:
+            if material == NO_SESSION:
+                try:
+                    await scenario.signed_out_start_gate.wait()
+                except asyncio.CancelledError:
+                    scenario.signed_out_start_cancelled = True
+                    raise
+            elif scenario.start_error is not None:
+                raise scenario.start_error
+        elif scenario is not None and scenario.start_error is not None:
+            raise scenario.start_error
 
     async def navigate(self, url: str) -> BrowserObservation:
         """Simulate the browser navigation result needed by this failure-path regression."""
@@ -79,10 +140,50 @@ class FakeSessionRuntime:
             revision="revision-2",
         )
 
+    async def act_within_grant(
+        self,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        *,
+        now: datetime,
+    ) -> BrowserObservation:
+        self.constrained.append((constraint, now))
+        return await self.act(action)
+
+    @property
+    def signed_in(self) -> bool:
+        return self.initial_material not in {None, NO_SESSION}
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        return self.known_facts.get(revision)
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        self.evidence_urls.append(url)
+        scenario = self.scenario or HandoffScenario()
+        if scenario.gate is not None:
+            scenario.started.set()
+            await scenario.gate.wait()
+        outcome = scenario.with_session if self.signed_in else scenario.without_session
+        if outcome == "hang":
+            await asyncio.sleep(3600)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if outcome is None:
+            return BrowserPageEvidence(
+                on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+            )
+        assert isinstance(outcome, BrowserPageEvidence)
+        return outcome
+
     async def storage_state(self) -> bytes:
+        if self.scenario is not None and self.scenario.storage_error is not None:
+            raise self.scenario.storage_error
         return self.sealed_material
 
     async def authentication_status(self) -> BrowserAuthenticationStatus:
+        self.status_checks += 1
+        if self.authentication_samples:
+            return self.authentication_samples.pop(0)
         return self.authentication
 
     async def interactive_frame(self) -> bytes:
@@ -99,6 +200,8 @@ def services(
     tmp_path: Path,
     *,
     first_navigate_error: Exception | None = None,
+    scenario: HandoffScenario | None = None,
+    verification_seconds: float = 30.0,
 ) -> tuple[
     HostedProfileLifecycleService,
     HostedProfileSessionService,
@@ -119,6 +222,7 @@ def services(
         assert tenant_id == principal().tenant_id
         runtime = FakeSessionRuntime(
             navigate_error=first_navigate_error if not runtimes else None,
+            scenario=scenario,
         )
         runtimes.append(runtime)
         return runtime
@@ -129,6 +233,8 @@ def services(
         now=lambda: times[0],
         process_secret=b"synthetic-process-secret-with-32-bytes",
         ceremony_base_url="https://browser-login.example.test",
+        verification_seconds=verification_seconds,
+        sweep_sample_seconds=0,
     )
     lifecycle = HostedProfileLifecycleService(
         store,
@@ -464,6 +570,39 @@ async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
     )
 
 
+async def test_restarted_service_never_reissues_a_ceremony_capability(tmp_path: Path) -> None:
+    """A capability that can write profile material must never repeat (ADR-0128 D3).
+
+    A restarted service keeps its store and process secret, so a capability
+    derived from them and a per-process counter would be issued again.
+    """
+
+    lifecycle, first, _runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    before = await first.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+    await first.cancel_authentication(before.id, principal())
+    _lifecycle, restarted, _restarted_runtimes, _restarted_times = services(tmp_path)
+
+    after = await restarted.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+
+    assert before.launch_url is not None and after.launch_url is not None
+    before_capability = before.launch_url.split("#capability=", 1)[1]
+    after_capability = after.launch_url.split("#capability=", 1)[1]
+    assert before_capability != after_capability
+    assert before.id != after.id
+    assert len(after_capability) == 43
+
+
 async def test_authentication_scope_mismatch_and_caller_asserted_success_are_absent(
     tmp_path: Path,
 ) -> None:
@@ -515,9 +654,9 @@ async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runti
     await assert_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(tmp_path)
 
 
-async def test_expired_authentication_is_retained_for_bounded_idempotency(
-    tmp_path: Path,
-) -> None:
+async def test_terminal_outcome_is_retained_for_a_day(tmp_path: Path) -> None:
+    """ADR-0128 D16: an outcome no client read in minutes is still there for a day."""
+
     lifecycle, sessions, _runtimes, times = services(tmp_path)
     await provision(lifecycle)
     ceremony = await sessions.begin_authentication(
@@ -535,8 +674,18 @@ async def test_expired_authentication_is_retained_for_bounded_idempotency(
     assert replay == expired
 
     times[0] += timedelta(minutes=5, seconds=1)
+    try:
+        after_minutes = await sessions.authentication_status(ceremony.id, principal())
+    except ConflictError:
+        pytest.fail("a finished ceremony was forgotten after five minutes")
+    times[0] = expired.expires_at + timedelta(seconds=1) + timedelta(hours=23, minutes=59)
+    after_a_day_less_a_minute = await sessions.authentication_status(ceremony.id, principal())
+    times[0] += timedelta(minutes=1)
     with pytest.raises(ConflictError):
         await sessions.authentication_status(ceremony.id, principal())
+
+    assert after_minutes == expired
+    assert after_a_day_less_a_minute == expired
 
 
 @pytest.mark.parametrize(
@@ -586,3 +735,710 @@ async def test_authentication_launch_navigation_failure_is_stable_and_discards_r
     assert retried.launch_url is not None
     assert len(runtimes) == 2
     assert runtimes[1].closed is False
+
+
+# --- ADR-0128: device sign-in handoff --------------------------------------
+
+SESSION_SENTINEL = "device-session-sentinel-value"
+
+
+def device_handoff(**overrides: object) -> DeviceSessionHandoff:
+    body: dict[str, object] = {
+        "confirmed_url": "https://example.org/learn#unit",
+        "cookies": [
+            {
+                "name": "session",
+                "value": SESSION_SENTINEL,
+                "domain": ".example.org",
+                "path": "/",
+                "expires": -1,
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            },
+            {
+                "name": "tracker",
+                "value": "foreign",
+                "domain": ".example.net",
+                "path": "/",
+                "expires": -1,
+                "httpOnly": False,
+                "secure": True,
+                "sameSite": "None",
+            },
+        ],
+        "origins": [
+            {"origin": "https://example.org", "localStorage": [{"name": "k", "value": "v"}]}
+        ],
+    }
+    body.update(overrides)
+    return DeviceSessionHandoff.model_validate(body)
+
+
+async def begin_device(sessions: HostedProfileSessionService) -> tuple[UUID, str]:
+    view = await sessions.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/",
+        mode=BrowserAuthenticationMode.DEVICE,
+    )
+    assert view.launch_url is not None
+    return view.id, view.launch_url.split("#capability=", 1)[1]
+
+
+async def sealed_material(sessions: HostedProfileSessionService) -> bytes:
+    store = sessions._store  # noqa: SLF001 - the contract inspects what was sealed
+    metadata = await store.find_by_profile(PROFILE_ID)
+    assert metadata is not None
+    return await store.load(metadata.identity())
+
+
+def record_writes(sessions: HostedProfileSessionService) -> list[bytes]:
+    writes: list[bytes] = []
+    store = sessions._store  # noqa: SLF001 - the contract records sealing
+    original = store.write
+
+    async def write(identity: ProfileMaterialIdentity, material: bytes) -> ProfileMaterialMetadata:
+        writes.append(material)
+        return await original(identity, material)
+
+    store.write = write  # type: ignore[method-assign]
+    return writes
+
+
+async def verification_started(scenario: HandoffScenario, task: asyncio.Task[None]) -> None:
+    """Wait until a handoff's verification loads begin, or its task ends first."""
+
+    started = asyncio.ensure_future(scenario.started.wait())
+    await asyncio.wait({started, task}, timeout=5, return_when=asyncio.FIRST_COMPLETED)
+    started.cancel()
+    assert scenario.started.is_set(), "the handoff never began verifying"
+
+
+async def ceremony_status(
+    sessions: HostedProfileSessionService, ceremony_id: UUID
+) -> BrowserAuthenticationStatus:
+    return (await sessions.authentication_status(ceremony_id, principal())).status
+
+
+async def assert_device_handoff_is_single_use_scope_filtered_and_service_decided(
+    tmp_path: Path,
+) -> None:
+    """Gate 9 (ADR-0128): one handoff, filtered to the profile, decided by the service."""
+
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+    assert runtimes == []
+
+    await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.READY
+    assert await sealed_material(sessions) == b'{"format_version":1,"sealed":true}'
+    with_session, without_session = runtimes
+    seeded = json.loads(with_session.initial_material or b"{}")
+    assert [cookie["domain"] for cookie in seeded["storage_state"]["cookies"]] == [".example.org"]
+    assert without_session.initial_material == NO_SESSION
+    assert (
+        with_session.evidence_urls == without_session.evidence_urls == ["https://example.org/learn"]
+    )
+    assert with_session.closed and without_session.closed
+    with pytest.raises(CeremonyCapabilityRejected):
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    assert len(runtimes) == 2
+
+    _lifecycle, unconfirmed, _runtimes, _times = services(
+        tmp_path / "unconfirmed", scenario=HandoffScenario(without_session=None)
+    )
+    await provision(_lifecycle)
+    other_id, other_capability = await begin_device(unconfirmed)
+    with pytest.raises(DeviceSessionRejected) as rejected:
+        await unconfirmed.accept_device_session(other_id, other_capability, device_handoff())
+    assert rejected.value.code == "session_unconfirmed"
+
+
+async def test_device_handoff_is_single_use_scope_filtered_and_service_decided(
+    tmp_path: Path,
+) -> None:
+    await assert_device_handoff_is_single_use_scope_filtered_and_service_decided(tmp_path)
+
+
+async def test_concurrent_device_handoffs_consume_the_capability_once(tmp_path: Path) -> None:
+    scenario = HandoffScenario(gate=asyncio.Event())
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    first = asyncio.create_task(
+        sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    )
+    await verification_started(scenario, first)
+    with pytest.raises(CeremonyCapabilityRejected):
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await first
+
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.READY
+    assert len(runtimes) == 2
+
+
+@pytest.mark.parametrize(
+    ("with_session", "without_session"),
+    [
+        pytest.param(None, SIGNED_OUT, id="signed-out-page-shows-a-challenge"),
+        pytest.param(
+            None,
+            BrowserPageEvidence(on_allowed_origin=True, path="/", challenge_visible=False),
+            id="signed-out-page-moves",
+        ),
+        pytest.param(
+            None,
+            BrowserPageEvidence(on_allowed_origin=False, path="/", challenge_visible=False),
+            id="signed-out-page-leaves-the-origins",
+        ),
+        pytest.param(
+            BrowserPageEvidence(
+                on_allowed_origin=True, path="/learn/unit-1", challenge_visible=False
+            ),
+            SIGNED_OUT,
+            id="descendant-path-stays",
+        ),
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=True, path="/learn/", challenge_visible=False),
+            SIGNED_OUT,
+            id="trailing-slash-stays",
+        ),
+    ],
+)
+async def test_a_session_the_site_tells_apart_is_ready(
+    tmp_path: Path,
+    with_session: BrowserPageEvidence | None,
+    without_session: BrowserPageEvidence,
+) -> None:
+    scenario = HandoffScenario(with_session=with_session, without_session=without_session)
+    lifecycle, sessions, _runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.READY
+
+
+@pytest.mark.parametrize(
+    ("with_session", "without_session", "code"),
+    [
+        pytest.param(SIGNED_OUT, SIGNED_OUT, "session_signed_out", id="challenge"),
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=True, path="/home", challenge_visible=False),
+            SIGNED_OUT,
+            "session_signed_out",
+            id="moved",
+        ),
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=True, path="/learner", challenge_visible=False),
+            SIGNED_OUT,
+            "session_signed_out",
+            id="sibling-path-is-not-a-descendant",
+        ),
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=False, path="/learn", challenge_visible=False),
+            SIGNED_OUT,
+            "session_signed_out",
+            id="off-origin",
+        ),
+        pytest.param(None, None, "session_unconfirmed", id="same-without-a-session"),
+    ],
+)
+async def test_a_session_the_site_does_not_confirm_is_cancelled_and_never_sealed(
+    tmp_path: Path,
+    with_session: BrowserPageEvidence | None,
+    without_session: BrowserPageEvidence | None,
+    code: str,
+) -> None:
+    scenario = HandoffScenario(with_session=with_session, without_session=without_session)
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    before = await sealed_material(sessions)
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(DeviceSessionRejected) as rejected:
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert rejected.value.code == code
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.CANCELLED
+    assert writes == []
+    assert await sealed_material(sessions) == before
+    assert len(runtimes) == 2 and all(runtime.closed for runtime in runtimes)
+
+
+async def test_a_handoff_with_nothing_in_scope_is_empty(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+    foreign_only = device_handoff(
+        cookies=[
+            {
+                "name": "tracker",
+                "value": "foreign",
+                "domain": ".example.net",
+                "path": "/",
+                "expires": -1,
+                "httpOnly": False,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ],
+        origins=[{"origin": "https://example.net", "localStorage": [{"name": "k", "value": "v"}]}],
+    )
+
+    with pytest.raises(DeviceSessionRejected) as rejected:
+        await sessions.accept_device_session(ceremony_id, capability, foreign_only)
+
+    assert rejected.value.code == "session_empty"
+    assert runtimes == []
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.CANCELLED
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        pytest.param(HandoffScenario(start_error=RuntimeError("private start")), id="start"),
+        pytest.param(HandoffScenario(with_session="hang"), id="evidence-hangs"),
+        pytest.param(
+            HandoffScenario(
+                without_session=BrowserProviderError(
+                    "tool.browser.provider_unavailable", retryable=True
+                )
+            ),
+            id="signed-out-load-fails",
+        ),
+        pytest.param(
+            HandoffScenario(storage_error=ValueError("browser profile material exceeds its bound")),
+            id="state-over-2-mib",
+        ),
+    ],
+)
+async def test_a_verification_that_cannot_finish_is_unavailable_and_writes_nothing(
+    tmp_path: Path,
+    scenario: HandoffScenario,
+) -> None:
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path, scenario=scenario, verification_seconds=0.1
+    )
+    await provision(lifecycle)
+    before = await sealed_material(sessions)
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert "private" not in str(raised.value)
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.CANCELLED
+    assert writes == []
+    assert await sealed_material(sessions) == before
+    assert runtimes and all(runtime.closed for runtime in runtimes)
+
+
+async def test_a_failed_load_stops_the_other_before_its_browser_is_closed(
+    tmp_path: Path,
+) -> None:
+    """A browser still starting when its sibling fails must not outlive close()."""
+
+    scenario = HandoffScenario(
+        start_error=RuntimeError("the signed-in browser failed to start"),
+        signed_out_start_gate=asyncio.Event(),
+    )
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await asyncio.wait_for(
+            sessions.accept_device_session(ceremony_id, capability, device_handoff()), 5
+        )
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert scenario.signed_out_start_cancelled is True
+    assert all(runtime.closed for runtime in runtimes)
+
+
+async def test_revocation_during_verification_wins_and_nothing_is_written(tmp_path: Path) -> None:
+    scenario = HandoffScenario(gate=asyncio.Event())
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+    verifying = asyncio.create_task(
+        sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    )
+    await verification_started(scenario, verifying)
+
+    await lifecycle.revoke(PROFILE_ID, principal(), PROVIDER_REF)
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await verifying
+    assert raised.value.reason_code == "tool.browser.profile_unavailable"
+    assert writes == []
+    assert all(runtime.closed for runtime in runtimes)
+
+
+async def test_cancel_during_verification_wins_and_nothing_is_written(tmp_path: Path) -> None:
+    scenario = HandoffScenario(gate=asyncio.Event())
+    lifecycle, sessions, _runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+    verifying = asyncio.create_task(
+        sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    )
+    await verification_started(scenario, verifying)
+
+    cancelled = await sessions.cancel_authentication(ceremony_id, principal())
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    assert cancelled.status is BrowserAuthenticationStatus.CANCELLED
+    with pytest.raises(CeremonyCapabilityRejected):
+        await verifying
+    assert writes == []
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.CANCELLED
+
+
+async def test_a_verifying_ceremony_is_never_expired_by_time_alone(tmp_path: Path) -> None:
+    """Its own budget ends a verification; lazy expiry skips a spent capability."""
+
+    scenario = HandoffScenario(gate=asyncio.Event())
+    lifecycle, sessions, _runtimes, times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+    verifying = asyncio.create_task(
+        sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    )
+    await verification_started(scenario, verifying)
+    times[0] = NOW + timedelta(minutes=6)
+
+    during = await ceremony_status(sessions, ceremony_id)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await verifying
+
+    assert during is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.READY
+
+
+async def test_open_or_verifying_device_ceremonies_exclude_leases_and_begins(
+    tmp_path: Path,
+) -> None:
+    scenario = HandoffScenario(gate=asyncio.Event())
+    lifecycle, sessions, _runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    async def acquire() -> BrowserLease:
+        return await sessions.acquire(
+            PROFILE_ID,
+            principal(),
+            PROVIDER_REF,
+            run_id=RUN_ID,
+            attempt_number=1,
+            deadline_at=NOW + timedelta(minutes=10),
+        )
+
+    with pytest.raises(ConflictError):
+        await acquire()
+    verifying = asyncio.create_task(
+        sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    )
+    await verification_started(scenario, verifying)
+    with pytest.raises(ConflictError):
+        await acquire()
+    with pytest.raises(ConflictError):
+        await begin_device(sessions)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await verifying
+
+    await acquire()
+    with pytest.raises(ConflictError):
+        await begin_device(sessions)
+
+
+async def test_an_off_origin_confirmed_page_is_invalid_and_spends_nothing(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(DeviceHandoffInvalid):
+        await sessions.accept_device_session(
+            ceremony_id, capability, device_handoff(confirmed_url="https://example.net/learn")
+        )
+    assert runtimes == []
+    await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.READY
+
+
+async def test_surface_capabilities_are_bound_to_their_mode_and_operation(tmp_path: Path) -> None:
+    lifecycle, sessions, _runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    device_id, device_capability = await begin_device(sessions)
+
+    assert await sessions.authenticate_surface(device_id, device_capability, "handoff")
+    assert not await sessions.authenticate_surface(device_id, device_capability, "frame")
+    assert not await sessions.authenticate_surface(device_id, device_capability, "events")
+    assert not await sessions.authenticate_surface(device_id, "x" * 43, "handoff")
+    await sessions.cancel_authentication(device_id, principal())
+    assert not await sessions.authenticate_surface(device_id, device_capability, "handoff")
+
+    remote = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    assert remote.launch_url is not None
+    remote_capability = remote.launch_url.split("#capability=", 1)[1]
+    assert await sessions.authenticate_surface(remote.id, remote_capability, "frame")
+    assert await sessions.authenticate_surface(remote.id, remote_capability, "events")
+    assert not await sessions.authenticate_surface(remote.id, remote_capability, "handoff")
+    await sessions.cancel_authentication(remote.id, principal())
+
+    later_id, later_capability = await begin_device(sessions)
+    times[0] = NOW + timedelta(minutes=5)
+    assert not await sessions.authenticate_surface(later_id, later_capability, "handoff")
+
+
+async def test_a_spent_device_capability_no_longer_authenticates(tmp_path: Path) -> None:
+    scenario = HandoffScenario(gate=asyncio.Event())
+    lifecycle, sessions, _runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+    verifying = asyncio.create_task(
+        sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    )
+    await verification_started(scenario, verifying)
+
+    during = await sessions.authenticate_surface(ceremony_id, capability, "handoff")
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await verifying
+
+    assert during is False
+
+
+async def test_terminal_ceremonies_are_capped_at_1024(tmp_path: Path) -> None:
+    lifecycle, sessions, _runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    first_id, _capability = await begin_device(sessions)
+    await sessions.cancel_authentication(first_id, principal())
+    last_id = first_id
+    for _ in range(1024):
+        last_id, _capability = await begin_device(sessions)
+        await sessions.cancel_authentication(last_id, principal())
+
+    assert await ceremony_status(sessions, last_id) is BrowserAuthenticationStatus.CANCELLED
+    with pytest.raises(ConflictError):
+        await ceremony_status(sessions, first_id)
+
+
+# --- ADR-0128 D16: remote outcomes are not lost ------------------------------
+
+
+async def begin_remote(sessions: HostedProfileSessionService) -> UUID:
+    view = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    return view.id
+
+
+async def test_sweep_seals_a_remote_ceremony_ready_on_two_samples(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    writes = record_writes(sessions)
+    ceremony_id = await begin_remote(sessions)
+    runtime = runtimes[0]
+    runtime.authentication = BrowserAuthenticationStatus.READY
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=15)
+
+    await sessions.sweep()
+
+    assert runtime.status_checks == 2
+    assert writes == [runtime.sealed_material]
+    assert runtime.closed is True
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.READY
+
+
+async def test_sweep_does_not_seal_on_one_sample(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    writes = record_writes(sessions)
+    ceremony_id = await begin_remote(sessions)
+    runtime = runtimes[0]
+    runtime.authentication_samples = [BrowserAuthenticationStatus.READY]
+    runtime.authentication = BrowserAuthenticationStatus.NEEDS_USER
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=15)
+
+    await sessions.sweep()
+    await sessions.sweep()
+
+    assert runtime.status_checks == 2
+    assert writes == []
+    assert runtime.closed is False
+    status = await ceremony_status(sessions, ceremony_id)
+    assert status is not BrowserAuthenticationStatus.READY
+
+
+async def test_sweep_samples_only_in_the_last_twenty_seconds(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    await begin_remote(sessions)
+    runtime = runtimes[0]
+    runtime.authentication = BrowserAuthenticationStatus.READY
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=21)
+
+    await sessions.sweep()
+
+    assert runtime.status_checks == 0
+    assert runtime.closed is False
+
+
+async def test_sweep_closes_expired_runtimes_without_traffic(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id = await begin_remote(sessions)
+    ceremony_runtime = runtimes[0]
+    ceremony_runtime.authentication = BrowserAuthenticationStatus.NEEDS_USER
+    times[0] = NOW + timedelta(minutes=6)
+
+    await sessions.sweep()
+
+    assert ceremony_runtime.closed is True
+    terminal = sessions._terminal_ceremonies[ceremony_id]  # noqa: SLF001 - no traffic arrived
+    assert terminal.status is BrowserAuthenticationStatus.EXPIRED
+
+    await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=times[0] + timedelta(minutes=1),
+    )
+    lease_runtime = runtimes[-1]
+    times[0] += timedelta(minutes=2)
+
+    await sessions.sweep()
+
+    assert lease_runtime.closed is True
+    assert sessions._leases == {}  # noqa: SLF001 - no traffic arrived
+
+
+async def test_a_swept_ceremony_never_serves_two_callers_at_once(tmp_path: Path) -> None:
+    """The sweep and a status refresh take turns on the headed page."""
+
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id = await begin_remote(sessions)
+    runtime = runtimes[0]
+    active = 0
+    overlapped = False
+    original = runtime.authentication_status
+
+    async def exclusive_status() -> BrowserAuthenticationStatus:
+        nonlocal active, overlapped
+        active += 1
+        overlapped = overlapped or active > 1
+        await asyncio.sleep(0.01)
+        try:
+            return await original()
+        finally:
+            active -= 1
+
+    runtime.authentication_status = exclusive_status  # type: ignore[method-assign]
+    runtime.authentication = BrowserAuthenticationStatus.NEEDS_USER
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=15)
+
+    await asyncio.gather(
+        sessions.sweep(), sessions.refresh_authentication(ceremony_id, principal())
+    )
+
+    assert overlapped is False
+
+
+# --- ADR-0129: element facts beside the observation --------------------------
+
+
+def many_facts(revision: str, count: int) -> BrowserObservationFacts:
+    labels = {source: source.value[0] * 256 for source in BrowserLabelSource}
+    return BrowserObservationFacts(
+        revision=revision,
+        elements={
+            f"{revision}:{index}": BrowserElementFacts(
+                field_kind=BrowserFieldKind.NONE, labels=labels, context_name="c" * 128
+            )
+            for index in range(count)
+        },
+    )
+
+
+async def test_navigate_observe_and_act_carry_the_facts_of_their_revision(
+    tmp_path: Path,
+) -> None:
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=10),
+    )
+    runtime = runtimes[0]
+    runtime.known_facts = {"revision-1": many_facts("revision-1", 1)}
+
+    navigated = await sessions.navigate_snapshot(lease.lease_ref, "https://example.org/lesson")
+    observed = await sessions.observe_snapshot(lease.lease_ref)
+    acted = await sessions.act_snapshot(
+        lease.lease_ref,
+        BrowserAction(
+            kind=BrowserActionKind.CLICK, expected_revision="revision-1", ref="revision-1:0"
+        ),
+        sequence=1,
+    )
+
+    assert navigated.facts == runtime.known_facts["revision-1"]
+    assert observed.facts == runtime.known_facts["revision-1"]
+    assert acted.observation.revision == "revision-2"
+    assert acted.facts is None
+
+
+async def test_facts_beyond_64_kib_are_dropped_in_element_order(tmp_path: Path) -> None:
+    """An element without facts is never covered; the budget never truncates one."""
+
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=10),
+    )
+    everything = many_facts("revision-1", 256)
+    runtimes[0].known_facts = {"revision-1": everything}
+
+    snapshot = await sessions.navigate_snapshot(lease.lease_ref, "https://example.org/lesson")
+
+    assert snapshot.facts is not None
+    kept = list(snapshot.facts.elements)
+    assert 0 < len(kept) < 256
+    assert kept == list(everything.elements)[: len(kept)]
+    assert all(snapshot.facts.elements[ref] == everything.elements[ref] for ref in kept)
+    assert len(snapshot.facts.model_dump_json().encode()) <= 64 * 1024

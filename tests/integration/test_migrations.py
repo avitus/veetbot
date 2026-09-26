@@ -26,6 +26,9 @@ from tests.contract.support import NOW, principal, session
 from tests.integration.m2_support import database_settings
 
 ROOT = Path(__file__).resolve().parents[2]
+# ADR-0125's migration. Later migrations follow it, so its downgrade tests
+# name the revision before it rather than stepping back one from head.
+BEFORE_MERGE_SUGGESTIONS = "524f16dfc8f9-1"
 
 
 def _alembic(*arguments: str) -> str:
@@ -183,7 +186,7 @@ async def test_merge_suggestion_downgrade_never_erases_an_owner_answer() -> None
 
             assert len((await service.dedupe(owner, apply=True)).suggestions) == 1
             # An open suggestion is derived: it goes, and the next pass asks again.
-            _alembic("downgrade", "-1")
+            _alembic("downgrade", BEFORE_MERGE_SUGGESTIONS)
             _alembic("upgrade", "head")
             assert await listed() == []
             assert len((await service.dedupe(owner, apply=True)).suggestions) == 1
@@ -199,7 +202,7 @@ async def test_merge_suggestion_downgrade_never_erases_an_owner_answer() -> None
             )
             # The owner's answer is final, so the downgrade refuses to erase it.
             with pytest.raises(subprocess.CalledProcessError) as refused:
-                _alembic("downgrade", "-1")
+                _alembic("downgrade", BEFORE_MERGE_SUGGESTIONS)
             assert "answered" in refused.value.stderr
             assert EXPECTED_REVISION in _alembic("current")
             assert (await service.dedupe(owner, apply=True)).suggestions == []
@@ -256,7 +259,7 @@ async def test_merge_suggestion_downgrade_waits_for_an_answer_in_flight() -> Non
                     "-m",
                     "alembic",
                     "downgrade",
-                    "-1",
+                    BEFORE_MERGE_SUGGESTIONS,
                     cwd=ROOT,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,

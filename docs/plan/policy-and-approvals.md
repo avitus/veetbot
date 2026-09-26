@@ -168,10 +168,11 @@ class ApprovalStatus(str, Enum):
     CANCELLED = "cancelled"
 ```
 
-Five statuses, but Section 9.3 lists only two resolutions, `APPROVE_ONCE` and
-`DENY`. The lists differ in length because `EXPIRED` and `CANCELLED` are
-statuses reached *without* a resolution — by the reaper and by the cancellation
-edge respectively, both of which Section 9.3 assigns to the application service.
+Five statuses, but Section 9.3 lists three resolutions, `APPROVE_ONCE`,
+`APPROVE_FOR_TASK`, and `DENY`, and the first two both reach `APPROVED`. The
+lists differ because `EXPIRED` and `CANCELLED` are statuses reached *without* a
+resolution — by the reaper and by the cancellation edge respectively, both of
+which Section 9.3 assigns to the application service.
 
 `CANCELLED` is kept distinct from `DENIED` for a reason that shows up later, in
 the metrics: a run cancelled by its own user reaps a pending approval, and
@@ -182,11 +183,20 @@ something unwelcome.
 ```python
 class ApprovalResolutionType(str, Enum):
     APPROVE_ONCE = "approve_once"
+    APPROVE_FOR_TASK = "approve_for_task"
     DENY = "deny"
 ```
 
-Exactly Section 9.3's two. Session-wide and permanent grants are explicitly out
-of scope for version 0.1 and no value is reserved for them.
+`APPROVE_FOR_TASK` (ADR-0129, accepted by the owner 2026-09-25) is valid only
+for a `browser.act` approval that carries a server-authored task-grant offer
+for an owner-configured site scope. It resolves the approval to `APPROVED`,
+exactly as `APPROVE_ONCE` does, and in the same transaction creates a
+thirty-minute, two-hundred-action `BrowserTaskGrant` bound to the session, as
+specified in [browser-automation.md](browser-automation.md). It requires
+`browser.grant.write` in addition to `approval.resolve`, and its request
+repeats the offer's origin and path prefix. The CLI, inbound surfaces, and
+notification actions cannot use it. No other session-wide or permanent
+approval grant exists.
 
 ## `ProposedAction`
 
@@ -354,7 +364,7 @@ joined by dots, of which the last is the action. All thirty-three have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1318` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1334` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -1211,8 +1221,9 @@ GET /v1/approvals/{approval_id}
 Both are tenant-scoped from the authenticated principal and never from a query
 parameter — a tenant identifier accepted from the client is a cross-tenant read
 waiting to be discovered. Responses carry `action_summary`, `tool_name`,
-`arguments`, `argument_digests`, `risk`, `expires_at`, and `policy_reason`; they
-do not carry the rule that fired.
+`arguments`, `argument_digests`, `risk`, `expires_at`, and `policy_reason`, and
+for `browser.act` the optional `task_grant_offer`, `task_grant_id`, and
+`task_grant_not_covered` (ADR-0129); they do not carry the rule that fired.
 
 `arguments` is a redacted view, not the action: a value under a sensitive key or
 matching a credential shape becomes `[REDACTED]`, and a string over 512
@@ -1236,6 +1247,11 @@ never become a truncated action.
 Milestone 5, where [http-api-and-streaming.md](http-api-and-streaming.md) puts
 every route in the API; the service methods they call and the CLI commands that
 call the same methods are Milestone 4.
+
+ADR-0129 later added one optional body field, `task_grant`, which repeats the
+offered origin and path prefix and is accepted only with `approve_for_task`.
+That decision also requires `browser.grant.write`, checked by the application
+service before any read; the route's declared scope stays `approval.resolve`.
 
 ## Failure modes and defenses
 
@@ -1533,7 +1549,7 @@ policy remain enforced. An uncertain write is not automatically repeated.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
 arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
 and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
-matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:598);
+matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:608);
 the arm holds that decision under every profile, so no profile can turn an
 unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent

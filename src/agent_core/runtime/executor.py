@@ -71,6 +71,7 @@ from agent_core.runtime.loop import (
     RunContext,
     ToolDispatch,
     _record_open_question,
+    apply_tool_evidence,
     checkpoint,
     run_loop,
 )
@@ -1025,6 +1026,8 @@ class RunExecutor:
         elif recorded != len(results):
             raise ConflictError("persisted tool usage does not match the pending batch")
         context.checkpoint.conversation.extend(results)
+        # ADR-0130: a batch completed after an approval restarts counts too.
+        apply_tool_evidence(context.checkpoint.working_state, calls)
         context.checkpoint.pending_tool_calls = []
         await checkpoint(context, "tool_recovered")
 

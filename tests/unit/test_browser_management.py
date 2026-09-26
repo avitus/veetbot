@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from types import TracebackType
 from typing import Self, cast
@@ -19,7 +19,13 @@ from agent_core.adapters.browser.profiles import (
     InMemoryBrowserProfileControlPlane,
     InMemoryBrowserProfileRepository,
 )
+from agent_core.adapters.browser.task_grants import InMemoryBrowserTaskGrantRepository
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.adapters.persistence.memory import (
+    InMemoryEventRepository,
+    InMemorySessionRepository,
+)
+from agent_core.application.browser_grants import StandingBrowserGrantAuthorizer
 from agent_core.application.browser_management import (
     BrowserGrantManagementService,
     BrowserProfileManagementService,
@@ -29,13 +35,24 @@ from agent_core.application.errors import BrowserLoginURLValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
+    BrowserAction,
+    BrowserActionConsequence,
+    BrowserActionContext,
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
     BrowserProfileStatus,
     BrowserProviderError,
 )
+from agent_core.domain.browser_task_grants import (
+    TASK_GRANT_DURATION,
+    BrowserTaskGrant,
+    BrowserTaskGrantEndReason,
+)
 from agent_core.domain.errors import AuthorizationError, ConflictError
+from agent_core.domain.policies import PolicyDecisionType
+from agent_core.domain.sessions import Session, SessionStatus
 from tests.contract.support import NOW, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000c7")
@@ -48,6 +65,9 @@ class FakeUnitOfWork:
         self.browser_profiles = InMemoryBrowserProfileRepository()
         self.browser_authentications = InMemoryBrowserAuthenticationRepository()
         self.browser_grants = InMemoryBrowserGrantRepository()
+        self.browser_task_grants = InMemoryBrowserTaskGrantRepository()
+        self.sessions = InMemorySessionRepository()
+        self.events = InMemoryEventRepository(self.sessions, FixedClock(NOW))
 
     async def __aenter__(self) -> Self:
         return self
@@ -75,6 +95,8 @@ class FakeUnitOfWorkFactory:
 @dataclass
 class FakeAuthenticationControlPlane:
     status: BrowserAuthenticationStatus = BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    begun_modes: list[BrowserAuthenticationMode] = field(default_factory=list)
+    profile_id: UUID = PROFILE_ID
 
     async def begin_authentication(
         self,
@@ -83,8 +105,10 @@ class FakeAuthenticationControlPlane:
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         del owner, provider_ref, login_url
+        self.begun_modes.append(mode)
         return BrowserAuthenticationView(
             id=CEREMONY_ID,
             profile_id=profile_id,
@@ -104,7 +128,7 @@ class FakeAuthenticationControlPlane:
         del owner
         return BrowserAuthenticationView(
             id=ceremony_id,
-            profile_id=PROFILE_ID,
+            profile_id=self.profile_id,
             status=self.status,
             expires_at=NOW + timedelta(minutes=5),
         )
@@ -132,6 +156,7 @@ class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         self.begin_calls += 1
         self.started.set()
@@ -141,6 +166,7 @@ class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
             owner,
             provider_ref,
             login_url=login_url,
+            mode=mode,
         )
 
 
@@ -468,8 +494,9 @@ async def test_authentication_provider_launch_has_total_deadline() -> None:
             provider_ref: str,
             *,
             login_url: str,
+            mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
         ) -> BrowserAuthenticationView:
-            del profile_id, owner, provider_ref, login_url
+            del profile_id, owner, provider_ref, login_url, mode
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
 
@@ -541,9 +568,10 @@ async def test_authentication_redirect_outside_allowed_origins_is_a_login_error(
             provider_ref: str,
             *,
             login_url: str,
+            mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
         ) -> BrowserAuthenticationView:
             """Simulate a refused authentication launch for safe error-mapping assertions."""
-            del profile_id, owner, provider_ref, login_url
+            del profile_id, owner, provider_ref, login_url, mode
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
 
     uow = FakeUnitOfWorkFactory()
@@ -572,3 +600,421 @@ async def test_authentication_redirect_outside_allowed_origins_is_a_login_error(
     assert unchanged.generation == created.generation
     assert unchanged.status == created.status
     assert await uow.uow.browser_authentications.list(subject, profile_id=PROFILE_ID) == []
+
+
+@pytest.mark.parametrize(
+    "login_url",
+    ["https://other.example/login", "http://example.org/login", "https://127.0.0.1/"],
+)
+async def test_device_begin_validates_login_url_before_provider_dispatch(login_url: str) -> None:
+    """ADR-0128: device mode keeps the login-URL rules and never dispatches first."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=authentication,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.write")
+    created = await service.create(subject, ("https://example.org",))
+
+    with pytest.raises(BrowserLoginURLValidationError):
+        await service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url=login_url,
+            mode=BrowserAuthenticationMode.DEVICE,
+        )
+
+    assert authentication.begun_modes == []
+    unchanged = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    assert unchanged.generation == created.generation
+    assert await uow.uow.browser_authentications.list(subject, profile_id=PROFILE_ID) == []
+
+    await service.begin_authentication(
+        subject,
+        PROFILE_ID,
+        login_url="https://example.org/",
+        mode=BrowserAuthenticationMode.DEVICE,
+    )
+    assert authentication.begun_modes == [BrowserAuthenticationMode.DEVICE]
+
+
+class SealedOnCancelControlPlane(FakeAuthenticationControlPlane):
+    """The service sealed the ceremony before the client's cancel arrived."""
+
+    async def cancel_authentication(
+        self,
+        ceremony_id: UUID,
+        owner: Principal,
+    ) -> BrowserAuthenticationView:
+        self.status = BrowserAuthenticationStatus.READY
+        return await self.authentication_status(ceremony_id, owner)
+
+
+class RefusingControlPlane(FakeAuthenticationControlPlane):
+    async def begin_authentication(
+        self,
+        profile_id: UUID,
+        owner: Principal,
+        provider_ref: str,
+        *,
+        login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
+    ) -> BrowserAuthenticationView:
+        del profile_id, owner, provider_ref, login_url, mode
+        raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
+
+
+def profile_service(
+    uow: FakeUnitOfWorkFactory,
+    authentication: FakeAuthenticationControlPlane,
+    **options: float,
+) -> BrowserProfileManagementService:
+    return BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=authentication,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+        **options,
+    )
+
+
+async def ready_profile_generation(uow: FakeUnitOfWorkFactory, subject: Principal) -> int:
+    """Mark the created profile READY directly, as an earlier sign-in would have."""
+
+    current = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    ready = await uow.uow.browser_profiles.transition(
+        PROFILE_ID,
+        subject,
+        expected_generation=current.generation,
+        status=BrowserProfileStatus.READY,
+        updated_at=NOW,
+    )
+    return ready.generation
+
+
+@pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))
+async def test_every_ceremony_begin_and_ready_outcome_advances_the_generation(
+    mode: BrowserAuthenticationMode,
+) -> None:
+    """ADR-0128 decision 10: grants pinned to a profile never survive a sign-in."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    ready_generation = await ready_profile_generation(uow, subject)
+
+    await service.begin_authentication(
+        subject, PROFILE_ID, login_url="https://example.org/", mode=mode
+    )
+    after_begin = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    authentication.status = BrowserAuthenticationStatus.READY
+    await service.authentication_status(subject, CEREMONY_ID)
+    after_ready = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    await service.authentication_status(subject, CEREMONY_ID)
+    after_second_read = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    assert (after_begin.status, after_begin.generation) == (
+        BrowserProfileStatus.READY,
+        ready_generation + 1,
+    )
+    assert (after_ready.status, after_ready.generation) == (
+        BrowserProfileStatus.READY,
+        ready_generation + 2,
+    )
+    assert after_second_read == after_ready
+
+
+async def test_failed_begin_leaves_the_generation_unchanged() -> None:
+    uow = FakeUnitOfWorkFactory()
+    subject = owner("browser.profile.write")
+    await profile_service(uow, FakeAuthenticationControlPlane()).create(
+        subject, ("https://example.org",)
+    )
+    generation = await ready_profile_generation(uow, subject)
+
+    with pytest.raises(BrowserProviderError):
+        await profile_service(uow, RefusingControlPlane()).begin_authentication(
+            subject, PROFILE_ID, login_url="https://example.org/"
+        )
+    assert (await uow.uow.browser_profiles.get(PROFILE_ID, subject)).generation == generation
+
+    blocking = BlockingAuthenticationControlPlane()
+    service = profile_service(uow, blocking, authentication_lock_timeout_seconds=0.01)
+    first = asyncio.create_task(
+        service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    )
+    await blocking.started.wait()
+    with pytest.raises(ConflictError):
+        await service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    assert (await uow.uow.browser_profiles.get(PROFILE_ID, subject)).generation == generation
+    blocking.release.set()
+    await asyncio.wait_for(first, timeout=1)
+    assert (await uow.uow.browser_profiles.get(PROFILE_ID, subject)).generation == generation + 1
+
+
+async def test_cancel_that_finds_a_sealed_ceremony_records_ready_once() -> None:
+    """Cancel and status record the service's outcome through the same step."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = SealedOnCancelControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    begun = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    cancelled = await service.cancel_authentication(subject, CEREMONY_ID)
+    sealed = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    await service.cancel_authentication(subject, CEREMONY_ID)
+    await service.authentication_status(subject, CEREMONY_ID)
+    unchanged = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    assert cancelled.status is BrowserAuthenticationStatus.READY
+    assert (sealed.status, sealed.generation) == (
+        BrowserProfileStatus.READY,
+        begun.generation + 1,
+    )
+    assert unchanged == sealed
+
+
+async def test_standing_grant_stops_authorizing_after_a_sign_in_begins() -> None:
+    uow = FakeUnitOfWorkFactory()
+    service = profile_service(uow, FakeAuthenticationControlPlane())
+    subject = owner(
+        "browser.profile.read",
+        "browser.profile.write",
+        "browser.grant.read",
+        "browser.grant.write",
+    )
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    grants = BrowserGrantManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([GRANT_ID]),
+        agent_version="agent-v1",
+        policy_version="policy-v1",
+    )
+    await grants.create(
+        subject,
+        profile_id=PROFILE_ID,
+        allowed_origins=("https://example.org",),
+        action_kinds=(BrowserActionKind.CLICK,),
+        element_roles=("button",),
+        element_names=("Continue",),
+        purpose=None,
+        starts_at=NOW,
+        expires_at=NOW + timedelta(days=7),
+    )
+    authorizer = StandingBrowserGrantAuthorizer(
+        grants=uow.uow.browser_grants,
+        profiles=uow.uow.browser_profiles,
+        now=lambda: NOW + timedelta(minutes=1),
+    )
+
+    async def authorize() -> str:
+        result = await authorizer.authorize(
+            grant_id=GRANT_ID,
+            profile_id=PROFILE_ID,
+            principal=subject,
+            agent_version="agent-v1",
+            policy_version="policy-v1",
+            purpose=None,
+            action_deadline=NOW + timedelta(minutes=2),
+            action=BrowserAction(
+                kind=BrowserActionKind.CLICK, expected_revision="r-1", ref="r-1:0"
+            ),
+            context=BrowserActionContext(
+                origin="https://example.org",
+                role="button",
+                name="Continue",
+                consequence=BrowserActionConsequence.ROUTINE,
+                revision="r-1",
+                ref="r-1:0",
+            ),
+            deterministic_decision=PolicyDecisionType.REQUIRE_APPROVAL,
+        )
+        return result.reason_code
+
+    before = await authorize()
+    await service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    after = await authorize()
+
+    assert (before, after) == ("browser.grant.authorized", "browser.grant.mismatch")
+
+
+@pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))
+async def test_no_standing_grant_is_created_before_a_sign_in_outcome_is_recorded(
+    mode: BrowserAuthenticationMode,
+) -> None:
+    """ADR-0128 decision 10: after a begin the profile stays READY at the
+    generation the begin set. A grant created then would pin it and keep
+    authorizing on the session the service seals whenever no client records
+    the outcome, so creation waits for the outcome, even past the expiry."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner(
+        "browser.profile.read",
+        "browser.profile.write",
+        "browser.grant.read",
+        "browser.grant.write",
+    )
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    await service.begin_authentication(
+        subject, PROFILE_ID, login_url="https://example.org/", mode=mode
+    )
+    grants = BrowserGrantManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        clock=FixedClock(NOW + timedelta(minutes=10)),
+        ids=SequenceIdFactory([GRANT_ID]),
+        agent_version="agent-v1",
+        policy_version="policy-v1",
+    )
+
+    async def create() -> int:
+        created = await grants.create(
+            subject,
+            profile_id=PROFILE_ID,
+            allowed_origins=("https://example.org",),
+            action_kinds=(BrowserActionKind.CLICK,),
+            element_roles=("button",),
+            element_names=("Continue",),
+            purpose=None,
+            starts_at=NOW,
+            expires_at=NOW + timedelta(days=7),
+        )
+        return created.profile_generation
+
+    with pytest.raises(ConflictError):
+        await create()
+    listed = await grants.list(subject, profile_id=PROFILE_ID)
+    authentication.status = BrowserAuthenticationStatus.READY
+    await service.authentication_status(subject, CEREMONY_ID)
+    sealed = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    assert listed.items == []
+    assert await create() == sealed.generation
+
+
+TASK_SESSION = UUID("00000000-0000-0000-0000-0000000000cb")
+
+
+async def task_grant_on_profile(uow: FakeUnitOfWorkFactory, subject: Principal) -> BrowserTaskGrant:
+    """An active task grant on the profile, in a chat bound to it (ADR-0129)."""
+
+    await uow.uow.sessions.create(
+        Session(
+            id=TASK_SESSION,
+            tenant_id=subject.tenant_id,
+            principal_id=subject.principal_id,
+            agent_id=UUID(int=0xA6),
+            agent_version="agent-v1",
+            status=SessionStatus.ACTIVE,
+            metadata={"browser_profile_id": str(PROFILE_ID)},
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    profile = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    return await uow.uow.browser_task_grants.create(
+        BrowserTaskGrant(
+            id=UUID(int=0xCC),
+            tenant_id=subject.tenant_id,
+            principal_id=subject.principal_id,
+            session_id=TASK_SESSION,
+            profile_id=PROFILE_ID,
+            profile_generation=profile.generation,
+            agent_version="agent-v1",
+            policy_version="policy-v1",
+            origin="https://example.org",
+            path_prefix="/lesson",
+            max_actions=200,
+            actions_used=4,
+            typed_characters=0,
+            approval_id=UUID(int=0xCD),
+            approved_by=subject.principal_id,
+            created_at=NOW,
+            expires_at=NOW + TASK_GRANT_DURATION,
+        )
+    )
+
+
+async def ended_task_grant_events(uow: FakeUnitOfWorkFactory, subject: Principal) -> list[str]:
+    events = await uow.uow.events.list_after(TASK_SESSION, 0, subject)
+    return [
+        event.payload["reason"]
+        for event in events
+        if event.event_type == "browser.task_grant.ended"
+    ]
+
+
+async def test_profile_revoke_and_delete_end_task_grants() -> None:
+    """ADR-0129 section 9: a revoked profile's task grants end profile_revoked."""
+
+    uow = FakeUnitOfWorkFactory()
+    service = profile_service(uow, FakeAuthenticationControlPlane())
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    grant = await task_grant_on_profile(uow, subject)
+
+    await service.revoke(subject, PROFILE_ID)
+    ended = await uow.uow.browser_task_grants.get(grant.id, subject)
+    await service.delete(subject, PROFILE_ID)
+
+    assert ended.end_reason is BrowserTaskGrantEndReason.PROFILE_REVOKED
+    assert await ended_task_grant_events(uow, subject) == ["profile_revoked"]
+
+
+@pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))
+async def test_sign_in_begin_and_ready_end_task_grants_for_the_profile(
+    mode: BrowserAuthenticationMode,
+) -> None:
+    """ADR-0129 with ADR-0128 decision 10: every sign-in ends the profile's
+    task grants, at begin and when a ready outcome finds the profile READY."""
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    grant = await task_grant_on_profile(uow, subject)
+
+    await service.begin_authentication(
+        subject, PROFILE_ID, login_url="https://example.org/", mode=mode
+    )
+    after_begin = await uow.uow.browser_task_grants.get(grant.id, subject)
+
+    assert after_begin.end_reason is BrowserTaskGrantEndReason.PROFILE_CHANGED
+    assert await ended_task_grant_events(uow, subject) == ["profile_changed"]
+
+    second = await uow.uow.browser_task_grants.create(
+        after_begin.model_copy(
+            update={
+                "id": UUID(int=0xCE),
+                "approval_id": UUID(int=0xCF),
+                "profile_generation": after_begin.profile_generation + 1,
+                "ended_at": None,
+                "end_reason": None,
+            }
+        )
+    )
+    authentication.status = BrowserAuthenticationStatus.READY
+    await service.authentication_status(subject, CEREMONY_ID)
+
+    assert (await uow.uow.browser_task_grants.get(second.id, subject)).end_reason is (
+        BrowserTaskGrantEndReason.PROFILE_CHANGED
+    )
+    assert await ended_task_grant_events(uow, subject) == ["profile_changed", "profile_changed"]

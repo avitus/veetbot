@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **185 configuration knobs** across the specifications;
+The corpus now declares **190 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -308,8 +308,9 @@ retention days, purge cadence, and purge batch; ADR-0093 adds memory model selec
 Milestone 26 adds the two aggregate automatic-email cost allowances, Milestone 29
 adds the seven thread-folder knobs and, under ADR-0110, the judgment matcher's
 switch and probability floor, Milestone 31 adds the unsubscribe grace
-period, ADR-0123 adds the deferred tool index's item and token caps, and
-ADR-0131 adds how long a tenant HTTP server's MCP discovery is reused. The plan names **three
+period, ADR-0123 adds the deferred tool index's item and token caps,
+ADR-0131 adds how long a tenant HTTP server's MCP discovery is reused, and
+ADR-0130 adds the five browser-task run limits. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -334,13 +335,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-185 falls out.
+190 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-185 tuning knobs in YAML.
+190 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -348,7 +349,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 185 knobs live, at the values the
+    module that owns it. This is where all 190 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -426,7 +427,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 185. Schema versions, profile names, rule identifiers,
+and asserts the total is 190. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -436,10 +437,10 @@ or invariants rather than knobs and are not counted.
 | `models/policies.yaml` | 4 |
 | `context/plan.yaml` | 30 |
 | `tools/limits.yaml` | 21 |
-| `runtime/limits.yaml` | 60 |
+| `runtime/limits.yaml` | 65 |
 | `memory/profiles.yaml` | 38 |
 | `folders/profiles.yaml` | 9 |
-| **Total** | **185** |
+| **Total** | **190** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -1293,7 +1294,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 185 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 190 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1315,7 +1316,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 185 declared knobs into files and leaves ten fields in
+   sorts all 190 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,
@@ -1529,3 +1530,20 @@ sweep, over the knowledge service with the PDF extractor adapter composed in
 front of the plain-text one. No versioned knob is added; the limits are
 constants in `agent_core.model.attachments`. The detailed contract is
 [ADR-0120](../adr/0120-chat-attachments.md).
+
+## ADR-0129 browser task-grant composition
+
+`BROWSER_TASK_GRANTS_ENABLED` defaults to off and requires
+`BROWSER_PROVIDER=hosted`. `BROWSER_TASK_GRANT_SCOPES` is empty by default,
+requires the flag, and is parsed at startup into exact scopes of one
+public-HTTPS origin and one path segment; a malformed, duplicate, or sensitive
+scope is a configuration error. When the flag is set, the composition root
+places a task-grant authorizer after the pinned standing-grant authorizer in
+one composite, hands the resolution service a task-grant resolver, mounts the
+task-grant routes, and registers the task-grant expiry sweep on the
+maintenance worker. The `browser.act` approval presenter is composed either
+way and makes no offer while the flag is off. Both settings are deployment
+controls in the environment layer; no versioned knob is added, and the
+durations and caps are constants in `agent_core.domain.browser_task_grants`.
+The detailed contract is [browser-automation.md](browser-automation.md) and
+[ADR-0129](../adr/0129-time-boxed-task-grant-from-the-approval-card.md).

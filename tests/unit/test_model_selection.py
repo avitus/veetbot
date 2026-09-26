@@ -52,6 +52,29 @@ async def test_requested_models_resolve_with_verified_pricing_and_limits(
     assert resolved.pricing.reasoning_priced_separately is False
 
 
+@pytest.mark.parametrize(
+    ("model", "one_hour_write"),
+    [("claude-fable-5-1", "20.00"), ("claude-opus-5", "10.00")],
+)
+async def test_anthropic_models_price_the_one_hour_cache_write(
+    model: str, one_hour_write: str
+) -> None:
+    """A one-hour write is twice the base input price (ADR-0132); OpenAI has no TTL."""
+    registry = ProviderRegistry.load(PACKAGE_ROOT / "models", adapters=ADAPTER_DEFINITIONS)
+    anthropic = next(
+        profile for profile in registry.profiles.values() if profile.document.adapter == "anthropic"
+    )
+    pricing = next(entry for entry in anthropic.models if entry.model_id == model).pricing
+    astra = await StaticModelRouter(registry, FixedClock(NOW)).resolve(
+        "astra", tenant_id="tenant-a"
+    )
+
+    assert anthropic.document.capabilities.explicit_cache_control is True
+    assert pricing.cache_write_1h_per_mtok == Decimal(one_hour_write)
+    assert pricing.cache_write_1h_per_mtok == 2 * pricing.input_per_mtok
+    assert astra.pricing.cache_write_1h_per_mtok is None
+
+
 @pytest.mark.parametrize("chat_policy", ["astra", "flagship", "fable"])
 async def test_chat_defaults_keep_sol_people_memory(tmp_path: Path, chat_policy: str) -> None:
     settings = load_settings(

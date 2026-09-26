@@ -57,6 +57,10 @@ TOOL_MESSAGES: dict[str, str] = {
     ),
     "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
     "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",
+    # ADR-0129: names no grant, so the model cannot learn that one exists.
+    "tool.browser.grant_not_applicable": (
+        "Not performed. The page changed since it was observed; observe it again."
+    ),
     "policy.scope.missing": "Not performed. The principal lacks a required scope.",
     "policy.milestone1.non_pure": (
         "Not performed. This milestone authorizes only side-effect-free tools."

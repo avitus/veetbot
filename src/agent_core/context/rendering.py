@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from html import escape
 from typing import Any
 
@@ -178,15 +178,31 @@ def prefix_bytes(
     prefix: Sequence[ConversationItem],
     tools: Sequence[ToolSpec],
     deferred_tools: Sequence[ToolSpec] = (),
+    *,
+    recorded_scopes: Mapping[str, Sequence[str]] | None = None,
 ) -> bytes:
+    """The bytes a plan's prefix hash covers.
+
+    `recorded_scopes` reproduces a plan hashed before scope sets serialized
+    sorted: each listed tool's scopes take the order its plan event recorded
+    (ADR-0134).
+    """
+
+    def dump(spec: ToolSpec) -> dict[str, Any]:
+        dumped = spec.model_dump(mode="json")
+        order = None if recorded_scopes is None else recorded_scopes.get(spec.name)
+        if order is not None and sorted(order) == dumped["required_scopes"]:
+            dumped["required_scopes"] = list(order)
+        return dumped
+
     document: dict[str, Any] = {
         "conversation": [item.model_dump(mode="json") for item in prefix],
-        "tools": [spec.model_dump(mode="json") for spec in tools],
+        "tools": [dump(spec) for spec in tools],
     }
     # Deferred specifications join the identity only when a plan has them, so a
     # plan without deferred tools keeps its earlier hash (ADR-0123).
     if deferred_tools:
-        document["deferred_tools"] = [spec.model_dump(mode="json") for spec in deferred_tools]
+        document["deferred_tools"] = [dump(spec) for spec in deferred_tools]
     return canonical_json_bytes(document)
 
 

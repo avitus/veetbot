@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserDispatchConstraint,
     BrowserElement,
+    BrowserElementFacts,
+    BrowserFieldKind,
+    BrowserLabelSource,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserProviderError,
 )
 from agent_core.domain.messages import TextPart
@@ -21,6 +28,7 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.tools import ToolFailureKind
+from agent_core.ports.browser import BrowserProvider
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
@@ -37,6 +45,7 @@ class FakeBrowserProvider:
     actions: list[BrowserAction] = field(default_factory=list)
     action_failure: BrowserProviderError | None = None
     execution_contexts: list[object] = field(default_factory=list)
+    constraints: list[BrowserDispatchConstraint | None] = field(default_factory=list)
 
     async def bind_execution(self, context: object) -> None:
         self.execution_contexts.append(context)
@@ -67,10 +76,16 @@ class FakeBrowserProvider:
         self.observation_count += 1
         return self._observation("https://example.org/account")
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
         if self.action_failure is not None:
             raise self.action_failure
         self.actions.append(action)
+        self.constraints.append(constraint)
         return self._observation("https://example.org/account")
 
     async def close(self) -> None:
@@ -268,9 +283,14 @@ async def test_browser_act_marks_effect_before_provider_dispatch() -> None:
     order: list[str] = []
 
     class OrderedProvider(FakeBrowserProvider):
-        async def act(self, action: BrowserAction) -> BrowserObservation:
+        async def act(
+            self,
+            action: BrowserAction,
+            *,
+            constraint: BrowserDispatchConstraint | None = None,
+        ) -> BrowserObservation:
             order.append("dispatch")
-            return await super().act(action)
+            return await super().act(action, constraint=constraint)
 
     async def mark_effect() -> None:
         order.append("watermark")
@@ -338,3 +358,154 @@ async def test_browser_act_normalizes_stale_and_ambiguous_failures() -> None:
     assert uncertain_result.failure is not None
     assert uncertain_result.failure.kind is ToolFailureKind.OUTCOME_UNKNOWN
     assert uncertain_result.failure.reason_code == "tool.browser.outcome_unknown"
+
+
+async def test_model_visible_observation_excludes_facts() -> None:
+    """ADR-0129 D14: facts never reach a model-visible result."""
+
+    @dataclass
+    class FactCachingProvider(FakeBrowserProvider):
+        facts: BrowserObservationFacts | None = None
+
+        async def navigate(self, url: str) -> BrowserObservation:
+            observation = await super().navigate(url)
+            self.facts = BrowserObservationFacts(
+                revision=observation.revision,
+                elements={
+                    "element-1": BrowserElementFacts(
+                        field_kind=BrowserFieldKind.NONE,
+                        labels={BrowserLabelSource.VISIBLE_TEXT: "Pay $12.99"},
+                        context_name="Try Super free",
+                    )
+                },
+            )
+            return observation
+
+    plain = await BrowserNavigateTool(FakeBrowserProvider()).execute(
+        {"url": "https://example.org/account"}, tool_context()
+    )
+    with_facts = await BrowserNavigateTool(FactCachingProvider()).execute(
+        {"url": "https://example.org/account"}, tool_context()
+    )
+
+    assert with_facts.model_dump_json() == plain.model_dump_json()
+    assert "Pay $12.99" not in with_facts.model_dump_json()
+    schema = BrowserNavigateTool.spec.output_schema
+    assert schema is not None
+    assert "facts" not in json.dumps(schema)
+    assert set(schema["properties"]) == {
+        "provider",
+        "url",
+        "title",
+        "revision",
+        "text",
+        "elements",
+    }
+
+
+TASK_CONSTRAINT = BrowserDispatchConstraint(
+    grant_kind="task",
+    origins=("https://example.org",),
+    path_prefix="/lesson",
+    not_after=datetime(2026, 9, 25, 18, 30, tzinfo=UTC),
+    consequence_ceiling="unknown",
+    max_text_characters=256,
+)
+CLICK_ARGUMENTS = {"kind": "click", "expected_revision": "revision-1", "ref": "element-1"}
+
+
+async def test_act_passes_the_dispatch_constraint_to_the_provider() -> None:
+    """ADR-0129: a grant-authorized act carries its constraint to the runtime."""
+
+    provider = FakeBrowserProvider()
+    context = replace(tool_context(), dispatch_constraint=TASK_CONSTRAINT)
+
+    granted = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, context)
+    approved = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, tool_context())
+
+    assert granted.ok and approved.ok
+    assert provider.constraints == [TASK_CONSTRAINT, None]
+
+
+async def test_invalid_dispatch_constraint_fails_closed() -> None:
+    """A constraint that fails its validator is refused before the watermark."""
+
+    marked: list[str] = []
+
+    async def mark_effect() -> None:
+        marked.append("watermark")
+
+    provider = FakeBrowserProvider()
+    forged = BrowserDispatchConstraint.model_construct(
+        grant_kind="standing",
+        origins=("https://example.org",),
+        path_prefix=None,
+        not_after=TASK_CONSTRAINT.not_after,
+        consequence_ceiling="unknown",
+        max_text_characters=None,
+    )
+    context = replace(tool_context(), dispatch_constraint=forged, mark_effect_sent=mark_effect)
+
+    result = await BrowserActTool(provider).execute(CLICK_ARGUMENTS, context)
+
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.reason_code == "tool.browser.grant_not_applicable"
+    assert (provider.actions, marked) == ([], [])
+
+
+class ConstraintlessProvider(FakeBrowserProvider):
+    """A provider whose runtime cannot recheck a grant's constraint.
+
+    It falls outside the port, which takes the constraint; the tool still
+    refuses a constrained act on it rather than dropping the constraint.
+    """
+
+    async def act(self, action: BrowserAction) -> BrowserObservation:  # type: ignore[override]
+        self.actions.append(action)
+        return self._observation("https://example.org/account")
+
+
+async def test_a_provider_that_cannot_recheck_refuses_a_constrained_act() -> None:
+    provider = ConstraintlessProvider()
+    outside_the_port = cast(BrowserProvider, provider)
+    context = replace(tool_context(), dispatch_constraint=TASK_CONSTRAINT)
+
+    refused = await BrowserActTool(outside_the_port).execute(CLICK_ARGUMENTS, context)
+    approved = await BrowserActTool(outside_the_port).execute(CLICK_ARGUMENTS, tool_context())
+
+    assert refused.failure is not None
+    assert refused.failure.reason_code == "tool.browser.grant_not_applicable"
+    assert approved.ok
+    assert len(provider.actions) == 1
+
+
+def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
+    """ADR-0130 decision 6: navigate and act return the settled page, so the
+    model acts on it directly instead of observing again. Versions stay."""
+
+    provider = FakeBrowserProvider()
+
+    assert BrowserNavigateTool(provider).spec.description == (
+        "Open one page in this chat's website profile and return it once it settles. "
+        "Use a full https:// URL on an origin listed as browser_origins in the runtime "
+        "metadata."
+    )
+    assert BrowserObserveTool(provider).spec.description == (
+        "Read the current page of this chat's website profile again. navigate and act "
+        "already return the settled page, so observe only to refresh a page that changes "
+        "on its own."
+    )
+    assert BrowserActTool(provider).spec.description == (
+        "Perform one action, subject to approval, on an element of the latest page "
+        "revision. The result is the page after the action settles, with a new revision "
+        "and element refs; act on it directly without observing first."
+    )
+    assert {
+        tool.spec.version
+        for tool in (
+            BrowserNavigateTool(provider),
+            BrowserObserveTool(provider),
+            BrowserActTool(provider),
+        )
+    } == {"1.0.0"}

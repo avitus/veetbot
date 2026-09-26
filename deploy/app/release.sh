@@ -238,6 +238,8 @@ export BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE="$BROWSER_CONTROL_CREDENTIA
   "VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE must not be a symlink: $BROWSER_CONTROL_CREDENTIAL_FILE"
 [[ "${BROWSER_PROFILE_CEREMONY_BASE_URL:-}" =~ ^https://[^/?#[:space:]]+/?$ ]] || fail \
   "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin"
+[[ "${BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED:-true}" =~ ^(true|false)$ ]] || fail \
+  "BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED must be true or false"
 [[ "${BROWSER_PROFILE_KEY_DIR:-}" = /* ]] || fail \
   "BROWSER_PROFILE_KEY_DIR must be an absolute path"
 [[ -d "$BROWSER_PROFILE_KEY_DIR" ]] || fail \

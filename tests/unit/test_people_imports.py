@@ -5,6 +5,9 @@ from decimal import Decimal
 import pytest
 
 from agent_core.domain.messages import (
+    CacheBreakpoint,
+    CacheHints,
+    CacheTtl,
     ModelPricing,
     ModelRequest,
     ResolvedModel,
@@ -55,6 +58,40 @@ def test_reservation_includes_worst_case_input_output_and_separate_reasoning() -
     )
     with pytest.raises(ImportStoppedError, match="pricing"):
         reservation_cost(request, model.model_copy(update={"pricing": ModelPricing()}))
+
+
+def test_reservation_uses_the_one_hour_write_rate_only_when_a_breakpoint_asks_for_it() -> None:
+    """A one-hour cache write costs more than any other input token (ADR-0132)."""
+    model = ResolvedModel(
+        provider="test",
+        model="test",
+        resolved_at=NOW,
+        pricing=ModelPricing(
+            input_per_mtok=Decimal(1),
+            cache_write_per_mtok=Decimal(2),
+            cache_write_1h_per_mtok=Decimal(5),
+            output_per_mtok=Decimal(3),
+        ),
+    )
+
+    def reserved(ttl: CacheTtl) -> Decimal:
+        request = ModelRequest(
+            model_policy="test",
+            conversation=[],
+            tools=[],
+            maximum_output_tokens=100,
+            cache_hints=CacheHints(
+                breakpoints=[
+                    CacheBreakpoint(boundary="after_system", ttl="default"),
+                    CacheBreakpoint(boundary="after_tools", ttl=ttl),
+                ]
+            ),
+        )
+        return reservation_cost(request, model)
+
+    window = model.limits.context_window_tokens
+    assert reserved("1h") == Decimal(window * 5 + 300) / 1_000_000
+    assert reserved("default") == Decimal(window * 2 + 300) / 1_000_000
 
 
 async def test_scoped_import_survives_new_observed_identifiers() -> None:

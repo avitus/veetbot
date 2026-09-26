@@ -4,6 +4,9 @@
 - Date: 2026-08-19
 - Related: `AGENTS.md` (the operating contract), ADR-0027 and ADR-0028 (gate
   registry), `docs/plan/milestone-map.md` (the census)
+- Amended by: ADR-0133 (2026-09-26), which compares each commit's trailer with
+  that commit's own diff; a range whose newest trailer covers every changed
+  path still passes
 - Detailed design: `AGENTS.md`, `scripts/architecture_checks.py`,
   `scripts/gate_registry.py`
 

@@ -22,6 +22,7 @@ from dotenv import dotenv_values
 from pydantic import SecretStr, ValidationError
 
 from agent_core.domain.browser import normalize_browser_origin
+from agent_core.domain.browser_task_grants import BrowserTaskGrantScope, parse_task_grant_scopes
 from agent_core.domain.calls import CallConfiguration
 from agent_core.domain.memory import (
     MemoryDistillationEvidence,
@@ -180,6 +181,10 @@ class Settings:
     browser_provider: BrowserProviderKind = BrowserProviderKind.DISABLED
     judgment_provider: JudgmentProviderKind = JudgmentProviderKind.DISABLED
     browser_allowed_origins: tuple[str, ...] = ()
+    # ADR-0129: task grants from the browser.act approval card, and the exact
+    # site scopes an owner may allow; environment-layer deployment controls.
+    browser_task_grants_enabled: bool = False
+    browser_task_grant_scopes: tuple[BrowserTaskGrantScope, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
     browser_grant_id: UUID | None = None
@@ -345,6 +350,11 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "run_defaults.max_tool_calls",
             "run_defaults.synthesis_reserve_model_calls",
             "run_defaults.synthesis_reserve_tool_calls",
+            "browser_task.max_steps",
+            "browser_task.max_model_calls",
+            "browser_task.max_tool_calls",
+            "browser_task.max_cost",
+            "browser_task.synthesis_reserve_cost",
             "email.daily_cost",
             "email.monthly_cost",
             "email.unsubscribe_grace_days",
@@ -451,6 +461,11 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:run_defaults.max_tool_calls": 1,
         "runtime/limits.yaml:run_defaults.synthesis_reserve_model_calls": 0,
         "runtime/limits.yaml:run_defaults.synthesis_reserve_tool_calls": 0,
+        "runtime/limits.yaml:browser_task.max_steps": 1,
+        "runtime/limits.yaml:browser_task.max_model_calls": 1,
+        "runtime/limits.yaml:browser_task.max_tool_calls": 1,
+        "runtime/limits.yaml:browser_task.max_cost": 0.01,
+        "runtime/limits.yaml:browser_task.synthesis_reserve_cost": 0,
         "runtime/limits.yaml:email.daily_cost": 0.01,
         "runtime/limits.yaml:email.monthly_cost": 0.01,
         "runtime/limits.yaml:email.unsubscribe_grace_days": 2,
@@ -1410,6 +1425,13 @@ def validate_settings(
         raise ConfigurationError("BROWSER_GRANT_ID requires BROWSER_PROFILE_ID")
     if settings.browser_run_purpose is not None and settings.browser_grant_id is None:
         raise ConfigurationError("BROWSER_RUN_PURPOSE requires BROWSER_GRANT_ID")
+    if (
+        settings.browser_task_grants_enabled
+        and settings.browser_provider is not BrowserProviderKind.HOSTED
+    ):
+        raise ConfigurationError("BROWSER_TASK_GRANTS_ENABLED requires BROWSER_PROVIDER=hosted")
+    if settings.browser_task_grant_scopes and not settings.browser_task_grants_enabled:
+        raise ConfigurationError("BROWSER_TASK_GRANT_SCOPES requires BROWSER_TASK_GRANTS_ENABLED=1")
 
 
 def validate_runtime_identity(
@@ -1777,6 +1799,15 @@ def _load_settings(
         values.get("JUDGMENT_PROVIDER", "disabled").strip(),
         "JUDGMENT_PROVIDER",
     )
+    # ADR-0129: task grants from the approval card, off by default; each scope
+    # an exact public-HTTPS origin and one path segment.
+    browser_task_grants_enabled = _parse_flag(values, "BROWSER_TASK_GRANTS_ENABLED")
+    try:
+        browser_task_grant_scopes = parse_task_grant_scopes(
+            values.get("BROWSER_TASK_GRANT_SCOPES", "")
+        )
+    except ValueError as exc:
+        raise ConfigurationError(f"BROWSER_TASK_GRANT_SCOPES {exc}") from None
     raw_browser_origins = tuple(
         value.strip()
         for value in values.get("BROWSER_ALLOWED_ORIGINS", "").split(",")
@@ -1890,6 +1921,8 @@ def _load_settings(
         browser_provider=browser_provider,
         judgment_provider=judgment_provider,
         browser_allowed_origins=browser_allowed_origins,
+        browser_task_grants_enabled=browser_task_grants_enabled,
+        browser_task_grant_scopes=browser_task_grant_scopes,
         browser_profile_service_url=browser_profile_service_url,
         browser_profile_id=browser_profile_id,
         browser_grant_id=browser_grant_id,

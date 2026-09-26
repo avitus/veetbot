@@ -18,7 +18,7 @@ admit the typed-judgment port and the judgment matcher.
 
 A chat conversation is a `sessions` row shared by every surface, and every
 client lists those rows as one flat, activity-ordered history
-(http-api-and-streaming.md:757-761). Nothing groups them. The owner wants
+(http-api-and-streaming.md:790-794). Nothing groups them. The owner wants
 conversations organized into folders, wants the assistant to notice when a
 handful of unfiled conversations belong together and to say so, and wants the
 folders to carry the names the owner gives them. Milestone 29 builds it: flat,
@@ -89,7 +89,7 @@ not find it here should find the reason here.
 conversation history server state and every local history store a cache
 (multi-device-and-surfaces.md:49-53). A folder is a fact about a session the
 same way its title is: `SessionView.title` is server-owned and never a
-client-only value (http-api-and-streaming.md:625-632). Membership therefore
+client-only value (http-api-and-streaming.md:655-662). Membership therefore
 lives beside the session on the server and every client reads it from the
 index, which is what lets a folder created on the Mac appear on the iPhone.
 
@@ -101,7 +101,7 @@ uniqueness rule, a cascade, and a count — so it is a table, not a metadata
 key. Metadata stays opaque, bounded, and untrusted.
 
 **Session metadata never enters a model prompt.** The rule is a security rule
-(http-api-and-streaming.md:667-675): metadata is client input and the shape
+(http-api-and-streaming.md:697-705): metadata is client input and the shape
 an injection takes. The grouping call reads titles, bounded message text, and
 folder names — content the platform already treats as user-authored data
 under a trust label — and reads no metadata key at all.
@@ -122,7 +122,7 @@ source, and records an audited deterministic fallback on any failure
 a different schema.
 
 **The maintenance role.** Background work runs as sweeps in the maintenance
-worker under an advisory lock (runtime-loop.md:1446), each on its own timer
+worker under an advisory lock (runtime-loop.md:1462), each on its own timer
 when it is slow. The proposal pass is one more sweep.
 
 ## The domain model
@@ -164,7 +164,7 @@ session_folder_memberships (
 
 The primary key is the single-parent rule: a session is in at most one
 folder, and a move is an upsert. The first cascade is how ADR-0050's session
-deletion (http-api-and-streaming.md:763-769) leaves no membership behind
+deletion (http-api-and-streaming.md:796-802) leaves no membership behind
 without a new step in the deletion transaction; the second is how deleting a
 folder returns its conversations to the unfiled state in the same statement.
 The denormalized tenant and principal let ownership be a predicate on this
@@ -554,7 +554,7 @@ moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none
 of them differs between two deployments of the same revision
-(bootstrap-and-composition.md:339-341). `folders/profiles.yaml` ships:
+(bootstrap-and-composition.md:340-342). `folders/profiles.yaml` ships:
 
 ```yaml
 schema_version: 1
@@ -576,7 +576,7 @@ the two judgment knobs ship with the matcher. `judgment_match_threshold` is
 above 0.5 and at most 1, so at most one option of a question can clear it.
 One environment key, `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and
 the pass together, defaults off, and appears in `.env.example` in the same
-change (bootstrap-and-composition.md:526-531). The matcher additionally needs
+change (bootstrap-and-composition.md:527-532). The matcher additionally needs
 the `JUDGMENT_PROVIDER` selector [typed-judgment.md](typed-judgment.md)
 defines; with the knob on and no provider composed, the pass uses the inner
 grouper alone and says so once in the log.

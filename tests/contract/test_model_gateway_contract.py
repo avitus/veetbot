@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from collections.abc import AsyncIterator
@@ -30,6 +31,10 @@ from agent_core.adapters.models.recorded import (
     RecordedModelProvider,
 )
 from agent_core.domain.messages import (
+    AssistantMessage,
+    CacheBreakpoint,
+    CacheHints,
+    CacheTtl,
     CostSource,
     FakeModelScript,
     FileReferencePart,
@@ -50,6 +55,7 @@ from agent_core.domain.messages import (
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
+    SystemMessage,
     TextPart,
     ToolCallDeltaEvent,
     ToolCallItem,
@@ -1095,6 +1101,203 @@ async def test_anthropic_disjoint_input_counters_normalize_to_total_input() -> N
     assert turn.usage.cache_write_input_tokens == 30
     assert turn.usage.output_tokens == 2
     assert turn.usage.cost == Decimal("0.0002975")
+
+
+# Anthropic renders tools, then system, then messages; longer TTLs must come first.
+_WIRE_ORDER = ("after_tools", "after_system", "after_history_prefix")
+_TTL_RANK = {"default": 0, "1h": 1}
+
+
+def _caching_anthropic(one_hour_write: Decimal | None = Decimal("20")) -> ResolvedModel:
+    return resolved("anthropic").model_copy(
+        update={
+            "limits": ModelLimits(max_cache_breakpoints=4),
+            "pricing": ModelPricing(
+                input_per_mtok=Decimal("10"),
+                cached_input_per_mtok=Decimal("0.25"),
+                cache_write_per_mtok=Decimal("12.50"),
+                cache_write_1h_per_mtok=one_hour_write,
+                output_per_mtok=Decimal("50"),
+            ),
+        }
+    )
+
+
+def _cached_request(ttls: dict[str, CacheTtl]) -> ModelRequest:
+    return request(
+        [
+            SystemMessage(content=[TextPart(text="Be exact.")]),
+            UserMessage(content=[TextPart(text="calculate")]),
+        ]
+    ).model_copy(
+        update={
+            "cache_hints": CacheHints(
+                breakpoints=[
+                    CacheBreakpoint(boundary=boundary, ttl=ttl) for boundary, ttl in ttls.items()
+                ]
+            )
+        }
+    )
+
+
+def _wire_cache_controls(payload: dict[str, Any]) -> dict[str, dict[str, str] | None]:
+    return {
+        "after_tools": payload["tools"][-1].get("cache_control"),
+        "after_system": payload["system"][-1].get("cache_control"),
+        "after_history_prefix": payload["messages"][-1]["content"][-1].get("cache_control"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("ttl", "cache_control"),
+    [
+        ("1h", {"type": "ephemeral", "ttl": "1h"}),
+        ("default", {"type": "ephemeral"}),
+    ],
+)
+def test_anthropic_messages_sends_the_ttl_the_context_plan_carries(
+    ttl: CacheTtl, cache_control: dict[str, str]
+) -> None:
+    payload, sent, dropped = AnthropicMessagesProvider._request_payload(
+        _cached_request({"after_system": ttl, "after_tools": ttl}), _caching_anthropic()
+    )
+
+    controls = _wire_cache_controls(payload)
+    assert (sent, dropped) == (2, 0)
+    assert controls["after_tools"] == cache_control
+    assert controls["after_system"] == cache_control
+    assert controls["after_history_prefix"] is None
+
+
+@pytest.mark.parametrize("ttls", list(itertools.product(("default", "1h"), repeat=3)))
+def test_anthropic_messages_keeps_longer_ttls_ahead_of_shorter_ones(
+    ttls: tuple[CacheTtl, CacheTtl, CacheTtl],
+) -> None:
+    requested = dict(
+        zip(("after_system", "after_tools", "after_history_prefix"), ttls, strict=True)
+    )
+    payload, _, _ = AnthropicMessagesProvider._request_payload(
+        _cached_request(requested), _caching_anthropic()
+    )
+
+    controls = _wire_cache_controls(payload)
+    sent = []
+    for boundary in _WIRE_ORDER:
+        control = controls[boundary]
+        assert control is not None and control["type"] == "ephemeral"
+        sent.append(control.get("ttl", "default"))
+    ranks = [_TTL_RANK[ttl] for ttl in sent]
+    assert ranks == sorted(ranks, reverse=True), sent
+    # A TTL the plan asked for is never shortened to satisfy the ordering.
+    for boundary, ttl in zip(_WIRE_ORDER, sent, strict=True):
+        assert _TTL_RANK[ttl] >= _TTL_RANK[requested[boundary]]
+
+
+@pytest.mark.parametrize(
+    ("run_marker_ttl", "expected"),
+    [
+        ("default", ["1h", "1h", "default", "default"]),
+        ("1h", ["1h", "1h", "1h", "1h"]),
+    ],
+)
+def test_anthropic_messages_orders_ttls_across_both_history_markers(
+    run_marker_ttl: CacheTtl, expected: list[str]
+) -> None:
+    conversation: list[Any] = [
+        SystemMessage(content=[TextPart(text="Be exact.")]),
+        UserMessage(content=[TextPart(text="first question")]),
+        AssistantMessage(content=[TextPart(text="first answer")], item_index=0),
+        UserMessage(content=[TextPart(text="second question")]),
+    ]
+    hints = [
+        CacheBreakpoint(boundary="after_system", ttl="1h"),
+        CacheBreakpoint(boundary="after_tools", ttl="1h"),
+        CacheBreakpoint(boundary="after_history_prefix", through_item=2),
+        CacheBreakpoint(boundary="after_history_prefix", through_item=3, ttl=run_marker_ttl),
+    ]
+    payload, sent, _ = AnthropicMessagesProvider._request_payload(
+        request(conversation).model_copy(update={"cache_hints": CacheHints(breakpoints=hints)}),
+        _caching_anthropic(),
+    )
+
+    history = [
+        block["cache_control"]
+        for message in payload["messages"]
+        for block in message["content"]
+        if "cache_control" in block
+    ]
+    sent_ttls = [
+        control.get("ttl", "default")
+        for control in [
+            payload["tools"][-1]["cache_control"],
+            payload["system"][-1]["cache_control"],
+            *history,
+        ]
+    ]
+    assert sent == 4
+    assert sent_ttls == expected
+
+
+def test_anthropic_messages_sends_the_default_ttl_when_one_hour_writes_are_unpriced() -> None:
+    payload, _, _ = AnthropicMessagesProvider._request_payload(
+        _cached_request({"after_system": "1h", "after_tools": "1h"}),
+        _caching_anthropic(one_hour_write=None),
+    )
+
+    controls = _wire_cache_controls(payload)
+    assert controls["after_tools"] == {"type": "ephemeral"}
+    assert controls["after_system"] == {"type": "ephemeral"}
+
+
+async def test_anthropic_one_hour_cache_writes_are_priced_at_the_one_hour_rate() -> None:
+    events = anthropic_text_events("safe")
+    events[0]["message"]["usage"] = {
+        "input_tokens": 10,
+        "cache_read_input_tokens": 20,
+        "cache_creation_input_tokens": 30,
+        "cache_creation": {"ephemeral_5m_input_tokens": 10, "ephemeral_1h_input_tokens": 20},
+        "output_tokens": 1,
+    }
+    source = ScriptedRawSource([events])
+    provider = AnthropicMessagesProvider(event_source=source)
+    try:
+        turn = await collect_turn(
+            provider.stream(
+                _cached_request({"after_system": "1h", "after_tools": "1h"}),
+                _caching_anthropic(),
+                ATTEMPT,
+            )
+        )
+    finally:
+        await provider.close()
+
+    assert turn.usage.input_tokens == 60
+    assert turn.usage.cache_write_input_tokens == 30
+    assert turn.usage.cache_write_1h_input_tokens == 20
+    # 10 x 10 + 20 x 0.25 + 10 x 12.50 + 20 x 20 + 2 x 50, per million tokens.
+    assert turn.usage.cost == Decimal("0.00073")
+
+
+def test_one_hour_cache_writes_are_a_priced_subset_of_cache_writes() -> None:
+    pricing = ModelPricing(
+        input_per_mtok=Decimal("10"),
+        cache_write_per_mtok=Decimal("12.50"),
+        cache_write_1h_per_mtok=Decimal("20"),
+    )
+    usage = ModelUsage(
+        input_tokens=1_000_000,
+        cache_write_input_tokens=300_000,
+        cache_write_1h_input_tokens=200_000,
+    )
+
+    assert price_usage(usage, pricing).cost == Decimal("12.25")
+    with pytest.raises(ValueError, match="exceed"):
+        price_usage(
+            usage.model_copy(update={"cache_write_1h_input_tokens": 300_001}),
+            pricing,
+        )
+    with pytest.raises(ValueError, match="one-hour"):
+        price_usage(usage, pricing.model_copy(update={"cache_write_1h_per_mtok": None}))
 
 
 async def test_anthropic_error_type_drives_retry_and_sdk_validation_is_protocol() -> None:

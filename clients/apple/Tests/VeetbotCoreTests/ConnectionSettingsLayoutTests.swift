@@ -70,6 +70,143 @@ import Testing
         #expect(connectionSection.contains("connectionAction"))
         #expect(!actionBar.contains("saveConnection()"))
     }
+
+    // MARK: - Website Access (ADR-0128 D12, CS13)
+
+    private func settingsSource() throws -> String {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/ConnectionSettingsView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    private func websiteAccessSection() throws -> Substring {
+        let source = try settingsSource()
+        let start = try #require(source.range(of: "case .websiteAccess:"))
+        let end = try #require(source.range(of: "case .smsIntegration:"))
+        return source[start.lowerBound..<end.lowerBound]
+    }
+
+    @Test
+    func testSignInOnThisDeviceIsThePrimaryWebsiteAccessAction() throws {
+        let section = try websiteAccessSection()
+        let device = try #require(section.range(of: "Label(\"Sign in on this device\""))
+        let remote = try #require(section.range(of: "Label(\"Use Veetbot's remote browser\""))
+
+        #expect(device.lowerBound < remote.lowerBound)
+        let deviceButton = section[device.lowerBound..<remote.lowerBound]
+        #expect(deviceButton.contains(".buttonStyle(.borderedProminent)"))
+        #expect(deviceButton.contains(".accessibilityIdentifier(\"website-access.sign-in-on-device\")"))
+        let remoteButton = section[remote.lowerBound...]
+        #expect(remoteButton.contains(".buttonStyle(.bordered)"))
+        #expect(remoteButton.contains(".accessibilityIdentifier(\"website-access.remote-browser\")"))
+        #expect(!section.contains("Create secure login"))
+    }
+
+    @Test
+    func testTheNotReadyGuardAppliesToBothSignInModes() throws {
+        let source = try settingsSource()
+        let section = try websiteAccessSection()
+
+        #expect(source.contains("private var websiteAccessBlocked: Bool"))
+        #expect(source.contains("(model.browserAuthentication.map { $0.status != .ready } ?? false)"))
+        #expect(section.components(separatedBy: ".disabled(websiteAccessBlocked)").count == 3)
+    }
+
+    @Test(arguments: [
+        (BrowserProfileStatus.provisioning, true),
+        (.authenticationRequired, true),
+        (.ready, true),
+        (.needsUser, true),
+        (.revoked, false),
+    ])
+    func testSignInAgainIsOfferedOnlyOnProfilesThatAreNotRevoked(
+        status: BrowserProfileStatus, offered: Bool
+    ) throws {
+        #expect(WebsiteAccessActions.offersSignInAgain(status) == offered)
+        let source = try settingsSource()
+        #expect(source.contains("if WebsiteAccessActions.offersSignInAgain(profile.status) {"))
+        #expect(source.contains("model.beginDeviceSignIn(profile: profile)"))
+        #expect(source.contains("Button(\"Sign in again\")"))
+    }
+
+    @Test
+    func testTaskPermissionsIsACompactMenuRowAtTheEndOfWebsiteAccess() throws {
+        let section = try websiteAccessSection()
+        let rows = try #require(section.range(of: "ForEach(model.browserProfiles)"))
+        let permissions = try #require(section.range(of: "if !model.activeTaskGrants.isEmpty {"))
+
+        #expect(rows.lowerBound < permissions.lowerBound)
+        let row = section[permissions.lowerBound...]
+        #expect(row.contains("Text(\"Task permissions\")"))
+        #expect(row.contains("Menu {"))
+        #expect(row.contains("await model.stopTaskGrant(grant.id)"))
+        #expect(row.contains(".accessibilityIdentifier(\"website-access.task-permissions\")"))
+        let source = try settingsSource()
+        #expect(source.contains("await model.refreshTaskPermissions()"))
+    }
+
+    @Test
+    func testWebsiteAccessAddsNoListSectionAboveAssertedRows() throws {
+        let section = try websiteAccessSection()
+
+        #expect(!section.contains("List {"))
+        #expect(!section.contains("List("))
+        #expect(!section.contains("Section {"))
+        #expect(!section.contains("Section("))
+    }
+
+    @Test
+    func testTheSignInWindowIsPresentedFromSettingsAndRemoteCeremoniesRefreshOnActivation() throws {
+        let source = try settingsSource()
+
+        #expect(source.contains(".deviceSignInPresentation(model: model)"))
+        #expect(source.contains("@Environment(\\.scenePhase) private var scenePhase"))
+        #expect(source.contains("if phase == .active {"))
+        #expect(source.contains("await model.refreshOpenRemoteAuthentication()"))
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sheet = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/DeviceSignInSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(sheet.contains(".fullScreenCover(item:"))
+        #expect(sheet.contains("userInterfaceIdiom == .phone"))
+        #expect(sheet.contains(".frame(minWidth: 820, minHeight: 680)"))
+        #expect(sheet.contains("Button(\"I'm signed in\")"))
+        #expect(sheet.contains("DeviceSignInNavigationPolicy.canConfirm("))
+        #expect(sheet.contains("DeviceSignInNavigationPolicy.decide("))
+        #expect(sheet.contains("navigationResponse.canShowMIMEType"))
+        #expect(sheet.contains("createWebViewWith configuration"))
+        #expect(sheet.contains("contentWorld: .defaultClient"))
+        #expect(sheet.contains("removeData(\n") || sheet.contains("removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()"))
+        #expect(sheet.contains(
+            "const o=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);o.push([k,localStorage.getItem(k)]);}return JSON.stringify(o);"
+        ))
+        #expect(sheet.contains("await model.completeDeviceSignIn("))
+        #expect(!sheet.contains("websiteAuthenticationLaunchURL"))
+        #expect(!sheet.contains("@SceneStorage"))
+        #expect(!sheet.contains("@AppStorage"))
+    }
+
+    /// While I'm signed in is being checked, Cancel is disabled, and a swipe
+    /// on the iPad sheet must not close the window either; a success closes
+    /// only the window it belongs to.
+    @Test
+    func testTheSignInWindowStaysOpenWhileItChecksTheSignIn() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sheet = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/DeviceSignInSheet.swift"),
+            encoding: .utf8
+        )
+
+        #expect(sheet.contains(".disabled(isConfirming)"))
+        #expect(sheet.contains(".interactiveDismissDisabled(isConfirming)"))
+        #expect(sheet.contains("model.finishDeviceSignIn(request)"))
+    }
 }
 
 #if os(macOS)

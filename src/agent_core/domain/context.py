@@ -125,6 +125,9 @@ class ContextPlan(BaseModel):
     deferred_tool_names: tuple[str, ...] = ()
     deferred_tool_specs: tuple[ToolSpec, ...] = ()
     skipped_tool_names: tuple[str, ...] = ()
+    # ADR-0130: the origins browser.navigate accepts in this session, named in
+    # the runtime metadata row. The default keeps older plan events valid.
+    browser_origins: tuple[str, ...] = Field(default=(), max_length=64)
 
     @model_validator(mode="after")
     def tools_match_names(self) -> ContextPlan:

@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-from datetime import timedelta
+import logging
+from contextlib import suppress
+from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from typing import Any
+from urllib.parse import parse_qs, quote, urlsplit
 from uuid import UUID
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 
 from agent_core.adapters.browser.hosted_profiles import HostedBrowserProfileControlPlane
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.browser_control_plane.api import create_profile_service_app
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
+from agent_core.browser_control_plane.handoff import DeviceSessionHandoff
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
@@ -24,8 +30,14 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
+    BrowserElementFacts,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserObservationFacts,
+    BrowserPageEvidence,
+    BrowserProviderError,
 )
 from agent_core.domain.credentials import SecretValue
 from tests.contract.support import NOW, principal
@@ -36,11 +48,21 @@ PROVIDER_REF = "opaque-http-reference-000000000000000001"
 RUN_ID = UUID("00000000-0000-0000-0000-0000000000f8")
 
 
+NO_SESSION = b'{"format_version":1}'
+
+
 class FakeRuntime:
-    def __init__(self, events: list[BrowserInteractiveEvent] | None = None) -> None:
+    def __init__(
+        self,
+        events: list[BrowserInteractiveEvent] | None = None,
+        *,
+        evidence_failure: Exception | None = None,
+    ) -> None:
         self.origins: tuple[str, ...] = ()
         self.closed = False
         self.events = events if events is not None else []
+        self.material: bytes | None = None
+        self.evidence_failure = evidence_failure
 
     async def start(
         self,
@@ -49,7 +71,8 @@ class FakeRuntime:
         *,
         interactive: bool,
     ) -> None:
-        del material, interactive
+        del interactive
+        self.material = material
         self.origins = allowed_origins
 
     async def navigate(self, url: str) -> BrowserObservation:
@@ -61,6 +84,35 @@ class FakeRuntime:
     async def act(self, action: BrowserAction) -> BrowserObservation:
         del action
         return BrowserObservation(url=self.origins[0], revision="revision-2")
+
+    async def act_within_grant(
+        self,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        *,
+        now: datetime,
+    ) -> BrowserObservation:
+        del constraint, now
+        return await self.act(action)
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        """Facts for every revision this fake reports: one plain button."""
+        return BrowserObservationFacts(
+            revision=revision,
+            elements={f"{revision}:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)},
+        )
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        """A public home page, and members' pages that send a visitor to sign in."""
+        if self.evidence_failure is not None:
+            raise self.evidence_failure
+        if self.material == NO_SESSION and urlsplit(url).path not in {"", "/"}:
+            return BrowserPageEvidence(
+                on_allowed_origin=True, path="/log-in", challenge_visible=True
+            )
+        return BrowserPageEvidence(
+            on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
 
     async def storage_state(self) -> bytes:
         return b'{"format_version":1,"wire":true}'
@@ -101,6 +153,12 @@ def full_app(
     root: Path,
     *,
     events: list[BrowserInteractiveEvent] | None = None,
+    runtimes: list[FakeRuntime] | None = None,
+    device_sign_in_enabled: bool = True,
+    times: list[datetime] | None = None,
+    evidence_failure: Exception | None = None,
+    services: list[HostedProfileSessionService] | None = None,
+    sweep_interval_seconds: float = 0,
 ) -> FastAPI:
     store = FilesystemEncryptedProfileStore(
         root,
@@ -109,13 +167,25 @@ def full_app(
             current_version="key-v1",
         ),
     )
+    created = runtimes if runtimes is not None else []
+
+    def runtime_factory(tenant_id: str) -> FakeRuntime:
+        del tenant_id
+        runtime = FakeRuntime(events, evidence_failure=evidence_failure)
+        created.append(runtime)
+        return runtime
+
+    clock = times if times is not None else [NOW]
     sessions = HostedProfileSessionService(
         store,
-        runtime_factory=lambda tenant_id: FakeRuntime(events),
-        now=lambda: NOW,
+        runtime_factory=runtime_factory,
+        now=lambda: clock[0],
         process_secret=b"synthetic-http-process-secret-32-bytes",
         ceremony_base_url="https://login.example.test",
+        device_sign_in_enabled=device_sign_in_enabled,
     )
+    if services is not None:
+        services.append(sessions)
     lifecycle_service = HostedProfileLifecycleService(
         store,
         reference_factory=lambda: PROVIDER_REF,
@@ -125,6 +195,7 @@ def full_app(
         lifecycle_service,
         SecretValue(OPAQUE_AUTH_VALUE),
         sessions=sessions,
+        sweep_interval_seconds=sweep_interval_seconds,
     )
 
 
@@ -501,3 +572,787 @@ async def test_authentication_surface_binds_fragment_capability_before_interacti
     assert frame.headers["content-type"] == "image/png"
     assert event.status_code == 204
     assert events == [BrowserInteractiveEvent(kind="click", x=100, y=120)]
+
+
+SERVICE_HEADERS = {
+    "Authorization": f"Bearer {OPAQUE_AUTH_VALUE}",
+    "Content-Type": "application/json",
+}
+
+
+async def _provision_over_http(http: httpx.AsyncClient) -> str:
+    response = await http.post(
+        "/v1/browser-profiles:provision",
+        headers={**SERVICE_HEADERS, "Idempotency-Key": f"browser-profile:{PROFILE_ID}:provision"},
+        json={
+            "profile_id": str(PROFILE_ID),
+            "tenant_id": principal().tenant_id,
+            "principal_id": principal().principal_id,
+            "allowed_origins": ["https://example.org"],
+        },
+    )
+    assert response.status_code == 201
+    return str(response.json()["provider_ref"])
+
+
+async def _begin_over_http(
+    http: httpx.AsyncClient,
+    provider_ref: str,
+    *,
+    mode: str | None,
+    login_url: str = "https://example.org/",
+) -> httpx.Response:
+    body: dict[str, object] = {
+        "profile_id": str(PROFILE_ID),
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "provider_ref": provider_ref,
+        "login_url": login_url,
+    }
+    if mode is not None:
+        body["mode"] = mode
+    return await http.post(
+        "/v1/browser-authentications:begin",
+        headers={
+            **SERVICE_HEADERS,
+            "Idempotency-Key": f"browser-authentication:{PROFILE_ID}:begin",
+        },
+        json=body,
+    )
+
+
+async def test_device_ceremony_begin_returns_a_handoff_capability_and_starts_no_browser(
+    tmp_path: Path,
+) -> None:
+    """A device begin issues a handoff capability; the owner's client signs in (ADR-0128)."""
+
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", runtimes=runtimes))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        begun = await _begin_over_http(http, provider_ref, mode="device")
+        status = await http.post(
+            "/v1/browser-authentications:status",
+            headers=SERVICE_HEADERS,
+            json={
+                "ceremony_id": begun.json().get("id"),
+                "tenant_id": principal().tenant_id,
+                "principal_id": principal().principal_id,
+            },
+        )
+        bogus = await _begin_over_http(http, provider_ref, mode="bogus")
+
+    assert begun.status_code == 201
+    view = begun.json()
+    launch = urlsplit(view["launch_url"])
+    assert (launch.scheme, launch.netloc) == ("https", "login.example.test")
+    assert launch.path == f"/authentication/{view['id']}/handoff"
+    capability = parse_qs(launch.fragment)["capability"][0]
+    assert len(capability) == 43
+    assert view["status"] == "authentication_required"
+    assert runtimes == []
+    assert status.status_code == 200
+    assert status.json()["status"] == "authentication_required"
+    assert status.json().get("launch_url") is None
+    assert bogus.status_code == 400
+
+
+async def test_remote_ceremony_begin_is_unchanged_without_a_mode(tmp_path: Path) -> None:
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", runtimes=runtimes))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        begun = await _begin_over_http(http, provider_ref, mode=None)
+
+    assert begun.status_code == 201
+    launch = urlsplit(begun.json()["launch_url"])
+    assert launch.path == f"/authentication/{begun.json()['id']}"
+    assert len(runtimes) == 1
+
+
+async def test_device_begin_is_refused_when_device_sign_in_is_off(tmp_path: Path) -> None:
+    """The service kill switch refuses device begins and leaves remote ones alone (D13)."""
+
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(
+        app=full_app(tmp_path / "profiles", runtimes=runtimes, device_sign_in_enabled=False)
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        refused = await _begin_over_http(http, provider_ref, mode="device")
+        remote = await _begin_over_http(http, provider_ref, mode="remote")
+
+    assert refused.status_code == 409
+    assert refused.json() == {
+        "error": {
+            "code": "tool.browser.provider_unavailable",
+            "message": "browser operation rejected",
+        }
+    }
+    assert remote.status_code == 201
+    assert len(runtimes) == 1
+
+
+# --- ADR-0128: the device sign-in handoff at the service boundary -----------
+
+HANDOFF_SENTINEL = "handoff-boundary-sentinel-value"
+
+
+def handoff_body(**overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "confirmed_url": "https://example.org/learn",
+        "cookies": [
+            {
+                "name": "session",
+                "value": HANDOFF_SENTINEL,
+                "domain": ".example.org",
+                "path": "/",
+                "expires": 1790000000.5,
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ],
+        "origins": [],
+    }
+    body.update(overrides)
+    return body
+
+
+async def _begin_device(http: httpx.AsyncClient) -> tuple[str, str, str]:
+    """Provision the profile and begin a device ceremony: (id, handoff path, capability)."""
+
+    provider_ref = await _provision_over_http(http)
+    begun = await _begin_over_http(http, provider_ref, mode="device")
+    assert begun.status_code == 201, begun.text
+    launch = urlsplit(begun.json()["launch_url"])
+    return begun.json()["id"], launch.path, parse_qs(launch.fragment)["capability"][0]
+
+
+async def _ceremony_status(http: httpx.AsyncClient, ceremony_id: str) -> str:
+    response = await http.post(
+        "/v1/browser-authentications:status",
+        headers=SERVICE_HEADERS,
+        json={
+            "ceremony_id": ceremony_id,
+            "tenant_id": principal().tenant_id,
+            "principal_id": principal().principal_id,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return str(response.json()["status"])
+
+
+def _handoff_headers(capability: str | None) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if capability is not None:
+        headers["X-Browser-Ceremony-Capability"] = capability
+    return headers
+
+
+async def test_device_handoff_seals_the_verified_session_once(tmp_path: Path) -> None:
+    """ADR-0128 happy path: one handoff, verified and sealed, then the capability is spent."""
+
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", runtimes=runtimes))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        ceremony_id, path, capability = await _begin_device(http)
+        sealed = await http.post(path, headers=_handoff_headers(capability), json=handoff_body())
+        status = await _ceremony_status(http, ceremony_id)
+        replay = await http.post(path, headers=_handoff_headers(capability), json=handoff_body())
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json() == {"status": "ready"}
+    assert sealed.headers["cache-control"] == "no-store"
+    assert sealed.headers["x-content-type-options"] == "nosniff"
+    assert status == "ready"
+    assert replay.status_code == 401
+    assert replay.json() == {
+        "error": {"code": "unauthorized", "message": "authentication required"}
+    }
+    assert len(runtimes) == 2 and all(runtime.closed for runtime in runtimes)
+    for response in (sealed, replay):
+        assert HANDOFF_SENTINEL not in response.text
+        assert capability not in response.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(handoff_body(extra=True), id="extra-field"),
+        pytest.param(handoff_body(confirmed_url="http://example.org/learn"), id="http"),
+        pytest.param(
+            handoff_body(cookies=[{**handoff_body()["cookies"][0], "value": "a;b"}]),  # type: ignore[index]
+            id="bad-cookie",
+        ),
+        pytest.param(handoff_body(confirmed_url="https://example.net/learn"), id="off-origin"),
+        pytest.param(b"not json", id="not-json"),
+    ],
+)
+async def test_a_malformed_handoff_is_400_and_spends_nothing(
+    tmp_path: Path, body: dict[str, object] | bytes
+) -> None:
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        headers = _handoff_headers(capability)
+        if isinstance(body, bytes):
+            rejected = await http.post(path, headers=headers, content=body)
+        else:
+            rejected = await http.post(path, headers=headers, json=body)
+        accepted = await http.post(path, headers=headers, json=handoff_body())
+
+    assert rejected.status_code == 400
+    assert rejected.json() == {
+        "error": {"code": "invalid_request", "message": "request is invalid"}
+    }
+    assert HANDOFF_SENTINEL not in rejected.text
+    assert accepted.status_code == 200
+
+
+async def test_device_handoff_authenticates_before_reading_the_body(tmp_path: Path) -> None:
+    """A missing, wrong, remote, expired or cancelled capability is 401 before any body."""
+
+    times = [NOW]
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", times=times))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        unread = {"Content-Type": "application/json", "Content-Length": "999999"}
+        missing = await http.post(path, headers=unread, content=b"not parsed")
+        wrong = await http.post(
+            path,
+            headers={**unread, "X-Browser-Ceremony-Capability": "w" * 43},
+            content=b"not parsed",
+        )
+        frame = await http.get(
+            path.removesuffix("/handoff") + "/frame",
+            headers={"X-Browser-Ceremony-Capability": capability},
+        )
+        events = await http.post(
+            path.removesuffix("/handoff") + "/events",
+            headers=_handoff_headers(capability),
+            json={"kind": "click", "x": 1, "y": 1},
+        )
+        unsupported = await http.post(
+            path,
+            headers={"X-Browser-Ceremony-Capability": capability, "Content-Type": "text/plain"},
+            content=b"{}",
+        )
+        declared_too_large = await http.post(
+            path,
+            headers={**_handoff_headers(capability), "Content-Length": str(1024 * 1024 + 1)},
+            content=b"x",
+        )
+        streamed_too_large = await http.post(
+            path, headers=_handoff_headers(capability), content=b" " * (1024 * 1024 + 1)
+        )
+        times[0] = NOW + timedelta(minutes=5)
+        expired = await http.post(path, headers=_handoff_headers(capability), json=handoff_body())
+
+    assert [response.status_code for response in (missing, wrong, frame, events)] == [401] * 4
+    assert unsupported.status_code == 415
+    assert declared_too_large.status_code == 413
+    assert streamed_too_large.status_code == 413
+    assert expired.status_code == 401
+    for response in (missing, wrong, frame, events, unsupported, declared_too_large, expired):
+        assert response.headers["cache-control"] == "no-store"
+
+
+async def _asgi_post(
+    app: FastAPI, path: str, headers: dict[str, str], body: bytes
+) -> tuple[int, int]:
+    """POST ``body`` in 64 KiB chunks to ``path`` as uvicorn delivers it,
+    already percent-decoded; answer the status and how many body bytes the
+    application read."""
+
+    chunks = [body[start : start + 64 * 1024] for start in range(0, len(body), 64 * 1024)]
+    read = 0
+    statuses: list[int] = []
+
+    async def receive() -> dict[str, Any]:
+        nonlocal read
+        if not chunks:
+            return {"type": "http.disconnect"}
+        chunk = chunks.pop(0)
+        read += len(chunk)
+        return {"type": "http.request", "body": chunk, "more_body": bool(chunks)}
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            statuses.append(message["status"])
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": path,
+        "raw_path": quote(path).encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(name.lower().encode(), value.encode()) for name, value in headers.items()],
+        "server": ("service.test", 443),
+        "client": ("127.0.0.1", 50000),
+    }
+    await app(scope, receive, send)  # type: ignore[arg-type]
+    [status] = statuses
+    return status, read
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["newline-handoff", "newline-events", "undashed-handoff", "uppercase-handoff"],
+)
+async def test_a_non_canonical_surface_path_is_refused_before_its_body_is_read(
+    tmp_path: Path, variant: str
+) -> None:
+    """ADR-0128 D5: every path under /authentication/ passes the capability
+    boundary. A ceremony path with a trailing newline (``%0A``, which uvicorn
+    decodes) or another spelling of the id still reached the handoff route
+    through FastAPI's looser matching and had its body parsed, uncapped."""
+
+    application = full_app(tmp_path / "profiles")
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        ceremony_id, _path, _capability = await _begin_device(http)
+    canonical = f"/authentication/{ceremony_id}"
+    path = {
+        "newline-handoff": f"{canonical}/handoff\n",
+        "newline-events": f"{canonical}/events\n",
+        "undashed-handoff": f"/authentication/{UUID(ceremony_id).hex}/handoff",
+        "uppercase-handoff": f"/authentication/{ceremony_id.upper()}/handoff",
+    }[variant]
+    oversized = b" " * (2 * 1024 * 1024)
+
+    status, read = await _asgi_post(
+        application,
+        path,
+        {"Content-Type": "text/plain", "Content-Length": str(len(oversized))},
+        oversized,
+    )
+
+    assert (status, read) == (404, 0)
+
+
+async def test_a_remote_capability_never_authorizes_a_handoff(tmp_path: Path) -> None:
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        begun = await _begin_over_http(http, provider_ref, mode="remote")
+        launch = urlsplit(begun.json()["launch_url"])
+        capability = parse_qs(launch.fragment)["capability"][0]
+        refused = await http.post(
+            launch.path + "/handoff", headers=_handoff_headers(capability), json=handoff_body()
+        )
+
+    assert refused.status_code == 401
+
+
+async def test_after_a_rejected_handoff_the_ceremony_is_cancelled_and_a_new_one_begins(
+    tmp_path: Path,
+) -> None:
+    """Retry means a new ceremony (ADR-0128 D4)."""
+
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        ceremony_id, path, capability = await _begin_device(http)
+        unconfirmed = await http.post(
+            path,
+            headers=_handoff_headers(capability),
+            json=handoff_body(confirmed_url="https://example.org/"),
+        )
+        status = await _ceremony_status(http, ceremony_id)
+        retried = await http.post(path, headers=_handoff_headers(capability), json=handoff_body())
+        again = await _begin_over_http(http, PROVIDER_REF, mode="device")
+
+    assert unconfirmed.status_code == 422, unconfirmed.text
+    assert unconfirmed.json()["error"]["code"] == "session_unconfirmed"
+    assert status == "cancelled"
+    assert retried.status_code == 401
+    assert again.status_code == 201
+
+
+async def test_a_cancelled_device_ceremony_refuses_its_handoff(tmp_path: Path) -> None:
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        ceremony_id, path, capability = await _begin_device(http)
+        cancelled = await http.post(
+            "/v1/browser-authentications:cancel",
+            headers={
+                **SERVICE_HEADERS,
+                "Idempotency-Key": f"browser-authentication:{ceremony_id}:cancel",
+            },
+            json={
+                "ceremony_id": ceremony_id,
+                "tenant_id": principal().tenant_id,
+                "principal_id": principal().principal_id,
+            },
+        )
+        refused = await http.post(path, headers=_handoff_headers(capability), json=handoff_body())
+
+    assert cancelled.status_code == 200
+    assert refused.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "code"),
+    [
+        pytest.param(
+            BrowserProviderError("tool.browser.provider_unavailable", retryable=True),
+            409,
+            "tool.browser.provider_unavailable",
+            id="provider-unavailable",
+        ),
+        pytest.param(
+            RuntimeError(f"unexpected {HANDOFF_SENTINEL}"),
+            409,
+            "tool.browser.provider_unavailable",
+            id="load-crashes",
+        ),
+    ],
+)
+async def test_a_verification_failure_is_a_fixed_answer(
+    tmp_path: Path, failure: Exception, status: int, code: str
+) -> None:
+    transport = httpx.ASGITransport(
+        app=full_app(tmp_path / "profiles", evidence_failure=failure),
+        raise_app_exceptions=True,
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        ceremony_id, path, capability = await _begin_device(http)
+        answered = await http.post(path, headers=_handoff_headers(capability), json=handoff_body())
+        after = await _ceremony_status(http, ceremony_id)
+
+    assert answered.status_code == status
+    assert answered.json() == {"error": {"code": code, "message": "browser operation rejected"}}
+    assert HANDOFF_SENTINEL not in answered.text
+    assert after == "cancelled"
+
+
+# --- ADR-0128 D18: nothing from a handoff reaches a log or escapes -----------
+
+LOG_SENTINEL_NAME = "log-sentinel-cookie-name"
+LOG_SENTINEL_VALUE = "log-sentinel-cookie-value"
+LOG_SENTINEL_STORAGE = "log-sentinel-storage-item"
+LOG_SENTINEL_PATH = "log-sentinel-path"
+_LOG_SENTINELS = (LOG_SENTINEL_NAME, LOG_SENTINEL_VALUE, LOG_SENTINEL_STORAGE, LOG_SENTINEL_PATH)
+
+
+def sentinel_handoff(**overrides: object) -> dict[str, object]:
+    cookie = {
+        "name": LOG_SENTINEL_NAME,
+        "value": LOG_SENTINEL_VALUE,
+        "domain": ".example.org",
+        "path": "/",
+        "expires": -1,
+        "httpOnly": True,
+        "secure": True,
+        "sameSite": "Lax",
+    }
+    body: dict[str, object] = {
+        "confirmed_url": f"https://example.org/{LOG_SENTINEL_PATH}",
+        "cookies": [cookie, {**cookie, "domain": ".example.net"}],
+        "origins": [
+            {
+                "origin": "https://example.org",
+                "localStorage": [{"name": LOG_SENTINEL_STORAGE, "value": LOG_SENTINEL_STORAGE}],
+            }
+        ],
+    }
+    body.update(overrides)
+    return body
+
+
+def injected_failures() -> list[Exception]:
+    """A RuntimeError with a sentinel and a chained cause, a KeyError, a ValidationError."""
+
+    try:
+        raise KeyError(LOG_SENTINEL_NAME)
+    except KeyError as cause:
+        chained = RuntimeError(f"verification failed for {LOG_SENTINEL_VALUE}")
+        chained.__cause__ = cause
+    try:
+        DeviceSessionHandoff.model_validate(
+            {"confirmed_url": LOG_SENTINEL_VALUE, "cookies": [], "origins": []}
+        )
+    except ValidationError as error:
+        validation = error
+    return [chained, KeyError(LOG_SENTINEL_VALUE), validation]
+
+
+def _leaks(records: list[logging.LogRecord], secrets: tuple[str, ...]) -> list[str]:
+    leaks: list[str] = []
+    for record in records:
+        rendered = " ".join(
+            (
+                record.getMessage(),
+                repr(record.args),
+                str(record.exc_text),
+                repr({key: value for key, value in vars(record).items() if key != "exc_info"}),
+            )
+        )
+        if record.exc_info is not None:
+            rendered += logging.Formatter().formatException(record.exc_info)
+        leaks.extend(secret for secret in secrets if secret in rendered)
+    return leaks
+
+
+async def _handoff_once(
+    root: Path, body: dict[str, object], *, failure: Exception | None = None, **options: Any
+) -> tuple[httpx.Response, str]:
+    services: list[HostedProfileSessionService] = []
+    transport = httpx.ASGITransport(app=full_app(root, services=services, **options))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        if failure is not None:
+
+            async def fail(*args: object) -> None:
+                del args
+                raise failure
+
+            services[0].accept_device_session = fail  # type: ignore[method-assign,assignment]
+        response = await http.post(path, headers=_handoff_headers(capability), json=body)
+    return response, capability
+
+
+# What each of _every_handoff_path's handoffs answers, in order: ready, two
+# malformed bodies, unconfirmed, a provider failure, then the injected failures.
+EVERY_HANDOFF_PATH_STATUSES = [200, 400, 400, 422, 409, 500, 500, 500]
+
+
+async def _every_handoff_path(root: Path) -> list[tuple[httpx.Response, str]]:
+    answers = [
+        await _handoff_once(root / "ready", sentinel_handoff()),
+        await _handoff_once(root / "invalid", sentinel_handoff(extra=LOG_SENTINEL_VALUE)),
+        await _handoff_once(
+            root / "bad-cookie",
+            sentinel_handoff(
+                cookies=[
+                    {
+                        "name": LOG_SENTINEL_NAME,
+                        "value": LOG_SENTINEL_VALUE + ";",
+                        "domain": ".example.org",
+                        "path": "/",
+                        "expires": -1,
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "Lax",
+                    }
+                ]
+            ),
+        ),
+        await _handoff_once(
+            root / "unconfirmed", sentinel_handoff(confirmed_url="https://example.org/")
+        ),
+        await _handoff_once(
+            root / "provider",
+            sentinel_handoff(),
+            evidence_failure=RuntimeError(f"net::ERR at /{LOG_SENTINEL_PATH}"),
+        ),
+    ]
+    for index, failure in enumerate(injected_failures()):
+        answers.append(
+            await _handoff_once(root / f"injected-{index}", sentinel_handoff(), failure=failure)
+        )
+    return answers
+
+
+async def test_device_handoff_logs_nothing_from_the_payload(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    answers = await _every_handoff_path(tmp_path)
+
+    assert [response.status_code for response, _ in answers] == EVERY_HANDOFF_PATH_STATUSES
+    capabilities = tuple(capability for _, capability in answers)
+    assert _leaks(caplog.records, _LOG_SENTINELS + capabilities) == []
+    for response, _capability in answers:
+        assert not any(secret in response.text for secret in _LOG_SENTINELS)
+    assert any(record.getMessage() == "device handoff failed" for record in caplog.records)
+
+
+@pytest.mark.parametrize("failure", injected_failures(), ids=lambda failure: type(failure).__name__)
+async def test_no_exception_leaves_the_handoff_path(tmp_path: Path, failure: Exception) -> None:
+    services: list[HostedProfileSessionService] = []
+    transport = httpx.ASGITransport(
+        app=full_app(tmp_path / "profiles", services=services), raise_app_exceptions=True
+    )
+
+    async def fail(*args: object) -> None:
+        del args
+        raise failure
+
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        services[0].accept_device_session = fail  # type: ignore[method-assign,assignment]
+        try:
+            response = await http.post(
+                path, headers=_handoff_headers(capability), json=sentinel_handoff()
+            )
+        except Exception as escaped:
+            pytest.fail(f"escaped: {type(escaped).__name__}")
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {"code": "internal_error", "message": "service unavailable"}
+    }
+
+
+async def test_the_surface_check_never_raises_into_the_application(tmp_path: Path) -> None:
+    services: list[HostedProfileSessionService] = []
+    transport = httpx.ASGITransport(
+        app=full_app(tmp_path / "profiles", services=services), raise_app_exceptions=True
+    )
+
+    async def fail(*args: object) -> bool:
+        del args
+        raise injected_failures()[0]
+
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        _ceremony_id, path, capability = await _begin_device(http)
+        services[0].authenticate_surface = fail  # type: ignore[method-assign,assignment]
+        response = await http.post(
+            path,
+            headers={**_handoff_headers(capability), "Content-Length": "999999"},
+            content=b"never read",
+        )
+
+    assert response.status_code == 500
+    assert response.headers["cache-control"] == "no-store"
+
+
+async def test_device_handoff_authenticates_before_buffering_and_logs_nothing(
+    tmp_path: Path,
+) -> None:
+    """Gate 9 (ADR-0128): capability before body; no payload in any log record."""
+
+    records: list[logging.LogRecord] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = Collect(level=logging.DEBUG)
+    root = logging.getLogger()
+    previous = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    try:
+        transport = httpx.ASGITransport(app=full_app(tmp_path / "boundary"))
+        async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+            _ceremony_id, path, _capability = await _begin_device(http)
+            unread = await http.post(
+                path,
+                headers={"Content-Type": "application/json", "Content-Length": "999999"},
+                content=b"not parsed",
+            )
+        answers = await _every_handoff_path(tmp_path / "paths")
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous)
+
+    assert unread.status_code == 401
+    # Every path reached the handoff route and was decided there, so the
+    # silence below is the route's and not a refusal before it (gate 9).
+    assert [response.status_code for response, _ in answers] == EVERY_HANDOFF_PATH_STATUSES
+    capabilities = tuple(capability for _, capability in answers)
+    assert _leaks(records, _LOG_SENTINELS + capabilities) == []
+
+
+async def test_service_lifespan_runs_the_sweep(tmp_path: Path) -> None:
+    """ADR-0128 D16: the service sweeps on a timer, not only when traffic arrives."""
+
+    services: list[HostedProfileSessionService] = []
+    application = full_app(tmp_path / "profiles", services=services, sweep_interval_seconds=0.01)
+    swept = asyncio.Event()
+    calls = 0
+
+    async def sweep() -> None:
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            swept.set()
+        if calls == 1:
+            raise RuntimeError("a failed sweep never stops the timer")
+
+    services[0].sweep = sweep  # type: ignore[method-assign]
+
+    async with application.router.lifespan_context(application):
+        with suppress(TimeoutError):
+            await asyncio.wait_for(swept.wait(), timeout=2)
+        assert swept.is_set(), "the service never swept on its own"
+    stopped_at = calls
+    await asyncio.sleep(0.05)
+
+    assert calls == stopped_at
+
+
+async def test_a_zero_interval_runs_no_sweep(tmp_path: Path) -> None:
+    services: list[HostedProfileSessionService] = []
+    application = full_app(tmp_path / "profiles", services=services, sweep_interval_seconds=0)
+    calls = 0
+
+    async def sweep() -> None:
+        nonlocal calls
+        calls += 1
+
+    services[0].sweep = sweep  # type: ignore[method-assign]
+    async with application.router.lifespan_context(application):
+        await asyncio.sleep(0.05)
+
+    assert calls == 0
+
+
+async def test_facts_are_an_optional_sibling_of_the_observation(tmp_path: Path) -> None:
+    """ADR-0129 D26: responses keep the observation at the top level and add facts."""
+
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        acquired = await http.post(
+            "/v1/browser-sessions:acquire",
+            headers={
+                **SERVICE_HEADERS,
+                "Idempotency-Key": f"browser-session:{PROFILE_ID}:{RUN_ID}:1:acquire",
+            },
+            json={
+                "profile_id": str(PROFILE_ID),
+                "tenant_id": principal().tenant_id,
+                "principal_id": principal().principal_id,
+                "provider_ref": provider_ref,
+                "run_id": str(RUN_ID),
+                "attempt_number": 1,
+                "deadline_at": (NOW + timedelta(minutes=5)).isoformat(),
+            },
+        )
+        lease_ref = acquired.json()["lease_ref"]
+        navigated = await http.post(
+            "/v1/browser-sessions:navigate",
+            headers=SERVICE_HEADERS,
+            json={"lease_ref": lease_ref, "url": "https://example.org/lesson"},
+        )
+        observed = await http.post(
+            "/v1/browser-sessions:observe", headers=SERVICE_HEADERS, json={"lease_ref": lease_ref}
+        )
+
+    for response in (navigated, observed):
+        body = response.json()
+        assert response.status_code == 200
+        assert BrowserObservation.model_validate(body).revision == "revision-1"
+        assert "facts" in body, "the response carries no facts"
+        assert body["facts"] == {
+            "revision": "revision-1",
+            "elements": {
+                "revision-1:0": {
+                    "field_kind": "none",
+                    "labels": {},
+                    "labels_truncated": False,
+                    "link_target": None,
+                    "form_target": None,
+                    "download": False,
+                    "context_name": "",
+                }
+            },
+        }

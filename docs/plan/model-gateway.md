@@ -251,6 +251,7 @@ class ModelUsage(BaseModel):
     input_tokens: int
     cached_input_tokens: int         # read from cache; billed lower
     cache_write_input_tokens: int    # 10.2's "fifth class"
+    cache_write_1h_input_tokens: int # its one-hour-TTL part (ADR-0132)
     output_tokens: int
     reasoning_tokens: int | None     # None = not separately reported
     cost: Decimal
@@ -275,6 +276,14 @@ class". Section 6.5's `RunUsage` gains the same field, because a class that is
 tracked per call and dropped per run is not tracked. This is the one place this
 document adds a field to a type the plan defines, and it is adding the field
 the plan asks for in a different section.
+
+`cache_write_1h_input_tokens` is the part of `cache_write_input_tokens` written
+with the one-hour TTL, which Anthropic reports as
+`usage.cache_creation.ephemeral_1h_input_tokens`. It is priced at
+`cache_write_1h_per_mtok` and the rest of the writes at `cache_write_per_mtok`.
+It classifies within the fifth class rather than adding a sixth, so `RunUsage`
+gains no field: the run's cost carries the price, and `model.response.completed`
+carries the split.
 
 `reasoning_tokens` is `int | None`, and `None` is load-bearing. OpenAI reports
 `output_tokens_details.reasoning_tokens` separately. Anthropic includes thinking
@@ -609,7 +618,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:974-976`). The gateway translates those hints into
+(`context-engine.md:1036-1038`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -633,8 +642,14 @@ other than the ratio falling.
 
 The breakpoint budget is where the two providers force a real decision. Four
 breakpoints, three natural boundaries (`after_system`, `after_tools`,
-`after_history_prefix`), and a fourth that the context engine may place at a
-compaction boundary. When the context engine supplies more hints than the
+`after_history_prefix`), and a fourth that goes to the history window's second
+marker: the context engine places `after_history_prefix` after the history a
+run carries in and again after the prefix the run's next step repeats
+(`context-engine.md:230-239`). Each history hint names the conversation item it
+closes in `through_item`; the Anthropic adapter marks that item's last content
+block, or the nearest earlier one when the item renders no message block, and
+never a thinking block. A history hint without `through_item` marks the final
+block. When the context engine supplies more hints than the
 provider allows, the adapter keeps the earliest ones and drops the rest, on
 the reasoning that an earlier breakpoint protects a larger prefix. The adapter
 records the drop on the attempt so that a persistent shortfall is visible
@@ -644,10 +659,31 @@ TTL selection follows Section 10.1's guidance: a long agentic loop that will
 issue many calls against the same prefix requests the one-hour TTL, an
 interactive session takes the default. The `ContextPlan` carries the choice
 because the context engine knows the session shape; the gateway does not.
+ADR-0132 names the shape. A read refreshes a five-minute entry for free, so the
+one-hour write, at twice the base input price against 1.25 times, pays only
+across a gap of five to sixty minutes between requests that share the prefix.
+A scheduled occurrence is the loop that has such gaps. It is one autonomous run
+in a dedicated session, and it waits on delegated children, slow tools, the
+async queue and owner approvals. Its plan gives both prefix breakpoints the
+one-hour TTL. Delegated children and every interactive shape take the default.
+Run length alone is not a criterion, because calls that start less than five
+minutes apart keep the default entry warm however many there are.
+
+The Anthropic adapter writes a one-hour hint as `{"type": "ephemeral",
+"ttl": "1h"}` and a default hint without `ttl`. The Messages API renders tools,
+then system, then messages, and rejects an entry with a longer TTL after one
+with a shorter TTL. So, walking that order from the end, each placed breakpoint
+takes the longest TTL placed at or after it. An earlier breakpoint caches a
+prefix of every later one, so reuse the context engine expects of the larger
+prefix is reuse of the smaller; the adapter lengthens, and never shortens, a
+requested TTL. It sends the one-hour TTL only when the resolved pricing carries
+`cache_write_1h_per_mtok`, and otherwise the default, so every write it causes
+has a price. The history window's markers take the default in every session:
+they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:952-954` and the
+The cached-prefix ratio is defined in `context-engine.md:1014-1016` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -666,7 +702,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:267`
+native tool calling, how much output to reserve. `context-engine.md:319`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -725,7 +761,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:233's second half
+    default_output_reserve: int  # context-engine.md:285's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
     max_tool_count: int | None
 ```
@@ -734,7 +770,8 @@ class ModelLimits(BaseModel):
 class ModelPricing(BaseModel):
     input_per_mtok: Decimal
     cached_input_per_mtok: Decimal
-    cache_write_per_mtok: Decimal | None
+    cache_write_per_mtok: Decimal | None     # five-minute TTL
+    cache_write_1h_per_mtok: Decimal | None  # one-hour TTL (ADR-0132)
     output_per_mtok: Decimal
     reasoning_per_mtok: Decimal | None
     reasoning_priced_separately: bool
@@ -743,7 +780,7 @@ class ModelPricing(BaseModel):
 ```
 
 The router is a port with one implementation in 0.1, reading the model
-registry described at `engineering-plan.md:1418-1423`. The registry is
+registry described at `engineering-plan.md:1422-1427`. The registry is
 configuration, not code: a YAML file per provider profile, validated at load,
 hashed the way the policy profile is hashed so that a run records which
 registry it resolved against. That document's schema, its validation, and the
@@ -753,8 +790,8 @@ call sites.
 
 ### Pinning, and the contradiction with availability routing
 
-Section 10 (`engineering-plan.md:1402`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:3069-3076`) wants routing to move work
+Section 10 (`engineering-plan.md:1406`) requires a run to be pinned to one
+provider. Milestone 10 (`engineering-plan.md:3082-3089`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -788,9 +825,9 @@ compound that into a provider switch on resume.
 
 ## The provider profile document
 
-`engineering-plan.md:1418` calls a provider profile "a plugin the registry
+`engineering-plan.md:1422` calls a provider profile "a plugin the registry
 loads and the user can override without editing core" and
-`engineering-plan.md:1420-1423` says what it declares: an API mode, aliases
+`engineering-plan.md:1424-1427` says what it declares: an API mode, aliases
 and capabilities and limits and prices, credential pools, and a
 model-catalog import. ADR-0012 decision 2 requires that a new
 OpenAI-compatible provider be addable without writing code. Neither
@@ -801,7 +838,7 @@ This section is that shape.
 ### Where a profile lives, and the two files it is not
 
 The routing section above says the registry is a YAML file per provider
-profile. `bootstrap-and-composition.md:413-414` places `models/policies.yaml`
+profile. `bootstrap-and-composition.md:414-415` places `models/policies.yaml`
 ("model_policies and provider profiles") and `models/catalog.yaml`
 ("aliases, limits, context windows, prices") inside the package. Read
 together those describe two layouts, and the difference is not cosmetic: one
@@ -822,7 +859,7 @@ src/agent_core/models/
 `policies.yaml` keeps `model_policies` unchanged and satisfies its "and
 provider profiles" half with the list of profile names this deployment
 loads; a profile's body is a file of its own. `catalog.yaml` keeps exactly
-the four things `bootstrap-and-composition.md:414` names it for and becomes
+the four things `bootstrap-and-composition.md:415` names it for and becomes
 the target of Section 10.5's fourth declaration, the model-catalog import,
 rather than a second place models are defined. A profile either declares a
 model inline or imports a catalog entry for it, never both.
@@ -963,6 +1000,9 @@ ADR-0119 adds two optional per-model keys, `display_name` and
 `reasoning_efforts`, the latter the closed `ReasoningEffort` levels the
 provider accepts for that model, and one optional key to `policies.yaml`,
 `selectable_chat_policies`, the chat models the owner may choose between.
+ADR-0132 adds one optional pricing key, `cache_write_1h_per_mtok`, the
+one-hour cache write price, a decimal string or null like
+`cache_write_per_mtok`.
 
 Three of those rows are worth defending.
 
@@ -974,7 +1014,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1208-1249` is
+family of the secret scanner at `bootstrap-and-composition.md:1209-1250` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1011,7 +1051,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:821` because it answers the
+`policy_version` at `policy-and-approvals.md:831` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1116,7 +1156,7 @@ sentence.
 ## Usage, cost, and where the numbers live
 
 Section 6.5 fixes the precedence order for cost figures and Section 15 has no
-table to put them in. `runs.usage JSONB` at `engineering-plan.md:1818` is the
+table to put them in. `runs.usage JSONB` at `engineering-plan.md:1822` is the
 only persistence the plan gives usage, and a JSONB blob on the run cannot
 answer the questions the budget enforcement in Section 6.5 needs to ask: what
 did this step cost, which attempt burned the tokens, and what were we charged
@@ -1226,8 +1266,8 @@ not an oversight.
 
 ## Provider metadata, and why the key set is closed
 
-`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1335` as
-`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1337`:
+`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1339` as
+`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1341`:
 it "may include response IDs and cache information, but application logic
 must not rely on provider-specific fields." That is a constraint on readers.
 It says nothing about writers, and an adapter is a writer.
@@ -1266,7 +1306,7 @@ yet.
 | key | source | why it earns a key |
 | --- | --- | --- |
 | `provider_api` | the profile | one adapter fronts three APIs, and a row that does not say which is a row that cannot be compared |
-| `response_id` | the response body | `engineering-plan.md:1380` requires the OpenAI adapter to capture it |
+| `response_id` | the response body | `engineering-plan.md:1384` requires the OpenAI adapter to capture it |
 | `request_id` | a response header | the only identifier a vendor support ticket can be opened against |
 | `resolved_model` | the response body | an alias resolves to a dated model, and reproducibility needs the dated one |
 | `previous_response_id` | the request | which continuation this attempt resumed, which is the first thing to check when a reasoning chain breaks |
@@ -1360,14 +1400,14 @@ Flattening `metadata` into columns happens in the persistence adapter and is
 the first of exactly two places in the system that read `ProviderMetadata`
 at all. The second is the span builder in the telemetry section below.
 Nothing in the runtime, the policy engine, the context engine, or any tool
-reads it, which is what `engineering-plan.md:1337`'s "application logic must
+reads it, which is what `engineering-plan.md:1341`'s "application logic must
 not rely on provider-specific fields" means once it is a rule a test can
 evaluate.
 
 ## Retries, and who owns them
 
-`engineering-plan.md:1383` puts retries in the adapter.
-`engineering-plan.md:1718` says "Keep retry decisions in application code, not
+`engineering-plan.md:1387` puts retries in the adapter.
+`engineering-plan.md:1722` says "Keep retry decisions in application code, not
 in provider adapters alone." The word "alone" is doing the work, and the split
 it implies is the right one.
 
@@ -1493,7 +1533,7 @@ renames are.
 
 `engineering-plan.md:722` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:1022-1051` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:1032-1061` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.
@@ -1542,7 +1582,7 @@ the same accepted levels, and effort is not part of the pin.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:514-518` requires that a
+be answerable by a tool result; `context-engine.md:576-580` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
@@ -1619,7 +1659,7 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (`engineering-plan.md:2268-2286`) omit the
+Section 19's telemetry attributes (`engineering-plan.md:2281-2299`) omit the
 cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
@@ -1721,8 +1761,8 @@ the failure that grep misses.
 Section 2.3's provider list at `engineering-plan.md:277-281` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
-(`engineering-plan.md:2692`) requires "the same contract suite against OpenAI,
-Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2436`
+(`engineering-plan.md:2705`) requires "the same contract suite against OpenAI,
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2449`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
 a narrower requirement, and this document resolves it in favour of the
@@ -1750,7 +1790,7 @@ the provider boundary.
 
 ### The fake and the recorded adapters
 
-`engineering-plan.md:1343-1355` uses `FakeModelScript`, `ToolCallTurn` and
+`engineering-plan.md:1347-1359` uses `FakeModelScript`, `ToolCallTurn` and
 `FinalTurn` at a call site and never defines them.
 
 ```python
@@ -1961,7 +2001,7 @@ These are decisions taken to keep the plan moving. Each is recorded in
    the two declarations and cannot edit the plan's. The reconciliation table
    makes the divergence readable; it does not make it go away.
 7. Is one file per provider profile right, given that
-   `bootstrap-and-composition.md:413` describes a single `models/policies.yaml`
+   `bootstrap-and-composition.md:414` describes a single `models/policies.yaml`
    holding both policies and profiles? One file per profile is what ADR-0012's
    "without editing core" requires of an overlay, and merging the two back is
    a compatible change in the other direction.

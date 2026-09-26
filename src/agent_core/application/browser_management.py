@@ -13,11 +13,13 @@ from typing import Protocol, Self
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.browser_task_grants import end_task_grants_for_profile
 from agent_core.application.errors import BrowserLoginURLValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationRecord,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
@@ -29,7 +31,9 @@ from agent_core.domain.browser import (
     BrowserProviderError,
     browser_origin,
     normalize_browser_origin,
+    sign_in_outcome_unrecorded,
 )
+from agent_core.domain.browser_task_grants import BrowserTaskGrantEndReason
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.views import Page
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
@@ -39,7 +43,9 @@ from agent_core.ports.browser_profiles import (
     BrowserProfileRepository,
 )
 from agent_core.ports.browser_sessions import BrowserAuthenticationControlPlane
+from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from agent_core.ports.determinism import Clock, IdFactory
+from agent_core.ports.events import EventRepository
 
 LOGIN_REDIRECT_MESSAGE = (
     "The website redirected the login page to an origin this website access "
@@ -52,6 +58,10 @@ class _BrowserUnitOfWork(Protocol):
     browser_profiles: BrowserProfileRepository
     browser_authentications: BrowserAuthenticationRepository
     browser_grants: BrowserGrantRepository
+    # ADR-0129: a profile change ends the task grants pinned to it, with an
+    # event, in the unit of work that records the change.
+    browser_task_grants: BrowserTaskGrantRepository
+    events: EventRepository
 
     async def __aenter__(self) -> Self: ...
 
@@ -267,6 +277,13 @@ class BrowserProfileManagementService:
                     status=BrowserProfileStatus.REVOKED,
                     updated_at=self._clock.now(),
                 )
+            await end_task_grants_for_profile(
+                uow,
+                principal,
+                profile_id,
+                reason=BrowserTaskGrantEndReason.PROFILE_REVOKED,
+                now=self._clock.now(),
+            )
         return _profile_view(revoked)
 
     async def delete(self, principal: Principal, profile_id: UUID) -> None:
@@ -281,6 +298,13 @@ class BrowserProfileManagementService:
         if profile.provider_ref is not None:
             await self._lifecycle.delete(profile_id, principal, profile.provider_ref)
         async with self._uow_factory() as uow:
+            await end_task_grants_for_profile(
+                uow,
+                principal,
+                profile_id,
+                reason=BrowserTaskGrantEndReason.PROFILE_REVOKED,
+                now=self._clock.now(),
+            )
             await uow.browser_profiles.delete(
                 profile_id,
                 principal,
@@ -293,6 +317,7 @@ class BrowserProfileManagementService:
         profile_id: UUID,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
         """Start one scoped login ceremony and preserve safe navigation failures."""
         require_scope(principal, "browser.profile.write")
@@ -351,6 +376,7 @@ class BrowserProfileManagementService:
                             principal,
                             profile.provider_ref,
                             login_url=login_url,
+                            mode=mode,
                         )
                 except TimeoutError as exc:
                     raise BrowserProviderError(
@@ -362,6 +388,10 @@ class BrowserProfileManagementService:
                         raise BrowserLoginURLValidationError(LOGIN_REDIRECT_MESSAGE) from exc
                     raise
                 now = self._clock.now()
+                # ADR-0128 decision 10: every sign-in attempt moves the
+                # generation that grants pin, in the unit of work that records
+                # the ceremony, so a failed begin changes nothing.
+                await self._advance_generation(uow, principal, profile, updated_at=now)
                 record = BrowserAuthenticationRecord(
                     id=launched.id,
                     tenant_id=principal.tenant_id,
@@ -398,16 +428,7 @@ class BrowserProfileManagementService:
         if remote.id != record.id or remote.profile_id != record.profile_id:
             raise ConflictError("browser authentication response identity changed")
         async with self._uow_factory() as uow:
-            current = await uow.browser_authentications.get(authentication_id, principal)
-            if current.status is not remote.status:
-                current = await uow.browser_authentications.transition(
-                    authentication_id,
-                    principal,
-                    expected_status=current.status,
-                    status=remote.status,
-                    updated_at=self._clock.now(),
-                )
-            await self._synchronize_profile_status(uow.browser_profiles, principal, current)
+            current = await self._record_remote_status(uow, principal, remote)
         return _authentication_view(current)
 
     async def list_authentications(
@@ -432,23 +453,74 @@ class BrowserProfileManagementService:
         if remote.id != record.id or remote.profile_id != record.profile_id:
             raise ConflictError("browser authentication response identity changed")
         async with self._uow_factory() as uow:
-            current = await uow.browser_authentications.get(authentication_id, principal)
-            if current.status is not remote.status:
-                current = await uow.browser_authentications.transition(
-                    authentication_id,
-                    principal,
-                    expected_status=current.status,
-                    status=remote.status,
-                    updated_at=self._clock.now(),
-                )
+            current = await self._record_remote_status(uow, principal, remote)
         return _authentication_view(current)
+
+    async def _record_remote_status(
+        self,
+        uow: _BrowserUnitOfWork,
+        principal: Principal,
+        remote: BrowserAuthenticationView,
+    ) -> BrowserAuthenticationRecord:
+        """Record the isolated service's outcome for one ceremony and follow it
+        on the profile. Status and cancel both come here, so a cancel that finds
+        a ceremony the service already sealed records the ready outcome too."""
+
+        current = await uow.browser_authentications.get(remote.id, principal)
+        entered_ready = False
+        if current.status is not remote.status:
+            current = await uow.browser_authentications.transition(
+                remote.id,
+                principal,
+                expected_status=current.status,
+                status=remote.status,
+                updated_at=self._clock.now(),
+            )
+            entered_ready = current.status is BrowserAuthenticationStatus.READY
+        await self._synchronize_profile_status(uow, principal, current, entered_ready=entered_ready)
+        return current
+
+    async def _advance_generation(
+        self,
+        uow: _BrowserUnitOfWork,
+        principal: Principal,
+        profile: BrowserProfile,
+        *,
+        updated_at: datetime,
+    ) -> BrowserProfile:
+        """Advance a sign-in's profile generation (ADR-0128 decision 10).
+
+        These are the only two places a sign-in changes the generation: a
+        begin, and a ready outcome recorded for a profile that is already
+        ready.
+        """
+
+        advanced = await uow.browser_profiles.advance_generation(
+            profile.id,
+            principal,
+            expected_generation=profile.generation,
+            updated_at=updated_at,
+        )
+        # ADR-0129: a sign-in ends the task grants pinned to the profile; the
+        # authorizer's generation check is the backstop for any other path.
+        await end_task_grants_for_profile(
+            uow,
+            principal,
+            profile.id,
+            reason=BrowserTaskGrantEndReason.PROFILE_CHANGED,
+            now=updated_at,
+        )
+        return advanced
 
     async def _synchronize_profile_status(
         self,
-        profiles: BrowserProfileRepository,
+        uow: _BrowserUnitOfWork,
         principal: Principal,
         authentication: BrowserAuthenticationRecord,
+        *,
+        entered_ready: bool,
     ) -> None:
+        profiles = uow.browser_profiles
         target = {
             BrowserAuthenticationStatus.READY: BrowserProfileStatus.READY,
             BrowserAuthenticationStatus.NEEDS_USER: BrowserProfileStatus.NEEDS_USER,
@@ -459,9 +531,15 @@ class BrowserProfileManagementService:
         if target is None:
             return
         profile = await profiles.get(authentication.profile_id, principal)
-        if profile.status is target or target not in ALLOWED_BROWSER_PROFILE_TRANSITIONS.get(
-            profile.status, frozenset()
-        ):
+        if profile.status is target:
+            if entered_ready and target is BrowserProfileStatus.READY:
+                # A new session replaced a ready one: grants pinned to the old
+                # generation must not carry over to it.
+                await self._advance_generation(
+                    uow, principal, profile, updated_at=self._clock.now()
+                )
+            return
+        if target not in ALLOWED_BROWSER_PROFILE_TRANSITIONS.get(profile.status, frozenset()):
             return
         await profiles.transition(
             profile.id,
@@ -507,6 +585,12 @@ class BrowserGrantManagementService:
             profile = await uow.browser_profiles.get(profile_id, principal)
             if profile.status is not BrowserProfileStatus.READY:
                 raise ConflictError("browser profile must be ready before granting authority")
+            # ADR-0128 D10: read after the profile, so a begin that committed
+            # the generation this grant pins is seen here too.
+            if sign_in_outcome_unrecorded(
+                await uow.browser_authentications.list(principal, profile_id=profile.id)
+            ):
+                raise ConflictError("browser profile sign-in must finish before granting authority")
             normalized = tuple(normalize_browser_origin(origin) for origin in allowed_origins)
             if not set(normalized).issubset(profile.allowed_origins):
                 raise ConflictError("browser grant origin exceeds profile scope")

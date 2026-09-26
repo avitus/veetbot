@@ -12,6 +12,7 @@ from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
+from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from agent_core.ports.calls import CallStore
 from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
@@ -65,6 +66,7 @@ class RepositoryUnitOfWork(Protocol):
     policy_profiles: PolicyProfileRepository
     browser_profiles: BrowserProfileRepository
     browser_grants: BrowserGrantRepository
+    browser_task_grants: BrowserTaskGrantRepository
     browser_authentications: BrowserAuthenticationRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository

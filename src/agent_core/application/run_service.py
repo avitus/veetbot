@@ -8,7 +8,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from agent_core.application.session_service import SessionService
-from agent_core.domain.agents import Principal
+from agent_core.domain.agents import Principal, run_limits_for_session
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.persistence import IdempotencyRecord
@@ -99,6 +99,7 @@ class RunService:
                             session.id, self._principal, title
                         )
                 agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+                limits = run_limits_for_session(agent, session)
                 consent = await uow.export_consent.get(
                     self._principal.tenant_id,
                     self._principal.principal_id,
@@ -111,10 +112,10 @@ class RunService:
                     agent_id=session.agent_id,
                     agent_version=session.agent_version,
                     status=RunStatus.QUEUED,
-                    limits=agent.limits.model_copy(deep=True),
+                    limits=limits,
                     priority=0,
                     scheduled_for=now,
-                    deadline_at=agent.limits.deadline_at,
+                    deadline_at=limits.deadline_at,
                     export_consent=(
                         self._trajectory_export_enabled and consent is not None and consent.active
                     ),

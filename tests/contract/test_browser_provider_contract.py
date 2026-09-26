@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 
+from agent_core.adapters.browser.hosted_provider import (
+    HostedBrowserProvider,
+    SessionBoundHostedBrowserProvider,
+)
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserDispatchConstraint,
     BrowserElement,
     BrowserObservation,
 )
@@ -44,7 +52,13 @@ class ContractBrowserProvider:
         self.observations += 1
         return self._page("https://example.org/current")
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        del constraint
         return self._page(f"https://example.org/action/{action.kind.value}")
 
     async def close(self) -> None:
@@ -87,6 +101,31 @@ async def test_browser_provider_navigation_and_observation_contract() -> None:
     )
 
 
+def _takes_an_optional_keyword_only_constraint(act: Callable[..., object]) -> bool:
+    parameter = inspect.signature(act).parameters.get("constraint")
+    return (
+        parameter is not None
+        and parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        and parameter.default is None
+    )
+
+
+def test_every_browser_provider_act_takes_an_optional_keyword_only_constraint() -> None:
+    """ADR-0129 D15: the port itself carries a grant's dispatch constraint.
+
+    An approved action passes none, so every adapter keeps its old call shape.
+    """
+
+    for act in (
+        BrowserProvider.act,
+        ContractBrowserProvider.act,
+        PlaywrightBrowserProvider.act,
+        HostedBrowserProvider.act,
+        SessionBoundHostedBrowserProvider.act,
+    ):
+        assert _takes_an_optional_keyword_only_constraint(act), act.__qualname__
+
+
 @dataclass
 class AdapterRuntime:
     current_url: str = "https://example.org/"
@@ -109,7 +148,14 @@ class AdapterRuntime:
             elements=(BrowserElement(ref="opaque-2", role="button", name="Continue"),),
         )
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation:
+        del constraint, now
         self.current_url = f"https://example.org/action/{action.kind.value}"
         return await self.observe()
 

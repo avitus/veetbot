@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from datetime import datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserObservationFacts,
+    BrowserPageEvidence,
     BrowserProviderError,
     normalize_browser_origin,
 )
@@ -36,7 +40,17 @@ class StatefulBrowserRuntime(Protocol):
 
     async def observe(self) -> BrowserObservation: ...
 
-    async def act(self, action: BrowserAction) -> BrowserObservation: ...
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation: ...
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
     async def storage_state(self) -> dict[str, object]: ...
 
@@ -132,6 +146,32 @@ class HostedPlaywrightSessionRuntime:
 
     async def act(self, action: BrowserAction) -> BrowserObservation:
         return await self._runtime.act(action)
+
+    async def act_within_grant(
+        self,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        *,
+        now: datetime,
+    ) -> BrowserObservation:
+        """Act only if the live page is still covered by the grant (ADR-0129)."""
+        return await self._runtime.act(action, constraint=constraint, now=now)
+
+    def facts(self, revision: str) -> BrowserObservationFacts | None:
+        """The element facts of ``revision``, while it is the current observation."""
+        return self._runtime.facts(revision)
+
+    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        """Load one confirmed page and report what it showed (ADR-0128)."""
+        try:
+            return await self._runtime.load_page_evidence(url)
+        except BrowserProviderError:
+            raise
+        except Exception as exc:
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
 
     async def storage_state(self) -> bytes:
         payload = {
