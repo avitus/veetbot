@@ -1,0 +1,544 @@
+{
+  "contract": "veetbot.browser_task_grant.v1",
+  "design": "docs/adr/0129-time-boxed-task-grant-from-the-approval-card.md",
+  "as_of": "2026-09-25T18:10:00Z",
+  "approval_views": [
+    {
+      "name": "offered",
+      "approval": {
+        "id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a1",
+        "run_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000002",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "status": "PENDING",
+        "tool_name": "browser.act",
+        "action_summary": "Click a button on www.duolingo.com/lesson/unit-3",
+        "arguments": {
+          "view": "browser.act.v1",
+          "described": true,
+          "kind": "click",
+          "page_origin": "https://www.duolingo.com",
+          "page_path": "/lesson/unit-3",
+          "page_title": "Duolingo",
+          "element_role": "button",
+          "element_name": "el gato",
+          "field": "none",
+          "consequence": "unknown",
+          "refused": false
+        },
+        "argument_digests": {},
+        "risk": "HIGH",
+        "policy_reason": "policy.matrix.external_write",
+        "expires_at": "2026-09-25T18:15:00Z",
+        "created_at": "2026-09-25T18:00:00Z",
+        "resolved_at": null,
+        "resolved_by": null,
+        "decision": null,
+        "task_grant_offer": {
+          "origin": "https://www.duolingo.com",
+          "path_prefix": "/lesson",
+          "duration_seconds": 1800,
+          "max_actions": 200,
+          "max_typed_characters": 4096,
+          "action_kinds": [
+            "click",
+            "type",
+            "select",
+            "check",
+            "press",
+            "scroll"
+          ],
+          "summary": "Clicks and typing on www.duolingo.com/lesson for 30 minutes, up to 200 actions. Passwords and one-time codes are never typed. Veetbot recognises payments, purchases, subscriptions and trials, account and settings changes, messages and posts, deletions, and signing out by the website's labels, and asks again for those. Stop this at any time."
+        },
+        "task_grant_id": null,
+        "task_grant_not_covered": null
+      }
+    },
+    {
+      "name": "resolved_for_task",
+      "approval": {
+        "id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a2",
+        "run_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000002",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "status": "APPROVED",
+        "tool_name": "browser.act",
+        "action_summary": "Toggle a checkbox on www.duolingo.com/lesson/unit-3",
+        "arguments": {
+          "view": "browser.act.v1",
+          "described": true,
+          "kind": "check",
+          "page_origin": "https://www.duolingo.com",
+          "page_path": "/lesson/unit-3",
+          "page_title": "Duolingo",
+          "element_role": "checkbox",
+          "element_name": "Enable sound",
+          "field": "choice",
+          "checked": false,
+          "consequence": "unknown",
+          "refused": false
+        },
+        "argument_digests": {},
+        "risk": "HIGH",
+        "policy_reason": "policy.matrix.external_write",
+        "expires_at": "2026-09-25T18:15:00Z",
+        "created_at": "2026-09-25T18:00:00Z",
+        "resolved_at": "2026-09-25T18:00:30Z",
+        "resolved_by": "owner",
+        "decision": "approve_for_task",
+        "task_grant_offer": {
+          "origin": "https://www.duolingo.com",
+          "path_prefix": "/lesson",
+          "duration_seconds": 1800,
+          "max_actions": 200,
+          "max_typed_characters": 4096,
+          "action_kinds": [
+            "click",
+            "type",
+            "select",
+            "check",
+            "press",
+            "scroll"
+          ],
+          "summary": "Clicks and typing on www.duolingo.com/lesson for 30 minutes, up to 200 actions. Passwords and one-time codes are never typed. Veetbot recognises payments, purchases, subscriptions and trials, account and settings changes, messages and posts, deletions, and signing out by the website's labels, and asks again for those. Stop this at any time."
+        },
+        "task_grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
+        "task_grant_not_covered": null
+      }
+    },
+    {
+      "name": "not_covered",
+      "approval": {
+        "id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a3",
+        "run_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000002",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "status": "PENDING",
+        "tool_name": "browser.act",
+        "action_summary": "Click a button on www.duolingo.com/lesson/unit-3",
+        "arguments": {
+          "view": "browser.act.v1",
+          "described": true,
+          "kind": "click",
+          "page_origin": "https://www.duolingo.com",
+          "page_path": "/lesson/unit-3",
+          "page_title": "Duolingo",
+          "element_role": "button",
+          "element_name": "Continue",
+          "element_text": "Pay $12.99",
+          "element_context": "Try Super free",
+          "field": "none",
+          "consequence": "payment",
+          "refused": false
+        },
+        "argument_digests": {},
+        "risk": "HIGH",
+        "policy_reason": "policy.matrix.external_write",
+        "expires_at": "2026-09-25T18:15:00Z",
+        "created_at": "2026-09-25T18:00:00Z",
+        "resolved_at": null,
+        "resolved_by": null,
+        "decision": null,
+        "task_grant_offer": null,
+        "task_grant_id": null,
+        "task_grant_not_covered": {
+          "grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
+          "reason": "browser.task_grant.excluded.payment"
+        }
+      }
+    },
+    {
+      "name": "typed_text_redacted",
+      "approval": {
+        "id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a4",
+        "run_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000002",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "status": "PENDING",
+        "tool_name": "browser.act",
+        "action_summary": "Type into a text field on www.duolingo.com/lesson/unit-3",
+        "arguments": {
+          "view": "browser.act.v1",
+          "described": true,
+          "kind": "type",
+          "page_origin": "https://www.duolingo.com",
+          "page_path": "/lesson/unit-3",
+          "page_title": "Duolingo",
+          "element_role": "textbox",
+          "element_name": "Password",
+          "field": "password",
+          "text": "[REDACTED]",
+          "consequence": "authentication_change",
+          "refused": true
+        },
+        "argument_digests": {},
+        "risk": "HIGH",
+        "policy_reason": "policy.matrix.external_write",
+        "expires_at": "2026-09-25T18:15:00Z",
+        "created_at": "2026-09-25T18:00:00Z",
+        "resolved_at": null,
+        "resolved_by": null,
+        "decision": null,
+        "task_grant_offer": null,
+        "task_grant_id": null,
+        "task_grant_not_covered": null
+      }
+    },
+    {
+      "name": "undescribed",
+      "approval": {
+        "id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a5",
+        "run_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000002",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "status": "PENDING",
+        "tool_name": "browser.act",
+        "action_summary": "Run a browser action the server can no longer describe",
+        "arguments": {
+          "view": "browser.act.v1",
+          "described": false,
+          "kind": "click"
+        },
+        "argument_digests": {},
+        "risk": "HIGH",
+        "policy_reason": "policy.matrix.external_write",
+        "expires_at": "2026-09-25T18:15:00Z",
+        "created_at": "2026-09-25T18:00:00Z",
+        "resolved_at": null,
+        "resolved_by": null,
+        "decision": null,
+        "task_grant_offer": null,
+        "task_grant_id": null,
+        "task_grant_not_covered": null
+      }
+    }
+  ],
+  "resolve_bodies": [
+    {
+      "name": "approve_for_task",
+      "body": {
+        "decision": "approve_for_task",
+        "reason": null,
+        "task_grant": {
+          "origin": "https://www.duolingo.com",
+          "path_prefix": "/lesson"
+        }
+      }
+    },
+    {
+      "name": "approve_once",
+      "body": {
+        "decision": "approve_once"
+      }
+    },
+    {
+      "name": "deny",
+      "body": {
+        "decision": "deny",
+        "reason": "Do not perform this action."
+      }
+    }
+  ],
+  "task_grant_views": [
+    {
+      "name": "active",
+      "view": {
+        "id": "ecb511f1-2976-5326-9f73-9748dc26211f",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "profile_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000003",
+        "origin": "https://www.duolingo.com",
+        "path_prefix": "/lesson",
+        "action_kinds": [
+          "click",
+          "type",
+          "select",
+          "check",
+          "press",
+          "scroll"
+        ],
+        "status": "active",
+        "end_reason": null,
+        "max_actions": 200,
+        "actions_used": 23,
+        "max_typed_characters": 4096,
+        "typed_characters": 57,
+        "created_at": "2026-09-25T18:00:30Z",
+        "expires_at": "2026-09-25T18:30:30Z",
+        "last_used_at": "2026-09-25T18:09:12Z",
+        "ended_at": null,
+        "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a2",
+        "approved_by": "owner"
+      }
+    },
+    {
+      "name": "scope_removed",
+      "view": {
+        "id": "94c43a00-895b-5f7b-8a29-47162200313f",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "profile_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000003",
+        "origin": "https://www.duolingo.com",
+        "path_prefix": "/lesson",
+        "action_kinds": [
+          "click",
+          "type",
+          "select",
+          "check",
+          "press",
+          "scroll"
+        ],
+        "status": "ended",
+        "end_reason": "scope_removed",
+        "max_actions": 200,
+        "actions_used": 4,
+        "max_typed_characters": 4096,
+        "typed_characters": 0,
+        "created_at": "2026-09-25T18:00:30Z",
+        "expires_at": "2026-09-25T18:30:30Z",
+        "last_used_at": "2026-09-25T18:02:00Z",
+        "ended_at": "2026-09-25T18:05:00Z",
+        "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a6",
+        "approved_by": "owner"
+      }
+    },
+    {
+      "name": "exhausted",
+      "view": {
+        "id": "e17affed-6c56-5a73-851b-d5eb27305ada",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "profile_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000003",
+        "origin": "https://www.duolingo.com",
+        "path_prefix": "/lesson",
+        "action_kinds": [
+          "click",
+          "type",
+          "select",
+          "check",
+          "press",
+          "scroll"
+        ],
+        "status": "exhausted",
+        "end_reason": "exhausted",
+        "max_actions": 200,
+        "actions_used": 200,
+        "max_typed_characters": 4096,
+        "typed_characters": 4096,
+        "created_at": "2026-09-25T18:00:30Z",
+        "expires_at": "2026-09-25T18:30:30Z",
+        "last_used_at": "2026-09-25T18:09:59Z",
+        "ended_at": "2026-09-25T18:09:59Z",
+        "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a7",
+        "approved_by": "owner"
+      }
+    },
+    {
+      "name": "revoked",
+      "view": {
+        "id": "e30fa46a-f6c2-5093-a11f-35943dc6f6d6",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "profile_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000003",
+        "origin": "https://www.duolingo.com",
+        "path_prefix": "/lesson",
+        "action_kinds": [
+          "click",
+          "type",
+          "select",
+          "check",
+          "press",
+          "scroll"
+        ],
+        "status": "revoked",
+        "end_reason": "revoked",
+        "max_actions": 200,
+        "actions_used": 9,
+        "max_typed_characters": 4096,
+        "typed_characters": 12,
+        "created_at": "2026-09-25T18:00:30Z",
+        "expires_at": "2026-09-25T18:30:30Z",
+        "last_used_at": "2026-09-25T18:04:00Z",
+        "ended_at": "2026-09-25T18:06:00Z",
+        "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a8",
+        "approved_by": "owner"
+      }
+    },
+    {
+      "name": "expired_before_the_sweep",
+      "view": {
+        "id": "c7a2bd21-1946-5bf8-b45f-c6c7a8692ae1",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "profile_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000003",
+        "origin": "https://www.duolingo.com",
+        "path_prefix": "/lesson",
+        "action_kinds": [
+          "click",
+          "type",
+          "select",
+          "check",
+          "press",
+          "scroll"
+        ],
+        "status": "expired",
+        "end_reason": null,
+        "max_actions": 200,
+        "actions_used": 31,
+        "max_typed_characters": 4096,
+        "typed_characters": 80,
+        "created_at": "2026-09-25T17:30:00Z",
+        "expires_at": "2026-09-25T18:00:00Z",
+        "last_used_at": "2026-09-25T17:40:00Z",
+        "ended_at": null,
+        "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a9",
+        "approved_by": "owner"
+      }
+    }
+  ],
+  "task_grant_page": {
+    "items": [
+      {
+        "id": "ecb511f1-2976-5326-9f73-9748dc26211f",
+        "session_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000001",
+        "profile_id": "6a1c3f0e-2b4d-4c8e-9f10-000000000003",
+        "origin": "https://www.duolingo.com",
+        "path_prefix": "/lesson",
+        "action_kinds": [
+          "click",
+          "type",
+          "select",
+          "check",
+          "press",
+          "scroll"
+        ],
+        "status": "active",
+        "end_reason": null,
+        "max_actions": 200,
+        "actions_used": 23,
+        "max_typed_characters": 4096,
+        "typed_characters": 57,
+        "created_at": "2026-09-25T18:00:30Z",
+        "expires_at": "2026-09-25T18:30:30Z",
+        "last_used_at": "2026-09-25T18:09:12Z",
+        "ended_at": null,
+        "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a2",
+        "approved_by": "owner"
+      }
+    ],
+    "next_cursor": "opaque-cursor"
+  },
+  "events": {
+    "browser.task_grant.created": {
+      "grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
+      "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a2",
+      "origin": "https://www.duolingo.com",
+      "path_prefix": "/lesson",
+      "expires_at": "2026-09-25T18:30:30Z",
+      "max_actions": 200,
+      "max_typed_characters": 4096
+    },
+    "browser.task_grant.ended": {
+      "grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
+      "reason": "revoked",
+      "actions_used": 23,
+      "typed_characters": 57
+    },
+    "tool.call.authorized": {
+      "authorization_kind": "browser_task_grant",
+      "authorization_ref": "ecb511f1-2976-5326-9f73-9748dc26211f",
+      "authorization_reason": "browser.task_grant.authorized",
+      "authorization_use": 1,
+      "authorization_view": {
+        "view": "browser.act.v1",
+        "described": true,
+        "kind": "click",
+        "page_origin": "https://www.duolingo.com",
+        "page_path": "/lesson/unit-3",
+        "page_title": "Duolingo",
+        "element_role": "button",
+        "element_name": "el gato",
+        "field": "none",
+        "consequence": "unknown",
+        "refused": false
+      }
+    },
+    "approval.resolved": {
+      "approval_id": "6a1c3f0e-2b4d-4c8e-9f10-0000000000a2",
+      "resolution": "approve_for_task",
+      "task_grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f"
+    }
+  },
+  "decisions": [
+    "approve_once",
+    "approve_for_task",
+    "deny"
+  ],
+  "conflict_reasons": [
+    "approval_already_resolved",
+    "task_grant_unavailable",
+    "task_grant_offer_mismatch"
+  ],
+  "statuses": [
+    "active",
+    "expired",
+    "exhausted",
+    "revoked",
+    "ended"
+  ],
+  "ended_reasons": [
+    "expired",
+    "exhausted",
+    "revoked",
+    "superseded",
+    "profile_changed",
+    "profile_revoked",
+    "policy_changed",
+    "agent_changed",
+    "scope_removed"
+  ],
+  "not_covered_reasons": [
+    "browser.task_grant.agent_changed",
+    "browser.task_grant.ended",
+    "browser.task_grant.excluded.account_recovery",
+    "browser.task_grant.excluded.authentication_change",
+    "browser.task_grant.excluded.destructive",
+    "browser.task_grant.excluded.file_transfer",
+    "browser.task_grant.excluded.legal_acceptance",
+    "browser.task_grant.excluded.payment",
+    "browser.task_grant.excluded.permission_change",
+    "browser.task_grant.excluded.publication",
+    "browser.task_grant.excluded.purchase",
+    "browser.task_grant.excluded.security_change",
+    "browser.task_grant.exhausted",
+    "browser.task_grant.expired",
+    "browser.task_grant.facts_unavailable",
+    "browser.task_grant.field_not_covered",
+    "browser.task_grant.form_outside_prefix",
+    "browser.task_grant.link_outside_prefix",
+    "browser.task_grant.outside_origin",
+    "browser.task_grant.outside_prefix",
+    "browser.task_grant.policy_changed",
+    "browser.task_grant.profile_changed",
+    "browser.task_grant.revoked",
+    "browser.task_grant.run_not_eligible",
+    "browser.task_grant.scope_removed",
+    "browser.task_grant.sensitive_path",
+    "browser.task_grant.text_budget_exhausted",
+    "browser.task_grant.text_not_covered",
+    "browser.task_grant.text_too_long",
+    "browser.task_grant.turn_not_browser_only",
+    "browser.task_grant.unavailable",
+    "browser.task_grant.unnamed_element"
+  ],
+  "approval_view_keys": [
+    "view",
+    "described",
+    "kind",
+    "page_origin",
+    "page_path",
+    "page_title",
+    "element_role",
+    "element_name",
+    "element_text",
+    "element_context",
+    "field",
+    "text",
+    "option",
+    "key",
+    "scroll_delta_y",
+    "checked",
+    "consequence",
+    "refused"
+  ]
+}

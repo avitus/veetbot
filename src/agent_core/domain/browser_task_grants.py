@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Literal
+from typing import Final, Literal
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -22,11 +22,11 @@ from agent_core.domain.browser_classification import path_is_within_prefix, segm
 # Fixed limits, not configuration (ADR-0129 decision 4). Database check
 # constraints enforce the same numbers.
 TASK_GRANT_DURATION = timedelta(minutes=30)
-TASK_GRANT_MAX_ACTIONS = 200
-TASK_GRANT_MAX_TEXT_CHARACTERS = 256
-TASK_GRANT_MAX_TYPED_CHARACTERS = 4096
+TASK_GRANT_MAX_ACTIONS: Final = 200
+TASK_GRANT_MAX_TEXT_CHARACTERS: Final = 256
+TASK_GRANT_MAX_TYPED_CHARACTERS: Final = 4096
 TASK_GRANT_ACTION_KINDS: tuple[BrowserActionKind, ...] = tuple(BrowserActionKind)
-MAXIMUM_TASK_GRANT_SCOPES = 16
+MAXIMUM_TASK_GRANT_SCOPES: Final = 16
 PATH_SEGMENT = TASK_GRANT_PATH_SEGMENT
 
 # Why an active task grant did not cover an approval's action: the closed list
@@ -300,7 +300,100 @@ class BrowserTaskGrantStatus(StrEnum):
     ENDED = "ended"
 
 
-class BrowserTaskGrantView(BaseModel):
-    """The public view of one task grant."""
+# The status a view reports for a grant that has ended, by its end reason.
+_ENDED_STATUS = {
+    BrowserTaskGrantEndReason.EXPIRED: BrowserTaskGrantStatus.EXPIRED,
+    BrowserTaskGrantEndReason.EXHAUSTED: BrowserTaskGrantStatus.EXHAUSTED,
+    BrowserTaskGrantEndReason.REVOKED: BrowserTaskGrantStatus.REVOKED,
+}
 
-    model_config = ConfigDict(extra="forbid")
+
+def task_grant_status(grant: BrowserTaskGrant, *, now: datetime) -> BrowserTaskGrantStatus:
+    """A grant's status at ``now``: expired as soon as its window closes, even
+    before the sweep records the end."""
+
+    if grant.end_reason is not None:
+        return _ENDED_STATUS.get(grant.end_reason, BrowserTaskGrantStatus.ENDED)
+    if now >= grant.expires_at:
+        return BrowserTaskGrantStatus.EXPIRED
+    if grant.actions_used >= grant.max_actions:
+        return BrowserTaskGrantStatus.EXHAUSTED
+    return BrowserTaskGrantStatus.ACTIVE
+
+
+class BrowserTaskGrantView(BaseModel):
+    """The public view of one task grant (0129-design section 8.3).
+
+    It names the configured origin and prefix and never a page URL, and it
+    carries no tenant, principal, pins or approval internals.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: UUID
+    session_id: UUID
+    profile_id: UUID
+    origin: str
+    path_prefix: str
+    action_kinds: tuple[BrowserActionKind, ...]
+    status: BrowserTaskGrantStatus
+    end_reason: BrowserTaskGrantEndReason | None
+    max_actions: int = Field(ge=1, le=TASK_GRANT_MAX_ACTIONS)
+    actions_used: int = Field(ge=0)
+    max_typed_characters: Literal[4096]
+    typed_characters: int = Field(ge=0, le=TASK_GRANT_MAX_TYPED_CHARACTERS)
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None
+    ended_at: datetime | None
+    approval_id: UUID
+    approved_by: str = Field(min_length=1, max_length=255)
+
+    @field_validator("origin")
+    @classmethod
+    def origin_is_exact(cls, value: str) -> str:
+        return normalize_browser_origin(value)
+
+    @field_validator("path_prefix")
+    @classmethod
+    def prefix_is_one_segment(cls, value: str) -> str:
+        return require_task_grant_path_prefix(value)
+
+    @model_validator(mode="after")
+    def status_agrees_with_the_end(self) -> BrowserTaskGrantView:
+        if (self.ended_at is None) != (self.end_reason is None):
+            raise ValueError("task grant view end time and reason are set together")
+        if self.end_reason is None:
+            valid = self.status in {
+                BrowserTaskGrantStatus.ACTIVE,
+                BrowserTaskGrantStatus.EXPIRED,
+                BrowserTaskGrantStatus.EXHAUSTED,
+            }
+        else:
+            valid = self.status is _ENDED_STATUS.get(self.end_reason, BrowserTaskGrantStatus.ENDED)
+        if not valid:
+            raise ValueError("task grant view status contradicts its end")
+        return self
+
+    @classmethod
+    def from_grant(cls, grant: BrowserTaskGrant, *, now: datetime) -> BrowserTaskGrantView:
+        return cls(
+            id=grant.id,
+            session_id=grant.session_id,
+            profile_id=grant.profile_id,
+            origin=grant.origin,
+            path_prefix=grant.path_prefix,
+            action_kinds=TASK_GRANT_ACTION_KINDS,
+            status=task_grant_status(grant, now=now),
+            end_reason=grant.end_reason,
+            max_actions=grant.max_actions,
+            actions_used=grant.actions_used,
+            max_typed_characters=TASK_GRANT_MAX_TYPED_CHARACTERS,
+            typed_characters=grant.typed_characters,
+            created_at=grant.created_at,
+            expires_at=grant.expires_at,
+            last_used_at=grant.last_used_at,
+            ended_at=grant.ended_at,
+            approval_id=grant.approval_id,
+            approved_by=grant.approved_by,
+        )
