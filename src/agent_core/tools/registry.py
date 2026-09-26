@@ -7,9 +7,18 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approvals import ApprovalPresentation
+from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND, UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
-from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
+from agent_core.domain.policies import (
+    AuthorizationTurn,
+    IdempotencyClass,
+    RiskLevel,
+    SideEffectClass,
+    TrustLevel,
+)
+from agent_core.domain.runs import Run
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolKind,
@@ -74,6 +83,29 @@ class RegisteredTool:
         return cast(
             tuple[str, dict[str, Any]],
             await presenter(arguments, tenant_id=tenant_id),
+        )
+
+    async def approval_view_in_session(
+        self,
+        arguments: dict[str, Any],
+        *,
+        run: Run,
+        principal: Principal,
+        turn: AuthorizationTurn | None,
+        not_covered: TaskGrantNotCovered | None,
+    ) -> ApprovalPresentation:
+        """ADR-0129: a tool that knows the session describes the action itself
+        and may offer a task grant; any other tool keeps the legacy view."""
+
+        presenter = getattr(self.implementation, "approval_view_in_session", None)
+        if presenter is None:
+            summary, view = await self.approval_view(arguments, tenant_id=run.tenant_id)
+            return ApprovalPresentation(summary=summary, arguments=view)
+        return cast(
+            ApprovalPresentation,
+            await presenter(
+                arguments, run=run, principal=principal, turn=turn, not_covered=not_covered
+            ),
         )
 
 

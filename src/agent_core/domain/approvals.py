@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_core.domain.browser_task_grants import BrowserTaskGrantOffer, TaskGrantNotCovered
 from agent_core.domain.policies import ActionKind, PolicyDecision, RiskLevel
@@ -95,6 +95,21 @@ class ApprovalRequest(BaseModel):
     task_grant_offer: BrowserTaskGrantOffer | None = None
     task_grant_not_covered: TaskGrantNotCovered | None = None
     task_grant_id: UUID | None = None
+
+
+class ApprovalPresentation(BaseModel):
+    """How a tool describes a pending action on its approval card (ADR-0129).
+
+    ``summary`` holds only server-authored words and trusted values; page or
+    model text appears only in ``arguments``. An offer lets the owner allow
+    the task, not just the action.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    summary: str
+    arguments: dict[str, Any]
+    task_grant_offer: BrowserTaskGrantOffer | None = None
 
 
 class ApprovalResolutionOutcome(BaseModel):

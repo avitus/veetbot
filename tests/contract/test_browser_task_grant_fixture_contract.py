@@ -19,7 +19,18 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from agent_core.domain.browser import BrowserActionConsequence, BrowserActionKind
+from agent_core.domain.browser import (
+    BrowserAction,
+    BrowserActionConsequence,
+    BrowserActionKind,
+    BrowserElement,
+    BrowserElementFacts,
+    BrowserFieldKind,
+    BrowserObservation,
+    BrowserObservationFacts,
+    BrowserSnapshot,
+)
+from agent_core.domain.browser_act_views import describe_browser_action, task_grant_offer_summary
 from agent_core.domain.browser_task_grants import (
     TASK_GRANT_ACTION_KINDS,
     TASK_GRANT_MAX_ACTIONS,
@@ -35,7 +46,7 @@ from agent_core.domain.browser_task_grants import (
     TaskGrantNotCovered,
     task_grant_id_for_approval,
 )
-from agent_core.domain.views import Page
+from agent_core.domain.views import ApprovalView, Page
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "api" / "browser_task_grant_contract.json"
 
@@ -252,3 +263,55 @@ def test_closed_lists_match_the_domain(contract: dict[str, Any]) -> None:
         "task_grant_unavailable",
         "task_grant_offer_mismatch",
     ]
+
+
+def test_approval_examples_are_server_approval_views(contract: dict[str, Any]) -> None:
+    """Track O (O-17): the public ApprovalView carries every example as is."""
+
+    for example in contract["approval_views"]:
+        view = ApprovalView.model_validate(example["approval"])
+        assert view.model_dump(mode="json") == example["approval"], example["name"]
+
+
+def test_the_server_describes_the_offered_example_as_the_fixture_does(
+    contract: dict[str, Any],
+) -> None:
+    offered = next(
+        example["approval"]
+        for example in contract["approval_views"]
+        if example["name"] == "offered"
+    )
+    arguments = offered["arguments"]
+    snapshot = BrowserSnapshot(
+        observation=BrowserObservation(
+            url=arguments["page_origin"] + arguments["page_path"],
+            title=arguments["page_title"],
+            revision="revision-1",
+            elements=(
+                BrowserElement(
+                    ref="revision-1:0",
+                    role=arguments["element_role"],
+                    name=arguments["element_name"],
+                ),
+            ),
+        ),
+        facts=BrowserObservationFacts(
+            revision="revision-1",
+            elements={"revision-1:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)},
+        ),
+    )
+
+    view = describe_browser_action(
+        BrowserAction(
+            kind=BrowserActionKind.CLICK, expected_revision="revision-1", ref="revision-1:0"
+        ),
+        snapshot,
+    )
+
+    assert view.arguments == arguments
+    assert view.summary == offered["action_summary"]
+    scope = BrowserTaskGrantScope(
+        origin=offered["task_grant_offer"]["origin"],
+        path_prefix=offered["task_grant_offer"]["path_prefix"],
+    )
+    assert task_grant_offer_summary(scope) == offered["task_grant_offer"]["summary"]

@@ -282,6 +282,14 @@ class HostedBrowserProvider:
             return None
         return BrowserSnapshot(observation=self._observation, facts=self._facts)
 
+    async def snapshot_in_session(self, session_id: UUID) -> BrowserSnapshot | None:
+        """A pinned provider serves the whole deployment; an action's revision
+        decides whether its cached page still describes it."""
+
+        del session_id
+        async with self._lock:
+            return self.snapshot()
+
     async def release_run(self, run_id: UUID) -> None:
         """Close, and so seal, the lease an ended run held; leave any other run's."""
 

@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.browser_task_grants import BrowserTaskGrantOffer, TaskGrantNotCovered
 from agent_core.domain.devices import (
     DeviceInvocationStatus,
     DeviceKind,
@@ -214,6 +215,12 @@ class ApprovalView(BaseModel):
     resolved_at: datetime | None
     resolved_by: str | None
     decision: ApprovalResolutionType | None
+    # ADR-0129: the task-grant offer shown on a browser.act card, the grant an
+    # approve_for_task resolution created, and why an active grant did not
+    # cover the action. Additive; null for every other approval.
+    task_grant_offer: BrowserTaskGrantOffer | None = None
+    task_grant_id: UUID | None = None
+    task_grant_not_covered: TaskGrantNotCovered | None = None
 
 
 class DeviceView(BaseModel):

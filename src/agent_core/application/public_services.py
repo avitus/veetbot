@@ -232,6 +232,9 @@ def _approval_view(approval: ApprovalRequest) -> ApprovalView:
         resolved_at=approval.resolved_at,
         resolved_by=approval.resolved_by,
         decision=approval.resolution,
+        task_grant_offer=approval.task_grant_offer,
+        task_grant_id=approval.task_grant_id,
+        task_grant_not_covered=approval.task_grant_not_covered,
     )
 
 

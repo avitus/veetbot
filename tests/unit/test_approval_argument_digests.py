@@ -37,3 +37,25 @@ def test_sensitive_values_are_never_digested() -> None:
     arguments = {"api_key": "s" * 600, "body": "token=value " + "c" * 600}
 
     assert _approval_argument_digests(arguments) == {}
+
+
+async def test_browser_view_text_digest() -> None:
+    """ADR-0129: a long typed text is truncated on the card and digested; a
+    redacted one is never digested."""
+
+    from agent_core.domain.browser import BrowserElementFacts, BrowserFieldKind
+    from tests.unit.test_browser_act_approval_view import click, present, snapshot
+
+    long_text = "b" * 600
+    typed = await present(
+        {**click(), "kind": "type", "value": long_text},
+        snapshot(role="textbox", facts=BrowserElementFacts(field_kind=BrowserFieldKind.MULTILINE)),
+    )
+    hidden = await present(
+        {**click(), "kind": "type", "value": "p" * 600},
+        snapshot(role="textbox", facts=BrowserElementFacts(field_kind=BrowserFieldKind.PASSWORD)),
+    )
+
+    assert _approval_argument_digests(typed.arguments) == {"text": _sha256(long_text)}
+    assert _approval_argument_digests(hidden.arguments) == {}
+    assert _approval_argument_view(hidden.arguments).get("text") == "[REDACTED]"
