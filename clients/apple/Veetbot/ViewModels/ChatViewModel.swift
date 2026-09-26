@@ -1886,6 +1886,11 @@ public final class ChatViewModel: ObservableObject {
         guard generation == connectionGeneration else {
             return failure(DeviceSignInMessage.couldNotConfirm)
         }
+        // The profile is signed in: a remote ceremony still remembered for it
+        // is superseded, and Start over must not remove the ready profile.
+        if browserAuthentication?.profileID == profileID {
+            clearWebsiteAuthenticationState()
+        }
         if deviceSignInCreatedProfile?.profileID == profileID {
             deviceSignInCreatedProfile = nil
         }
@@ -1986,6 +1991,11 @@ public final class ChatViewModel: ObservableObject {
                 _ = try await api.cancelBrowserAuthentication(open.id)
             } catch {
                 return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+            }
+            // A remote ceremony it cancelled is over: its link and Start over
+            // no longer apply.
+            if browserAuthentication?.id == open.id {
+                clearWebsiteAuthenticationState()
             }
         } else if conflict {
             return .failure(DeviceSignInError(DeviceSignInMessage.websiteInUse))

@@ -541,6 +541,120 @@ import Testing
         #expect(!server.routes.contains { $0.hasSuffix("/revoke") || $0.hasPrefix("DELETE") })
     }
 
+    /// Sign in again over an open remote ceremony: begin recovery cancels
+    /// that ceremony, so the app forgets it and its link, and Start over can
+    /// no longer remove the profile that has just become ready.
+    @Test
+    func signingInAgainOverAnOpenRemoteCeremonyForgetsItAndKeepsTheProfile() async throws {
+        let profileID = UUID()
+        let remote = UUID()
+        let device = UUID()
+        let begins = Counter()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles":
+                return (201, Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                switch begins.next() {
+                case 1: return (201, Self.ceremony(remote, profileID: profileID, launch: true, remote: true))
+                case 2: return (409, #"{"error":{"code":"conflict","message":"Open.","details":{},"request_id":"r"}}"#)
+                default: return (201, Self.ceremony(device, profileID: profileID, launch: true))
+                }
+            case "GET veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (200, "[\(Self.ceremony(remote, profileID: profileID))]")
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(remote.uuidString)/cancel":
+                return (200, Self.ceremony(remote, profileID: profileID, status: "cancelled"))
+            case "POST browser.example /authentication/\(device.uuidString)/handoff":
+                return (200, #"{"status":"ready"}"#)
+            case "GET veetbot.test /v1/browser-authentication-ceremonies/\(device.uuidString)":
+                return (200, Self.ceremony(device, profileID: profileID, status: "ready"))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "ready")]))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/revoke":
+                return (200, Self.profile(profileID, origins: ["https://example.org"], status: "revoked"))
+            case "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)":
+                return (204, "")
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        #expect(await model.createWebsiteAccess(websiteURL: "example.org") != nil)
+        #expect(model.browserAuthentication?.id == remote)
+        let profile = try JSONDecoder.server.decode(
+            BrowserProfileView.self,
+            from: Data(Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required").utf8)
+        )
+
+        let request = try #require(model.beginDeviceSignIn(profile: profile))
+        let result = await model.completeDeviceSignIn(
+            request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+        )
+
+        #expect(result == .signedIn(profileID: profileID))
+        #expect(server.routes.contains("POST veetbot.test /v1/browser-authentication-ceremonies/\(remote.uuidString)/cancel"))
+        #expect(model.browserAuthentication == nil)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+        #expect(model.selectedBrowserProfileID == profileID)
+
+        server.clear()
+        await model.cancelWebsiteAccessSetup()
+
+        #expect(!server.routes.contains { $0.hasSuffix("/revoke") || $0.hasPrefix("DELETE") })
+        #expect(model.selectedBrowserProfileID == profileID)
+    }
+
+    /// The remote ceremony that begin recovery cancelled is forgotten even
+    /// when the device attempt then fails.
+    @Test
+    func aRemoteCeremonyThatBeginRecoveryCancelledIsForgottenWhenTheAttemptFails() async throws {
+        let profileID = UUID()
+        let remote = UUID()
+        let device = UUID()
+        let begins = Counter()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles":
+                return (201, Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                switch begins.next() {
+                case 1: return (201, Self.ceremony(remote, profileID: profileID, launch: true, remote: true))
+                case 2: return (409, #"{"error":{"code":"conflict","message":"Open.","details":{},"request_id":"r"}}"#)
+                default: return (201, Self.ceremony(device, profileID: profileID, launch: true))
+                }
+            case "GET veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (200, "[\(Self.ceremony(remote, profileID: profileID))]")
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(remote.uuidString)/cancel":
+                return (200, Self.ceremony(remote, profileID: profileID, status: "cancelled"))
+            case "POST browser.example /authentication/\(device.uuidString)/handoff":
+                return (422, #"{"error":{"code":"session_empty","message":"Empty."}}"#)
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(device.uuidString)/cancel":
+                return (200, Self.ceremony(device, profileID: profileID, status: "cancelled"))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([
+                    Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required")
+                ]))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        #expect(await model.createWebsiteAccess(websiteURL: "example.org") != nil)
+        let profile = try JSONDecoder.server.decode(
+            BrowserProfileView.self,
+            from: Data(Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required").utf8)
+        )
+
+        let request = try #require(model.beginDeviceSignIn(profile: profile))
+        let result = await model.completeDeviceSignIn(
+            request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+        )
+
+        #expect(result == .failed(DeviceSignInFailure(message: DeviceSignInMessage.sessionEmpty, canRetry: true)))
+        #expect(model.browserAuthentication == nil)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+    }
+
     @Test
     func aConnectionChangeClosesTheWindow() async throws {
         let server = DeviceFlowServer { _ in nil }
