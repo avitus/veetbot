@@ -8,7 +8,9 @@ the standard library and the domain, so both processes import it.
 Every text is classified separately: each label source, the enclosing dialog's
 name, a chosen option, and the first path segment of a link or form target. A
 hit in any one of them names the consequence. Over-matching only adds an
-approval, so word forms are generated generously.
+approval, so word forms are generated generously, and a text is also read as
+it is displayed: in the order a right-to-left override shows it, and with
+letters that look Latin read as the Latin letters.
 """
 
 from __future__ import annotations
@@ -183,6 +185,111 @@ _CATEGORIES = _compile()
 _CATEGORY_ORDER = tuple(consequence for consequence, _words, _phrases in _CATEGORIES)
 
 
+# Letters that display like a Latin letter once case-folded and stripped of
+# marks: Cyrillic, Greek and Armenian lookalikes, and Latin small capitals and
+# IPA letters NFKC leaves alone, abridged from Unicode TR39's confusables, with
+# the digits it confuses with letters. A capital that looks Latin can case-fold
+# to a letter that looks like another one, so an ambiguous letter has a second
+# reading.
+_LOOKALIKES = str.maketrans(
+    {
+        # Cyrillic.
+        "\u0430": "a",
+        "\u0432": "b",
+        "\u0441": "c",
+        "\u0501": "d",
+        "\u0435": "e",
+        "\u04bb": "h",
+        "\u043d": "h",
+        "\u0456": "i",
+        "\u0458": "j",
+        "\u043a": "k",
+        "\u04cf": "l",
+        "\u043c": "m",
+        "\u043f": "n",
+        "\u043e": "o",
+        "\u0440": "p",
+        "\u051b": "q",
+        "\u0455": "s",
+        "\u0442": "t",
+        "\u051d": "w",
+        "\u0445": "x",
+        "\u0443": "y",
+        "\u04af": "y",
+        "\u044c": "b",
+        # Greek.
+        "\u03b1": "a",
+        "\u03b2": "b",
+        "\u03b5": "e",
+        "\u03b6": "z",
+        "\u03b7": "h",
+        "\u03b9": "i",
+        "\u03ba": "k",
+        "\u03bc": "m",
+        "\u03bd": "n",
+        "\u03bf": "o",
+        "\u03c1": "p",
+        "\u03c4": "t",
+        "\u03c5": "y",
+        "\u03c7": "x",
+        "\u03b3": "y",
+        "\u03c9": "w",
+        "\u03f2": "c",
+        "\u03f3": "j",
+        # Armenian.
+        "\u0585": "o",
+        "\u057d": "u",
+        "\u0578": "n",
+        "\u0570": "h",
+        "\u0581": "g",
+        "\u0566": "q",
+        # Latin small capitals and IPA letters.
+        "\u1d00": "a",
+        "\u0299": "b",
+        "\u1d04": "c",
+        "\u1d05": "d",
+        "\u1d07": "e",
+        "\ua730": "f",
+        "\u0262": "g",
+        "\u029c": "h",
+        "\u026a": "i",
+        "\u1d0a": "j",
+        "\u1d0b": "k",
+        "\u029f": "l",
+        "\u1d0d": "m",
+        "\u0274": "n",
+        "\u1d0f": "o",
+        "\u1d18": "p",
+        "\u0280": "r",
+        "\ua731": "s",
+        "\u1d1b": "t",
+        "\u1d1c": "u",
+        "\u1d20": "v",
+        "\u1d21": "w",
+        "\u028f": "y",
+        "\u1d22": "z",
+        "\u0251": "a",
+        "\u0261": "g",
+        "\u0131": "i",
+        "\u0237": "j",
+        "\u0269": "i",
+        "\u01c0": "l",
+        # Digits.
+        "0": "o",
+        "1": "l",
+    }
+)
+_LOOKALIKES_SECOND = str.maketrans(
+    {"\u03b7": "n", "\u03bd": "v", "\u03bc": "u", "\u03c5": "u", "\u043f": "n"}
+)
+# The right-to-left override, and the controls that open and close an
+# embedding or override, which it nests with.
+_RIGHT_TO_LEFT_OVERRIDE = "\u202e"
+_EMBEDDING_OPENERS = frozenset("\u202a\u202b\u202d\u202e")
+_EMBEDDING_CLOSER = "\u202c"
+_PARAGRAPH_ENDS = frozenset("\u000a\u000d\u2029\u0085")
+
+
 def normalize_text(value: str) -> str:
     """The design's ``N(s)``: fold compatibility, case, format and marks away.
 
@@ -206,6 +313,55 @@ def normalize_text(value: str) -> str:
     return " ".join(text.split())
 
 
+def _displayed_order(value: str) -> str:
+    """``value`` with each right-to-left override shown as it displays.
+
+    An override reverses everything after it, nested controls included, up
+    to its closing control or the end of the paragraph; bidirectional controls
+    themselves are dropped later by normalization.
+    """
+
+    shown: list[str] = []
+    index = 0
+    while index < len(value):
+        if value[index] != _RIGHT_TO_LEFT_OVERRIDE:
+            shown.append(value[index])
+            index += 1
+            continue
+        depth, end = 1, index + 1
+        while end < len(value) and value[end] not in _PARAGRAPH_ENDS:
+            if value[end] in _EMBEDDING_OPENERS:
+                depth += 1
+            elif value[end] == _EMBEDDING_CLOSER:
+                depth -= 1
+                if depth == 0:
+                    break
+            end += 1
+        shown.extend(reversed(value[index + 1 : end]))
+        index = end + 1 if end < len(value) and depth == 0 else end
+    return "".join(shown)
+
+
+def _readings(value: str) -> frozenset[str]:
+    """Every normalized way ``value`` can read: as written, as a right-to-left
+    override displays it, and with lookalike letters read as Latin ones."""
+
+    orders = {value}
+    if _RIGHT_TO_LEFT_OVERRIDE in value:
+        orders.add(_displayed_order(value))
+    readings = set()
+    for order in orders:
+        text = normalize_text(order)
+        readings.update(
+            {
+                text,
+                text.translate(_LOOKALIKES),
+                text.translate(_LOOKALIKES_SECOND).translate(_LOOKALIKES),
+            }
+        )
+    return frozenset(readings - {""})
+
+
 def _has_currency_symbol(value: str) -> bool:
     return any(
         unicodedata.category(character) == "Sc"
@@ -218,17 +374,19 @@ def _named_consequence(text: str) -> BrowserActionConsequence | None:
 
     if _has_currency_symbol(text):
         return C.PAYMENT
-    tokens = normalize_text(text).split()
-    if not tokens:
-        return None
+    readings = [reading.split() for reading in _readings(text)]
     for consequence, words, phrases in _CATEGORIES:
-        if any(token in words for token in tokens):
-            return consequence
-        for first_forms, rest in phrases:
-            width = len(rest)
-            for index, token in enumerate(tokens):
-                if token in first_forms and tuple(tokens[index + 1 : index + 1 + width]) == rest:
-                    return consequence
+        for tokens in readings:
+            if any(token in words for token in tokens):
+                return consequence
+            for first_forms, rest in phrases:
+                width = len(rest)
+                for index, token in enumerate(tokens):
+                    if (
+                        token in first_forms
+                        and tuple(tokens[index + 1 : index + 1 + width]) == rest
+                    ):
+                        return consequence
     return None
 
 
@@ -250,7 +408,7 @@ def segment_is_sensitive(segment: str) -> bool:
     messaging area."""
 
     decoded = unquote(segment, errors="replace")
-    if decoded.casefold() in _SENSITIVE_SEGMENTS:
+    if not _SENSITIVE_SEGMENTS.isdisjoint({decoded.casefold(), *_readings(decoded)}):
         return True
     return _named_consequence(decoded) is not None
 

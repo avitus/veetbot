@@ -70,6 +70,9 @@ MAXIMUM_TEXT_CHARACTERS = 262_144
 SETTLE_SECONDS = 2.0
 # The DOM counts as quiet after this long without a mutation.
 DOM_QUIET_MILLISECONDS = 300
+# How long Playwright waits for an element to become actionable, such as for
+# its click point to reach the element itself, before an act fails.
+ACTION_TIMEOUT_MILLISECONDS = 30_000
 _QUIET_SCRIPT = """([quietMs, timeoutMs]) => new Promise(resolve => {
     let quiet = 0;
     let limit = 0;
@@ -336,26 +339,35 @@ class PythonPlaywrightRuntime:
 
     def _track_navigation(self, request: Request) -> None:
         """Remember refused navigation origins for stable browser failure classification."""
-        if (
-            request.is_navigation_request()
-            and request.frame.parent_frame is None
-            and not _origin_allowed(request.url, self._allowed_origins)
+        if not request.is_navigation_request():
+            return
+        frame = _request_frame(request)
+        if (frame is None or frame.parent_frame is None) and not _origin_allowed(
+            request.url, self._allowed_origins
         ):
             self._disallowed_navigation = True
 
     async def _route(self, route: Route) -> None:
         request = route.request
         allowed = is_public_https_url(request.url)
-        if request.is_navigation_request() and request.frame.parent_frame is None:
+        navigation = request.is_navigation_request()
+        # A new window's first navigation is issued before its frame exists, so
+        # it has no frame; it is top-level and never this runtime's page.
+        frame = _request_frame(request) if navigation else None
+        top_level = navigation and (frame is None or frame.parent_frame is None)
+        own_page = (
+            top_level and frame is not None and (self._page is None or frame.page is self._page)
+        )
+        if top_level:
             allowed = allowed and _origin_allowed(request.url, self._allowed_origins)
-            if self._page is not None and request.frame.page is not self._page:
+            if not own_page:
                 allowed = False
         fenced = self._document_fence is not None and (
-            request.is_navigation_request() or request.resource_type == "ping"
+            navigation or request.resource_type == "ping"
         )
         if fenced and not self._inside_document_fence(request.url):
             allowed = False
-            if request.is_navigation_request() and request.frame.parent_frame is None:
+            if own_page:
                 self._fence_refused_page = True
         if allowed:
             await route.continue_()
@@ -624,19 +636,25 @@ class PythonPlaywrightRuntime:
         ):
             raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
 
-        focus_guard: JSHandle | None = None
+        guards: list[JSHandle] = []
         if constraint is not None:
             assert now is not None
-            await self._require_live_coverage(page, handle, action, constraint, now=now)
+            guards.append(
+                await self._require_live_coverage(page, handle, action, constraint, now=now)
+            )
             if action.kind in _KEYBOARD_KINDS:
-                focus_guard = await self._hold_focus(handle)
+                try:
+                    guards.append(await self._hold_focus(handle))
+                except BaseException:
+                    await _release_guards(guards)
+                    raise
 
         documents_before = self._main_frame_navigations
         if constraint is not None and constraint.path_prefix is not None:
             self._document_fence = (constraint.origins[0], constraint.path_prefix)
             self._fence_refused_page = False
         try:
-            await self._dispatch(page, handle, action, focus_guard)
+            await self._dispatch(page, handle, action, guards)
             # The action was sent; settling never turns it into a failure (ADR-0130).
             await self._settle(
                 page, after_document=self._main_frame_navigations != documents_before
@@ -656,36 +674,39 @@ class PythonPlaywrightRuntime:
         page: Page,
         handle: ElementHandle,
         action: BrowserAction,
-        focus_guard: JSHandle | None,
+        guards: list[JSHandle],
     ) -> None:
-        """Send one action to the element; any failure makes its outcome unknown."""
+        """Send one action to the element; any failure makes its outcome unknown.
+
+        ``guards`` are a grant-constrained act's click guard and, for a key or
+        text, its focus guard, released once the action is sent.
+        """
         try:
             if action.kind is BrowserActionKind.CLICK:
-                await handle.click(timeout=30_000)
+                await handle.click(timeout=ACTION_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.TYPE:
-                await handle.fill(action.value or "", timeout=30_000)
+                await handle.fill(action.value or "", timeout=ACTION_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.SELECT:
-                await handle.select_option(action.value or "", timeout=30_000)
+                await handle.select_option(action.value or "", timeout=ACTION_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.CHECK:
-                await handle.check(timeout=30_000)
+                await handle.check(timeout=ACTION_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.PRESS:
                 key = action.key.value if action.key is not None else ""
-                if focus_guard is None:
-                    await handle.press(key, timeout=30_000)
+                if not guards:
+                    await handle.press(key, timeout=ACTION_TIMEOUT_MILLISECONDS)
                 else:
-                    # The guard focused the element and verified it holds focus;
-                    # the keyboard sends to the focused element.
+                    # Under a constraint the focus guard focused the element and
+                    # verified it holds focus; the keyboard sends to it.
                     await page.keyboard.press(key)
             else:
-                await handle.scroll_into_view_if_needed(timeout=30_000)
+                await handle.scroll_into_view_if_needed(timeout=ACTION_TIMEOUT_MILLISECONDS)
                 await page.mouse.wheel(0, action.delta_y or 0)
         except PlaywrightError as exc:
-            if focus_guard is not None:
-                await _release_focus(focus_guard)
+            await _release_guards(guards)
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
-        if focus_guard is not None and await _release_focus(focus_guard):
-            # A key or text went to another element and was stopped there;
-            # what the page's own listeners did with it is unknown.
+        if await _release_guards(guards):
+            # A click, key or text went to another element and was stopped
+            # there; what the page's own listeners did with it is unknown.
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
 
@@ -718,21 +739,46 @@ class PythonPlaywrightRuntime:
         constraint: BrowserDispatchConstraint,
         *,
         now: datetime,
-    ) -> None:
+    ) -> JSHandle:
         """Recheck a grant-authorized act against the live page before dispatch (ADR-0129).
 
         The worker decided from the observation it was shown; this reads the
         live URL, every live label source at full length and live facts, and
-        runs the same coverage rules. A constraint can only narrow.
+        runs the same coverage rules. A constraint can only narrow. The read
+        arms the click guard, which is returned armed for dispatch to release.
         """
+        guard: JSHandle | None = None
         try:
-            metadata = await handle.evaluate(_ELEMENT_SCRIPT)
+            guard = await handle.evaluate_handle(_GUARDED_READ_SCRIPT)
+            metadata = await guard.evaluate("guard => guard.metadata")
+            covered = await self._live_coverage(page, handle, action, constraint, metadata, now=now)
         except PlaywrightError:
+            covered = False
+        except BaseException:
+            await _release_guards([guard] if guard is not None else [])
+            raise
+        if not covered or guard is None:
+            await _release_guards([guard] if guard is not None else [])
             await self._refuse_grant()
+        return guard
+
+    async def _live_coverage(
+        self,
+        page: Page,
+        handle: ElementHandle,
+        action: BrowserAction,
+        constraint: BrowserDispatchConstraint,
+        metadata: dict[str, Any],
+        *,
+        now: datetime,
+    ) -> bool:
         if metadata.get("overlong") is not False:
             # A label source past what the live check reads could hold an
             # excluded word in its unread tail.
-            await self._refuse_grant()
+            return False
+        option_texts = await self._live_option_texts(handle, action)
+        if option_texts is None:
+            return False
         name = str(metadata.get("name") or "")[:1024]
         role = str(metadata.get("role") or "") or _default_role(
             str(metadata.get("tag") or ""), metadata.get("inputType")
@@ -744,12 +790,30 @@ class PythonPlaywrightRuntime:
             role=role,
             labels=[name, *_live_labels(metadata).values()],
             facts=_element_facts(metadata, name=name, page_url=page.url),
-            option_texts=_option_texts(metadata, action),
+            option_texts=option_texts,
             runtime_origins=self._allowed_origins,
             now=now,
         )
-        if not coverage.covered:
-            await self._refuse_grant()
+        return coverage.covered
+
+    async def _live_option_texts(
+        self, handle: ElementHandle, action: BrowserAction
+    ) -> list[str] | None:
+        """For a selection, every label of every option it could choose.
+
+        Playwright chooses the first option whose value or label, with white
+        space collapsed, is the requested text, among all the options. Every
+        option that matches by any of those, or by its text, is read, with its
+        label, value, text, accessible name, title and its group's label. A
+        select with too many options, or too many that match, to read whole
+        has none that can be read (None), and is refused.
+        """
+        if action.kind is not BrowserActionKind.SELECT or action.value is None:
+            return []
+        texts = await handle.evaluate(_OPTION_SCRIPT, action.value)
+        if not isinstance(texts, list):
+            return None
+        return [action.value, *(text for text in texts if isinstance(text, str))]
 
     async def _refuse_grant(self) -> NoReturn:
         """Refuse before dispatch and forget the observation (ADR-0129 D16).
@@ -873,18 +937,29 @@ class PythonPlaywrightRuntime:
             self._fence_refused_page = False
 
 
-async def _release_focus(guard: JSHandle) -> bool:
-    """Remove the focus guard; true when it stopped a key or text aimed elsewhere.
+def _request_frame(request: Request) -> Frame | None:
+    """The frame a request belongs to, or None while a new window's frame does
+    not exist yet, when Playwright's accessor raises."""
+
+    try:
+        return request.frame
+    except PlaywrightError:
+        return None
+
+
+async def _release_guards(guards: list[JSHandle]) -> bool:
+    """Remove each guard; true when any stopped a click, key or text aimed elsewhere.
 
     A guard whose document is gone, because the action navigated, stopped
     nothing that could still act.
     """
 
     redirected = False
-    with suppress(PlaywrightError):
-        redirected = bool(await guard.evaluate("guard => guard()"))
-    with suppress(PlaywrightError):
-        await guard.dispose()
+    for guard in guards:
+        with suppress(PlaywrightError):
+            redirected = bool(await guard.evaluate("guard => guard()")) or redirected
+        with suppress(PlaywrightError):
+            await guard.dispose()
     return redirected
 
 
@@ -907,9 +982,12 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
 # node's parent is its slot, a shadow root's is its host, and a slot's children
 # include what is assigned to it. A click lands on whatever lies at the
 # element's centre, which may be a descendant, so descendants' targets count
-# too. Past the walk's bounds, or with an embedded document inside, the element
-# is opaque: its targets cannot be listed.
-_ELEMENT_SCRIPT = """node => {
+# too. Past the walk's bounds, or with an embedded document, an image map or an
+# SVG <use> whose copy could hold a link inside, the element is opaque: its
+# targets cannot be listed. Beside the metadata it returns every
+# element it read: the node, its ancestors and descendants, the controls of
+# labels among them, and the default button of its form.
+_READ_ELEMENT_SCRIPT = """node => {
     const collapse = value => Array.from(String(value || '').replace(/\\s+/g, ' ').trim());
     const clean = value => collapse(value).slice(0, 1024).join('');
     const byId = (element, id) => {
@@ -969,18 +1047,49 @@ _ELEMENT_SCRIPT = """node => {
         pending.push(...childrenOf(next));
     }
     const reached = [node, ...descendants];
-    if (reached.some(element => ['iframe', 'frame', 'object', 'embed'].includes(element.localName)
-            || element.hasAttribute('usemap'))) {
+    const embedders = ['iframe', 'frame', 'object', 'embed'];
+    // An SVG <use> renders a copy of what it references in a tree page script
+    // cannot read. A copy that could hold a link or embedded content, or of
+    // something in another document, is opaque; a plain icon is not.
+    const copyUnsafe = [...embedders, 'a', 'use', 'foreignObject'];
+    const useOpaque = use => [use.getAttribute('href'),
+        use.getAttributeNS('http://www.w3.org/1999/xlink', 'href'),
+        use.href instanceof SVGAnimatedString ? use.href.animVal : null]
+        .filter(value => typeof value === 'string' && value.trim()).some(value => {
+            const reference = value.trim();
+            if (!reference.startsWith('#')) {
+                return true;
+            }
+            let id = reference.slice(1);
+            try { id = decodeURIComponent(id); } catch (error) { return true; }
+            const tree = use.getRootNode();
+            return [tree.getElementById ? tree.getElementById(id) : null,
+                document.getElementById(id)].filter(Boolean).some(target => {
+                    const copied = [target, ...target.querySelectorAll('*')];
+                    return copied.length > 2048 || copied.some(element =>
+                        copyUnsafe.includes(element.localName) || element.hasAttribute('usemap'));
+                });
+        });
+    if (reached.some(element => embedders.includes(element.localName)
+            || element.hasAttribute('usemap')
+            || (element.localName === 'use' && useOpaque(element)))) {
         opaque = true;
     }
     const flat = [...ancestors, ...descendants];
     const anchor = element => ['a', 'area'].includes(element.localName);
-    const hrefOf = element => anchor(element)
-        ? (element.getAttribute('href')
-            ?? element.getAttributeNS('http://www.w3.org/1999/xlink', 'href'))
-        : null;
-    const links = flat.filter(element => hrefOf(element) !== null)
-        .map(element => ({linkHref: hrefOf(element), link: resolve(hrefOf(element))}));
+    // An SVG link follows its animated value, which an animation can set away
+    // from the attribute, so both are targets.
+    const hrefsOf = element => {
+        if (!anchor(element)) {
+            return [];
+        }
+        const written = element.getAttribute('href')
+            ?? element.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        const animated = element.href instanceof SVGAnimatedString ? element.href.animVal : null;
+        return [...new Set([written, animated])].filter(value => typeof value === 'string');
+    };
+    const links = flat.flatMap(element => hrefsOf(element))
+        .map(href => ({linkHref: href, link: resolve(href)}));
     const submits = element => !!element && !!element.form && (
         (element.localName === 'button' && element.type === 'submit')
         || (element.localName === 'input' && ['submit', 'image'].includes(element.type)));
@@ -1012,8 +1121,18 @@ _ELEMENT_SCRIPT = """node => {
         (submitter.hasAttribute('formaction')
             ? submitter.getAttribute('formaction')
             : submitter.form.getAttribute('action')) || document.URL);
+    // A form-associated custom element has no form property of its own, and
+    // its form attribute names its owner as any control's does.
+    const formOf = element => {
+        if (element.form instanceof HTMLFormElement) {
+            return element.form;
+        }
+        const named = element.hasAttribute('form') ? byId(element, element.getAttribute('form'))
+            : null;
+        return named instanceof HTMLFormElement ? named : null;
+    };
     const form = own.length ? null
-        : (node.form || ownControls.map(control => control.form).find(Boolean)
+        : (formOf(node) || ownControls.map(formOf).find(Boolean)
             || ancestors.find(element => element.localName === 'form') || null);
     const defaultButton = form
         ? Array.from(form.getRootNode().querySelectorAll('button,input'))
@@ -1057,7 +1176,7 @@ _ELEMENT_SCRIPT = """node => {
     };
     const labels = Object.fromEntries(
         Object.entries(sources).map(([source, value]) => [source, clean(value)]));
-    return {
+    const metadata = {
         tag,
         role: node.getAttribute('role'),
         inputType: node.getAttribute('type'),
@@ -1075,10 +1194,71 @@ _ELEMENT_SCRIPT = """node => {
         context: dialog ? clean(dialog.getAttribute('aria-label')
             || referenced(dialog, dialog.getAttribute('aria-labelledby'))
             || (heading ? heading.textContent : '')) : '',
-        options: tag === 'select'
-            ? Array.from(node.options).slice(0, 256).map(option => [option.label, option.value])
-            : [],
     };
+    const read = [...ancestors, ...descendants, ...ownControls, ...controlsOf(descendants),
+        ...(defaultButton ? [defaultButton] : [])];
+    return {metadata, read};
+}"""
+_ELEMENT_SCRIPT = "node => (" + _READ_ELEMENT_SCRIPT + ")(node).metadata"
+# The live read of a grant-constrained act, which also arms a click guard in
+# the same turn of the page's event loop: until released, a trusted click aimed
+# at any element the read did not cover is stopped with its default action.
+# Only the act's own input makes trusted clicks, so a page that moves another
+# control under the click point, or swaps a label's control, after the read
+# cannot redirect it. Returns the release function, which reports whether the
+# guard stopped a click, with the metadata on it.
+_GUARDED_READ_SCRIPT = (
+    "node => { const read = ("
+    + _READ_ELEMENT_SCRIPT
+    + """)(node);
+    const covered = new Set(read.read);
+    let stopped = false;
+    const guard = event => {
+        if (!event.isTrusted || covered.has(event.composedPath()[0])) {
+            return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        stopped = true;
+    };
+    window.addEventListener('click', guard, true);
+    const release = () => {
+        window.removeEventListener('click', guard, true);
+        return stopped;
+    };
+    release.metadata = read.metadata;
+    return release;
+}"""
+)
+# The options a selection of ``wanted`` could choose, as flat label texts, or
+# null when there are too many options, or matches, to read them all.
+_OPTION_SCRIPT = """(node, wanted) => {
+    const squeeze = value => String(value ?? '').replace(/\\s+/g, ' ').trim();
+    const options = node.localName === 'select' ? Array.from(node.options) : [];
+    if (options.length > 4096) {
+        return null;
+    }
+    const chosen = options.filter(option => option.value === wanted || option.label === wanted
+        || squeeze(option.label) === squeeze(wanted) || squeeze(option.text) === squeeze(wanted));
+    if (chosen.length > 64) {
+        return null;
+    }
+    const referenced = (element, ids) => squeeze(ids).split(' ').filter(Boolean).slice(0, 8)
+        .map(id => {
+            const tree = element.getRootNode();
+            const target = (tree.getElementById ? tree.getElementById(id) : null)
+                || document.getElementById(id);
+            return target ? target.textContent : '';
+        }).join(' ');
+    const sources = element => [element.getAttribute('aria-label'),
+        referenced(element, element.getAttribute('aria-labelledby')),
+        element.getAttribute('title')];
+    return chosen.flatMap(option => {
+        const group = option.parentElement && option.parentElement.localName === 'optgroup'
+            ? option.parentElement : null;
+        return [option.label, option.value, option.text, ...sources(option),
+            ...(group ? [group.label, ...sources(group)] : [])];
+    }).map(squeeze).filter(Boolean);
 }"""
 # Actions whose effect goes to the focused element rather than to the element.
 _KEYBOARD_KINDS = frozenset({BrowserActionKind.PRESS, BrowserActionKind.TYPE})
@@ -1273,18 +1453,6 @@ def _live_labels(metadata: dict[str, Any]) -> dict[BrowserLabelSource, str]:
         for source in BrowserLabelSource
         if labels.get(source.value)
     }
-
-
-def _option_texts(metadata: dict[str, Any], action: BrowserAction) -> list[str]:
-    """For a selection, the matched option's label and value, as the page has them."""
-
-    if action.kind is not BrowserActionKind.SELECT or action.value is None:
-        return []
-    options = metadata.get("options")
-    for option in options if isinstance(options, list) else []:
-        if isinstance(option, list) and len(option) == 2 and action.value in option:
-            return [str(option[0]), str(option[1])]
-    return [action.value]
 
 
 def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> BrowserElementFacts:

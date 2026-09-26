@@ -301,6 +301,44 @@ def test_case_hyphen_zero_width_and_combining_variants_are_normalized() -> None:
     assert {text: classify(text) for text in variants} == variants
 
 
+def test_right_to_left_overrides_read_as_the_text_they_display() -> None:
+    """A right-to-left override shows the letters after it reversed, so
+    "\u202eyaP" displays "Pay"; the classifier reads the displayed order too."""
+
+    variants = {
+        "\u202eyaP": C.PAYMENT,
+        "Keep \u202eyaP\u202c now": C.PAYMENT,
+        "D\u202eetele\u202c": C.DESTRUCTIVE,
+        "\u202etuo kcehc": C.PAYMENT,
+        "Keep \u202eebircsbuS\u202c going": C.PURCHASE,
+        "\u202eyaP\u2069 and \u202eeteleD": C.PAYMENT,
+        "\u202dPay": C.PAYMENT,
+    }
+    assert {text: classify(text) for text in variants} == variants
+    assert classify("\u202eeunitnoC\u202c") is C.UNKNOWN
+
+
+def test_letters_that_look_latin_read_as_the_latin_letters() -> None:
+    """Cyrillic, Greek, Armenian and Latin small-capital lookalikes fold to the
+    Latin letters they show; genuine words in those scripts stay unknown."""
+
+    variants = {
+        "D\u0435l\u0435t\u0435": C.DESTRUCTIVE,
+        "\u0420\u0430y": C.PAYMENT,
+        "\u03a1\u03b1y": C.PAYMENT,
+        "\u0405ubscrib\u0435": C.PURCHASE,
+        "\u0405UBS\u0421RIB\u0415": C.PURCHASE,
+        "\u1d18\u1d00\u028f": C.PAYMENT,
+        "S\u0578\u0585": C.UNKNOWN,
+        "\u0441\u0430rd": C.PAYMENT,
+        "\u0433\u0435\u043c": C.UNKNOWN,
+        "\u043a\u043e\u0442": C.UNKNOWN,
+        "\u043d\u0435\u0442": C.UNKNOWN,
+        "\u03bd\u03b1\u03b9": C.UNKNOWN,
+    }
+    assert {text: classify(text) for text in variants} == variants
+
+
 def test_currency_symbols_are_payments() -> None:
     for text in ("\u20ac5", "12 \u20b9", "\u00a5", "\u00a3 3", "$", "\uff04 1", "Go \u20bf"):
         assert classify(text) is C.PAYMENT, text

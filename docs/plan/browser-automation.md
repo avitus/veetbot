@@ -473,18 +473,23 @@ same-origin, its first path segment, and whether any of its path segments is
 sensitive; a download flag; and the enclosing dialog's accessible name, capped
 at 128 characters. A form target is where the browser would submit: the
 formaction of the submit control a click activates or, for Enter in a field,
-of the form's default button, else the form's action. A fragment or empty link
+of the form's default button, else the form's action. An element's form is its
+form owner, including the one a form-associated custom element names with its
+`form` attribute. A fragment or empty link
 has no target only when it stays on the page, since a `<base>` element can
 send it elsewhere; a `javascript:` link, and any target that is not HTTPS, is
-outside every origin. Facts follow the flat tree the browser renders, through
+outside every origin. An SVG link's targets are both its written and its
+animated value. Facts follow the flat tree the browser renders, through
 open shadow roots and slots: visible text includes what a shadow root renders,
 an `aria-labelledby` reference resolves in the element's own tree, and a form's
 default button is found in the form's own tree. A click lands on whatever lies
 at the element's centre, so the targets are those of the link or submit control
 around the element, its label's control, and every link and submit control
 inside it; the facts carry one target that is inside a prefix only when every
-one of them is. An element with an embedded document inside it, or too large
-to walk, has a target outside every origin. Raw target URLs never leave the
+one of them is. An element with an embedded document or an image map inside
+it, or an SVG `<use>` whose copy could hold a link or embedded content or
+comes from another document, or one too large to walk, has a target outside
+every origin. Raw target URLs never leave the
 runtime. Facts feed the
 action classifier and the approval view and never enter a model-visible
 result. An act request may carry a dispatch constraint naming the grant kind,
@@ -492,7 +497,19 @@ origins, an optional path prefix, an expiry, a consequence ceiling, and a text
 cap. The runtime uses it only to refuse: before dispatch it checks the expiry,
 the live page URL, and the live element's labels, consequence, and facts, and
 it refuses an element with a label source longer than the 1,024 characters it
-reads.
+reads. For a selection it reads every option the selection could choose, by
+value or by label with white space collapsed and wherever it lies in the list,
+with that option's label, value, text, accessible name, title, and group
+label, and it refuses a select with more than 4,096 options or more than 64
+that match.
+The same read arms a click guard: until the action is sent, it stops, with its
+default action, any trusted click aimed at an element the read did not cover,
+which are the element, its ancestors and descendants, the controls of labels
+among them, and its form's default button; if it had to, the act's outcome is
+`tool.browser.outcome_unknown`. Only the act's own input makes trusted clicks,
+so a control that lies over the click point inside the button or link around
+the element, where the click is aimed, or a label whose control the page swaps
+after the read, never takes the click.
 A key press or typed text goes to whatever holds focus, so under a constraint
 the runtime focuses the element and refuses unless the element itself then
 holds focus, through open shadow roots, and never an embedded document. Until
@@ -504,7 +521,13 @@ hyperlink-auditing ping whose URL is not on the grant's origin inside its
 prefix with no sensitive segment, whatever the page hid from the facts, such
 as a closed shadow root. When it refuses the page's own document, the page is
 left on the browser's error page and the act's outcome is
-`tool.browser.outcome_unknown`.
+`tool.browser.outcome_unknown`. A new window never loads, including its first
+navigation, which it issues before its frame exists. Page script is outside
+these checks, an accepted limit of ADR-0129: it can change the page's own
+controls, as `element.click()` from the element's own handler does on a
+check box, and send its own requests on the allowed origins, and a document it
+requests after the act settles, such as a refresh or timer the act scheduled
+for later, is not fenced.
 `tool.browser.grant_not_applicable` is a refusal given before dispatch; the
 lease and its action sequence are unchanged, and the runtime forgets the
 observation's element handles, so the next action needs a new observation
@@ -865,7 +888,15 @@ name, a selected option, its field kind, and every path segment of its
 navigation target. The worker applies it to the observation that named the
 element; the isolated runtime applies it again to the live page before a
 grant-authorized dispatch. A label or context that matches the exclusion
-vocabulary yields a named consequence, never `routine` or `unknown`. A
+vocabulary yields a named consequence, never `routine` or `unknown`. Each text
+is read as written and as displayed: in the order a right-to-left override
+shows it, and with Cyrillic, Greek, and Armenian letters, Latin small capitals
+and IPA letters, and the digits 0 and 1 that look like Latin letters read as
+those letters. Name matching still reads English words in the DOM: a label in
+another language, a lookalike letter outside that set, or a label drawn with
+CSS, including a CSS bidirectional override, or with an image that has no
+alternative text can defeat it, and a task grant's path prefix is then the
+boundary (ADR-0129). A
 standing grant can authorize only `routine` interaction, and only when every
 label source reads as the same routine word; `unknown` stays hard-excluded
 from it. A task grant can authorize `routine` and `unknown` interaction and no

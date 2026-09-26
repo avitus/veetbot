@@ -130,23 +130,35 @@ change needs the owner's explicit approval, and the owner has given it.
        radio, through a label or one inside it, that control's own labels
        join its associated labels;
      - the accessible name of any enclosing dialog;
-     - for a select, the chosen option's label and value;
+     - for a select, every option the selection could choose, by value or by
+       label with white space collapsed and wherever it lies in the list, with
+       that option's label, value, text, accessible name, title and group
+       label;
      - a closed field kind;
      - the navigation target of a link or form, including every segment of
        its path.
    - Label sources and targets are read over the flat tree the browser
      renders, through open shadow roots and slots. What a shadow root renders
      is visible text, and an `aria-labelledby` reference resolves in the
-     element's own tree. A click lands on whatever lies at the element's
-     centre, so the targets are those of the link or submit control around
-     the element, its label's control, and every link and submit control
-     inside it. The element's target is inside a prefix only when all of them
-     are. An element with an embedded document inside it has a target outside
-     every origin.
+     element's own tree. An element's form is its form owner, including the
+     one a form-associated custom element names with its `form` attribute,
+     and an SVG link's targets are both its written and its animated value.
+     A click lands on whatever lies at the element's centre, so the targets
+     are those of the link or submit control around the element, its label's
+     control, and every link and submit control inside it. The element's
+     target is inside a prefix only when all of them are. An element with an
+     embedded document or an image map inside it, or an SVG `<use>` whose
+     copy could hold a link or embedded content or comes from another
+     document, has a target outside every origin.
    - Each label source is classified separately. A match of the exclusion
      vocabulary in any of them yields that named consequence, so a button
      labelled "Continue" for assistive technology but showing "Pay $12.99"
      is a payment.
+   - Each text is read as written and as displayed: in the order a
+     right-to-left override shows it, and with Cyrillic, Greek and Armenian
+     letters, Latin small capitals and IPA letters, and the digits 0 and 1
+     that look like Latin letters read as those letters. Extra readings only
+     add matches, so they only add approvals.
    - The vocabulary covers payment, currency and in-app currency (gems,
      coins), purchase, subscription and trial, money movement, authentication
      and signing out, account recovery, account and settings changes,
@@ -207,7 +219,17 @@ change needs the owner's explicit approval, and the owner has given it.
    - The runtime reads the live page URL, the live element and its live label
      sources, and runs the same classifier and coverage rules. It refuses an
      element with a label source longer than the 1,024 characters it reads,
-     whose unread tail could hold an excluded word.
+     whose unread tail could hold an excluded word, and a select with more
+     than 4,096 options, or more than 64 that a selection could choose.
+   - A click goes to whatever lies at its point, and Playwright aims a click
+     on an element inside a button or link at that button or link. The same
+     read therefore arms a click guard: until the action is sent, the runtime
+     stops any trusted click aimed at an element the read did not cover (the
+     element, its ancestors and descendants, the controls of labels among
+     them, and its form's default button), with its default action, and then
+     reports the act's outcome as unknown. Only the act's own input makes
+     trusted clicks, so a control lying over the click point, or a label
+     whose control the page swaps after the read, never takes the click.
    - A key press or typed text goes to whatever holds focus, not to the
      element the classifier read. For those, the runtime focuses the element
      and refuses before dispatch unless the element itself then holds focus,
@@ -222,7 +244,8 @@ change needs the owner's explicit approval, and the owner has given it.
      every hyperlink-auditing ping whose URL is not on the grant's origin
      inside its prefix with no sensitive segment. A refused document of the
      page itself leaves the browser's error page, and the act's outcome is
-     reported as unknown.
+     reported as unknown. A new window never loads, including its first
+     navigation, which it issues before its frame exists.
    - A mismatch refuses the action before dispatch with the new stable code
      `tool.browser.grant_not_applicable`. It is a refusal given before
      dispatch in the sense of ADR-0127 decision 3: the lease and its action
@@ -341,15 +364,28 @@ change needs the owner's explicit approval, and the owner has given it.
   - revocation, and the end of every grant on a new sign-in;
   - the audit trail, which records what each unreviewed action was.
 - **Limits of name matching.** The exclusion vocabulary is English and reads
-  the DOM. A site that names its controls in another language, disguises them
-  with lookalike characters, or draws a label with CSS or an image without
+  the DOM. Zero-width and format characters, right-to-left overrides, and
+  the common Cyrillic, Greek, Armenian and Latin small-capital lookalikes are
+  read through (decision 5), but a site that names its controls in another
+  language, disguises them with other lookalike characters, or draws a label
+  with CSS, including a CSS bidirectional override, or with an image without
   alternative text can defeat name matching. The configured path prefix is
   then the real boundary, and the runtime holds every document load and ping
-  to it while a granted act runs and settles. Page script is not bounded that
-  way: it can send its own requests on the allowed origins, and a navigation
-  it starts after the act settles is not fenced. This is why scopes are the
-  owner's choice and are suited to sites the owner trusts not to disguise
-  their controls.
+  to it while a granted act runs and settles.
+- **Limits of page script.** The runtime bounds what the act's own input
+  does, not what the page's script does in response. Page script can:
+  - send its own requests on the allowed origins;
+  - change the page's own controls, whether by clicking another check box,
+    as `element.click()` from the element's own handler does, or by setting
+    it, since the click guard stops only trusted clicks;
+  - start a navigation after the act settles, which is not fenced, such as a
+    `<meta http-equiv=refresh>` with a delay, or a timer, that the act
+    scheduled. The origin guard still keeps it on the allowed origins.
+
+  Closing these would take a fence that outlives the act, and every script
+  request held to the prefix, which a single-page site cannot work under.
+  This is why scopes are the owner's choice and are suited to sites the owner
+  trusts not to disguise their controls or act behind them.
 - **False positives are expected.** An answer tile that happens to be "pay",
   "post", "card" or "changed" asks for approval, and so does typed text with
   four digits in a row. This is the deny-biased direction, and the rollout
@@ -456,7 +492,16 @@ tests. The coverage required:
   element that cannot hold focus or whose focus the page moves, forms and
   labels in open shadow roots and slots, links and submit buttons inside the
   element, an embedded document, an SVG link, a `javascript:` link, a closed
-  shadow root, and a hyperlink-auditing ping.
+  shadow root, and a hyperlink-auditing ping. A second set covers `form=`
+  ownership across trees, `formmethod`, `formtarget` and image inputs,
+  dialogs and `<details>`, image maps, animated SVG links and `<use>`,
+  same-origin, `srcdoc` and sandboxed frames, an inserted refresh,
+  form-associated custom elements, access keys, editable regions, option
+  labels, overlays and clipped or pass-through elements, the page changed
+  before and during the click, handlers that act on another element, new
+  windows, and excluded words behind zero-width characters, overrides and
+  lookalike letters. Tests pin the two page-script limits: a check box a
+  handler clicks, and a delayed refresh.
 - `tests/gates/test_browser_m10.py::test_standing_grant` gains the task-grant
   cases.
 
