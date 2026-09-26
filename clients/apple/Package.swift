@@ -95,6 +95,9 @@ let package = Package(
             name: "VeetbotCoreTests",
             dependencies: ["VeetbotCore"],
             path: "Tests/VeetbotCoreTests",
+            // The server's task-grant contract fixture (ADR-0129), copied in
+            // and pinned by checksum in WireModelsTests.
+            resources: [.copy("Fixtures")],
             swiftSettings: commandLineTestingFlags + fullXcodeFlags,
             linkerSettings: commandLineTestingLinkerFlags
         ),

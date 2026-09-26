@@ -143,6 +143,12 @@ public final class ChatViewModel: ObservableObject {
     /// launch URL, capability or session value: those live only in the locals
     /// of `completeDeviceSignIn`.
     @Published public private(set) var deviceSignInRequest: DeviceSignInRequest?
+    /// The open conversation's active task permission, if any (ADR-0129).
+    @Published public private(set) var activeTaskGrant: BrowserTaskGrantView?
+    /// Only a conversation bound to a website profile can hold one.
+    private var selectedSessionUsesWebsiteProfile = false
+    /// Every active task permission, for Settings > Website Access.
+    @Published public private(set) var activeTaskGrants: [BrowserTaskGrantView] = []
     /// The `device.sms.send` invocation whose compose sheet the owner should
     /// see now, if any. Its recipient and body live only here and in the sheet.
     @Published public private(set) var pendingSmsInvocation: SmsInvocation?
@@ -312,6 +318,8 @@ public final class ChatViewModel: ObservableObject {
         clearPendingSmsInvocations()
         await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
+        activeTaskGrants = []
+        activeTaskGrant = nil
         isConfigured = false
         requiresReauthentication = true
         if let revokeError {
@@ -793,6 +801,8 @@ public final class ChatViewModel: ObservableObject {
         clearAttachments()
         notificationFocus = nil
         notificationNavigationID = nil
+        activeTaskGrant = nil
+        selectedSessionUsesWebsiteProfile = false
         runState.reset()
     }
 
@@ -811,12 +821,15 @@ public final class ChatViewModel: ObservableObject {
         pendingSubmission = nil
         notificationFocus = nil
         notificationNavigationID = nil
+        activeTaskGrant = nil
+        selectedSessionUsesWebsiteProfile = false
         runState.reset()
         do {
             let session = try await api.getSession(entry.sessionID)
             guard selectionRequestID == requestID,
                 !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
+            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
             try await store(
                 session: session,
                 lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
@@ -851,6 +864,9 @@ public final class ChatViewModel: ObservableObject {
                 }
                 runState.seed(run: run)
                 watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive)
+            }
+            if selectedSessionUsesWebsiteProfile {
+                await loadTaskGrant()
             }
         } catch {
             if selectionRequestID == requestID {
@@ -1302,6 +1318,7 @@ public final class ChatViewModel: ObservableObject {
         if sessionCreation == creation {
             sessionCreation = nil
             selectedSessionID = session.id
+            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
             try await store(session: session, lastRunID: nil, suggestedTitle: suggestedTitle)
         }
         return session
@@ -1356,18 +1373,35 @@ public final class ChatViewModel: ObservableObject {
     public func resolveApproval(
         _ approval: ApprovalView,
         decision: ApprovalDecision,
-        reason: String? = nil
+        reason: String? = nil,
+        taskGrant: TaskGrantEcho? = nil
     ) async {
         guard let api else { return }
         do {
             let stored = try await api.resolveApproval(
                 approval.id,
                 decision: decision,
-                reason: reason
+                reason: reason,
+                taskGrant: taskGrant
             )
             runState.mergeApproval(stored)
+            if decision == .approveForTask {
+                await loadTaskGrant()
+            }
         } catch {
             if let apiError = apiError(from: error),
+                apiError.code == .conflict,
+                let reason = apiError.details.reason,
+                reason == "task_grant_unavailable" || reason == "task_grant_offer_mismatch"
+            {
+                // The offer is gone or changed: show the card as it is now.
+                do {
+                    runState.mergeApproval(try await api.getApproval(approval.id))
+                    errorMessage = "Allow for this task is no longer available. Allow once or Deny."
+                } catch {
+                    present(error)
+                }
+            } else if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 apiError.details.reason == "approval_already_resolved"
             {
@@ -1381,6 +1415,103 @@ public final class ChatViewModel: ObservableObject {
             } else {
                 present(error)
             }
+        }
+    }
+
+    // MARK: - Task permissions (ADR-0129)
+
+    /// Re-reads the open conversation's active task permission. The chat view
+    /// calls this every 30 seconds while it is visible.
+    public func reconcileTaskGrant() async {
+        await loadTaskGrant()
+    }
+
+    /// The banner above the composer, while the open conversation holds an
+    /// active task permission.
+    public func taskGrantBannerText(now: Date = Date()) -> String? {
+        guard let grant = activeTaskGrant, grant.isActive, grant.sessionID == selectedSessionID
+        else { return nil }
+        return grant.bannerText(now: now)
+    }
+
+    /// Settings lists every active task permission. Quiet when the server has
+    /// task permissions turned off.
+    public func refreshTaskPermissions() async {
+        guard let api else { return }
+        let generation = connectionGeneration
+        do {
+            let page = try await api.listBrowserTaskGrants(status: .active, limit: 200)
+            guard generation == connectionGeneration else { return }
+            activeTaskGrants = page.items.filter(\.isActive)
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            activeTaskGrants = []
+        } catch {
+            // Best effort; Settings keeps what it showed.
+        }
+    }
+
+    /// Stops one task permission from Settings; no confirmation.
+    public func stopTaskGrant(_ grantID: UUID) async {
+        guard let api else { return }
+        do {
+            _ = try await api.revokeBrowserTaskGrant(grantID)
+            if activeTaskGrant?.id == grantID { activeTaskGrant = nil }
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            if activeTaskGrant?.id == grantID { activeTaskGrant = nil }
+        } catch {
+            present(error)
+        }
+        await refreshTaskPermissions()
+    }
+
+    /// Ends the active task permission at once; no confirmation.
+    public func stopTaskGrant() async {
+        guard let api, let grant = activeTaskGrant else { return }
+        do {
+            let ended = try await api.revokeBrowserTaskGrant(grant.id)
+            if activeTaskGrant?.id == grant.id, !ended.isActive {
+                activeTaskGrant = nil
+            }
+            activeTaskGrants.removeAll { $0.id == grant.id }
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            activeTaskGrant = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    /// Applies one run-stream frame's task-permission meaning: a use counts
+    /// locally (by its running number, so a replayed frame counts once); a
+    /// created or ended permission is re-read.
+    func applyTaskGrantFrame(_ frame: SSEFrame) async {
+        guard let event = RunStateReducer.taskGrantEvent(from: frame) else { return }
+        switch event {
+        case .used(let grantID, let use):
+            guard var grant = activeTaskGrant, grant.id == grantID else { return }
+            grant.actionsUsed = min(grant.maxActions, max(grant.actionsUsed, use ?? grant.actionsUsed + 1))
+            activeTaskGrant = grant
+        case .created, .ended:
+            await loadTaskGrant()
+        }
+    }
+
+    /// Reads the open conversation's active task permission. A server with
+    /// task permissions turned off answers as if there were none, quietly.
+    private func loadTaskGrant() async {
+        guard let api, let sessionID = selectedSessionID, selectedSessionUsesWebsiteProfile else {
+            activeTaskGrant = nil
+            return
+        }
+        do {
+            let page = try await api.listBrowserTaskGrants(
+                sessionID: sessionID, status: .active, limit: 1
+            )
+            guard selectedSessionID == sessionID else { return }
+            activeTaskGrant = page.items.first { $0.isActive && $0.sessionID == sessionID }
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            if selectedSessionID == sessionID { activeTaskGrant = nil }
+        } catch {
+            // Best effort: the next reconcile or stream event tries again.
         }
     }
 
@@ -2083,6 +2214,7 @@ public final class ChatViewModel: ObservableObject {
         isReconfiguring = true
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
+        activeTaskGrants = []
         await artifactCache.removeAll()
         pendingSubmission = nil
         clearAttachments()
@@ -2110,6 +2242,7 @@ public final class ChatViewModel: ObservableObject {
     private func clearInstalledConnection() {
         dismissCallResult()
         resetFolderState()
+        activeTaskGrants = []
         api = nil
         eventStream = nil
         baseURL = nil
@@ -2124,6 +2257,7 @@ public final class ChatViewModel: ObservableObject {
                 for try await frame in eventStream.frames(runID: runID) {
                     guard let self else { return }
                     self.runState.reduce(frame)
+                    await self.applyTaskGrantFrame(frame)
                     if frame.event == "approval.requested"
                         || frame.event == "run.waiting_for_approval"
                     {

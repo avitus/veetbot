@@ -434,6 +434,8 @@ public struct RunView: Codable, Identifiable, Sendable {
 
 public enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
     case approveOnce = "approve_once"
+    /// Approve this action and allow the offered task permission (ADR-0129).
+    case approveForTask = "approve_for_task"
     case deny
 }
 
@@ -466,6 +468,13 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
     public let resolvedAt: Date?
     public let resolvedBy: String?
     public let decision: ApprovalDecision?
+    /// The task permission a `browser.act` approval offers, when the server
+    /// makes one (ADR-0129).
+    public var taskGrantOffer: TaskGrantOfferView? = nil
+    /// Set exactly when the approval was resolved with `approve_for_task`.
+    public var taskGrantID: UUID? = nil
+    /// Why the session's active task permission did not cover this action.
+    public var taskGrantNotCovered: TaskGrantNotCoveredView? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, status, arguments, risk, decision
@@ -479,6 +488,44 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
         case createdAt = "created_at"
         case resolvedAt = "resolved_at"
         case resolvedBy = "resolved_by"
+        case taskGrantOffer = "task_grant_offer"
+        case taskGrantID = "task_grant_id"
+        case taskGrantNotCovered = "task_grant_not_covered"
+    }
+}
+
+extension ApprovalView {
+    /// A decision this build does not know decodes as no decision instead of
+    /// failing the whole approval, so a newer server's resolution never hides
+    /// the card (ADR-0129 D27). The task-grant fields are optional, for older
+    /// servers.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        runID = try container.decode(UUID.self, forKey: .runID)
+        sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        status = try container.decode(ApprovalStatus.self, forKey: .status)
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+        actionSummary = try container.decode(String.self, forKey: .actionSummary)
+        arguments = try container.decode([String: JSONValue].self, forKey: .arguments)
+        argumentDigests = try container.decodeIfPresent(
+            [String: String].self, forKey: .argumentDigests
+        )
+        risk = try container.decode(String.self, forKey: .risk)
+        policyReason = try container.decode(String.self, forKey: .policyReason)
+        expiresAt = try container.decodeIfPresent(Date.self, forKey: .expiresAt)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        resolvedAt = try container.decodeIfPresent(Date.self, forKey: .resolvedAt)
+        resolvedBy = try container.decodeIfPresent(String.self, forKey: .resolvedBy)
+        decision = try container.decodeIfPresent(String.self, forKey: .decision)
+            .flatMap(ApprovalDecision.init(rawValue:))
+        taskGrantOffer = try container.decodeIfPresent(
+            TaskGrantOfferView.self, forKey: .taskGrantOffer
+        )
+        taskGrantID = try container.decodeIfPresent(UUID.self, forKey: .taskGrantID)
+        taskGrantNotCovered = try container.decodeIfPresent(
+            TaskGrantNotCoveredView.self, forKey: .taskGrantNotCovered
+        )
     }
 }
 

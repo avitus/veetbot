@@ -12,7 +12,8 @@ private enum ServerContractIdentifier {
 struct ToolActivityCard: View {
     let activity: ToolActivity
     let approval: ApprovalView?
-    let resolve: (ApprovalView, ApprovalDecision, String?) -> Void
+    var activeTaskGrant: BrowserTaskGrantView? = nil
+    let resolve: (ApprovalView, ApprovalDecision, String?, TaskGrantEcho?) -> Void
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
@@ -30,6 +31,11 @@ struct ToolActivityCard: View {
                         Text(activity.presentationStatus.rawValue.capitalized)
                             .appFont(.caption)
                             .foregroundColor(taxonomy.color)
+                        if activity.allowedByTaskGrant {
+                            Label("Allowed by task permission", systemImage: "checkmark.shield")
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     Spacer()
                     if let risk = activity.risk {
@@ -42,6 +48,9 @@ struct ToolActivityCard: View {
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
 
             if expanded {
+                if let summary = activity.taskGrantSummary {
+                    DetailBlock(title: "What it did", text: summary)
+                }
                 if !activity.arguments.isEmpty {
                     DetailBlock(
                         title: "Arguments", text: JSONValue.object(activity.arguments).prettyPrinted
@@ -56,8 +65,9 @@ struct ToolActivityCard: View {
                 }
             }
             if let approval {
-                ApprovalCard(approval: approval) { decision, reason in
-                    resolve(approval, decision, reason)
+                ApprovalCardView(approval: approval, activeTaskGrant: activeTaskGrant) {
+                    decision, reason, taskGrant in
+                    resolve(approval, decision, reason, taskGrant)
                 }
             }
         }
@@ -143,6 +153,11 @@ private struct BundledToolActivityRow: View {
                         if let detail = rowDetail {
                             Text(detail).appFont(.caption).lineLimit(1)
                         }
+                        if activity.allowedByTaskGrant {
+                            Text("Allowed by task permission")
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         Text(activity.presentationStatus.rawValue.capitalized)
                             .appFont(.caption)
                             .foregroundColor(.secondary)
@@ -160,6 +175,9 @@ private struct BundledToolActivityRow: View {
             .accessibilityIdentifier("tool.detail.\(activity.id)")
 
             if expanded {
+                if let summary = activity.taskGrantSummary {
+                    DetailBlock(title: "What it did", text: summary)
+                }
                 if !activity.arguments.isEmpty {
                     DetailBlock(
                         title: "Arguments",
@@ -201,6 +219,24 @@ private struct RiskBadge: View {
             .padding(.vertical, 3)
             .background(color.opacity(0.14))
             .clipShape(Capsule())
+    }
+}
+
+/// A `browser.act` approval with a described view gets its own card
+/// (ADR-0129); every other approval keeps the generic one.
+struct ApprovalCardView: View {
+    let approval: ApprovalView
+    var activeTaskGrant: BrowserTaskGrantView? = nil
+    let resolve: (ApprovalDecision, String?, TaskGrantEcho?) -> Void
+
+    var body: some View {
+        if let presentation = BrowserActionApprovalPresentation(approval: approval, activeGrant: activeTaskGrant) {
+            BrowserActionApprovalCard(approval: approval, presentation: presentation, resolve: resolve)
+        } else {
+            ApprovalCard(approval: approval) { decision, reason in
+                resolve(decision, reason, nil)
+            }
+        }
     }
 }
 

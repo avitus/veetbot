@@ -84,6 +84,9 @@
 		10000000000000000000A005 /* DeviceSignInSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A005 /* DeviceSignInSheet.swift */; };
 		10000000000000000000A006 /* DeviceSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A006 /* DeviceSignIn.swift */; };
 		10000000000000000000A007 /* WebsiteAccessActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A007 /* WebsiteAccessActions.swift */; };
+		10000000000000000000A008 /* BrowserTaskGrantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A008 /* BrowserTaskGrantModels.swift */; };
+		10000000000000000000A009 /* BrowserActionApprovalPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A009 /* BrowserActionApprovalPresentation.swift */; };
+		10000000000000000000A00A /* BrowserActionApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000A00A /* BrowserActionApprovalCard.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -178,6 +181,9 @@
 		20000000000000000000A005 /* DeviceSignInSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSignInSheet.swift; sourceTree = "<group>"; };
 		20000000000000000000A006 /* DeviceSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSignIn.swift; sourceTree = "<group>"; };
 		20000000000000000000A007 /* WebsiteAccessActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteAccessActions.swift; sourceTree = "<group>"; };
+		20000000000000000000A008 /* BrowserTaskGrantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTaskGrantModels.swift; sourceTree = "<group>"; };
+		20000000000000000000A009 /* BrowserActionApprovalPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserActionApprovalPresentation.swift; sourceTree = "<group>"; };
+		20000000000000000000A00A /* BrowserActionApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserActionApprovalCard.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -230,6 +236,7 @@
 		400000000000000000000003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000A008 /* BrowserTaskGrantModels.swift */,
 				20000000000000000000A001 /* DeviceSessionHandoff.swift */,
 				2000000000000000000000C1 /* PeopleModels.swift */,
 				200000000000000000000001 /* APIError.swift */,
@@ -289,6 +296,7 @@
 		400000000000000000000007 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000A009 /* BrowserActionApprovalPresentation.swift */,
 				20000000000000000000A006 /* DeviceSignIn.swift */,
 				2000000000000000000000C4 /* PeopleDetailViewModel.swift */,
 				2000000000000000000000C3 /* PeopleViewModel.swift */,
@@ -308,6 +316,7 @@
 		400000000000000000000008 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000A00A /* BrowserActionApprovalCard.swift */,
 				20000000000000000000A007 /* WebsiteAccessActions.swift */,
 				20000000000000000000A005 /* DeviceSignInSheet.swift */,
 				20000000000000000000A004 /* DeviceSignInNavigationPolicy.swift */,
@@ -464,6 +473,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				10000000000000000000A00A /* BrowserActionApprovalCard.swift in Sources */,
+				10000000000000000000A009 /* BrowserActionApprovalPresentation.swift in Sources */,
+				10000000000000000000A008 /* BrowserTaskGrantModels.swift in Sources */,
 				10000000000000000000A007 /* WebsiteAccessActions.swift in Sources */,
 				10000000000000000000A006 /* DeviceSignIn.swift in Sources */,
 				10000000000000000000A005 /* DeviceSignInSheet.swift in Sources */,

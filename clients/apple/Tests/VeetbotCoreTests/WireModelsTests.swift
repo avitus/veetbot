@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 
@@ -417,5 +418,216 @@ import Testing
         )
         #expect(BrowserAuthenticationMode(rawValue: "device") == .device)
         #expect(BrowserAuthenticationMode(rawValue: "remote") == .remote)
+    }
+
+    // MARK: - ADR-0129: the shared task-grant contract (T0-3 fixture)
+
+    /// SHA-256 of `tests/fixtures/api/browser_task_grant_contract.json`. The
+    /// Swift copy must be that file byte for byte; update both together.
+    static let taskGrantContractChecksum =
+        "34b2c62be6a1dd3eb3c67d9f90132122aeae4191b96280587f4df911c5c54bae"
+
+    @Test
+    func testTaskGrantContractFixtureIsTheServersCopy() throws {
+        #expect(Self.sha256(try Self.contractData()) == Self.taskGrantContractChecksum)
+        let repositoryCopy = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/api/browser_task_grant_contract.json")
+        if let canonical = try? Data(contentsOf: repositoryCopy) {
+            #expect(Self.sha256(canonical) == Self.taskGrantContractChecksum)
+        }
+    }
+
+    @Test
+    func testEveryContractApprovalDecodesWithItsTaskGrantFields() throws {
+        let offered = try Self.contractApproval("offered")
+        #expect(offered.decision == nil)
+        #expect(offered.taskGrantID == nil)
+        #expect(offered.taskGrantNotCovered == nil)
+        let offer = try #require(offered.taskGrantOffer)
+        #expect(offer.origin == "https://www.duolingo.com")
+        #expect(offer.pathPrefix == "/lesson")
+        #expect(offer.durationSeconds == 1_800)
+        #expect(offer.maxActions == 200)
+        #expect(offer.maxTypedCharacters == 4_096)
+        #expect(offer.actionKinds == ["click", "type", "select", "check", "press", "scroll"])
+        #expect(offer.summary.hasPrefix("Clicks and typing on www.duolingo.com/lesson"))
+        let click = try #require(offered.browserAction)
+        #expect(click.described)
+        #expect(click.kind == "click")
+        #expect(click.pageOrigin == "https://www.duolingo.com")
+        #expect(click.pagePath == "/lesson/unit-3")
+        #expect(click.pageTitle == "Duolingo")
+        #expect(click.elementRole == "button")
+        #expect(click.elementName == "el gato")
+        #expect(click.elementText == nil)
+        #expect(click.field == "none")
+        #expect(click.consequence == "unknown")
+        #expect(!click.refused)
+
+        let resolved = try Self.contractApproval("resolved_for_task")
+        #expect(resolved.status == .approved)
+        #expect(resolved.decision?.rawValue == "approve_for_task")
+        #expect(resolved.taskGrantID == UUID(uuidString: "ecb511f1-2976-5326-9f73-9748dc26211f"))
+        #expect(resolved.browserAction?.checked == false)
+        #expect(resolved.browserAction?.field == "choice")
+
+        let notCovered = try Self.contractApproval("not_covered")
+        #expect(notCovered.taskGrantOffer == nil)
+        #expect(notCovered.taskGrantNotCovered?.reason == "browser.task_grant.excluded.payment")
+        #expect(
+            notCovered.taskGrantNotCovered?.grantID
+                == UUID(uuidString: "ecb511f1-2976-5326-9f73-9748dc26211f")
+        )
+        #expect(notCovered.browserAction?.elementText == "Pay $12.99")
+        #expect(notCovered.browserAction?.elementContext == "Try Super free")
+        #expect(notCovered.browserAction?.consequence == "payment")
+
+        let typed = try #require(try Self.contractApproval("typed_text_redacted").browserAction)
+        #expect(typed.kind == "type")
+        #expect(typed.text == "[REDACTED]")
+        #expect(typed.field == "password")
+        #expect(typed.refused)
+
+        let undescribed = try #require(try Self.contractApproval("undescribed").browserAction)
+        #expect(!undescribed.described)
+        #expect(undescribed.kind == "click")
+        #expect(undescribed.elementName == nil)
+    }
+
+    @Test
+    func testAnUnknownDecisionDecodesAsNoDecisionInsteadOfFailing() throws {
+        var approval = try Self.contractExample("approval_views", "resolved_for_task", key: "approval")
+        approval["decision"] = "approve_forever"
+        let decoded = try JSONDecoder.server.decode(
+            ApprovalView.self, from: JSONSerialization.data(withJSONObject: approval)
+        )
+        #expect(decoded.decision == nil)
+        #expect(decoded.status == .approved)
+        #expect(ApprovalDecision(rawValue: "approve_for_task")?.rawValue == "approve_for_task")
+    }
+
+    @Test
+    func testAnApprovalFromAnOlderServerStillDecodes() throws {
+        let data = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000003","run_id":"00000000-0000-0000-0000-000000000002","session_id":"00000000-0000-0000-0000-000000000001","status":"PENDING","tool_name":"browser.act","action_summary":"Run browser.act with validated arguments.","arguments":{"ref":"e12","expected_revision":4,"kind":"click"},"risk":"HIGH","policy_reason":"policy.approval_required","expires_at":null,"created_at":"2026-08-12T12:00:00Z","resolved_at":null,"resolved_by":null,"decision":"deny"}"#
+                .utf8
+        )
+        let approval = try JSONDecoder.server.decode(ApprovalView.self, from: data)
+        #expect(approval.decision == .deny)
+        #expect(approval.taskGrantOffer == nil)
+        #expect(approval.taskGrantID == nil)
+        #expect(approval.taskGrantNotCovered == nil)
+        #expect(approval.browserAction == nil)
+    }
+
+    @Test
+    func testEveryContractTaskGrantViewDecodes() throws {
+        let examples = try #require(try Self.contract()["task_grant_views"] as? [[String: Any]])
+        var statuses: Set<String> = []
+        for example in examples {
+            let view = try JSONDecoder.server.decode(
+                BrowserTaskGrantView.self,
+                from: JSONSerialization.data(withJSONObject: try #require(example["view"]))
+            )
+            statuses.insert(view.status.rawValue)
+            #expect(view.pathPrefix == "/lesson")
+            #expect(view.origin == "https://www.duolingo.com")
+            #expect(view.maxActions == 200)
+            #expect(view.maxTypedCharacters == 4_096)
+        }
+        #expect(statuses == ["active", "expired", "exhausted", "revoked", "ended"])
+
+        let active = try JSONDecoder.server.decode(
+            BrowserTaskGrantView.self,
+            from: JSONSerialization.data(
+                withJSONObject: try Self.contractExample("task_grant_views", "active", key: "view")
+            )
+        )
+        #expect(active.status == .active)
+        #expect(active.actionsUsed == 23)
+        #expect(active.typedCharacters == 57)
+        #expect(active.endReason == nil)
+        #expect(active.lastUsedAt != nil)
+        #expect(active.sessionID == UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-000000000001"))
+        #expect(active.approvalID == UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-0000000000a2"))
+        #expect(active.expiresAt.timeIntervalSince(active.createdAt) == 1_800)
+
+        let removed = try JSONDecoder.server.decode(
+            BrowserTaskGrantView.self,
+            from: JSONSerialization.data(
+                withJSONObject: try Self.contractExample("task_grant_views", "scope_removed", key: "view")
+            )
+        )
+        #expect(removed.status == .ended)
+        #expect(removed.endReason == "scope_removed")
+        #expect(removed.endedAt != nil)
+
+        let page = try JSONDecoder.server.decode(
+            Page<BrowserTaskGrantView>.self,
+            from: JSONSerialization.data(withJSONObject: try #require(try Self.contract()["task_grant_page"]))
+        )
+        #expect(page.items.map(\.status) == [.active])
+        #expect(page.nextCursor == "opaque-cursor")
+
+        var paused = try Self.contractExample("task_grant_views", "active", key: "view")
+        paused["status"] = "paused"
+        let unknown = try JSONDecoder.server.decode(
+            BrowserTaskGrantView.self, from: JSONSerialization.data(withJSONObject: paused)
+        )
+        #expect(unknown.status.rawValue == "paused")
+    }
+
+    @Test
+    func testOnlyABrowserActApprovalCarriesTheBrowserView() throws {
+        var other = try Self.contractExample("approval_views", "offered", key: "approval")
+        other["tool_name"] = "sandbox.run_command"
+        let sandbox = try JSONDecoder.server.decode(
+            ApprovalView.self, from: JSONSerialization.data(withJSONObject: other)
+        )
+        #expect(sandbox.browserAction == nil)
+
+        var unversioned = try Self.contractExample("approval_views", "offered", key: "approval")
+        var arguments = try #require(unversioned["arguments"] as? [String: Any])
+        arguments["view"] = "browser.act.v2"
+        unversioned["arguments"] = arguments
+        let newer = try JSONDecoder.server.decode(
+            ApprovalView.self, from: JSONSerialization.data(withJSONObject: unversioned)
+        )
+        #expect(newer.browserAction == nil)
+    }
+
+    static func contractData() throws -> Data {
+        let url = try #require(
+            Bundle.module.url(
+                forResource: "browser_task_grant_contract", withExtension: "json",
+                subdirectory: "Fixtures"
+            )
+        )
+        return try Data(contentsOf: url)
+    }
+
+    static func contract() throws -> [String: Any] {
+        try #require(JSONSerialization.jsonObject(with: contractData()) as? [String: Any])
+    }
+
+    static func contractExample(_ list: String, _ name: String, key: String) throws -> [String: Any] {
+        let examples = try #require(try contract()[list] as? [[String: Any]])
+        let example = try #require(examples.first { $0["name"] as? String == name })
+        return try #require(example[key] as? [String: Any])
+    }
+
+    static func contractApproval(_ name: String) throws -> ApprovalView {
+        try JSONDecoder.server.decode(
+            ApprovalView.self,
+            from: JSONSerialization.data(
+                withJSONObject: try contractExample("approval_views", name, key: "approval")
+            )
+        )
+    }
+
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

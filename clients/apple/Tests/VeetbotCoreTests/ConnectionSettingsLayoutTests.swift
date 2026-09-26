@@ -133,6 +133,22 @@ import Testing
     }
 
     @Test
+    func testTaskPermissionsIsACompactMenuRowAtTheEndOfWebsiteAccess() throws {
+        let section = try websiteAccessSection()
+        let rows = try #require(section.range(of: "ForEach(model.browserProfiles)"))
+        let permissions = try #require(section.range(of: "if !model.activeTaskGrants.isEmpty {"))
+
+        #expect(rows.lowerBound < permissions.lowerBound)
+        let row = section[permissions.lowerBound...]
+        #expect(row.contains("Text(\"Task permissions\")"))
+        #expect(row.contains("Menu {"))
+        #expect(row.contains("await model.stopTaskGrant(grant.id)"))
+        #expect(row.contains(".accessibilityIdentifier(\"website-access.task-permissions\")"))
+        let source = try settingsSource()
+        #expect(source.contains("await model.refreshTaskPermissions()"))
+    }
+
+    @Test
     func testWebsiteAccessAddsNoListSectionAboveAssertedRows() throws {
         let section = try websiteAccessSection()
 

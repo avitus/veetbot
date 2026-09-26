@@ -13,6 +13,7 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
     case foldersUnavailable
     case attachmentsUnavailable
     case modelSettingsUnavailable
+    case taskGrantsUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +31,8 @@ public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
             return "This server does not accept attachments yet."
         case .modelSettingsUnavailable:
             return "This server doesn't support model settings yet."
+        case .taskGrantsUnavailable:
+            return "This server has task permissions turned off."
         }
     }
 }
@@ -204,7 +207,8 @@ public struct VeetbotAPIClient: Sendable {
     public func resolveApproval(
         _ approvalID: UUID,
         decision: ApprovalDecision,
-        reason: String? = nil
+        reason: String? = nil,
+        taskGrant: TaskGrantEcho? = nil
     ) async throws -> ApprovalView {
         // Approval resolution is first-decision-wins. A replay returns the
         // stored conflict, which ChatViewModel reconciles by reloading the item.
@@ -213,11 +217,63 @@ public struct VeetbotAPIClient: Sendable {
                 method: .post,
                 path: "/v1/approvals/\(approvalID.uuidString)/resolve",
                 body: try JSONEncoder.server.encode(
-                    ResolveApprovalBody(decision: decision, reason: reason)
+                    ResolveApprovalBody(decision: decision, reason: reason, taskGrant: taskGrant)
                 ),
                 retryAttempts: 2
             )
         )
+    }
+
+    /// The principal's task grants, newest first (ADR-0129). The routes exist
+    /// only while the server enables task grants.
+    public func listBrowserTaskGrants(
+        sessionID: UUID? = nil,
+        status: BrowserTaskGrantListStatus = .active,
+        limit: Int = 50,
+        cursor: String? = nil
+    ) async throws -> Page<BrowserTaskGrantView> {
+        var query: [URLQueryItem] = []
+        if let sessionID {
+            query.append(URLQueryItem(name: "session_id", value: sessionID.uuidString))
+        }
+        query.append(URLQueryItem(name: "status", value: status.rawValue))
+        query.append(URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))))
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        do {
+            return try await transport.send(
+                TransportRequest(method: .get, path: "/v1/browser-task-grants", queryItems: query)
+            )
+        } catch {
+            throw taskGrantCompatibilityError(from: error) ?? error
+        }
+    }
+
+    public func getBrowserTaskGrant(_ grantID: UUID) async throws -> BrowserTaskGrantView {
+        do {
+            return try await transport.send(
+                TransportRequest(
+                    method: .get, path: "/v1/browser-task-grants/\(grantID.uuidString)"
+                )
+            )
+        } catch {
+            throw taskGrantCompatibilityError(from: error) ?? error
+        }
+    }
+
+    /// Ends a task grant now. Revoking an ended grant returns it unchanged, so
+    /// a retry is safe.
+    public func revokeBrowserTaskGrant(_ grantID: UUID) async throws -> BrowserTaskGrantView {
+        do {
+            return try await transport.send(
+                TransportRequest(
+                    method: .post,
+                    path: "/v1/browser-task-grants/\(grantID.uuidString)/revoke",
+                    retryAttempts: 2
+                )
+            )
+        } catch {
+            throw taskGrantCompatibilityError(from: error) ?? error
+        }
     }
 
     public func registerDevice(
@@ -870,6 +926,20 @@ private func modelSettingsCompatibilityError(from error: Error) -> VeetbotAPICli
     return nil
 }
 
+/// Task grants are default-off (ADR-0129 D20): without the flag the routes
+/// are not mounted and answer the generic 404, or a method miss. A missing
+/// grant or session carries the service's own message and stays an API error.
+private func taskGrantCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 405 {
+        return .taskGrantsUnavailable
+    }
+    if apiError.statusCode == 404, apiError.message == "The requested resource was not found." {
+        return .taskGrantsUnavailable
+    }
+    return nil
+}
+
 private func scheduleBrowsingCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
     guard case HTTPTransportError.api(let apiError) = error else { return nil }
     if apiError.statusCode == 404 || apiError.statusCode == 405 {
@@ -932,9 +1002,17 @@ private struct InputBody: Encodable {
     }
 }
 
+/// `task_grant` is sent exactly with `approve_for_task` and omitted otherwise
+/// (0129-design section 15).
 private struct ResolveApprovalBody: Encodable {
     let decision: ApprovalDecision
     let reason: String?
+    let taskGrant: TaskGrantEcho?
+
+    enum CodingKeys: String, CodingKey {
+        case decision, reason
+        case taskGrant = "task_grant"
+    }
 }
 
 private struct DeviceInvocationResultBody: Encodable {

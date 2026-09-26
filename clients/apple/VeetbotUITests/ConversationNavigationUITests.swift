@@ -851,6 +851,42 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
     }
 
+    /// ADR-0129: a `browser.act` card offers Allow for this task; the owner
+    /// confirms the server's offer text, the resolve repeats the offer's scope
+    /// (the fixture refuses anything else), the banner counts the permission,
+    /// and Stop ends it without a confirmation.
+    func testBrowserApprovalAllowsForThisTaskAfterConfirmation() {
+        app.launchArguments.append("--ui-testing-browser-task-grant")
+        #if os(macOS)
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        #endif
+        app.launch()
+        app.activate()
+        let conversation = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(conversation.waitForExistence(timeout: 10))
+        activate(conversation)
+
+        let allowForTask = app.buttons["approval.allow-for-task"]
+        XCTAssertTrue(allowForTask.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["approval.allow-once"].exists)
+        XCTAssertTrue(app.staticTexts["Text from the website"].exists)
+        activate(allowForTask)
+
+        let summary = app.staticTexts["task-grant.confirm.summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        XCTAssertTrue(summary.label.hasPrefix("Clicks and typing on www.duolingo.com/lesson"))
+        activate(app.buttons["task-grant.confirm.allow"])
+
+        let banner = app.staticTexts["task-grant.banner.text"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(banner.label.hasPrefix("Allowed on www.duolingo.com/lesson · 0 of 200"))
+        XCTAssertTrue(app.staticTexts["Allowed for this task"].waitForExistence(timeout: 5))
+
+        activate(app.buttons["task-grant.banner.stop"])
+        XCTAssertTrue(banner.waitForNonExistence(timeout: 10))
+    }
+
     /// Choosing one person after another in Memory's People collection replaces
     /// the open profile. The directory is longer than the window, as a real one
     /// is: on the Mac, a second click there once left the first profile open.

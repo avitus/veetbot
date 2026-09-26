@@ -27,6 +27,9 @@ enum ConversationNavigationUITestFixture {
     static let hotelSessionID = "00000000-0000-0000-0000-0000000004A3"
     static let sintraSessionID = "00000000-0000-0000-0000-0000000004A4"
     static let proposalMemberIDs = [firstSessionID, flightsSessionID, hotelSessionID, sintraSessionID]
+    /// ADR-0129: the first conversation is bound to a website profile, and
+    /// its run waits on a `browser.act` approval that offers a task permission.
+    static let taskGrantLaunchArgument = "--ui-testing-browser-task-grant"
 
     static func makeAppearanceIfRequested() -> AppearancePreferences? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument),
@@ -58,6 +61,7 @@ enum ConversationNavigationUITestFixture {
         ConversationNavigationUITestURLProtocol.resetEmail()
         ConversationNavigationUITestURLProtocol.resetFolders()
         ConversationNavigationUITestURLProtocol.resetModelSettings()
+        ConversationNavigationUITestURLProtocol.resetTaskGrant()
         #if os(macOS)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
             let availableAfter = Date().addingTimeInterval(
@@ -187,6 +191,19 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             memoryModelChoice = ("balanced", nil)
         }
     }
+    private static let taskGrantLock = NSLock()
+    private static var taskGrantResolved = false
+    private static var taskGrantRevoked = false
+    private static var taskGrantJourney: Bool {
+        ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.taskGrantLaunchArgument)
+    }
+    /// Starts the task-grant journey with the approval pending and no grant.
+    static func resetTaskGrant() {
+        taskGrantLock.withLock {
+            taskGrantResolved = false
+            taskGrantRevoked = false
+        }
+    }
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
         emailLock.lock()
@@ -213,6 +230,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
         let body: String
         let statusCode: Int
+        var holdOpen = false
         switch (request.httpMethod, url.path) {
         case ("GET", "/v1/people") where ProcessInfo.processInfo.arguments.contains(Self.peopleDirectoryArgument):
             statusCode = 200
@@ -574,6 +592,54 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let result = Self.updateModelSettings(requestJSON())
             statusCode = result.0
             body = result.1
+        case ("GET", "/v1/runs/\(Self.taskRunID)") where Self.taskGrantJourney:
+            statusCode = 200
+            body = Self.taskRunJSON
+        case ("GET", "/v1/runs/\(Self.taskRunID)/events") where Self.taskGrantJourney:
+            // The run waits on the approval; the stream stays open, as a
+            // suspended run's does, until the test ends.
+            statusCode = 200
+            holdOpen = true
+            body = """
+                id: 5
+                event: approval.requested
+                data: {"run_id":"\(Self.taskRunID)","approval_id":"\(Self.taskApprovalID)"}
+
+                id: 6
+                event: run.waiting_for_approval
+                data: {"run_id":"\(Self.taskRunID)","approval_id":"\(Self.taskApprovalID)"}
+
+
+                """
+        case ("GET", "/v1/approvals/\(Self.taskApprovalID)") where Self.taskGrantJourney:
+            statusCode = 200
+            body = Self.taskApprovalJSON
+        case ("GET", "/v1/approvals") where Self.taskGrantJourney:
+            statusCode = 200
+            let pending = Self.taskGrantLock.withLock { !Self.taskGrantResolved }
+            body = "{\"items\":[\(pending ? Self.taskApprovalJSON : "")],\"next_cursor\":null}"
+        case ("POST", "/v1/approvals/\(Self.taskApprovalID)/resolve") where Self.taskGrantJourney:
+            // The client must repeat the offer's scope exactly (ADR-0129 D4).
+            let payload = requestJSON()
+            let echo = payload["task_grant"] as? [String: String]
+            if payload["decision"] as? String == "approve_for_task",
+                echo == ["origin": "https://www.duolingo.com", "path_prefix": "/lesson"]
+            {
+                Self.taskGrantLock.withLock { Self.taskGrantResolved = true }
+                statusCode = 200
+                body = Self.taskApprovalJSON
+            } else {
+                statusCode = 400
+                body = #"{"error":{"code":"malformed_request","message":"task_grant must repeat the offer","details":{},"request_id":"ui-test"}}"#
+            }
+        case ("GET", "/v1/browser-task-grants") where Self.taskGrantJourney:
+            statusCode = 200
+            let active = Self.taskGrantLock.withLock { Self.taskGrantResolved && !Self.taskGrantRevoked }
+            body = "{\"items\":[\(active ? Self.taskGrantJSON(status: "active") : "")],\"next_cursor\":null}"
+        case ("POST", "/v1/browser-task-grants/\(Self.taskGrantID)/revoke") where Self.taskGrantJourney:
+            Self.taskGrantLock.withLock { Self.taskGrantRevoked = true }
+            statusCode = 200
+            body = Self.taskGrantJSON(status: "revoked")
         case ("GET", "/v1/browser-profiles"):
             statusCode = 200
             body = #"{"items":[],"next_cursor":null}"#
@@ -608,11 +674,14 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }
+        let keepOpen = holdOpen
         let deliver = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             self.client?.urlProtocol(self, didLoad: Data(body.utf8))
-            self.client?.urlProtocolDidFinishLoading(self)
+            if !keepOpen {
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
         }
         pendingResponse = deliver
         let slowChat = ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-slow-send")
@@ -790,8 +859,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let folder = folderLock.withLock { sessionFolders[id] }
             folderField = ",\"folder_id\":" + (folder.map { "\"\($0)\"" } ?? "null")
         }
+        let bound = taskGrantJourney && id == ConversationNavigationUITestFixture.firstSessionID
+        let metadata = bound ? "{\"browser_profile_id\":\"\(browserProfileID)\"}" : "{}"
+        let activeRun = bound ? "\"\(taskRunID)\"" : "null"
         return """
-            {"id":"\(id)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"\(title)","metadata":{},"created_at":"\(createdAt)","updated_at":"\(updatedAt)","active_run_id":null,"last_run_id":null\(folderField)}
+            {"id":"\(id)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"\(title)","metadata":\(metadata),"created_at":"\(createdAt)","updated_at":"\(updatedAt)","active_run_id":\(activeRun),"last_run_id":\(activeRun)\(folderField)}
             """
     }
 
@@ -922,6 +994,33 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         """
 
     private static let browserProfileID = "00000000-0000-0000-0000-000000000789"
+    private static let taskRunID = "00000000-0000-0000-0000-0000000007A1"
+    private static let taskApprovalID = "00000000-0000-0000-0000-0000000007A2"
+    private static let taskGrantID = "00000000-0000-0000-0000-0000000007A3"
+    private static var taskRunJSON: String {
+        """
+        {"id":"\(taskRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","parent_run_id":null,"status":"WAITING_FOR_APPROVAL","step_count":2,"model_call_count":2,"tool_call_count":1,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":40,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:00:00Z"}
+        """
+    }
+    /// The contract fixture's offered approval (T0-3), with this journey's ids.
+    private static var taskApprovalJSON: String {
+        let resolved = taskGrantLock.withLock { taskGrantResolved }
+        let status = resolved ? "APPROVED" : "PENDING"
+        let decision = resolved ? "\"approve_for_task\"" : "null"
+        let grant = resolved ? "\"\(taskGrantID)\"" : "null"
+        let resolvedAt = resolved ? "\"2026-09-25T18:00:30Z\"" : "null"
+        let resolvedBy = resolved ? "\"owner\"" : "null"
+        return """
+            {"id":"\(taskApprovalID)","run_id":"\(taskRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"\(status)","tool_name":"browser.act","action_summary":"Click a button on www.duolingo.com/lesson/unit-3","arguments":{"view":"browser.act.v1","described":true,"kind":"click","page_origin":"https://www.duolingo.com","page_path":"/lesson/unit-3","page_title":"Duolingo","element_role":"button","element_name":"el gato","field":"none","consequence":"unknown","refused":false},"argument_digests":{},"risk":"HIGH","policy_reason":"policy.matrix.external_write","expires_at":"2099-09-25T18:15:00Z","created_at":"2026-09-25T18:00:00Z","resolved_at":\(resolvedAt),"resolved_by":\(resolvedBy),"decision":\(decision),"task_grant_offer":{"origin":"https://www.duolingo.com","path_prefix":"/lesson","duration_seconds":1800,"max_actions":200,"max_typed_characters":4096,"action_kinds":["click","type","select","check","press","scroll"],"summary":"Clicks and typing on www.duolingo.com/lesson for 30 minutes, up to 200 actions. Passwords and one-time codes are never typed. Veetbot recognises payments, purchases, subscriptions and trials, account and settings changes, messages and posts, deletions, and signing out by the website's labels, and asks again for those. Stop this at any time."},"task_grant_id":\(grant),"task_grant_not_covered":null}
+            """
+    }
+    private static func taskGrantJSON(status: String) -> String {
+        let ended = status == "active" ? "null" : "\"2026-09-25T18:05:00Z\""
+        let reason = status == "active" ? "null" : "\"\(status)\""
+        return """
+            {"id":"\(taskGrantID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","profile_id":"\(browserProfileID)","origin":"https://www.duolingo.com","path_prefix":"/lesson","action_kinds":["click","type","select","check","press","scroll"],"status":"\(status)","end_reason":\(reason),"max_actions":200,"actions_used":0,"max_typed_characters":4096,"typed_characters":0,"created_at":"2099-09-25T18:00:30Z","expires_at":"2099-09-25T18:30:30Z","last_used_at":null,"ended_at":\(ended),"approval_id":"\(taskApprovalID)","approved_by":"owner"}
+            """
+    }
     private static let authenticationID = "00000000-0000-0000-0000-000000000790"
     private static let runID = "00000000-0000-0000-0000-000000000791"
     private static let browserProfileJSON = """

@@ -841,4 +841,70 @@ import Testing
             ]
         )
     }
+
+    // MARK: - ADR-0129 task permissions
+
+    @Test
+    func testTaskGrantEventsAreRecordedFromTheStream() throws {
+        let reducer = RunStateReducer()
+        let grantID = try #require(UUID(uuidString: "ecb511f1-2976-5326-9f73-9748dc26211f"))
+        let created = try WireModelsTests.contract()["events"] as? [String: Any]
+        let createdData = try #require(created?["browser.task_grant.created"] as? [String: Any])
+        let createdFrame = SSEFrame(
+            id: 7, event: "browser.task_grant.created",
+            data: try JSONDecoder.server.decode(
+                [String: JSONValue].self, from: JSONSerialization.data(withJSONObject: createdData)
+            )
+        )
+
+        reducer.reduce(createdFrame)
+        #expect(reducer.lastTaskGrantEvent == .created(grantID: grantID))
+        #expect(RunStateReducer.taskGrantEvent(from: createdFrame) == .created(grantID: grantID))
+
+        reducer.reduce(
+            SSEFrame(
+                id: 8, event: "browser.task_grant.ended",
+                data: [
+                    "grant_id": .string(grantID.uuidString), "reason": .string("revoked"),
+                    "actions_used": .number(23), "typed_characters": .number(57),
+                ]
+            )
+        )
+        #expect(reducer.lastTaskGrantEvent == .ended(grantID: grantID, reason: "revoked"))
+    }
+
+    @Test
+    func testAToolAllowedByATaskGrantRecordsTheKindAndTheView() throws {
+        let reducer = RunStateReducer()
+        let grantID = try #require(UUID(uuidString: "ecb511f1-2976-5326-9f73-9748dc26211f"))
+        let events = try #require(try WireModelsTests.contract()["events"] as? [String: Any])
+        var authorized = try #require(events["tool.call.authorized"] as? [String: Any])
+        authorized["call_id"] = "call-browser-1"
+        authorized["name"] = "browser.act"
+        let frame = SSEFrame(
+            id: 9, event: "tool.call.authorized",
+            data: try JSONDecoder.server.decode(
+                [String: JSONValue].self, from: JSONSerialization.data(withJSONObject: authorized)
+            )
+        )
+
+        reducer.reduce(frame)
+
+        let tool = try #require(reducer.tools.first { $0.callID == "call-browser-1" })
+        #expect(tool.authorizationKind == "browser_task_grant")
+        #expect(tool.authorizationView?["element_name"]?.stringValue == "el gato")
+        #expect(tool.authorizationView?["view"]?.stringValue == "browser.act.v1")
+        #expect(reducer.lastTaskGrantEvent == .used(grantID: grantID, use: 1))
+
+        reducer.reduce(
+            SSEFrame(
+                id: 10, event: "tool.call.authorized",
+                data: ["call_id": .string("call-plain"), "name": .string("sandbox.run_command")]
+            )
+        )
+        let plain = try #require(reducer.tools.first { $0.callID == "call-plain" })
+        #expect(plain.authorizationKind == nil)
+        #expect(plain.authorizationView == nil)
+        #expect(reducer.lastTaskGrantEvent == .used(grantID: grantID, use: 1))
+    }
 }

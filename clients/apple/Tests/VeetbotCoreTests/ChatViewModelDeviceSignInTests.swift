@@ -759,7 +759,7 @@ import Testing
 }
 
 /// A counter the stub's handler can advance from any thread.
-private final class Counter: @unchecked Sendable {
+final class Counter: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
 
@@ -775,12 +775,13 @@ private final class Counter: @unchecked Sendable {
 
 /// Routes every request of one test, recording each after `configure`.
 /// `GET /v1/sessions` answers an empty history; a nil answer is unexpected.
-private final class DeviceFlowServer: @unchecked Sendable {
+final class DeviceFlowServer: @unchecked Sendable {
     struct Entry {
         let route: String
         let body: Data
         let capability: String?
         let authorization: String?
+        let url: String
     }
 
     typealias Handler = @Sendable (URLRequest) throws -> (Int, String)?
@@ -800,6 +801,8 @@ private final class DeviceFlowServer: @unchecked Sendable {
     func clear() { lock.withLock { entries.removeAll() } }
 
     func entry(of route: String) -> Entry? { lock.withLock { entries.first { $0.route == route } } }
+
+    func entryURL(of route: String) -> String? { entry(of: route)?.url }
 
     func json(of route: String) -> [String: Any]? {
         entry(of: route).flatMap { try? JSONSerialization.jsonObject(with: $0.body) as? [String: Any] }
@@ -821,7 +824,8 @@ private final class DeviceFlowServer: @unchecked Sendable {
                 Entry(
                     route: route, body: body,
                     capability: request.value(forHTTPHeaderField: DeviceSignInHandoffClient.capabilityHeader),
-                    authorization: request.value(forHTTPHeaderField: "Authorization")
+                    authorization: request.value(forHTTPHeaderField: "Authorization"),
+                    url: request.url?.absoluteString ?? ""
                 )
             )
         }
@@ -833,7 +837,7 @@ private final class DeviceFlowServer: @unchecked Sendable {
     }
 }
 
-private final class DeviceFlowURLProtocol: URLProtocol {
+final class DeviceFlowURLProtocol: URLProtocol {
     static let serverHeader = "X-Veetbot-Test-Device-Server"
     private static let lock = NSLock()
     nonisolated(unsafe) private static var servers: [String: DeviceFlowServer] = [:]

@@ -96,6 +96,7 @@ public struct ConnectionSettingsView: View {
                 Task {
                     await model.refreshBrowserProfiles()
                     await model.refreshOpenRemoteAuthentication()
+                    await model.refreshTaskPermissions()
                 }
             }
         }
@@ -307,6 +308,33 @@ public struct ConnectionSettingsView: View {
                             ForEach(model.browserProfiles) { profile in
                                 websiteProfileRow(profile)
                             }
+                        }
+                        // ADR-0129: a compact row, not a List section, so no
+                        // row the UI tests assert moves (CS13).
+                        if !model.activeTaskGrants.isEmpty {
+                            HStack(spacing: 10) {
+                                Image(systemName: "checkmark.shield.fill")
+                                    .foregroundColor(AppTheme.turquoise)
+                                Text("Task permissions")
+                                    .appFont(.body, weight: .semibold)
+                                Spacer(minLength: 8)
+                                Menu {
+                                    ForEach(model.activeTaskGrants) { grant in
+                                        Button(role: .destructive) {
+                                            Task { await model.stopTaskGrant(grant.id) }
+                                        } label: {
+                                            Text("Stop: \(grant.bannerText(now: Date()))")
+                                        }
+                                    }
+                                } label: {
+                                    Text("\(model.activeTaskGrants.count) active")
+                                }
+                                .fixedSize()
+                            }
+                            .padding(12)
+                            .background(Color.primary.opacity(0.035))
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                            .accessibilityIdentifier("website-access.task-permissions")
                         }
                     }
                 } else {

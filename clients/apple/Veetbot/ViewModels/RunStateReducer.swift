@@ -44,9 +44,42 @@ public struct ToolActivity: Identifiable, Sendable {
     public var sideEffect: SideEffectClass?
     public var risk: RiskLevel?
     public var approvalID: UUID?
+    /// How the call was allowed without a card, such as
+    /// `browser_task_grant`, and the view of what it did (ADR-0129 G7).
+    public var authorizationKind: String? = nil
+    public var authorizationView: [String: JSONValue]? = nil
     fileprivate var hasKnownName: Bool
 
     public var id: String { callID }
+
+    /// Whether a task permission allowed this call without a card.
+    public var allowedByTaskGrant: Bool { authorizationKind == "browser_task_grant" }
+
+    /// What a call a task permission allowed did, from its recorded view
+    /// (ADR-0129 G7). Website text is quoted as such.
+    public var taskGrantSummary: String? {
+        guard allowedByTaskGrant, let authorizationView,
+            let view = BrowserActionApprovalArguments(arguments: authorizationView), view.described
+        else { return nil }
+        let host = view.pageOrigin.flatMap { URL(string: $0)?.host } ?? ""
+        let page = host + (view.pagePath ?? "")
+        let element = [view.elementRole, view.elementName.map { "“\($0)”" }]
+            .compactMap { $0 }.joined(separator: " ")
+        let target = element.isEmpty ? "on \(page)" : "\(element) on \(page)"
+        switch view.kind {
+        case "click": return "Click \(target)"
+        case "type":
+            let sensitive = ["password", "one_time_code", "payment"].contains(view.field ?? "")
+            let typed = view.text.flatMap { sensitive || $0 == "[REDACTED]" ? nil : $0 }
+            return "Type into \(target): " + (typed.map { "“\($0)”" } ?? "hidden text")
+        case "select": return "Choose “\(view.option ?? "")” in \(target)"
+        case "check": return "Toggle \(target)"
+        case "press": return "Press \(view.key ?? "a key") on \(page)"
+        case "scroll": return "Scroll \(page)"
+        default: return "Act on \(target)"
+        }
+    }
+
     /// Present error-bearing completed calls as failed without rewriting their wire status.
     public var presentationStatus: ToolActivityStatus {
         status == .completed && result?.isError == true
@@ -115,6 +148,14 @@ public enum ConversationActivity: Identifiable, Sendable {
     }
 }
 
+/// What the run stream said about the session's task permission (ADR-0129).
+public enum TaskGrantEvent: Equatable, Sendable {
+    case created(grantID: UUID)
+    case ended(grantID: UUID, reason: String)
+    /// A call the permission allowed; `use` is its running count.
+    case used(grantID: UUID, use: Int?)
+}
+
 public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
     public let questionID: UUID
     public let runID: UUID
@@ -134,6 +175,8 @@ public final class RunStateReducer: ObservableObject {
     @Published public private(set) var activeRunID: UUID?
     @Published public private(set) var reasoningActive = false
     @Published public private(set) var failure: RunFailureView?
+    /// The latest task-permission event the stream carried.
+    @Published public private(set) var lastTaskGrantEvent: TaskGrantEvent?
 
     private var persistedSequences: Set<Int> = []
     private var pendingUserMessageID: String?
@@ -162,7 +205,29 @@ public final class RunStateReducer: ObservableObject {
         return bundleSuccessiveTools(activities)
     }
 
+    /// The task-permission event a frame carries, if any.
+    public static func taskGrantEvent(from frame: SSEFrame) -> TaskGrantEvent? {
+        switch frame.event {
+        case "browser.task_grant.created":
+            return frame.data["grant_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+                .map { .created(grantID: $0) }
+        case "browser.task_grant.ended":
+            guard let grantID = frame.data["grant_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+            else { return nil }
+            return .ended(grantID: grantID, reason: frame.data["reason"]?.stringValue ?? "")
+        case "tool.call.authorized":
+            guard frame.data["authorization_kind"]?.stringValue == "browser_task_grant",
+                let grantID = frame.data["authorization_ref"]?.stringValue
+                    .flatMap(UUID.init(uuidString:))
+            else { return nil }
+            return .used(grantID: grantID, use: frame.data["authorization_use"]?.intValue)
+        default:
+            return nil
+        }
+    }
+
     public func reset() {
+        lastTaskGrantEvent = nil
         timeline = []
         tools = []
         approvals = []
@@ -233,6 +298,7 @@ public final class RunStateReducer: ObservableObject {
         }
         let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:))
         if let runID { activeRunID = runID }
+        if let event = Self.taskGrantEvent(from: frame) { lastTaskGrantEvent = event }
 
         switch frame.event {
         case "session.created":
@@ -453,6 +519,12 @@ public final class RunStateReducer: ObservableObject {
             }
             if let value = frame.data["risk"]?.stringValue {
                 tool.risk = RiskLevel(rawValue: value.lowercased())
+            }
+            if let kind = frame.data["authorization_kind"]?.stringValue {
+                tool.authorizationKind = kind
+            }
+            if let view = frame.data["authorization_view"]?.objectValue {
+                tool.authorizationView = view
             }
             if let result {
                 tool.result = ToolResultView(

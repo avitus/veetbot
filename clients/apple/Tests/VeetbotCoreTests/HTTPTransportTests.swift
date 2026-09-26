@@ -190,6 +190,162 @@ import Testing
         #expect(beginJSON["login_url"] as? String == "https://www.example.org/")
     }
 
+    // MARK: - ADR-0129 task grants (0129-design section 15)
+
+    private static let grantID = UUID(uuidString: "ecb511f1-2976-5326-9f73-9748dc26211f")!
+    private static let taskApprovalID = UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-0000000000a1")!
+    private static let taskSessionID = UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-000000000001")!
+
+    private func contractJSON(_ list: String, _ name: String, key: String) throws -> String {
+        String(
+            decoding: try JSONSerialization.data(
+                withJSONObject: try WireModelsTests.contractExample(list, name, key: key)
+            ),
+            as: UTF8.self
+        )
+    }
+
+    private func stubRecording(
+        _ recorder: WebsiteLoginRequestRecorder,
+        answer: @escaping @Sendable (URLRequest) throws -> (Int, String)
+    ) {
+        StubURLProtocol.handler = { request in
+            recorder.record(request)
+            let (status, body) = try answer(request)
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: status, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+    }
+
+    @Test
+    func resolveBodiesMatchTheTaskGrantContract() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let recorder = WebsiteLoginRequestRecorder()
+        let resolved = try contractJSON("approval_views", "resolved_for_task", key: "approval")
+        stubRecording(recorder) { _ in (200, resolved) }
+        let client = try makeClient(token: "valid")
+        let path = "/v1/approvals/\(Self.taskApprovalID.uuidString)/resolve"
+
+        let approval = try await client.resolveApproval(
+            Self.taskApprovalID, decision: .approveForTask,
+            taskGrant: TaskGrantEcho(origin: "https://www.duolingo.com", pathPrefix: "/lesson")
+        )
+        _ = try await client.resolveApproval(Self.taskApprovalID, decision: .approveOnce)
+        _ = try await client.resolveApproval(
+            Self.taskApprovalID, decision: .deny, reason: "Do not perform this action."
+        )
+
+        #expect(approval.taskGrantID == Self.grantID)
+        let bodies = recorder.matching(method: "POST", path: path).compactMap { entry in
+            entry.body.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        }
+        #expect(bodies.count == 3)
+        let forTask = try WireModelsTests.contractExample("resolve_bodies", "approve_for_task", key: "body")
+        #expect(bodies.first?["decision"] as? String == forTask["decision"] as? String)
+        #expect(
+            (bodies.first?["task_grant"] as? [String: String])
+                == (forTask["task_grant"] as? [String: String])
+        )
+        #expect(bodies.first?["reason"] == nil || bodies.first?["reason"] is NSNull)
+        let once = try WireModelsTests.contractExample("resolve_bodies", "approve_once", key: "body")
+        #expect(NSDictionary(dictionary: bodies[1]) == NSDictionary(dictionary: once))
+        let deny = try WireModelsTests.contractExample("resolve_bodies", "deny", key: "body")
+        #expect(NSDictionary(dictionary: bodies[2]) == NSDictionary(dictionary: deny))
+    }
+
+    @Test
+    func taskGrantRoutesUseTheContractPathsAndQueries() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let recorder = WebsiteLoginRequestRecorder()
+        let pageObject = try #require(try WireModelsTests.contract()["task_grant_page"])
+        let page = String(
+            decoding: try JSONSerialization.data(withJSONObject: pageObject), as: UTF8.self
+        )
+        let active = try contractJSON("task_grant_views", "active", key: "view")
+        let revoked = try contractJSON("task_grant_views", "revoked", key: "view")
+        stubRecording(recorder) { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/browser-task-grants"): return (200, page)
+            case ("GET", "/v1/browser-task-grants/\(Self.grantID.uuidString)"): return (200, active)
+            case ("POST", "/v1/browser-task-grants/\(Self.grantID.uuidString)/revoke"): return (200, revoked)
+            default: return (500, "{}")
+            }
+        }
+        let client = try makeClient(token: "valid")
+
+        let listed = try await client.listBrowserTaskGrants(
+            sessionID: Self.taskSessionID, status: .active, limit: 999, cursor: "next page"
+        )
+        let all = try await client.listBrowserTaskGrants(status: .all, limit: 0)
+        let read = try await client.getBrowserTaskGrant(Self.grantID)
+        let ended = try await client.revokeBrowserTaskGrant(Self.grantID)
+
+        #expect(listed.items.map(\.id) == [Self.grantID])
+        #expect(listed.nextCursor == "opaque-cursor")
+        #expect(all.items.count == 1)
+        #expect(read.status == .active)
+        #expect(ended.status == .revoked)
+        let lists = recorder.matching(method: "GET", path: "/v1/browser-task-grants")
+        #expect(lists.count == 2)
+        let firstList = try #require(lists.first)
+        let lastList = try #require(lists.last)
+        let first = try #require(URLComponents(string: firstList.url)?.queryItems)
+        #expect(Set(first) == [
+            URLQueryItem(name: "session_id", value: Self.taskSessionID.uuidString),
+            URLQueryItem(name: "status", value: "active"),
+            URLQueryItem(name: "limit", value: "200"),
+            URLQueryItem(name: "cursor", value: "next page"),
+        ])
+        let second = try #require(URLComponents(string: lastList.url)?.queryItems)
+        #expect(Set(second) == [
+            URLQueryItem(name: "status", value: "all"),
+            URLQueryItem(name: "limit", value: "1"),
+        ])
+        #expect(recorder.matching(method: "POST", path: "/v1/browser-task-grants/\(Self.grantID.uuidString)/revoke").count == 1)
+    }
+
+    @Test
+    func resolveAndRevokeRetryOnceAfterAServerError() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let recorder = WebsiteLoginRequestRecorder()
+        stubRecording(recorder) { _ in
+            (503, #"{"error":{"code":"internal_error","message":"unavailable","details":{},"request_id":"r"}}"#)
+        }
+        let client = try makeClient(token: "valid")
+
+        await #expect(throws: HTTPTransportError.self) {
+            _ = try await client.resolveApproval(
+                Self.taskApprovalID, decision: .approveForTask,
+                taskGrant: TaskGrantEcho(origin: "https://www.duolingo.com", pathPrefix: "/lesson")
+            )
+        }
+        await #expect(throws: HTTPTransportError.self) {
+            _ = try await client.revokeBrowserTaskGrant(Self.grantID)
+        }
+
+        #expect(recorder.matching(method: "POST", path: "/v1/approvals/\(Self.taskApprovalID.uuidString)/resolve").count == 2)
+        #expect(recorder.matching(method: "POST", path: "/v1/browser-task-grants/\(Self.grantID.uuidString)/revoke").count == 2)
+    }
+
+    @Test
+    func taskGrantListDegradesWhenTheServerHasThemTurnedOff() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let client = try makeClient(token: "valid")
+        stubStatus(
+            404,
+            body: #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"r"}}"#
+        )
+
+        await #expect(throws: VeetbotAPIClientError.taskGrantsUnavailable) {
+            _ = try await client.listBrowserTaskGrants(sessionID: Self.taskSessionID)
+        }
+    }
+
     @Test
     func testKeychainStoreUsesLocalDataProtectionKeychain() {
         let query = KeychainTokenStore.makeBaseQuery(
@@ -1755,6 +1911,7 @@ private final class WebsiteLoginRequestRecorder: @unchecked Sendable {
         let method: String
         let path: String
         let body: Data?
+        var url: String = ""
     }
 
     private let lock = NSLock()
@@ -1774,7 +1931,10 @@ private final class WebsiteLoginRequestRecorder: @unchecked Sendable {
             }
             body = collected
         }
-        let entry = Entry(method: request.httpMethod ?? "", path: request.url?.path ?? "", body: body)
+        let entry = Entry(
+            method: request.httpMethod ?? "", path: request.url?.path ?? "", body: body,
+            url: request.url?.absoluteString ?? ""
+        )
         lock.withLock { entries.append(entry) }
     }
 
