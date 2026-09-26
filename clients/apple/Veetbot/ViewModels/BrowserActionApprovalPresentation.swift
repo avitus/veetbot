@@ -22,8 +22,11 @@ public struct BrowserActionApprovalPresentation: Equatable, Sendable {
     /// Website text: the page title and the dialog around the element.
     public let pageTitle: String?
     public let dialogName: String?
+    /// Website text: the option a `select` chooses (ADR-0129 decision 8).
+    public let option: String?
     public let typedText: TypedText?
-    /// The key, option, scroll distance or new state an action carries.
+    /// Veetbot's words for the key, scroll direction or new state an action
+    /// carries. Never website text: a chosen option is `option`.
     public let detail: String?
     public let consequenceBadge: String?
     public let refusedNotice: String?
@@ -40,6 +43,7 @@ public struct BrowserActionApprovalPresentation: Equatable, Sendable {
         shownOnScreen = view.elementText
         pageTitle = view.pageTitle
         dialogName = view.elementContext
+        option = view.kind == "select" ? view.option : nil
         if let origin = view.pageOrigin, let host = URL(string: origin)?.host {
             pageLocation = host + (view.pagePath ?? "")
         } else {
@@ -57,7 +61,6 @@ public struct BrowserActionApprovalPresentation: Equatable, Sendable {
         }
         switch view.kind {
         case "press": detail = view.key
-        case "select": detail = view.option
         case "scroll": detail = view.scrollDeltaY.map { $0 < 0 ? "Up" : "Down" }
         case "check": detail = view.checked.map { $0 ? "Now on" : "Now off" }
         default: detail = nil

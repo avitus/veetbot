@@ -36,6 +36,10 @@ struct BrowserActionApprovalCard: View {
                         .accessibilityIdentifier("approval.browser.consequence")
                 }
             }
+            // The website names its own options (ADR-0129 decision 8).
+            if let option = presentation.option {
+                labelledQuote("Option from the website", option)
+            }
             if presentation.elementRole != nil || presentation.elementName != nil {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Text from the website")

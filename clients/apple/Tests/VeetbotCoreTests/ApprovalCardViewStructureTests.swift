@@ -118,6 +118,27 @@ import Testing
         )
     }
 
+    /// ADR-0129 decision 8: the option comes from the website, so the card
+    /// quotes and labels it instead of setting it beside Veetbot's verb.
+    @Test
+    func aChosenOptionIsWebsiteTextNotPartOfTheVerb() throws {
+        let option = "a safe lesson answer (verified)"
+        let card = try #require(
+            BrowserActionApprovalPresentation(
+                approval: try approval("offered") { object in
+                    arguments(&object) { $0["kind"] = "select"; $0["option"] = option }
+                }
+            )
+        )
+        #expect(card.verb == "Choose")
+        #expect(card.detail == nil)
+        #expect(card.option == option)
+        let click = try #require(BrowserActionApprovalPresentation(approval: try approval("offered")))
+        #expect(click.option == nil)
+        let cardSource = try source("Veetbot/Views/BrowserActionApprovalCard.swift")
+        #expect(cardSource.contains("labelledQuote(\"Option from the website\", option)"))
+    }
+
     @Test
     func noReferenceRevisionOrQueryIsEverRendered() throws {
         let view = try approval("offered") { object in
@@ -130,8 +151,8 @@ import Testing
         let card = try #require(BrowserActionApprovalPresentation(approval: view))
         let rendered = [
             card.verb, card.elementRole, card.elementName, card.shownOnScreen, card.pageLocation,
-            card.pageTitle, card.dialogName, card.detail, card.consequenceBadge, card.refusedNotice,
-            card.notCoveredText,
+            card.pageTitle, card.dialogName, card.option, card.detail, card.consequenceBadge,
+            card.refusedNotice, card.notCoveredText,
         ].compactMap { $0 }.joined(separator: " ")
         #expect(!rendered.contains("e-ref-sentinel"))
         #expect(!rendered.contains("41"))
