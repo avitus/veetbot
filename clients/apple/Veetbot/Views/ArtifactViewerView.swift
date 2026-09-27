@@ -15,6 +15,7 @@ public struct ArtifactViewerView: View {
     @State private var artifact: LoadedArtifact?
     @State private var errorMessage: String?
     @State private var exporting = false
+    @State private var exportError: String?
 
     public init(model: ChatViewModel, artifactID: UUID) {
         self.model = model
@@ -22,44 +23,7 @@ public struct ArtifactViewerView: View {
     }
 
     public var body: some View {
-        NavigationView {
-            Group {
-                if let artifact {
-                    content(artifact)
-                } else if let errorMessage {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
-                        Text(errorMessage)
-                    }
-                    .padding()
-                } else {
-                    ProgressView("Loading artifact…")
-                }
-            }
-            .navigationTitle(artifact?.metadata.name ?? "Artifact")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Download") { exporting = true }
-                        .disabled(artifact == nil)
-                }
-            }
-        }
-        #if os(macOS)
-        // macOS opens a sheet at its minimum width unless the frame says otherwise;
-        // a file preview needs the reading width the other sheets use.
-        .sheetFrame(
-            minWidth: 320,
-            macMinWidth: 680,
-            idealWidth: 760,
-            maxWidth: .infinity,
-            minHeight: 420,
-            idealHeight: 640,
-            maxHeight: .infinity
-        )
-        #endif
+        presentation
         .task {
             do {
                 artifact = try await model.loadArtifact(artifactID)
@@ -74,9 +38,110 @@ public struct ArtifactViewerView: View {
             defaultFilename: artifact?.metadata.name ?? "artifact"
         ) { result in
             if case .failure(let error) = result {
-                errorMessage = "The artifact could not be exported: \(error.localizedDescription)"
+                exportError = error.localizedDescription
             }
         }
+        .alert("Couldn’t download this file", isPresented: Binding(
+            get: { exportError != nil },
+            set: { if !$0 { exportError = nil } }
+        )) {
+            Button("OK", role: .cancel) { exportError = nil }
+        } message: {
+            Text(exportError ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private var presentation: some View {
+        #if os(macOS)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "doc")
+                    .font(.title2)
+                    .foregroundColor(.secondary)
+                Text(artifact?.metadata.name ?? "Artifact")
+                    .appFont(.headline)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+
+            Divider()
+            preview
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Close") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Download") { exporting = true }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(artifact == nil)
+            }
+            .padding(16)
+        }
+        .sheetFrame(
+            minWidth: 320,
+            macMinWidth: 680,
+            idealWidth: 760,
+            maxWidth: .infinity,
+            minHeight: 420,
+            idealHeight: 640,
+            maxHeight: .infinity
+        )
+        #else
+        NavigationView {
+            preview
+                .navigationTitle(artifact?.metadata.name ?? "Artifact")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { dismiss() }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Download") { exporting = true }
+                            .disabled(artifact == nil)
+                    }
+                }
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if let artifact {
+            content(artifact)
+        } else if let errorMessage {
+            previewPlaceholder(
+                title: "Couldn’t load this file",
+                message: errorMessage,
+                symbol: "exclamationmark.triangle"
+            )
+        } else {
+            ProgressView("Loading artifact…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func previewPlaceholder(
+        title: String, message: String, symbol: String = "doc"
+    ) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 40))
+                .foregroundColor(.secondary)
+            Text(title).appFont(.headline)
+            Text(message)
+                .appFont(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 360)
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -93,7 +158,8 @@ public struct ArtifactViewerView: View {
             }
             .appFont(.caption)
             .foregroundColor(.secondary)
-            .padding(.horizontal)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
 
             if artifact.metadata.mediaType.hasPrefix("text/") {
                 let preview = textPreview(data: artifact.data)
@@ -117,13 +183,16 @@ public struct ArtifactViewerView: View {
             } else if artifact.metadata.mediaType.hasPrefix("image/") {
                 image(data: artifact.data)
             } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "doc.fill").font(.largeTitle)
-                    Text("This artifact can be downloaded for viewing in another app.")
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                unavailablePreview
             }
         }
+    }
+
+    private var unavailablePreview: some View {
+        previewPlaceholder(
+            title: "Preview unavailable",
+            message: "Download this file to open it in an app that supports its format."
+        )
     }
 
     private func textPreview(data: Data) -> (text: String, isTruncated: Bool) {
@@ -144,7 +213,7 @@ public struct ArtifactViewerView: View {
                     .resizable().scaledToFit().padding()
             }
         } else {
-            Text("The image data could not be decoded.")
+            unavailablePreview
         }
         #elseif os(macOS)
         if let thumbnail = ArtifactImageDecoder.thumbnail(from: data) {
@@ -153,7 +222,7 @@ public struct ArtifactViewerView: View {
                     .resizable().scaledToFit().padding()
             }
         } else {
-            Text("The image data could not be decoded.")
+            unavailablePreview
         }
         #endif
     }

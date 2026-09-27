@@ -46,7 +46,11 @@ without the upload route shows each file as not accepted, and an answer to a
 clarifying question stays text: staged files wait for the next message.
 
 A file the agent exports arrives as a button under its answer and opens the
-artifact viewer with a preview and Download (ADR-0122). Every finished message
+artifact viewer with a preview and Download (ADR-0122). On Mac, the viewer uses
+one full-width document area, a filename header, and a fixed Close/Download footer.
+Files without a supported preview, including SVGs the image decoder cannot render,
+show a centered explanation while Download remains available. Export failures
+appear in an alert. Every finished message
 has Copy, which writes formatted text (RTF and HTML, plus plain text without
 Markdown symbols), and Select Text, which opens the message in a native text view
 where any range can be selected.
