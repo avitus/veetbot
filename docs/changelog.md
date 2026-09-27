@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — Device sign-in verification has enough browser storage
+
+- After signing in on the device, "I'm signed in" could fail with "Couldn't
+  check the sign-in" because the two verification browsers filled the service's
+  temporary filesystem and crashed. The temporary mount now permits 512 MiB
+  within the existing 1 GiB container memory limit.
+- Verification page loads use the existing thirty-second overall budget
+  instead of failing early at a separate twenty-second navigation timeout.
+  Session checks and browser isolation are unchanged.
+
 ## 2026-09-26 — The API starts and stops faster on each release
 
 - Every service recompiled its Python code each time it started, because the

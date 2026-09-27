@@ -881,7 +881,7 @@ async def test_page_evidence_reports_origin_path_and_challenge() -> None:
         on_allowed_origin=True, path="/log-in", challenge_visible=True
     )
     assert left.on_allowed_origin is False
-    assert members.loads == [("https://www.duolingo.com/learn", "load", 20_000)]
+    assert members.loads == [("https://www.duolingo.com/learn", "load", 30_000)]
     assert members.idle_waits == [("networkidle", 5_000)]
     assert "learn" not in repr(kept)
 

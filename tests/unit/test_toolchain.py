@@ -326,6 +326,20 @@ def test_deployment_validation_rejects_hard_linked_browser_credential_paths(
     assert production_check._browser_credential_failures(hard_linked)
 
 
+def test_device_sign_in_verification_has_room_for_both_browser_processes() -> None:
+    """The two verification loads exhausted /tmp at 128 MiB and crashed Chromium."""
+    production_compose = yaml.safe_load(
+        (ROOT / "deploy" / "docker-compose.production.yml").read_text(encoding="utf-8")
+    )
+    profile_service = production_compose["services"]["browser-profile-service"]
+
+    # Playwright's Chromium redirects shared-memory files into /tmp. Its two
+    # verification processes need this space within the existing container cap.
+    assert profile_service["tmpfs"] == ["/tmp:rw,noexec,nosuid,nodev,size=512m"]
+    assert profile_service["mem_limit"] == "1g"
+    assert profile_service["read_only"] is True
+
+
 def test_production_compose_preserves_browser_profile_isolation() -> None:
     deploy = ROOT / "deploy"
     production_compose = yaml.safe_load(

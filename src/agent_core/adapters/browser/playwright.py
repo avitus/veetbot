@@ -488,7 +488,10 @@ class PythonPlaywrightRuntime:
         page = self._current_page()
         self._disallowed_navigation = False
         try:
-            await page.goto(url, wait_until="load", timeout=20_000)
+            # The service bounds the whole verification, including browser
+            # startup and both loads, at thirty seconds. Do not cut a valid
+            # load short with a smaller, independent navigation deadline.
+            await page.goto(url, wait_until="load", timeout=30_000)
         except PlaywrightError as exc:
             if self._disallowed_navigation:
                 return BrowserPageEvidence(

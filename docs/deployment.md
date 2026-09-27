@@ -490,6 +490,15 @@ shared environment before the first compatible release.
 
 ### Browser profile service host prerequisites
 
+The browser service mounts `/tmp` as a 512 MiB, memory-backed filesystem with
+`noexec,nosuid,nodev`, inside the unchanged 1 GiB container memory limit.
+Playwright's Chromium places shared-memory files there. Device sign-in verifies
+the supplied session against a second, signed-out browser concurrently; the
+former 128 MiB mount filled during these loads and crashed the browser drivers.
+Keep the two-browser capacity when changing container settings. The service
+still enforces one thirty-second deadline for verification, including browser
+startup, page loading and session capture; a page load has no shorter deadline.
+
 The release script refuses to run until the browser-profile secrets exist,
 even while `BROWSER_PROVIDER=disabled`, because the production compose file
 always starts the hardened profile service and bind-mounts these paths

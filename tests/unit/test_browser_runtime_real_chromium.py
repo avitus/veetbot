@@ -110,6 +110,33 @@ async def test_the_production_runtime_still_refuses_the_harness_certificate() ->
     assert raised.value.reason_code == "tool.browser.provider_unavailable"
 
 
+async def test_verification_accepts_a_document_loading_within_its_thirty_second_budget() -> None:
+    """A slow subresource must not spend an undocumented twenty-second sub-budget."""
+
+    async def members(request: Request) -> Response:
+        del request
+        return html('<h1>Your lessons</h1><img src="/slow.svg" alt="">')
+
+    async def slow_image(request: Request) -> Response:
+        del request
+        await asyncio.sleep(20.5)
+        return Response(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>',
+            media_type="image/svg+xml",
+        )
+
+    async with browsing([Route("/learn", members), Route("/slow.svg", slow_image)]) as (
+        site,
+        runtime,
+    ):
+        async with asyncio.timeout(30):
+            evidence = await runtime.load_page_evidence(site.url("/learn"))
+
+    assert evidence.on_allowed_origin
+    assert evidence.path == "/learn"
+    assert not evidence.challenge_visible
+
+
 async def _exercise_api(request: Request) -> Response:
     del request
     await asyncio.sleep(0.3)
