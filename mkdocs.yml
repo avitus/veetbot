@@ -261,4 +261,5 @@ nav:
       - ADR-0134 Tool scope sets serialize sorted: adr/0134-tool-scope-sets-serialize-sorted.md
       - ADR-0135 OpenAI Chat cache identity and history: adr/0135-openai-chat-cache-identity-and-history.md
       - ADR-0136 Synthesize before the identical-tool-call limit: adr/0136-synthesize-before-the-tool-loop-limit.md
+      - ADR-0137 Stable tool-output admission: adr/0137-stable-tool-output-admission.md
   - Changelog: changelog.md

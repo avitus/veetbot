@@ -452,3 +452,65 @@ async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -
         assert invocation.output_bytes - captured_bytes > 0
         assert "captured first" in results[0].content[0].text  # type: ignore[union-attr]
         assert "TAIL-END" in results[0].content[0].text  # type: ignore[union-attr]
+
+
+async def test_composed_web_run_admits_configured_excerpt_and_preserves_owner_download(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
+    from agent_core.domain.runs import RunStatus
+    from tests.unit.test_web_tools import FakeWebProvider
+
+    overlay = tmp_path / "config" / "tools"
+    overlay.mkdir(parents=True)
+    (overlay / "limits.yaml").write_text("output:\n  inline_maximum_bytes: 2048\n")
+    settings = replace(_settings(tmp_path), config_dir=overlay.parent)
+    page = "# Public page\n" + "Some detail. " * 12_000 + "THE END"
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="web.fetch",
+                        call_id="fetch",
+                        arguments={"url": "https://example.org/page"},
+                    )
+                ]
+            ),
+            ScriptedTurn(text="done"),
+        ]
+    )
+    async with build(
+        settings=settings,
+        sequential_ids=True,
+        script=script,
+        enabled_tools=["web.fetch"],
+        web_fetch_provider_override=FakeWebProvider(page_content=page),
+    ) as composition:
+        run_id = await composition.runs.submit("Read the page")
+        completed = await composition.runs.wait_terminal(run_id)
+        assert completed.status is RunStatus.COMPLETED
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+        invocation = invocations[0]
+        assert invocation.truncated
+        assert invocation.artifact_id is not None
+        assert invocation.result_item is not None
+        rendered = json.dumps(
+            [p.model_dump(mode="json") for p in (invocation.result_item.context_content or [])],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+        assert invocation.result_item.context_content is not None
+        assert invocation.result_item.content[0] == TextPart(text="Provider: fake-web\n\n" + page)
+        assert len(rendered) <= 2048
+        opened = await composition.services.artifacts.open_content(
+            composition.principal, invocation.artifact_id
+        )
+        raw = b"".join([chunk async for chunk in await opened.open()])
+        assert json.loads(raw)[0]["text"] == "Provider: fake-web\n\n" + page
+        other_owner = composition.principal.model_copy(update={"principal_id": "another-owner"})
+        with pytest.raises(NotFoundError):
+            await composition.services.artifacts.open_content(other_owner, invocation.artifact_id)

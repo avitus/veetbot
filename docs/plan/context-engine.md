@@ -500,6 +500,20 @@ the prefix is what turns that property into a guarantee about seeding, and it
 needs no gate of its own: the dispensability gate is the test, and it only tests
 anything because the cut is fixed.
 
+**Legacy tool results get deterministic excerpts before selection.** New results
+carry the tool pipeline's persisted `context_content` excerpt alongside their
+canonical content. Both context builders select that excerpt on a deep copy
+before estimation or provider rendering, and clear the alternate field in the
+request. The checkpoint and event retain canonical content for source receipts. For a carried result
+whose serialized content still exceeds `output.inline_maximum_bytes`, assembly
+uses the same head/tail excerpt algorithm and references its original event.
+It preserves the result's trust and any first artifact reference, and does not
+modify the checkpoint or source event. Selection is independent of later tool
+results; a deployment or operator limit change can change these bytes once.
+The aggregate tool-result budget and its oldest-first yield still apply after
+this normalization, including to active results from a resumed older run.
+`legacy_tool_excerpts` records this normalization in the pressure event.
+
 **At assembly, the retained set is a suffix, never a subset.** History is selected
 as a contiguous tail of the ordered item list — one cut index, everything at or
 after it in, everything before it out. Not a relevance ranking over past turns,
@@ -983,7 +997,10 @@ context.budget.exceeded
 
 `context.budget.pressure` records that a yield step ran and which one; it is the
 signal that tells an operator a deployment is chronically over-subscribed before
-`context.budget.exceeded` tells them it has failed.
+`context.budget.exceeded` tells them it has failed. It is emitted before the
+model request whenever a yield ran, even if the resulting request fits. Its
+`fits` field distinguishes successful yielding from overflow; a fitting request
+with no yields emits no pressure event and needs no compaction.
 
 `context.snapshot.used` binds a run to the opaque recall-trace ID and epoch of
 its nonempty frozen snapshot before provider egress. Registration and snapshot

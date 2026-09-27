@@ -217,3 +217,47 @@ async def test_working_state_event_replays_into_the_next_run() -> None:
     assert state.constraints == ["retain provenance"]
     assert [task.task_id for task in state.tasks] == ["open"]
     assert state.next_action is None
+
+
+@pytest.mark.parametrize("fits", [True, False])
+@pytest.mark.parametrize("yields", [(), ("tool_results",), ("history",), ("recall", "history")])
+async def test_fitting_context_reports_every_yield_without_compaction(
+    yields: tuple[str, ...],
+    fits: bool,
+) -> None:
+    class YieldingBuilder(_ObservedBuilder):
+        async def assemble(self, *args: Any, **kwargs: Any) -> Any:
+            built = await self.inner.assemble(*args, **kwargs)
+            assert built.pressure.fits
+            return built.model_copy(
+                update={
+                    "pressure": built.pressure.model_copy(
+                        update={"yield_steps": yields, "fits": fits, "compactable": False}
+                    )
+                }
+            )
+
+    async with build(
+        settings=_settings(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+        script=FakeModelScript(turns=[ScriptedTurn(text="done")]),
+    ) as composition:
+        executor = composition.executor
+        executor._context_builder = YieldingBuilder(executor._context_builder)
+        run_id = await composition.runs.submit("report any context yields")
+        completed = await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+    assert completed.status is (RunStatus.COMPLETED if fits else RunStatus.FAILED)
+    pressures = [e for e in events if e.event_type == "context.budget.pressure"]
+    assert len(pressures) == bool(yields or not fits)
+    if yields or not fits:
+        assert pressures[0].payload["yield_steps"] == list(yields)
+        assert pressures[0].payload["fits"] is fits
+        pressure_index = events.index(pressures[0])
+        if fits:
+            assert pressure_index < next(
+                i for i, e in enumerate(events) if e.event_type == "model.request.started"
+            )
+    assert not any(e.event_type == "context.compacted" for e in events)
+    assert any(e.event_type == "context.budget.exceeded" for e in events) is (not fits)

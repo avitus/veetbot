@@ -308,6 +308,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         ),
         "tools/limits.yaml": (
             "output.global_maximum_bytes",
+            "output.inline_maximum_bytes",
             "output.hard_ceiling_multiplier",
             "output.excerpt_head_ratio",
             "output.excerpt_tail_ratio",
@@ -458,6 +459,7 @@ RELEASE_ID_PATTERN = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}")
 MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
     {
         "runtime/limits.yaml:model.max_internal_attempts": 1,
+        "tools/limits.yaml:output.inline_maximum_bytes": 1024,
         "tools/limits.yaml:mcp.warmup_connect_timeout_seconds": 1,
         "tools/limits.yaml:mcp.warmup_retry_seconds": 1,
         "tools/limits.yaml:mcp.warmup_attempts": 1,

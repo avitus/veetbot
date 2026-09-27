@@ -201,19 +201,21 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
             context.principal,
         )
         pressure = assembled.pressure
+        if pressure.yield_steps or not pressure.fits:
+            await _append_event(
+                context,
+                "context.budget.pressure",
+                {
+                    "step_number": step.step_number,
+                    "reason": pressure.reason,
+                    "fits": pressure.fits,
+                    "total_tokens": pressure.total_tokens,
+                    "capacity_tokens": pressure.capacity_tokens,
+                    "yield_steps": list(pressure.yield_steps),
+                },
+            )
         if pressure.fits:
             return assembled.request
-        await _append_event(
-            context,
-            "context.budget.pressure",
-            {
-                "step_number": step.step_number,
-                "reason": pressure.reason,
-                "total_tokens": pressure.total_tokens,
-                "capacity_tokens": pressure.capacity_tokens,
-                "yield_steps": list(pressure.yield_steps),
-            },
-        )
         if not pressure.compactable or step.compactions >= context.max_compactions_per_step:
             await _append_event(
                 context,
