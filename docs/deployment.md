@@ -85,7 +85,9 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 7. switches `/opt/veetbot/current`, tags the sandbox image as `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
-   `X-Veetbot-Release: <release-id>`, makes an authenticated request to the
+   `X-Veetbot-Release: <release-id>` within 180 one-second attempts
+   (`VEETBOT_HEALTH_TIMEOUT_SECS`; every unit restarts at once, and the API has
+   needed more than a minute to bind), makes an authenticated request to the
    authoritative session index, and requires every process to run from the
    promoted directory;
 9. retains the five newest valid releases; and
@@ -726,7 +728,11 @@ seven required verification jobs pass:
 Both deployment jobs use CircleCI's shared production serial group in addition
 to the server lock. The release ID is created with the packaged artifact and
 reused by failed-job reruns. A rerun of an already active release verifies it
-without extracting over the live source directory.
+without extracting over the live source directory. So when `deploy-app` fails
+after promotion but `https://api.veetbot.com/health/ready` already returns the
+new `X-Veetbot-Release`, rerun the workflow from failed: `deploy-app` verifies
+without restarting anything, and `deploy-nginx` then ships the documentation,
+website, and proxy configuration that the failure skipped.
 
 The Nginx installer stores the prior Veetbot configuration under
 `/etc/nginx/veetbot-backups`, runs `nginx -t`, and reloads Nginx. Validation or
@@ -1010,16 +1016,28 @@ mv -Tf "$website_next" /opt/veetbot/shared/website/current
 website_next=""
 sudo systemctl restart "${managed_units[@]}"
 health_headers="$(mktemp /opt/veetbot/shared/rollback-health.XXXXXX)"
-curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-  --dump-header "$health_headers" --output /dev/null \
-  http://127.0.0.1:8000/health/ready
-awk -F ': *' -v expected="$target_id" '
-  tolower($1) == "x-veetbot-release" {
-    sub(/\r$/, "", $2)
-    if ($2 == expected) found = 1
-  }
-  END { exit found ? 0 : 1 }
-' "$health_headers"
+ready=0
+for ((attempt = 1; attempt <= 180; attempt++)); do
+  : >"$health_headers"
+  if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+    --dump-header "$health_headers" --output /dev/null \
+    http://127.0.0.1:8000/health/ready \
+    && awk -F ': *' -v expected="$target_id" '
+      tolower($1) == "x-veetbot-release" {
+        sub(/\r$/, "", $2)
+        if ($2 == expected) found = 1
+      }
+      END { exit found ? 0 : 1 }
+    ' "$health_headers"; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if test "$ready" -ne 1; then
+  echo "The restarted API did not report $target_id in 180 attempts" >&2
+  exit 1
+fi
 rm -f -- "$health_headers"
 health_headers=""
 test "$(cat /opt/veetbot/shared/docs/current/release.txt)" = "$target_id"
@@ -1037,7 +1055,9 @@ trap - EXIT
 
 The returned `X-Veetbot-Release` and both public surfaces' `release.txt` files
 must equal `target_id`, and each unit's
-`MainPID` working directory must resolve to `target`. The matching documentation
+`MainPID` working directory must resolve to `target`. The readiness check waits
+up to 180 one-second attempts, the same budget as `release.sh`, because the API
+refuses connections until it has started. The matching documentation
 releases are preconditions, so a missing or mismatched `release.txt` fails before
 any symlink changes. Image validation and tagging also precede all three pointer
 switches. If either public-surface switch, service restart, or readiness check

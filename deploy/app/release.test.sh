@@ -231,6 +231,8 @@ write_stub curl '
   if [[ -n "$headers" ]]; then
     printf "curl health\n" >>"$VEETBOT_TEST_LOG"
     if [[ "${VEETBOT_TEST_FAIL_HEALTH:-0}" == 1 ]]; then exit 1; fi
+    probes="$(grep -cFx "curl health" "$VEETBOT_TEST_LOG")"
+    if (( probes <= ${VEETBOT_TEST_HEALTH_REFUSALS:-0} )); then exit 7; fi
     printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
       "$VEETBOT_TEST_READY_RELEASE" >"$headers"
   else
@@ -317,7 +319,7 @@ run_release() {
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
   VEETBOT_KEEP_RELEASES=2 \
-  VEETBOT_HEALTH_TIMEOUT_SECS=2 \
+  VEETBOT_HEALTH_TIMEOUT_SECS="${VEETBOT_TEST_HEALTH_TIMEOUT_SECS-2}" \
   VEETBOT_CALL_SETTLE_SECS="${VEETBOT_TEST_CALL_SETTLE_SECS:-0}" \
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_AUTH_HEADERS="$TEST_ROOT/session-index-headers" \
@@ -1039,5 +1041,24 @@ EOF
   cp "$guide_permissions" "$prescribed_permissions"
   chmod -R u+rwX "$HOST_ROOT"
 fi
+
+# Every unit restarts at once, and on the two-vCPU production host the API has
+# needed more than a minute to bind. On the default budget, an API that refuses
+# connections for two minutes is still promoted. An empty test budget leaves
+# release.sh on its default.
+slow_start_id="20260810-152303-0000001"
+make_stage "$slow_start_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$slow_start_id" "$PROCESS_ROOT/4242/cwd"
+: >"$LOG_FILE"
+if ! VEETBOT_TEST_HEALTH_TIMEOUT_SECS='' VEETBOT_TEST_HEALTH_REFUSALS=120 \
+  run_release "$slow_start_id" >"$TEST_ROOT/slow-start.out" 2>&1; then
+  tail -n 5 "$TEST_ROOT/slow-start.out" >&2
+  printf 'release failed while the promoted API was still starting\n' >&2
+  exit 1
+fi
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$slow_start_id" ]]
+[[ "$(grep -cFx 'curl health' "$LOG_FILE")" == 121 ]]
+[[ "$(grep -cFx 'sleep 1' "$LOG_FILE")" == 120 ]]
 
 printf 'release script tests passed\n'
