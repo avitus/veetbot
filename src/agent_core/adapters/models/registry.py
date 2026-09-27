@@ -11,7 +11,7 @@ OPENAI_CAPABILITY_CEILING = ModelCapabilities(
     files=True,
     reasoning=ReasoningSupport.NATIVE,
     provider_managed_state=True,
-    explicit_cache_control=False,
+    explicit_cache_control=True,
     structured_output=True,
     streaming=True,
 )

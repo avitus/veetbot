@@ -1047,6 +1047,8 @@ async def test_large_body_analysis_advances_in_bounded_passages_without_repeatin
         assert row.payload["analysis_complete"] is False
         provider = app.executor._model_provider
         assert isinstance(provider, FakeModelProvider)
+        assert provider.requests[0].cache_hints is not None
+        assert provider.requests[0].cache_hints.session_key is not None
         first_request = provider.requests[0].model_dump_json()
         assert "DISTINCT_END_FACT" not in first_request
         second = await app.services.email.submit_task(app.principal, kind="refresh")

@@ -65,6 +65,48 @@ _OPENAI_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 logger = logging.getLogger(__name__)
 
 
+def _cache_positions(request: ModelRequest, resolved: ResolvedModel) -> list[int]:
+    """Translate only supplied boundaries supported by this priced profile."""
+    if (
+        request.cache_hints is None
+        or not resolved.capabilities.explicit_cache_control
+        or resolved.pricing.cache_write_per_mtok is None
+    ):
+        return []
+    positions: list[int] = []
+    for hint in request.cache_hints.breakpoints:
+        if len(positions) >= min(3, resolved.limits.max_cache_breakpoints):
+            break  # implicit caching reserves the fourth write slot
+        index = None
+        if hint.boundary == "after_system":
+            index = next(
+                (
+                    i
+                    for i in range(len(request.conversation) - 1, -1, -1)
+                    if isinstance(request.conversation[i], SystemMessage)
+                ),
+                None,
+            )
+        elif hint.boundary == "after_history_prefix":
+            index = hint.through_input_item
+            if index is None:
+                index = hint.through_item
+            if index is None:
+                index = len(request.conversation) - 1
+        if index is None or not 0 <= index < len(request.conversation):
+            continue
+        # Responses declares prompt_cache_breakpoint on input content blocks only. A
+        # boundary at an assistant reply, reasoning or tool call moves back to the
+        # nearest input item, so the cached prefix stops just before that output.
+        while index >= 0 and not isinstance(
+            request.conversation[index], (SystemMessage, UserMessage, ToolResultItem)
+        ):
+            index -= 1
+        if index >= 0 and index not in positions:
+            positions.append(index)
+    return positions
+
+
 def _wire_tool_name(name: str) -> str:
     if _OPENAI_TOOL_NAME.fullmatch(name):
         return name
@@ -118,7 +160,12 @@ class OpenAIResponsesProvider:
         if self._client is None:
             raise RuntimeError("OpenAI client is unavailable")
         responses = cast(Any, self._client).responses
-        stream = await responses.create(**payload, stream=True)
+        options = dict(payload)
+        cache_options = options.pop("prompt_cache_options", None)
+        if cache_options is not None:
+            # In the body, so every SDK release the project allows can send it.
+            options["extra_body"] = {"prompt_cache_options": cache_options}
+        stream = await responses.create(**options, stream=True)
         async for event in stream:
             yield as_mapping(event)
 
@@ -394,10 +441,11 @@ class OpenAIResponsesProvider:
                     ),
                     resolved_model=_optional_string(response.get("model")),
                     previous_response_id=_optional_string(payload_previous_id(request)),
-                    cache_breakpoints_sent=0,
+                    cache_breakpoints_sent=len(_cache_positions(request, resolved)),
                     cache_breakpoints_dropped=len(
                         [] if request.cache_hints is None else request.cache_hints.breakpoints
-                    ),
+                    )
+                    - len(_cache_positions(request, resolved)),
                 )
                 turn = accumulator.turn(
                     usage=usage,
@@ -449,22 +497,23 @@ class OpenAIResponsesProvider:
         usage = response.get("usage")
         if not isinstance(usage, dict):
             usage = {}
-        input_tokens = max(0, int(usage.get("input_tokens", 0)))
-        cached_input_tokens = min(
-            input_tokens,
-            max(0, int(nested(usage, "input_tokens_details", "cached_tokens", default=0))),
+
+        def count(*path: str) -> int:
+            # The SDK dumps a count it did not receive as None, not as a missing key.
+            return max(0, int(nested(usage, *path, default=0) or 0))
+
+        input_tokens = count("input_tokens")
+        cached_input_tokens = min(input_tokens, count("input_tokens_details", "cached_tokens"))
+        cache_write_input_tokens = min(
+            input_tokens - cached_input_tokens,
+            count("input_tokens_details", "cache_write_tokens"),
         )
-        output_tokens = max(0, int(usage.get("output_tokens", 0)))
-        reasoning_tokens = min(
-            output_tokens,
-            max(
-                0,
-                int(nested(usage, "output_tokens_details", "reasoning_tokens", default=0)),
-            ),
-        )
+        output_tokens = count("output_tokens")
+        reasoning_tokens = min(output_tokens, count("output_tokens_details", "reasoning_tokens"))
         normalized = ModelUsage(
             input_tokens=input_tokens,
             cached_input_tokens=cached_input_tokens,
+            cache_write_input_tokens=cache_write_input_tokens,
             output_tokens=output_tokens,
             reasoning_tokens=reasoning_tokens,
             provider="openai",
@@ -551,6 +600,26 @@ class OpenAIResponsesProvider:
             "store": False,
             "timeout": request.timeout_seconds,
         }
+        if request.cache_hints is not None and request.cache_hints.session_key is not None:
+            payload["prompt_cache_key"] = request.cache_hints.session_key
+        positions = _cache_positions(request, resolved)
+        for index in positions:
+            wire_item = inputs[index]
+            field = "output" if wire_item.get("type") == "function_call_output" else "content"
+            content = wire_item[field]
+            if isinstance(content, str):
+                content = [
+                    {
+                        "type": "output_text"
+                        if wire_item.get("role") == "assistant"
+                        else "input_text",
+                        "text": content,
+                    }
+                ]
+                wire_item[field] = content
+            content[-1]["prompt_cache_breakpoint"] = {"mode": "explicit"}
+        if positions:
+            payload["prompt_cache_options"] = {"mode": "implicit"}
         if request.maximum_output_tokens is not None:
             payload["max_output_tokens"] = min(
                 request.maximum_output_tokens, resolved.limits.max_output_tokens

@@ -319,6 +319,9 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "mcp.request_timeout_seconds",
             "mcp.idle_timeout_seconds",
             "mcp.discovery_reuse_seconds",
+            "mcp.warmup_connect_timeout_seconds",
+            "mcp.warmup_retry_seconds",
+            "mcp.warmup_attempts",
             "mcp.description_maximum_bytes",
             "mcp.schema_maximum_depth",
             "mcp.schema_maximum_bytes",
@@ -455,6 +458,9 @@ RELEASE_ID_PATTERN = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}")
 MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
     {
         "runtime/limits.yaml:model.max_internal_attempts": 1,
+        "tools/limits.yaml:mcp.warmup_connect_timeout_seconds": 1,
+        "tools/limits.yaml:mcp.warmup_retry_seconds": 1,
+        "tools/limits.yaml:mcp.warmup_attempts": 1,
         "runtime/limits.yaml:queue.max_attempts": 1,
         "runtime/limits.yaml:run_defaults.max_steps": 1,
         "runtime/limits.yaml:run_defaults.max_model_calls": 1,

@@ -77,17 +77,14 @@ from agent_core.adapters.mcp.calls import BlandCallProvider
 from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
 from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
-from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
 from agent_core.adapters.memory.in_memory import (
     InMemoryIntegratedEpisodeStore,
     InMemoryKnowledgeStore,
     InMemoryMemoryStore,
     InMemoryTraceStore,
 )
-from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
-from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
 from agent_core.adapters.models.unavailable import MissingCredentialProvider
 from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
@@ -1867,7 +1864,7 @@ async def build_call_worker(
             if ingress
             else BlandCallProvider(
                 owner.tenant_id,
-                SDKMCPClientFactory(),
+                _sdk_mcp_clients(),
                 MappingCredentialResolver(
                     {
                         name: secret.get_secret_value()
@@ -2459,6 +2456,12 @@ async def _compose(
         raise ConfigurationError("MCP discovery reuse must be numeric")
     if discovery_reuse <= 0:
         raise ConfigurationError("MCP discovery reuse must be positive")
+    warmup_limits: dict[str, int] = {}
+    for name in ("warmup_connect_timeout_seconds", "warmup_retry_seconds", "warmup_attempts"):
+        value = mcp_config.get(name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ConfigurationError(f"MCP {name} must be a positive integer")
+        warmup_limits[name] = value
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -3193,9 +3196,7 @@ async def _compose(
                         egress,
                         tenant_id=principal.tenant_id,
                     )
-                mcp_clients = SDKMCPClientFactory(
-                    http_proxy_url=None if mcp_proxy is None else mcp_proxy.url
-                )
+                mcp_clients = _sdk_mcp_clients(None if mcp_proxy is None else mcp_proxy.url)
         call_service = (
             None
             if not settings.call_enabled or settings.call_configuration is None
@@ -3218,6 +3219,9 @@ async def _compose(
             connect_timeout_seconds=float(connect_timeout),
             idle_timeout_seconds=float(idle_timeout),
             discovery_reuse_seconds=float(discovery_reuse),
+            warmup_connect_timeout_seconds=float(warmup_limits["warmup_connect_timeout_seconds"]),
+            warmup_retry_seconds=float(warmup_limits["warmup_retry_seconds"]),
+            warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
         )
         skill_catalogs = SkillCatalogService(
@@ -4395,17 +4399,29 @@ async def _compose(
         raise
 
 
+def _sdk_mcp_clients(http_proxy_url: str | None = None) -> MCPClientFactory:
+    # Every service role starts by importing this module; the MCP SDK loads
+    # only in a role that constructs an MCP client.
+    from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
+
+    return SDKMCPClientFactory(http_proxy_url=http_proxy_url)
+
+
 def _provider_adapters(
     settings: Settings,
     registry: ProviderRegistry,
     attachment_resolver: AttachmentResolver | None = None,
 ) -> dict[str, ModelProvider]:
+    # A provider SDK loads only in a role that constructs model providers, not
+    # in every service that starts by importing this module.
     providers: dict[str, ModelProvider] = {}
     for profile_name, loaded in registry.profiles.items():
         profile = loaded.document
         credential = settings.credentials.get(profile_name)
         api_key = None if credential is None else credential.get_secret_value()
         if profile.adapter == "openai":
+            from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
+
             provider: ModelProvider = (
                 MissingCredentialProvider("openai")
                 if api_key is None
@@ -4416,6 +4432,8 @@ def _provider_adapters(
                 )
             )
         elif profile.adapter == "anthropic":
+            from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
+
             provider = (
                 MissingCredentialProvider("anthropic")
                 if api_key is None

@@ -1173,13 +1173,13 @@ def test_browser_task_overlay_raises_only_bound_chat_limits() -> None:
     }
 
 
-def test_all_190_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_193_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 190
+    assert len(qualified_paths) == 193
     assert {
         "runtime/limits.yaml:browser_task.max_steps",
         "runtime/limits.yaml:browser_task.max_model_calls",

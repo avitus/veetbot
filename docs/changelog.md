@@ -4,6 +4,42 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — Device sign-in verification has enough browser storage
+
+- After signing in on the device, "I'm signed in" could fail with "Couldn't
+  check the sign-in" because the two verification browsers filled the service's
+  temporary filesystem and crashed. The temporary mount now permits 512 MiB
+  within the existing 1 GiB container memory limit.
+- Verification page loads use the existing thirty-second overall budget
+  instead of failing early at a separate twenty-second navigation timeout.
+  Session checks and browser isolation are unchanged.
+
+## 2026-09-26 — The API starts and stops faster on each release
+
+- Every service recompiled its Python code each time it started, because the
+  servers cannot write Python's compiled-code cache. With every service
+  starting at once on a release, the API needed 75 seconds before it answered,
+  and the MCP servers the warm-up starts ran past their handshake limit.
+  Releases now compile the code before they switch over. On the production
+  host that halves the CPU a service or an MCP server spends importing it.
+- A stopping API waited for every open live-update connection and was killed
+  after 30 seconds, which held back the new one. It now allows five seconds,
+  and the apps reconnect on their own.
+- The API starts the MCP warm-up only once it answers requests.
+
+## 2026-09-26 — The MCP warm-up survives a restart
+
+- Yesterday's change reached production but rarely helped. At each restart
+  the API and the worker warmed up at the same moment as all nine services
+  started, and most server handshakes hit the ten-second limit. The API
+  remembered nothing, so creating a chat still started all eight servers and
+  its first message still waited about 12 s.
+- The warm-up now starts one server at a time, waits up to a minute for each
+  handshake, and retries a server that failed every minute, up to five
+  times. Nothing waits on it; a chat's own handshakes keep the ten-second
+  limit. `mcp_discovery_warmup_abandoned` in the journal names any server that
+  never answered.
+
 ## 2026-09-26 — Integration tests erase only a database marked disposable
 
 - Every integration test emptied every application table in whatever database
@@ -19,18 +55,20 @@ title: Changelog
 
 ## 2026-09-26 — Chats keep their plan when Veetbot restarts
 
-- Each restart could quietly rebuild the plan of about half the chats that can
-  use Email feedback or unsubscribe. A rebuild recalls memory again and pays
-  full price for the next prompt. In about one restart in 25, the next message
-  in each of those chats failed with "the frozen context prefix no longer
-  matches its plan".
+- After a restart, a chat that can use Email feedback or unsubscribe could
+  quietly rebuild its plan at its next message, about half the time. A
+  rebuild recalls memory again and pays full price for the next prompt. In
+  about one restart in 25, that next message failed instead, with "the frozen
+  context prefix no longer matches its plan". Few chats continue across a
+  restart: production recorded two plan rotations of any kind in the last 30
+  days.
 - The cause was the order in which the two Email tools list their permissions.
   Each worker process could order them differently, and the order is part of
   the plan's fingerprint. They are now always listed in sorted order.
-- A chat whose plan was fingerprinted in the other order gets a new
-  fingerprint once, at its next message. Its tools, memory and history stay
-  as they are, so an approval it is waiting for still works. ADR-0134
-  records the change.
+- A chat whose plan was fingerprinted in the other order, 85 of the 633 that
+  hold these tools, gets a new fingerprint once, at its next message. Its
+  tools, memory and history stay as they are, so an approval it is waiting
+  for still works. ADR-0134 records the change.
 
 ## 2026-09-26 — New chats answer again
 

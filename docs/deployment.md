@@ -78,14 +78,17 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 1. takes `/opt/veetbot/shared/deploy.lock`;
 2. refuses a timestamped release older than the currently active release;
 3. installs a release-local `.venv` from `uv.lock` using a shared download
-   cache;
+   cache, and compiles the bytecode of its dependencies and of `src`, because
+   the units' read-only filesystem keeps Python from caching it at run time;
 4. builds `agent-core-sandbox:<release-id>`;
 5. ensures the local PostgreSQL service is running;
 6. applies `alembic upgrade head` and runs the production preflight;
 7. switches `/opt/veetbot/current`, tags the sandbox image as `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
-   `X-Veetbot-Release: <release-id>`, makes an authenticated request to the
+   `X-Veetbot-Release: <release-id>` within 180 one-second attempts
+   (`VEETBOT_HEALTH_TIMEOUT_SECS`; every unit restarts at once, and the API has
+   needed more than a minute to bind), makes an authenticated request to the
    authoritative session index, and requires every process to run from the
    promoted directory;
 9. retains the five newest valid releases; and
@@ -93,9 +96,17 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
     `veetbot-browser-profile-service` image tags and prunes build cache that
     no build has used for 48 hours.
 
-Release pruning normally runs as the deployment identity. Older releases may
-contain service-owned Python bytecode from deployments that predate the strict
-read-only systemd filesystem policy. If direct removal of such a release fails,
+Before step 3 compiled bytecode, every service start and every stdio MCP server
+spawn compiled its imports from source. On the idle production host, importing
+the CLI took 17.5 s of CPU from source and 8.4 s from bytecode, and a Gmail
+server's module 4.1 s and 2.2 s. The API gives in-flight requests five seconds
+when it is stopped, then cancels them; clients resume a cut run event stream
+from `Last-Event-ID`.
+
+Release pruning normally runs as the deployment identity, which also owns the
+bytecode each release compiles. Older releases may contain service-owned Python
+bytecode from deployments that predate the strict read-only systemd filesystem
+policy. If direct removal of such a release fails,
 the script retries with the just-built sandbox image as uid 0 in a one-shot,
 network-disabled container. The container has a read-only root filesystem, only
 the releases directory is mounted writable, and its fixed entrypoint removes
@@ -479,6 +490,15 @@ shared environment before the first compatible release.
 
 ### Browser profile service host prerequisites
 
+The browser service mounts `/tmp` as a 512 MiB, memory-backed filesystem with
+`noexec,nosuid,nodev`, inside the unchanged 1 GiB container memory limit.
+Playwright's Chromium places shared-memory files there. Device sign-in verifies
+the supplied session against a second, signed-out browser concurrently; the
+former 128 MiB mount filled during these loads and crashed the browser drivers.
+Keep the two-browser capacity when changing container settings. The service
+still enforces one thirty-second deadline for verification, including browser
+startup, page loading and session capture; a page load has no shorter deadline.
+
 The release script refuses to run until the browser-profile secrets exist,
 even while `BROWSER_PROVIDER=disabled`, because the production compose file
 always starts the hardened profile service and bind-mounts these paths
@@ -809,7 +829,11 @@ seven required verification jobs pass:
 Both deployment jobs use CircleCI's shared production serial group in addition
 to the server lock. The release ID is created with the packaged artifact and
 reused by failed-job reruns. A rerun of an already active release verifies it
-without extracting over the live source directory.
+without extracting over the live source directory. So when `deploy-app` fails
+after promotion but `https://api.veetbot.com/health/ready` already returns the
+new `X-Veetbot-Release`, rerun the workflow from failed: `deploy-app` verifies
+without restarting anything, and `deploy-nginx` then ships the documentation,
+website, and proxy configuration that the failure skipped.
 
 The Nginx installer stores the prior Veetbot configuration under
 `/etc/nginx/veetbot-backups`, runs `nginx -t`, and reloads Nginx. Validation or
@@ -1093,16 +1117,28 @@ mv -Tf "$website_next" /opt/veetbot/shared/website/current
 website_next=""
 sudo systemctl restart "${managed_units[@]}"
 health_headers="$(mktemp /opt/veetbot/shared/rollback-health.XXXXXX)"
-curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-  --dump-header "$health_headers" --output /dev/null \
-  http://127.0.0.1:8000/health/ready
-awk -F ': *' -v expected="$target_id" '
-  tolower($1) == "x-veetbot-release" {
-    sub(/\r$/, "", $2)
-    if ($2 == expected) found = 1
-  }
-  END { exit found ? 0 : 1 }
-' "$health_headers"
+ready=0
+for ((attempt = 1; attempt <= 180; attempt++)); do
+  : >"$health_headers"
+  if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+    --dump-header "$health_headers" --output /dev/null \
+    http://127.0.0.1:8000/health/ready \
+    && awk -F ': *' -v expected="$target_id" '
+      tolower($1) == "x-veetbot-release" {
+        sub(/\r$/, "", $2)
+        if ($2 == expected) found = 1
+      }
+      END { exit found ? 0 : 1 }
+    ' "$health_headers"; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if test "$ready" -ne 1; then
+  echo "The restarted API did not report $target_id in 180 attempts" >&2
+  exit 1
+fi
 rm -f -- "$health_headers"
 health_headers=""
 test "$(cat /opt/veetbot/shared/docs/current/release.txt)" = "$target_id"
@@ -1120,7 +1156,9 @@ trap - EXIT
 
 The returned `X-Veetbot-Release` and both public surfaces' `release.txt` files
 must equal `target_id`, and each unit's
-`MainPID` working directory must resolve to `target`. The matching documentation
+`MainPID` working directory must resolve to `target`. The readiness check waits
+up to 180 one-second attempts, the same budget as `release.sh`, because the API
+refuses connections until it has started. The matching documentation
 releases are preconditions, so a missing or mismatched `release.txt` fails before
 any symlink changes. Image validation and tagging also precede all three pointer
 switches. If either public-surface switch, service restart, or readiness check

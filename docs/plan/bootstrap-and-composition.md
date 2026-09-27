@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **190 configuration knobs** across the specifications;
+The corpus now declares **193 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -309,7 +309,8 @@ Milestone 26 adds the two aggregate automatic-email cost allowances, Milestone 2
 adds the seven thread-folder knobs and, under ADR-0110, the judgment matcher's
 switch and probability floor, Milestone 31 adds the unsubscribe grace
 period, ADR-0123 adds the deferred tool index's item and token caps,
-ADR-0131 adds how long a tenant HTTP server's MCP discovery is reused, and
+ADR-0131 adds how long a tenant HTTP server's MCP discovery is reused and the
+startup warm-up's handshake timeout, retry interval and attempts, and
 ADR-0130 adds the five browser-task run limits. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
@@ -335,13 +336,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-190 falls out.
+193 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-190 tuning knobs in YAML.
+193 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -349,7 +350,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 190 knobs live, at the values the
+    module that owns it. This is where all 193 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -427,7 +428,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 190. Schema versions, profile names, rule identifiers,
+and asserts the total is 193. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -436,11 +437,11 @@ or invariants rather than knobs and are not counted.
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
 | `context/plan.yaml` | 30 |
-| `tools/limits.yaml` | 21 |
+| `tools/limits.yaml` | 24 |
 | `runtime/limits.yaml` | 65 |
 | `memory/profiles.yaml` | 38 |
 | `folders/profiles.yaml` | 9 |
-| **Total** | **190** |
+| **Total** | **193** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -826,11 +827,27 @@ from having its own loop, so it does not build its own graph.
 The worker entry takes the role flag and attaches either the claim loop or
 the sweeps. One binary, three roles, one `build`.
 
+Every production unit, the execution service and the calling ingress
+included, starts through that binary, so each start imports whatever
+`cli/main.py` and `bootstrap.py` import. The composition root therefore
+imports the provider SDK adapters and the MCP SDK client factory where it
+constructs them, not at module scope: a role that never builds a model provider
+or an MCP client, such as the schedule, notification, or execution-service
+role, never loads those SDKs.
+
 The API and the interactive worker are the two entries that pin Chat catalogs,
-so after `build` they start the MCP runtime's discovery warm-up (ADR-0131). It
-runs in the background, discovers each enabled server of the configured tenant
-within the ordinary preparation slots, and closes it. Serving does not wait for
-it, and one-shot CLI commands and tests never start it.
+so they start the MCP runtime's discovery warm-up (ADR-0131): the interactive
+worker after `build`, and the API once its socket accepts connections, so
+readiness never waits on an MCP server and no server startup delays the bind.
+It runs in the background, discovers each enabled server of the configured
+tenant one at a time with a patient handshake timeout, retries the ones that
+fail, and closes each. One-shot CLI commands and tests never start it.
+
+Told to stop, the API gives in-flight requests `API_SHUTDOWN_GRACE_SECONDS`
+(5 s) and then cancels them. A run's event stream never ends by itself, and its
+client resumes from `Last-Event-ID`; without the grace, one open stream held the
+API until systemd killed it at its 30 s stop timeout. The rest of that timeout
+is left to the composition's teardown.
 
 ## Milestone 1: the in-memory tier
 
@@ -1294,7 +1311,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 190 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 193 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1316,7 +1333,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 190 declared knobs into files and leaves ten fields in
+   sorts all 193 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named non-policy points.** Policy-semantic documents reject interpolation,

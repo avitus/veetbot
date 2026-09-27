@@ -154,6 +154,9 @@ write_stub systemctl '
     printf "4242\n"
   fi
 '
+write_stub sleep '
+  printf "sleep %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+'
 write_stub curl '
   printf "curl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
   headers=""
@@ -166,6 +169,8 @@ write_stub curl '
     fi
   done
   [[ -n "$headers" ]]
+  probes="$(grep -c "^curl " "$VEETBOT_TEST_LOG")"
+  if (( probes <= ${VEETBOT_TEST_HEALTH_REFUSALS:-0} )); then exit 7; fi
   printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
     "$VEETBOT_TEST_READY_RELEASE" >"$headers"
 '
@@ -281,8 +286,15 @@ fi
 [[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$PREVIOUS_ID" ]]
 [[ "$(cat "$DOCKER_STATE")" == previous-image-id ]]
 
+# Every unit restarts at once, and on the production host the API has needed
+# more than a minute to bind. The runbook waits for it instead of reverting on
+# the first refused connection.
 : >"$LOG_FILE"
-run_rollback
+if ! VEETBOT_TEST_HEALTH_REFUSALS=120 run_rollback >"$TEST_ROOT/slow-start.out" 2>&1; then
+  tail -n 5 "$TEST_ROOT/slow-start.out" >&2
+  printf 'rollback reverted while the restarted API was still starting\n' >&2
+  exit 1
+fi
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$TARGET_ID" ]]
 [[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$TARGET_ID" ]]
 [[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$TARGET_ID" ]]
@@ -290,5 +302,7 @@ run_rollback
 grep -Fq \
   'systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
+[[ "$(grep -c '^curl ' "$LOG_FILE")" == 121 ]]
+[[ "$(grep -cFx 'sleep 1' "$LOG_FILE")" == 120 ]]
 
 printf 'manual rollback tests passed\n'

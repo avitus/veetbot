@@ -35,7 +35,7 @@ services:
       - ${BROWSER_PROFILE_KEY_DIR}:/run/secrets/browser-profile-keys:ro
       - browser-profile-material:/var/lib/veetbot/browser-profiles
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=128m
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
     networks:
       - browser-profile-private
       - browser-profile-egress

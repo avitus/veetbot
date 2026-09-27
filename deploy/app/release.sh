@@ -19,7 +19,9 @@ KEEP_IMAGES="${VEETBOT_KEEP_IMAGES:-2}"
 LOCK_WAIT_SECS="${VEETBOT_DEPLOY_LOCK_WAIT_SECS:-900}"
 HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
 API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
-HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
+# Every unit restarts at once; on the production host the API has needed more
+# than a minute of contended CPU before it binds.
+HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-180}"
 CALL_SETTLE_SECS="${VEETBOT_CALL_SETTLE_SECS:-90}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
 EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock
@@ -207,7 +209,12 @@ printf 'VEETBOT_RELEASE_ID=%s\nAGENT_EXECUTION_SERVICE_SOCKET=%s\n' \
 
 cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
-uv sync --frozen --no-dev
+# The units mount the release read-only (ProtectSystem=strict), so Python can
+# never cache bytecode at run time. Compile it here, dependencies and the
+# editable project alike, or every service start and every MCP server spawn
+# recompiles its imports from source.
+uv sync --frozen --no-dev --compile-bytecode
+"$STAGE/.venv/bin/python" -m compileall -q src
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
 docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
 

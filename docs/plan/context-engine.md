@@ -260,6 +260,33 @@ an epoch, and a plan built before ADR-0132 keeps the default until a rotation
 for another reason rebuilds it; a `prefix_hash_canonicalized` epoch copies the
 plan and keeps its breakpoints.
 
+### Session identity and OpenAI history lookback
+
+Both builders put `session-` followed by the first 32 hex characters of the
+SHA-256 of canonical `[tenant_id, session_id]` on `CacheHints.session_key`.
+Runs, steps and epochs share it; another tenant or session does not. Excluding
+the epoch preserves reusable material across plan rotations, while the changed
+prompt still invalidates the affected prefix. Separating sessions sacrifices
+cross-session Region A cache reuse for isolation and older-model routing; on
+Astra the key separates accounting rather than improving automatic routing.
+
+For each history marker the builder also supplies `through_input_item`: the
+latest user or tool-result item at or before `through_item`, if one exists.
+OpenAI uses this alternative because its implicit lookback can find an earlier
+input ending after the explicit marker moves on the next run. Anthropic keeps
+the full `through_item` boundary. This is a cache annotation, never a rewrite
+of messages, trust envelopes, context order, or continuation lifetime.
+
+Recall is recomputed per step and its timestamp, corrections and selected facts
+can change; working-state edits and date changes also invalidate what follows
+carried history. The explicit carried-history write protects the prefix before
+those rows. Tool-result truncation or history compaction can change the history
+itself and legitimately lose that hit. Never freeze corrections, suppress
+working-state updates, or exceed budgets to improve caching. Tests compare the
+actual Responses inputs, including the first changed byte at the latest
+reasoning item when the preceding body is stable. See
+[ADR-0135](../adr/0135-openai-chat-cache-identity-and-history.md).
+
 ### The persona row
 
 Milestone 22 adds one Region A row between the agent instructions and the tool
@@ -1020,6 +1047,10 @@ built incrementally afterwards.
 - **Compaction rate and depth** — compactions per thousand turns, and the share
   reaching depth 2. Rising depth means the escalation path (child runs) is not being
   taken when it should be.
+
+Also measure cached input against the preceding call's full input: a stable
+Region A hash alone does not prove history reuse. Provider lookup boundaries,
+legitimate body changes and cache availability affect it.
 
 ## Build sequence (incremental, each gated by evals)
 
