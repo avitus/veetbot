@@ -12,7 +12,9 @@ import UIKit
 /// Copy and Select Text render a reply once, from the transcript's own parser,
 /// as formatted text, as plain text without Markdown symbols, and as semantic
 /// HTML (ADR-0122).
-@Suite struct MarkdownRenditionTests {
+// Match Copy and Select Text: AppKit text rendering runs on the UI actor,
+// including while other suites create text views and round-trip RTF.
+@Suite @MainActor struct MarkdownRenditionTests {
     private func render(_ markdown: String) -> MarkdownRendition {
         MarkdownRenditionBuilder.render(MarkdownContentParser.parse(markdown), bodySize: 13)
     }

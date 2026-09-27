@@ -682,6 +682,7 @@ final class ConversationNavigationUITests: XCTestCase {
     func testASuggestedFolderListsEachConversationItWouldFile() {
         addFolderFixture()
         app.launch()
+        collapseRecentChats()
         let proposal = element("sidebar.proposal.\(Self.proposalID)")
         XCTAssertTrue(proposal.waitForExistence(timeout: 10))
         attachFolderScreenshot("Suggested folder")
