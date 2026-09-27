@@ -185,6 +185,9 @@ class MCPRuntime:
         connect_timeout_seconds: float = 10,
         idle_timeout_seconds: float = 900,
         discovery_reuse_seconds: float = 3600,
+        warmup_connect_timeout_seconds: float = 60,
+        warmup_retry_seconds: float = 60,
+        warmup_attempts: int = 5,
         call_interceptor: CallInterceptor | None = None,
     ) -> None:
         """Share bounded preparation capacity across this runtime's sessions."""
@@ -192,8 +195,19 @@ class MCPRuntime:
             raise ValueError("MCP idle timeout must be finite and positive")
         if not isfinite(discovery_reuse_seconds) or discovery_reuse_seconds <= 0:
             raise ValueError("MCP discovery reuse must be finite and positive")
+        for name, value in (
+            ("warm-up connect timeout", warmup_connect_timeout_seconds),
+            ("warm-up retry interval", warmup_retry_seconds),
+        ):
+            if not isfinite(value) or value <= 0:
+                raise ValueError(f"MCP {name} must be finite and positive")
+        if warmup_attempts < 1:
+            raise ValueError("MCP warm-up needs at least one attempt")
         self._idle_timeout_seconds = idle_timeout_seconds
         self._discovery_reuse_seconds = discovery_reuse_seconds
+        self._warmup_connect_timeout_seconds = warmup_connect_timeout_seconds
+        self._warmup_retry_seconds = warmup_retry_seconds
+        self._warmup_attempts = warmup_attempts
         # The last live discovery of each configured server in this process (ADR-0131).
         self._discoveries: dict[str, _RememberedDiscovery] = {}
         self._warmup_task: asyncio.Task[None] | None = None
@@ -375,8 +389,15 @@ class MCPRuntime:
     def _forget(self, config: MCPServerConfig) -> None:
         self._discoveries.pop(_discovery_key(config), None)
 
-    async def _discover_server(self, config: MCPServerConfig) -> _Discovered | _DisconnectedServer:
+    async def _discover_server(
+        self, config: MCPServerConfig, *, connect_timeout_seconds: float | None = None
+    ) -> _Discovered | _DisconnectedServer:
         """Admit bounded startup work before beginning the handshake deadline."""
+        deadline = (
+            self._connect_timeout_seconds
+            if connect_timeout_seconds is None
+            else connect_timeout_seconds
+        )
         async with AsyncExitStack() as capacity:
             if config.transport is MCPTransport.STDIO:
                 await capacity.enter_async_context(self._stdio_preparation_slots)
@@ -391,7 +412,7 @@ class MCPRuntime:
                     credential,
                     self._environment(config, credential),
                 )
-                async with asyncio.timeout(self._connect_timeout_seconds):
+                async with asyncio.timeout(deadline):
                     entered = await client.__aenter__()
                     discovery = await entered.discover()
             except (MCPUnauthorizedError, PermissionError):
@@ -1211,35 +1232,64 @@ class MCPRuntime:
             logger.warning("mcp_discovery_warmup_failed", extra={"error_class": type(exc).__name__})
 
     async def warm_discovery(self, tenant_ids: tuple[str, ...]) -> None:
-        """Remember every enabled server's catalog so new sessions start none of them."""
+        """Remember every enabled server's catalog so new sessions start none of them.
+
+        Services restart together on a small host, so the warm-up starts one server at a
+        time, waits longer than a chat would, and retries what failed (ADR-0131).
+        """
         for tenant_id in tenant_ids:
             if self._closing:
                 return
             async with self._uow_factory() as uow:
                 configs = await uow.mcp_servers.list_enabled(tenant_id)
             pending = [config for config in configs if self._remembered(config) is None]
-            results = await asyncio.gather(
-                *(self._warm_server(config) for config in pending), return_exceptions=True
-            )
-            for config, result in zip(pending, results, strict=True):
-                if isinstance(result, Exception):
-                    logger.warning(
-                        "mcp_discovery_warmup_failed",
-                        extra={"server_id": config.server_id, "error_class": type(result).__name__},
-                    )
-                elif isinstance(result, BaseException):
-                    raise result
+            for attempt in range(1, self._warmup_attempts + 1):
+                failed: list[MCPServerConfig] = []
+                for config in pending:
+                    if self._closing:
+                        return
+                    if self._remembered(config) is None and not await self._warm_server(
+                        config, attempt
+                    ):
+                        failed.append(config)
+                pending = failed
+                if not pending or attempt == self._warmup_attempts:
+                    break
+                await self._clock.sleep(self._warmup_retry_seconds)
+            for config in pending:
+                logger.warning(
+                    "mcp_discovery_warmup_abandoned",
+                    extra={"server_id": config.server_id, "attempts": self._warmup_attempts},
+                )
 
-    async def _warm_server(self, config: MCPServerConfig) -> None:
-        discovered = await self._discover_server(config)
+    async def _warm_server(self, config: MCPServerConfig, attempt: int) -> bool:
+        try:
+            discovered = await self._discover_server(
+                config, connect_timeout_seconds=self._warmup_connect_timeout_seconds
+            )
+        except Exception as exc:
+            logger.warning(
+                "mcp_discovery_warmup_failed",
+                extra={
+                    "server_id": config.server_id,
+                    "attempt": attempt,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            return False
         if isinstance(discovered, _DisconnectedServer):
             logger.warning(
                 "mcp_discovery_warmup_failed",
-                extra={"server_id": config.server_id, "reason_code": discovered.reason_code},
+                extra={
+                    "server_id": config.server_id,
+                    "attempt": attempt,
+                    "reason_code": discovered.reason_code,
+                },
             )
-            return
+            return False
         if discovered.client is not None:
             await self._close_preparation_client(discovered.client)
+        return True
 
     async def close_session(self, session_id: UUID) -> None:
         """Forget a closed session only after its active calls release their leases."""

@@ -83,7 +83,9 @@ project:
   # full MCP catalog preparation pins the runtime's last live discovery of a
   # server and starts it on first use, the API and interactive worker warm that
   # memory at startup, model attempts and MCP handshakes are timed, and
-  # `agent run latency` reports Chat latency from the event log.
+  # `agent run latency` reports Chat latency from the event log. Amended
+  # 2026-09-26: the warm-up starts one server at a time, waits longer than a
+  # chat would, and retries, because every production warm-up had timed out.
   # ADR-0133 records the owner's non-milestone CI change on 2026-09-26: the
   # reading-lane floor compares each commit's trailer with that commit's own
   # diff, a merge answers only for what it changed itself, and a range whose

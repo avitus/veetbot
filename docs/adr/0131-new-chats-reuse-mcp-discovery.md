@@ -1,6 +1,7 @@
 # ADR-0131: New chats pin MCP catalogs from the last discovery and start servers on first use
 
-- Status: Accepted (authorized by the repository owner, 2026-09-25)
+- Status: Accepted (authorized by the repository owner, 2026-09-25); amended
+  2026-09-26 after production showed the warm-up timing out
 - Date: 2026-09-25
 - Related: Sections 8 and 19 of the engineering plan; ADR-0021, ADR-0103,
   ADR-0104
@@ -87,10 +88,13 @@ avoidable cost the measurement found.
    already states. A server that has become unreachable since it was remembered
    is therefore advertised, and its calls return `tool.server_unreachable`.
 4. **The API and the interactive worker warm the memory when they start.** In
-   the background and within the existing preparation slots, each discovers
-   every enabled server of the configured tenant, then closes it. The warm-up
-   records no session state and emits no event. A failure is logged and leaves
-   the entry empty, so the next session open discovers that server live.
+   the background, each discovers every enabled server of the configured
+   tenant, then closes it. The warm-up records no session state and emits no
+   event. As amended below, it starts one server at a time, waits up to
+   `mcp.warmup_connect_timeout_seconds` (60) for each handshake, and retries
+   the servers that failed every `mcp.warmup_retry_seconds` (60), for at most
+   `mcp.warmup_attempts` (5) rounds. A server that never answers is logged
+   and left to live discovery at the next session open.
 5. **Every handshake is timed.** `mcp.server.connected` also carries the
    transport, which `tool-system.md` already lists, and `duration_ms` for
    connection plus discovery. It is now emitted when a call reconnects, too.
@@ -149,3 +153,37 @@ the reauthentication ladder are unchanged.
   again.
 - **Start typed Email servers lazily as well.** ADR-0104 rejected this because
   it serializes the read and write startups an archive needs.
+
+## Amendment, 2026-09-26: a patient warm-up
+
+The first release of this decision was in production from 2026-09-26 02:54 UTC
+and did not shorten new chats. The one chat created that day, at 19:20 UTC,
+still spent 12.1 s before its first model request. The API had started all
+eight servers live at chat creation, taking 3.9–5.1 s each. The worker pinned
+four servers from memory and started the other four.
+
+The warm-up was the cause. At every restart of the API and the worker that day
+(02:55, 19:06 and 23:37 UTC), `mcp_discovery_warmup_failed` recorded
+`tool.server_unreachable` for most servers. The failures arrived in pairs
+about twelve seconds apart, which is the ten-second handshake limit plus
+cleanup. The API remembered no server at all. At 19:06 the worker's last four
+servers answered only after the API's warm-up had finished. Both processes had
+been starting two Python servers each while all nine services restarted on a
+two-CPU host. Handshakes at chat time, on a quiet host, took 3.9–5.1 s. The
+services restarted four times that day, so almost every new chat was the first
+after a restart and found the memory empty.
+
+Decision 4 therefore changes in three ways. None of them waits in front of a
+user.
+
+- **The warm-up starts one server at a time.** Each process then adds one
+  Python startup to a busy host instead of two, and it leaves a startup slot
+  free for a chat opened meanwhile.
+- **The warm-up has its own handshake timeout.** The ten-second
+  `mcp.connect_timeout_seconds` bounds a user's wait. Nothing waits on the
+  warm-up, so `mcp.warmup_connect_timeout_seconds` is 60.
+- **The warm-up retries.** Servers that failed are tried again every
+  `mcp.warmup_retry_seconds` (60), for at most `mcp.warmup_attempts` (5) rounds.
+  A server still failing after the last round is logged as
+  `mcp_discovery_warmup_abandoned`.
+

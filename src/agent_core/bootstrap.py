@@ -2335,6 +2335,12 @@ async def _compose(
         raise ConfigurationError("MCP discovery reuse must be numeric")
     if discovery_reuse <= 0:
         raise ConfigurationError("MCP discovery reuse must be positive")
+    warmup_limits: dict[str, int] = {}
+    for name in ("warmup_connect_timeout_seconds", "warmup_retry_seconds", "warmup_attempts"):
+        value = mcp_config.get(name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ConfigurationError(f"MCP {name} must be a positive integer")
+        warmup_limits[name] = value
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -3081,6 +3087,9 @@ async def _compose(
             connect_timeout_seconds=float(connect_timeout),
             idle_timeout_seconds=float(idle_timeout),
             discovery_reuse_seconds=float(discovery_reuse),
+            warmup_connect_timeout_seconds=float(warmup_limits["warmup_connect_timeout_seconds"]),
+            warmup_retry_seconds=float(warmup_limits["warmup_retry_seconds"]),
+            warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
         )
         skill_catalogs = SkillCatalogService(

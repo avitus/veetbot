@@ -1,5 +1,6 @@
 """New chats pin remembered MCP discovery and start servers on first use (ADR-0131)."""
 
+import asyncio
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import replace
@@ -38,7 +39,11 @@ class _Factory:
         self.clients: list[ScriptedMCPClient] = []
         self.discovery = _discovery()
         self.failing: set[str] = set()
+        self.failures_left: Counter[str] = Counter()
         self.on_discover: Callable[[], None] | None = None
+        self.discover_seconds = 0.0
+        self.discovering = 0
+        self.most_discovering = 0
 
     def __call__(
         self, config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
@@ -49,11 +54,21 @@ class _Factory:
 
         class Client(ScriptedMCPClient):
             async def discover(self) -> MCPDiscovery:
-                if factory.on_discover is not None:
-                    factory.on_discover()
-                if failing:
-                    raise MCPTransportError
-                return await super().discover()
+                factory.discovering += 1
+                factory.most_discovering = max(factory.most_discovering, factory.discovering)
+                try:
+                    if factory.on_discover is not None:
+                        factory.on_discover()
+                    if factory.discover_seconds:
+                        await asyncio.sleep(factory.discover_seconds)
+                    if failing:
+                        raise MCPTransportError
+                    if factory.failures_left[config.server_id]:
+                        factory.failures_left[config.server_id] -= 1
+                        raise MCPTransportError
+                    return await super().discover()
+                finally:
+                    factory.discovering -= 1
 
             async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPCallResult:
                 return MCPCallResult(content=("ok",))
@@ -268,7 +283,7 @@ async def test_the_warm_up_discovers_each_server_once_and_records_nothing() -> N
         assert len(_payloads(await _events(app, session), "mcp.server.pinned")) == 2
 
 
-async def test_a_failed_warm_up_leaves_the_server_to_live_discovery() -> None:
+async def test_a_warm_up_that_gives_up_leaves_the_server_to_live_discovery() -> None:
     factory = _Factory()
     factory.failing.add("alpha")
     async with build(
@@ -278,13 +293,74 @@ async def test_a_failed_warm_up_leaves_the_server_to_live_discovery() -> None:
         mcp_client_factory=factory,
     ) as app:
         await app.start_mcp_discovery_warmup()
+        # The shipped mcp.warmup_attempts is 5.
+        assert factory.started == Counter({"alpha": 5, "beta": 1})
         factory.failing.clear()
 
         session = await app.sessions.create()
 
-        assert factory.started == Counter({"alpha": 2, "beta": 1})
+        assert factory.started == Counter({"alpha": 6, "beta": 1})
         events = await _events(app, session)
         assert [item["server_id"] for item in _payloads(events, "mcp.server.connected")] == [
             "alpha"
         ]
         assert [item["server_id"] for item in _payloads(events, "mcp.server.pinned")] == ["beta"]
+
+
+async def test_a_warm_up_outlasts_a_startup_slower_than_a_chat_would_wait(
+    tmp_path: Path,
+) -> None:
+    """On 2026-09-26 every warm-up handshake hit the 10 s chat limit while services restarted."""
+    overlay = tmp_path / "tools" / "limits.yaml"
+    overlay.parent.mkdir()
+    overlay.write_text("mcp:\n  connect_timeout_seconds: 1\n")
+    factory = _Factory()
+    factory.discover_seconds = 1.5
+    async with build(
+        settings=replace(_settings(), config_dir=tmp_path),
+        fixed_clock_at=START,
+        mcp_servers=(_server("alpha"),),
+        mcp_client_factory=factory,
+    ) as app:
+        await app.start_mcp_discovery_warmup()
+        assert factory.started == Counter({"alpha": 1})
+        factory.discover_seconds = 0.0
+
+        session = await app.sessions.create()
+
+        assert factory.started == Counter({"alpha": 1})
+        pinned = _payloads(await _events(app, session), "mcp.server.pinned")
+        assert [item["server_id"] for item in pinned] == ["alpha"]
+
+
+async def test_a_warm_up_retries_a_server_until_it_starts() -> None:
+    factory = _Factory()
+    factory.failures_left["alpha"] = 2
+    async with build(
+        settings=_settings(),
+        fixed_clock_at=START,
+        mcp_servers=(_server("alpha"), _server("beta")),
+        mcp_client_factory=factory,
+    ) as app:
+        await app.start_mcp_discovery_warmup()
+        assert factory.started == Counter({"alpha": 3, "beta": 1})
+
+        session = await app.sessions.create()
+
+        assert factory.started == Counter({"alpha": 3, "beta": 1})
+        assert len(_payloads(await _events(app, session), "mcp.server.pinned")) == 2
+
+
+async def test_a_warm_up_starts_one_server_at_a_time() -> None:
+    factory = _Factory()
+    factory.discover_seconds = 0.01
+    async with build(
+        settings=_settings(),
+        fixed_clock_at=START,
+        mcp_servers=(_server("alpha"), _server("beta"), _server("gamma")),
+        mcp_client_factory=factory,
+    ) as app:
+        await app.start_mcp_discovery_warmup()
+
+    assert factory.started == Counter({"alpha": 1, "beta": 1, "gamma": 1})
+    assert factory.most_discovering == 1

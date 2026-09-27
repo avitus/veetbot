@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — The MCP warm-up survives a restart
+
+- Yesterday's change reached production but rarely helped. At each restart
+  the API and the worker warmed up at the same moment as all nine services
+  started, and most server handshakes hit the ten-second limit. The API
+  remembered nothing, so creating a chat still started all eight servers and
+  its first message still waited about 12 s.
+- The warm-up now starts one server at a time, waits up to a minute for each
+  handshake, and retries a server that failed every minute, up to five
+  times. Nothing waits on it; a chat's own handshakes keep the ten-second
+  limit. `mcp_discovery_warmup_abandoned` in the journal names any server that
+  never answered.
+
 ## 2026-09-26 — Integration tests erase only a database marked disposable
 
 - Every integration test emptied every application table in whatever database
