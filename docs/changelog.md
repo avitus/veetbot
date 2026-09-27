@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-27 — Sign-in verification does not wait for every page resource
+
+- "I'm signed in" could still fail with "Couldn't check the sign-in" after
+  the browser storage repair: a pending image or embedded page kept the
+  verifier waiting for the full-page load event until its thirty-second
+  deadline expired. Verification now waits for the document and deferred
+  scripts, then performs the existing bounded network-settling check before
+  comparing the signed-in and signed-out pages and capturing the session.
+- Verification also waits for outstanding application requests to finish, so
+  a delayed session check cannot make an unfinished page appear signed in.
+- Real-browser regressions cover successful handoff and reuse with a pending
+  image or embedded page, rejected credentials, public pages, delayed session
+  decisions, sign-in challenges, redirects, rotated cookies and the overall
+  deadline. The thirty-second deadline is unchanged.
+
 ## 2026-09-26 — Device sign-in verification has enough browser storage
 
 - After signing in on the device, "I'm signed in" could fail with "Couldn't

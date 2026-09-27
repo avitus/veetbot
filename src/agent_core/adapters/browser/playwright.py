@@ -7,8 +7,8 @@ import os
 import re
 import secrets
 import tempfile
-from collections.abc import Awaitable, Callable, Iterable
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Iterable, Iterator
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from typing import Any, Literal, NoReturn, Protocol, cast
 from urllib.parse import urlsplit
@@ -487,34 +487,51 @@ class PythonPlaywrightRuntime:
         """
         page = self._current_page()
         self._disallowed_navigation = False
-        try:
-            # The service bounds the whole verification, including browser
-            # startup and both loads, at thirty seconds. Do not cut a valid
-            # load short with a smaller, independent navigation deadline.
-            await page.goto(url, wait_until="load", timeout=30_000)
-        except PlaywrightError as exc:
-            if self._disallowed_navigation:
-                return BrowserPageEvidence(
-                    on_allowed_origin=False, path="/", challenge_visible=False
-                )
-            raise BrowserProviderError(
-                "tool.browser.provider_unavailable",
-                retryable=True,
-            ) from exc
-        with suppress(PlaywrightError):
-            await page.wait_for_load_state("networkidle", timeout=5_000)
-        try:
-            challenge_visible = await self._sign_in_challenge_visible(page)
-        except PlaywrightError as exc:
-            raise BrowserProviderError(
-                "tool.browser.provider_unavailable",
-                retryable=True,
-            ) from exc
-        return BrowserPageEvidence(
-            on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
-            path=(urlsplit(page.url).path or "/")[:4096],
-            challenge_visible=challenge_visible,
-        )
+        with _verification_requests(page) as wait_for_application:
+            try:
+                # A full "load" also waits for passive images and subframes.
+                # Those must not spend the whole verification budget, but the
+                # document and requests that can decide sign-in must finish.
+                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            except PlaywrightError as exc:
+                if self._disallowed_navigation:
+                    return BrowserPageEvidence(
+                        on_allowed_origin=False, path="/", challenge_visible=False
+                    )
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable",
+                    retryable=True,
+                ) from exc
+            with suppress(PlaywrightError):
+                await page.wait_for_load_state("networkidle", timeout=5_000)
+            try:
+                challenge_visible = await self._sign_in_challenge_visible(page)
+                confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
+                current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
+                if (
+                    _origin_allowed(page.url, self._allowed_origins)
+                    and (
+                        current_path == confirmed_path
+                        or current_path.startswith(confirmed_path + "/")
+                    )
+                    and not challenge_visible
+                ):
+                    # A challenge or a different path is already negative
+                    # evidence. Background work on that page must not hold
+                    # the signed-out control open. A possible positive result
+                    # must still wait for its application's session decision.
+                    await wait_for_application()
+                    challenge_visible = await self._sign_in_challenge_visible(page)
+            except (PlaywrightError, TimeoutError) as exc:
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable",
+                    retryable=True,
+                ) from exc
+            return BrowserPageEvidence(
+                on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
+                path=(urlsplit(page.url).path or "/")[:4096],
+                challenge_visible=challenge_visible,
+            )
 
     async def observe(self) -> BrowserObservation:
         page = self._current_page()
@@ -955,6 +972,59 @@ class PythonPlaywrightRuntime:
             self._main_frame_navigations = 0
             self._document_fence = None
             self._fence_refused_page = False
+
+
+@contextmanager
+def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]]:
+    """Keep application requests in the verification budget, even behind a slow image.
+
+    The five-second generic network wait may expire on passive resources.
+    That is not permission to accept a shell whose session-check fetch is
+    still in flight. Track documents (including frames), scripts, styles and
+    application requests until none remain for 500 ms. The service's overall
+    thirty-second deadline still bounds startup, both loads and capture.
+    """
+    pending: set[Request] = set()
+    changed = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    last_change = loop.time()
+
+    def began(request: Request) -> None:
+        nonlocal last_change
+        if request.resource_type in {"document", "script", "stylesheet", "xhr", "fetch"}:
+            pending.add(request)
+            last_change = loop.time()
+            changed.set()
+
+    def ended(request: Request) -> None:
+        nonlocal last_change
+        if request in pending:
+            pending.remove(request)
+            last_change = loop.time()
+            changed.set()
+
+    async def wait_until_quiet() -> None:
+        # Also bound direct callers; the service's enclosing deadline expires
+        # sooner because it includes browser startup and document navigation.
+        async with asyncio.timeout(30):
+            while True:
+                quiet_left = max(0.0, last_change + 0.5 - loop.time())
+                if not pending and quiet_left == 0:
+                    return
+                changed.clear()
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(changed.wait(), None if pending else quiet_left)
+
+    page.on("request", began)
+    page.on("requestfinished", ended)
+    page.on("requestfailed", ended)
+    try:
+        yield wait_until_quiet
+    finally:
+        page.remove_listener("request", began)
+        page.remove_listener("requestfinished", ended)
+        page.remove_listener("requestfailed", ended)
+        pending.clear()
 
 
 def _request_frame(request: Request) -> Frame | None:

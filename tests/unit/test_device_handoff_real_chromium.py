@@ -8,6 +8,7 @@ served by the shared real-browser harness. The owner's device is played by
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import secrets
 from collections.abc import AsyncIterator
@@ -19,9 +20,10 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 import httpx
+import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from agent_core.browser_control_plane.api import create_profile_service_app
@@ -91,7 +93,9 @@ class ProfileService:
 
 
 @asynccontextmanager
-async def profile_service(site: LocalHttpsSite, root: Path) -> AsyncIterator[ProfileService]:
+async def profile_service(
+    site: LocalHttpsSite, root: Path, *, verification_seconds: float = 30
+) -> AsyncIterator[ProfileService]:
     store = FilesystemEncryptedProfileStore(
         root,
         StaticProfileKeyring(
@@ -109,6 +113,7 @@ async def profile_service(site: LocalHttpsSite, root: Path) -> AsyncIterator[Pro
         now=lambda: datetime.now(UTC),
         process_secret=b"synthetic-real-browser-process-secret",
         ceremony_base_url="https://browser.service.test",
+        verification_seconds=verification_seconds,
     )
     lifecycle = HostedProfileLifecycleService(
         store,
@@ -240,3 +245,207 @@ async def test_a_page_anyone_can_see_does_not_confirm_a_sign_in(tmp_path: Path) 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "session_unconfirmed"
     assert status.status is BrowserAuthenticationStatus.CANCELLED
+
+
+@pytest.mark.parametrize("outcome", ["ready", "signed_out", "challenge", "unconfirmed"])
+@pytest.mark.parametrize("resource", ["image", "embedded_page"])
+async def test_a_pending_image_does_not_prevent_the_site_from_verifying_the_session(
+    tmp_path: Path, outcome: str, resource: str
+) -> None:
+    """The site's document can prove or reject sign-in while a passive resource waits."""
+    require_real_browser()
+    release_image = asyncio.Event()
+    image_requested = asyncio.Event()
+    embedded = (
+        b'<img src="/pending.svg" alt="">'
+        if resource == "image"
+        else b'<iframe src="https://resource.test/frame"></iframe>'
+    )
+
+    class PendingImageSite(MembersSite):
+        async def image(self, request: Request) -> Response:
+            del request
+            image_requested.set()
+            await release_image.wait()
+            return Response("", media_type="image/svg+xml")
+
+        async def home(self, request: Request) -> Response:
+            response = await super().home(request)
+            background = (
+                b"<script>fetch('/pending.svg').catch(() => {});</script>"
+                if outcome != "unconfirmed"
+                else b""
+            )
+            return HTMLResponse(bytes(response.body) + embedded + background)
+
+        async def log_in(self, request: Request) -> Response:
+            response = await super().log_in(request)
+            if request.method == "POST":
+                return response
+            return HTMLResponse(bytes(response.body) + embedded)
+
+        async def learn(self, request: Request) -> Response:
+            response = await super().learn(request)
+            if response.status_code != 200:
+                # A signed-out landing page need not contain a password field
+                # and may keep its own background fetch running indefinitely.
+                return RedirectResponse("/", status_code=302)
+            challenge = (
+                b"<script>setTimeout(() => {const input = document.createElement('input');"
+                b"input.type = 'password'; document.body.appendChild(input);}, 200);</script>"
+                if outcome == "challenge"
+                else b""
+            )
+            return HTMLResponse(bytes(response.body) + challenge + embedded)
+
+        async def frame(self, request: Request) -> Response:
+            del request
+            return HTMLResponse('<h1>Embedded page</h1><img src="/pending.svg" alt="">')
+
+    members = PendingImageSite()
+    members.app.routes.append(Route("/pending.svg", members.image))
+    embedded_app = Starlette(
+        routes=[Route("/frame", members.frame), Route("/pending.svg", members.image)]
+    )
+    async with (
+        local_https_site(members.app) as site,
+        local_https_site(embedded_app, host="resource.test") as resources,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        site.relay.targets.update(resources.relay.targets)
+        cookie = await signed_in_cookie(members)
+        if outcome == "signed_out":
+            cookie = {**cookie, "value": "not-the-session"}
+        try:
+            response, ceremony_id = await hand_off(
+                service,
+                cookie=cookie,
+                confirmed_path="/" if outcome == "unconfirmed" else "/learn",
+            )
+            assert image_requested.is_set()
+            assert not release_image.is_set()
+        finally:
+            release_image.set()
+        status = await service.sessions.authentication_status(ceremony_id, OWNER)
+
+        if outcome == "ready":
+            assert response.status_code == 200, response.text
+            assert status.status is BrowserAuthenticationStatus.READY
+            lease = await service.sessions.acquire(
+                PROFILE_ID,
+                OWNER,
+                PROVIDER_REF,
+                run_id=RUN_ID,
+                attempt_number=1,
+                deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+            )
+            try:
+                lesson = await service.sessions.navigate(lease.lease_ref, site.url("/learn"))
+                assert MEMBERS_TEXT in lesson.text
+                assert lesson.url == site.url("/learn")
+            finally:
+                await service.sessions.close(lease.lease_ref)
+        else:
+            assert response.status_code == 422, response.text
+            code = "session_unconfirmed" if outcome == "unconfirmed" else "session_signed_out"
+            assert response.json()["error"]["code"] == code
+            assert status.status is BrowserAuthenticationStatus.CANCELLED
+
+
+@pytest.mark.parametrize("outcome", ["ready", "challenge", "redirect", "timeout"])
+async def test_verification_waits_for_the_sites_delayed_session_decision(
+    tmp_path: Path, outcome: str
+) -> None:
+    """A rendered application shell is not yet the site's authentication decision."""
+    require_real_browser()
+    checking_session = asyncio.Event()
+    answer_session = asyncio.Event()
+    session_answered = asyncio.Event()
+
+    class DelayedSessionSite(MembersSite):
+        async def learn(self, request: Request) -> Response:
+            response = await super().learn(request)
+            if response.status_code != 200:
+                return response
+            return HTMLResponse(
+                "<main>Checking session</main><script>fetch('/session-check')"
+                ".then(r => r.json()).then(result => {"
+                "if (result.outcome === 'redirect') {location.href = '/log-in';}"
+                "else if (result.outcome === 'challenge') {"
+                "document.body.innerHTML = '<input type=\"password\">';}"
+                "else {document.body.textContent = result.lessons;}"
+                "});</script>"
+            )
+
+        async def check_session(self, request: Request) -> Response:
+            assert request.cookies.get("session") == self.token
+            checking_session.set()
+            await answer_session.wait()
+            # A lease must receive the session produced by the verified page,
+            # including this rotation, rather than the earlier device cookie.
+            self.token = secrets.token_urlsafe(24)
+            response = JSONResponse({"outcome": outcome, "lessons": MEMBERS_TEXT})
+            response.set_cookie(
+                "session", self.token, secure=True, httponly=True, samesite="lax", path="/"
+            )
+            session_answered.set()
+            return response
+
+    members = DelayedSessionSite()
+    members.app.routes.append(Route("/session-check", members.check_session))
+    async with (
+        local_https_site(members.app) as site,
+        profile_service(
+            site, tmp_path / "profiles", verification_seconds=8 if outcome == "timeout" else 30
+        ) as service,
+    ):
+        checking = asyncio.create_task(
+            hand_off(service, cookie=await signed_in_cookie(members), confirmed_path="/learn")
+        )
+        try:
+            async with asyncio.timeout(10):
+                await checking_session.wait()
+            completed, _ = await asyncio.wait({checking}, timeout=6)
+            assert not completed, "The verifier decided before the site's session check finished"
+            if outcome == "timeout":
+                response, ceremony_id = await checking
+        finally:
+            answer_session.set()
+            response, ceremony_id = await checking
+        status = await service.sessions.authentication_status(ceremony_id, OWNER)
+        if outcome == "ready":
+            assert response.status_code == 200, response.text
+            assert status.status is BrowserAuthenticationStatus.READY
+            lease = await service.sessions.acquire(
+                PROFILE_ID,
+                OWNER,
+                PROVIDER_REF,
+                run_id=RUN_ID,
+                attempt_number=1,
+                deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+            )
+            try:
+                lesson = await service.sessions.navigate(lease.lease_ref, site.url("/learn"))
+                assert MEMBERS_TEXT in lesson.text
+                assert lesson.url == site.url("/learn")
+            finally:
+                await service.sessions.close(lease.lease_ref)
+        elif outcome == "timeout":
+            assert response.status_code == 409, response.text
+            assert response.json()["error"]["code"] == "tool.browser.provider_unavailable"
+            assert status.status is BrowserAuthenticationStatus.CANCELLED
+            # Let the site's cancelled request finish rotating its cookie
+            # before the owner signs in again and supplies a fresh session.
+            async with asyncio.timeout(5):
+                await session_answered.wait()
+            retried, retry_id = await hand_off(
+                service, cookie=await signed_in_cookie(members), confirmed_path="/learn"
+            )
+            assert retried.status_code == 200, retried.text
+            assert (
+                await service.sessions.authentication_status(retry_id, OWNER)
+            ).status is BrowserAuthenticationStatus.READY
+        else:
+            assert response.status_code == 422, response.text
+            assert response.json()["error"]["code"] == "session_signed_out"
+            assert status.status is BrowserAuthenticationStatus.CANCELLED
