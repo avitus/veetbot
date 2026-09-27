@@ -54,8 +54,39 @@ import Testing
             historyStore: VolatileSessionHistoryStore()
         )
         // Loading fails without a connection; the sheet still opens at its width.
-        let width = try await presentedSheetWidth { ArtifactViewerView(model: model, artifactID: UUID()) }
+        let width = try await presentedSheetWidth(
+            inspect: { sheet in
+                let content = try #require(sheet.contentView)
+                #expect(!Self.containsSplitView(content),
+                        "A single artifact must occupy the sheet, not a navigation sidebar.")
+            }
+        ) { ArtifactViewerView(model: model, artifactID: UUID()) }
         #expect(width >= Self.openingWidth(ideal: 760, minimum: 680))
+    }
+
+    @Test func svgDownloadUsesTheFullDocumentSheet() async throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ArtifactLayoutURLProtocol.self]
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore(),
+            urlSession: URLSession(configuration: configuration)
+        )
+        #expect(await model.configure(baseURLString: "https://artifact-layout.test", token: "fixture"))
+        _ = try await presentedSheetWidth(inspect: { sheet in
+            let content = try #require(sheet.contentView)
+            // Let the mocked metadata/content request and SwiftUI update finish.
+            try await Task.sleep(nanoseconds: 300_000_000)
+            #expect(!Self.containsSplitView(content))
+            #expect(content.bounds.width >= Self.openingWidth(ideal: 760, minimum: 680))
+
+        }) {
+            ArtifactViewerView(model: model, artifactID: ArtifactLayoutURLProtocol.artifactID)
+        }
     }
 
     @Test func messageTextSheetOpensAtItsIdealWidth() async throws {
@@ -83,6 +114,10 @@ import Testing
         #expect(textView.string == rendition.attributedText.string)
     }
 
+    private static func containsSplitView(_ view: NSView) -> Bool {
+        view is NSSplitView || view.subviews.contains(where: containsSplitView)
+    }
+
     private static func textView(in view: NSView) -> NSTextView? {
         if let textView = view as? NSTextView { return textView }
         for subview in view.subviews {
@@ -106,7 +141,10 @@ import Testing
 
 /// Presents `sheet` from a desktop-sized window and returns the settled sheet width.
 @MainActor
-func presentedSheetWidth<Sheet: View>(@ViewBuilder _ sheet: @escaping () -> Sheet) async throws -> CGFloat {
+func presentedSheetWidth<Sheet: View>(
+    inspect: (NSWindow) async throws -> Void = { _ in },
+    @ViewBuilder _ sheet: @escaping () -> Sheet
+) async throws -> CGFloat {
     _ = NSApplication.shared
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 1000),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
@@ -126,6 +164,33 @@ func presentedSheetWidth<Sheet: View>(@ViewBuilder _ sheet: @escaping () -> Shee
         if let width, width == previous { settled = width; break }
         previous = width
     }
-    return try #require(settled, "the sheet never presented")
+    let width = try #require(settled, "the sheet never presented")
+    try await inspect(#require(window.attachedSheet))
+    return width
+}
+
+private final class ArtifactLayoutURLProtocol: URLProtocol {
+    static let artifactID = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"200\"><rect width=\"400\" height=\"200\" fill=\"teal\"/></svg>"
+        let body: String
+        if url.path.hasSuffix("/content") {
+            body = svg
+        } else if url.path.hasSuffix(Self.artifactID.uuidString) {
+            body = """
+            {"id":"\(Self.artifactID)","session_id":"\(Self.artifactID)","run_id":null,"name":"Quarterly-market-overview-and-portfolio-summary.svg","media_type":"image/svg+xml","sha256":"abc","size_bytes":\(svg.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
+            """
+        } else {
+            body = #"{"items":[],"next_cursor":null}"#
+        }
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 #endif
