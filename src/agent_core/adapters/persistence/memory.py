@@ -20,6 +20,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionState,
     ApprovalResolutionType,
     ApprovalStatus,
+    approval_status_for,
 )
 from agent_core.domain.artifacts import (
     REPLY_ATTACHMENT_ORIGINS,
@@ -961,6 +962,8 @@ class InMemoryApprovalRepository:
         principal: Principal,
         resolution: ApprovalResolutionType,
         reason: str | None,
+        *,
+        task_grant_id: UUID | None = None,
     ) -> ApprovalResolutionOutcome:
         async with self._lock:
             request = self._approvals.get(approval_id)
@@ -975,16 +978,12 @@ class InMemoryApprovalRepository:
                 return ApprovalResolutionOutcome(
                     state=state, approval=request.model_copy(deep=True)
                 )
-            status = (
-                ApprovalStatus.APPROVED
-                if resolution is ApprovalResolutionType.APPROVE_ONCE
-                else ApprovalStatus.DENIED
-            )
             updated = request.model_copy(
                 update={
-                    "status": status,
+                    "status": approval_status_for(resolution),
                     "resolution": resolution,
                     "resolution_reason": reason,
+                    "task_grant_id": task_grant_id,
                     "resolved_at": self._clock.now(),
                     "resolved_by": principal.principal_id,
                 },

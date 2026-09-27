@@ -6,6 +6,8 @@
 - Amends: ADR-0058 decision 15 (run-attempt-scoped leases);
   `docs/plan/browser-automation.md` (hosted session and lease contract)
 - Detailed design: `docs/plan/browser-automation.md`
+- Amended by: ADR-0129 (decision 3: tool.browser.grant_not_applicable is a
+  refusal given before dispatch)
 
 ## Context
 

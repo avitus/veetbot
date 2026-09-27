@@ -36,6 +36,7 @@ from agent_core.adapters.models.common import (
 from agent_core.adapters.models.registry import ANTHROPIC_CAPABILITY_CEILING
 from agent_core.domain.messages import (
     AssistantMessage,
+    CacheTtl,
     ModelAttempt,
     ModelCompletedEvent,
     ModelEvent,
@@ -274,6 +275,7 @@ class AnthropicMessagesProvider:
         input_tokens = 0
         cached_tokens = 0
         cache_write_tokens = 0
+        one_hour_write_tokens = 0
         output_tokens = 0
         stop_reason = StopReason.END_TURN
         response_id: str | None = None
@@ -294,12 +296,19 @@ class AnthropicMessagesProvider:
                 input_tokens = _integer(usage.get("input_tokens"))
                 cached_tokens = _integer(usage.get("cache_read_input_tokens"))
                 cache_write_tokens = _integer(usage.get("cache_creation_input_tokens"))
+                cache_creation = usage.get("cache_creation")
+                one_hour_write_tokens = (
+                    _integer(cache_creation.get("ephemeral_1h_input_tokens"))
+                    if isinstance(cache_creation, dict)
+                    else 0
+                )
                 output_tokens = _integer(usage.get("output_tokens"))
                 provisional = self._usage(
                     resolved,
                     input_tokens=input_tokens,
                     cached_tokens=cached_tokens,
                     cache_write_tokens=cache_write_tokens,
+                    one_hour_write_tokens=one_hour_write_tokens,
                     output_tokens=output_tokens,
                 )
                 yield UsageEvent(
@@ -444,6 +453,7 @@ class AnthropicMessagesProvider:
                     input_tokens=input_tokens,
                     cached_tokens=cached_tokens,
                     cache_write_tokens=cache_write_tokens,
+                    one_hour_write_tokens=one_hour_write_tokens,
                     output_tokens=output_tokens,
                 )
                 yield UsageEvent(
@@ -460,6 +470,7 @@ class AnthropicMessagesProvider:
                     input_tokens=input_tokens,
                     cached_tokens=cached_tokens,
                     cache_write_tokens=cache_write_tokens,
+                    one_hour_write_tokens=one_hour_write_tokens,
                     output_tokens=output_tokens,
                 )
                 metadata = ProviderMetadata(
@@ -518,12 +529,14 @@ class AnthropicMessagesProvider:
         input_tokens: int,
         cached_tokens: int,
         cache_write_tokens: int,
+        one_hour_write_tokens: int,
         output_tokens: int,
     ) -> ModelUsage:
         normalized = ModelUsage(
             input_tokens=input_tokens + cached_tokens + cache_write_tokens,
             cached_input_tokens=cached_tokens,
             cache_write_input_tokens=cache_write_tokens,
+            cache_write_1h_input_tokens=one_hour_write_tokens,
             output_tokens=output_tokens,
             reasoning_tokens=None,
             provider="anthropic",
@@ -547,6 +560,9 @@ class AnthropicMessagesProvider:
         system: list[dict[str, Any]] = []
         messages: list[dict[str, Any]] = []
         tools: list[dict[str, Any]] = []
+        # The last message block at or before each conversation item: where a
+        # history breakpoint naming that item goes. Thinking blocks take none.
+        item_blocks: dict[int, dict[str, Any]] = {}
         for tool in request.tools:
             definition = tool_definition(tool, anthropic=True)
             definition["name"] = canonical_to_wire[tool.name]
@@ -595,16 +611,44 @@ class AnthropicMessagesProvider:
                 if item.provider != "anthropic":
                     raise ModelStreamError("reasoning continuation belongs to another provider")
                 _append_message(messages, "assistant", item.provider_payload)
+            if not isinstance(item, (SystemMessage, ProviderReasoningItem)) and messages:
+                item_blocks[item_index] = messages[-1]["content"][-1]
 
-        kept_boundaries = {hint.boundary for hint in hints[:sent]}
-        if "after_system" in kept_boundaries and system:
-            system[-1]["cache_control"] = {"type": "ephemeral"}
-        if "after_tools" in kept_boundaries and tools:
-            tools[-1]["cache_control"] = {"type": "ephemeral"}
-        if "after_history_prefix" in kept_boundaries and messages:
-            content = messages[-1]["content"]
-            if isinstance(content, list) and content:
-                content[-1]["cache_control"] = {"type": "ephemeral"}
+        # The one-hour TTL is sent only when the registry prices its write (ADR-0132).
+        one_hour_priced = resolved.pricing.cache_write_1h_per_mtok is not None
+        placements: list[tuple[dict[str, Any], CacheTtl]] = []
+        for hint in hints[:sent]:
+            if hint.boundary == "after_tools":
+                block = tools[-1] if tools else None
+            elif hint.boundary == "after_system":
+                block = system[-1] if system else None
+            elif hint.boundary == "after_history_prefix":
+                block = _history_block(hint.through_item, item_blocks, messages)
+            else:
+                block = None
+            if block is not None:
+                placements.append(
+                    (block, "1h" if hint.ttl == "1h" and one_hour_priced else "default")
+                )
+        # The Messages API renders tools, then system, then messages, and rejects a
+        # shorter-lived entry ahead of a longer-lived one. Each breakpoint caches a
+        # prefix of every later one, so walking back from the end, a breakpoint
+        # takes the longest TTL placed at or after it; none is ever shortened.
+        wire_blocks = [
+            *tools,
+            *system,
+            *(block for message in messages for block in message["content"]),
+        ]
+        position = {id(block): index for index, block in enumerate(wire_blocks)}
+        longest: CacheTtl = "default"
+        for block, ttl in sorted(
+            placements, key=lambda placed: position[id(placed[0])], reverse=True
+        ):
+            if ttl == "1h":
+                longest = "1h"
+            block["cache_control"] = (
+                {"type": "ephemeral", "ttl": "1h"} if longest == "1h" else {"type": "ephemeral"}
+            )
 
         payload: dict[str, Any] = {
             "model": resolved.model,
@@ -626,6 +670,23 @@ class AnthropicMessagesProvider:
     async def close(self) -> None:
         if self._owns_client and self._client is not None:
             await cast(Any, self._client).close()
+
+
+def _history_block(
+    through_item: int | None,
+    item_blocks: dict[int, dict[str, Any]],
+    messages: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The block a history breakpoint marks: the named item's, else the final one."""
+
+    if through_item is None:
+        if not messages or not messages[-1]["content"]:
+            return None
+        return cast(dict[str, Any], messages[-1]["content"][-1])
+    return next(
+        (item_blocks[index] for index in range(through_item, -1, -1) if index in item_blocks),
+        None,
+    )
 
 
 def _append_message(messages: list[dict[str, Any]], role: str, block: dict[str, Any]) -> None:

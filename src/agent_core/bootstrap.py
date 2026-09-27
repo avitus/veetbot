@@ -41,6 +41,7 @@ from agent_core.adapters.browser.hosted_provider import (
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileRepository
+from agent_core.adapters.browser.task_grants import InMemoryBrowserTaskGrantRepository
 from agent_core.adapters.browser.unavailable import (
     UnavailableBrowserAuthenticationControlPlane,
     UnavailableBrowserProfileControlPlane,
@@ -163,6 +164,7 @@ from agent_core.adapters.persistence.repositories import (
     PostgresBrowserAuthenticationRepository,
     PostgresBrowserGrantRepository,
     PostgresBrowserProfileRepository,
+    PostgresBrowserTaskGrantRepository,
     PostgresCapabilityEvaluationRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
@@ -255,6 +257,14 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.browser_task_grants import (
+    BrowserTaskGrantAuthorizer,
+    CompositeStandingAuthorizer,
+    PublicBrowserTaskGrantService,
+    TaskGrantResolution,
+    read_task_grant_context,
+    sweep_expired_task_grants,
+)
 from agent_core.application.call_worker import CallWorker
 from agent_core.application.calling import CallService
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
@@ -299,6 +309,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     BrowserProfileService as PublicBrowserProfileServiceContract,
+)
+from agent_core.application.services import (
+    BrowserTaskGrantService as PublicBrowserTaskGrantServiceContract,
 )
 from agent_core.application.services import (
     DeviceIngestService as PublicDeviceIngestServiceContract,
@@ -389,6 +402,7 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import render_email_context
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import (
+    BROWSER_TASK_LIMITS_METADATA_KEY,
     DEFERRED_TOOLS_METADATA_KEY,
     AgentSpec,
     Principal,
@@ -396,6 +410,7 @@ from agent_core.domain.agents import (
 )
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile, BrowserRunState
+from agent_core.domain.browser_act_views import TaskGrantSessionContext
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -550,7 +565,7 @@ from agent_core.ports.persistence import (
     TransactionCallbackRegistrar,
     UnitOfWorkFactory,
 )
-from agent_core.ports.policies import PolicyEngine
+from agent_core.ports.policies import PolicyEngine, StandingAuthorizer
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.tools import DeviceChannel
 from agent_core.ports.unsubscribe import OneClickTransport
@@ -569,7 +584,7 @@ from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
 from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
-from agent_core.tools.browser_act import BrowserActTool
+from agent_core.tools.browser_act import BrowserActApprovalPresenter, BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.calculator import CalculatorTool
@@ -693,6 +708,8 @@ class ApplicationServices:
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
     model_settings: PublicModelSettingsServiceContract | None = None
+    # ADR-0129: present only when BROWSER_TASK_GRANTS_ENABLED is set.
+    browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -791,6 +808,77 @@ def _session_tool_filter(
     return filter_tools
 
 
+def _task_grants_composed(settings: Settings, browser_provider: BrowserProvider) -> bool:
+    """ADR-0129: task grants need the flag and a provider that resolves each
+    session's own profile."""
+
+    return settings.browser_task_grants_enabled and isinstance(
+        browser_provider, SessionBoundHostedBrowserProvider
+    )
+
+
+def _task_grant_context_reader(
+    uow_factory: UnitOfWorkFactory, clock: Clock
+) -> Callable[[UUID, Principal], Awaitable[TaskGrantSessionContext]]:
+    async def read(session_id: UUID, principal: Principal) -> TaskGrantSessionContext:
+        async with uow_factory() as uow:
+            return await read_task_grant_context(uow, session_id, principal, now=clock.now())
+
+    return read
+
+
+def _session_browser_origins(
+    browser_provider: BrowserProvider | None,
+    settings: Settings,
+    uow_factory: UnitOfWorkFactory,
+) -> Callable[[Session, Principal], Awaitable[tuple[str, ...]]] | None:
+    """ADR-0130: the origins browser.navigate accepts, by provider mode.
+
+    A session-bound hosted provider reads the session's profile (nothing when
+    it is gone); an injected provider names its own; a pinned hosted or local
+    provider uses the configured origins. The profile id is never rendered.
+    """
+
+    if browser_provider is None:
+        return None
+    if isinstance(browser_provider, SessionBoundHostedBrowserProvider):
+
+        async def profile_origins(session: Session, principal: Principal) -> tuple[str, ...]:
+            selected = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+            if not isinstance(selected, str) or not selected:
+                return ()
+            try:
+                async with uow_factory() as uow:
+                    profile = await uow.browser_profiles.get(UUID(selected), principal)
+            except (NotFoundError, ValueError):
+                return ()
+            return profile.allowed_origins
+
+        return profile_origins
+    declared = getattr(browser_provider, "allowed_origins", None)
+    origins = (
+        tuple(declared)
+        if isinstance(declared, tuple) and all(isinstance(origin, str) for origin in declared)
+        else settings.browser_allowed_origins
+    )
+
+    async def configured_origins(session: Session, principal: Principal) -> tuple[str, ...]:
+        del session, principal
+        return origins
+
+    return configured_origins
+
+
+def _session_required_tools(session: Session) -> frozenset[str]:
+    """ADR-0130: a chat bound to a website profile always defines the browser
+    tools, so the item cap can never push them into the deferred index."""
+
+    selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+    if isinstance(selected_profile, str) and selected_profile:
+        return _BROWSER_TOOL_NAMES
+    return frozenset()
+
+
 def _run_limits_from_defaults(run_defaults: Mapping[str, Any]) -> RunLimits:
     return RunLimits(
         max_steps=int(run_defaults["max_steps"]),
@@ -799,6 +887,38 @@ def _run_limits_from_defaults(run_defaults: Mapping[str, Any]) -> RunLimits:
         synthesis_reserve_model_calls=int(run_defaults.get("synthesis_reserve_model_calls", 0)),
         synthesis_reserve_tool_calls=int(run_defaults.get("synthesis_reserve_tool_calls", 0)),
     )
+
+
+_BROWSER_TASK_COUNT_LIMITS = ("max_steps", "max_model_calls", "max_tool_calls")
+
+
+def _browser_task_limits(
+    run_defaults: Mapping[str, Any], browser_task: Mapping[str, Any]
+) -> RunLimits:
+    """ADR-0130: run_defaults with the browser_task block's keys replaced.
+
+    Built at every start, whatever the browser setting, so a bad overlay
+    fails startup. The model-call and tool-call reserves stay inherited.
+    """
+
+    defaults = _run_limits_from_defaults(run_defaults)
+    for name in _BROWSER_TASK_COUNT_LIMITS:
+        value = int(browser_task[name])
+        if value < getattr(defaults, name):
+            raise ConfigurationError(f"browser_task.{name} must not be below run_defaults.{name}")
+    try:
+        return RunLimits(
+            **(
+                defaults.model_dump()
+                | {name: int(browser_task[name]) for name in _BROWSER_TASK_COUNT_LIMITS}
+                | {
+                    "max_cost": Decimal(str(browser_task["max_cost"])),
+                    "synthesis_reserve_cost": Decimal(str(browser_task["synthesis_reserve_cost"])),
+                }
+            )
+        )
+    except ValueError as exc:
+        raise ConfigurationError(f"browser_task limits are invalid: {exc}") from None
 
 
 def default_run_limits(settings: Settings) -> RunLimits:
@@ -944,6 +1064,7 @@ def _memory_uow_repositories(
     usage = InMemoryUsageRepository(runs)
     trajectory_exports = InMemoryTrajectoryExportRepository()
     artifacts = InMemoryArtifactRepository()
+    browser_task_grants = InMemoryBrowserTaskGrantRepository()
     session_deletions = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -963,6 +1084,7 @@ def _memory_uow_repositories(
         schedules=schedules,
         notification_outbox=notification_outbox,
         delegations=delegations,
+        browser_task_grants=browser_task_grants,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -970,6 +1092,7 @@ def _memory_uow_repositories(
         policy_profiles=InMemoryPolicyProfileRepository(),
         browser_profiles=InMemoryBrowserProfileRepository(),
         browser_grants=InMemoryBrowserGrantRepository(),
+        browser_task_grants=browser_task_grants,
         browser_authentications=InMemoryBrowserAuthenticationRepository(),
         process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
@@ -1052,6 +1175,7 @@ def _postgres_repository_factory(
             policy_profiles=PostgresPolicyProfileRepository(session),
             browser_profiles=PostgresBrowserProfileRepository(session),
             browser_grants=PostgresBrowserGrantRepository(session),
+            browser_task_grants=PostgresBrowserTaskGrantRepository(session),
             browser_authentications=PostgresBrowserAuthenticationRepository(session),
             process_events=PostgresProcessEventRepository(session),
             sessions=sessions,
@@ -2416,7 +2540,20 @@ async def _compose(
     if browser_provider is not None:
         registry.register(BrowserNavigateTool(browser_provider))
         registry.register(BrowserObserveTool(browser_provider))
-        registry.register(BrowserActTool(browser_provider))
+        # ADR-0129: the approval card describes the action whatever the flag;
+        # it offers a task grant only when task grants are enabled.
+        registry.register(
+            BrowserActTool(
+                browser_provider,
+                presenter=BrowserActApprovalPresenter(
+                    browser_provider,
+                    context_reader=_task_grant_context_reader(uow_factory, clock),
+                    scopes=settings.browser_task_grant_scopes,
+                    enabled=_task_grants_composed(settings, browser_provider),
+                    now=clock.now,
+                ),
+            )
+        )
     if settings.delegation_enabled:
         registry.register(LegacyDelegateRunTool())
         registry.register(DelegateRunTool())
@@ -3167,6 +3304,10 @@ async def _compose(
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
             session_tool_filter=_session_tool_filter(browser_provider),
+            session_required_tools=_session_required_tools,
+            session_browser_origins=_session_browser_origins(
+                browser_provider, settings, uow_factory
+            ),
             attach_device_tools=attach_device_tools,
             snapshot_profiles=memory_profiles.snapshots,
         )
@@ -3293,19 +3434,35 @@ async def _compose(
                     clock=clock,
                     observer=AdvisoryMetrics(),
                 )
-        standing_authorizer = None
+        # ADR-0129 D18: the pinned standing grant first, then the task grant.
+        standing_authorizers: list[StandingAuthorizer] = []
         if settings.browser_grant_id is not None:
             if browser_provider is None or settings.browser_profile_id is None:
                 raise ConfigurationError("standing browser grant composition is incomplete")
-            standing_authorizer = ConfiguredBrowserStandingAuthorizer(
-                grant_id=settings.browser_grant_id,
-                profile_id=settings.browser_profile_id,
-                purpose=settings.browser_run_purpose,
-                provider=browser_provider,
-                uow_factory=uow_factory,
-                policy=deterministic_engine,
-                now=clock.now,
+            standing_authorizers.append(
+                ConfiguredBrowserStandingAuthorizer(
+                    grant_id=settings.browser_grant_id,
+                    profile_id=settings.browser_profile_id,
+                    purpose=settings.browser_run_purpose,
+                    provider=browser_provider,
+                    uow_factory=uow_factory,
+                    policy=deterministic_engine,
+                    now=clock.now,
+                )
             )
+        if browser_provider is not None and _task_grants_composed(settings, browser_provider):
+            standing_authorizers.append(
+                BrowserTaskGrantAuthorizer(
+                    provider=browser_provider,
+                    uow_factory=uow_factory,
+                    policy=deterministic_engine,
+                    scopes=settings.browser_task_grant_scopes,
+                    now=clock.now,
+                )
+            )
+        standing_authorizer = (
+            CompositeStandingAuthorizer(standing_authorizers) if standing_authorizers else None
+        )
         checkpoint_seeder = DurableCheckpointSeeder(clock)
         delegation_materializer = (
             DelegationMaterializer(
@@ -3952,11 +4109,19 @@ async def _compose(
 
         people_erasure.set_cleanup(cleanup_email_artifacts)
 
+        task_grants_enabled = browser_provider is not None and _task_grants_composed(
+            settings, browser_provider
+        )
         archive_approval_service = PublicApprovalService(
             uow_factory=uow_factory,
             dispatcher=dispatcher,
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
+            task_grants=(
+                TaskGrantResolution(scopes=settings.browser_task_grant_scopes, clock=clock)
+                if task_grants_enabled
+                else None
+            ),
         )
         folder_proposal_pass: FolderProposalPass | None = None
         if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:
@@ -4018,6 +4183,11 @@ async def _compose(
                 uow_factory=uow_factory, clock=clock, ids=ids, catalog=model_settings_catalog
             ),
             folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),
+            browser_task_grants=(
+                PublicBrowserTaskGrantService(uow_factory=uow_factory, clock=clock)
+                if task_grants_enabled
+                else None
+            ),
             calls=call_service,
             email=EmailExperienceService(
                 uow_factory=uow_factory,
@@ -4181,6 +4351,16 @@ async def _compose(
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
                     ),
+                    sweep_browser_task_grants=(
+                        partial(
+                            sweep_expired_task_grants,
+                            uow_factory,
+                            clock,
+                            tenant_id=principal.tenant_id,
+                        )
+                        if task_grants_enabled
+                        else None
+                    ),
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds
                     ),
@@ -4337,6 +4517,8 @@ def _browser_provider(
         return PlaywrightBrowserProvider(
             tenant_id=principal.tenant_id,
             allowed_origins=allowed_origins,
+            # ADR-0129: the runtime checks a grant's expiry on this clock.
+            now=now,
         )
     if kind is BrowserProviderKind.HOSTED:
         if sessions is None:
@@ -4726,6 +4908,7 @@ async def build(
         load_config_document(effective_settings, "folders/profiles.yaml")
     )
     run_defaults = runtime_config["run_defaults"]
+    browser_task_limits = _browser_task_limits(run_defaults, runtime_config["browser_task"])
     email_budget_limits = EmailBudgetLimits.model_validate(runtime_config["email"])
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
@@ -4887,11 +5070,21 @@ async def build(
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits or _run_limits_from_defaults(run_defaults),
-        metadata=(
-            {DEFERRED_TOOLS_METADATA_KEY: default_deferred_tools}
-            if enabled_tools is None and default_deferred_tools
-            else {}
-        ),
+        metadata={
+            **(
+                {DEFERRED_TOOLS_METADATA_KEY: default_deferred_tools}
+                if enabled_tools is None and default_deferred_tools
+                else {}
+            ),
+            # ADR-0130: the default agent's version pins the limits a chat
+            # bound to a website profile runs under. Compositions that pin
+            # their own limits or tools keep exactly what they asked for.
+            **(
+                {BROWSER_TASK_LIMITS_METADATA_KEY: browser_task_limits.model_dump(mode="json")}
+                if browser_enabled and enabled_tools is None and limits is None
+                else {}
+            ),
+        },
     )
     if storage == "postgres":
         agent = agent.model_copy(

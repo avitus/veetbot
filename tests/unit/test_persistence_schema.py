@@ -92,6 +92,60 @@ def test_browser_grants_schema_contains_exact_authority_without_material() -> No
     }
 
 
+def test_browser_task_grants_schema_holds_scope_pins_and_counters_only() -> None:
+    """ADR-0129: no page URL, material or credential column; named checks."""
+
+    table = Base.metadata.tables["browser_task_grants"]
+
+    assert set(table.columns.keys()) == {
+        "id",
+        "tenant_id",
+        "principal_id",
+        "session_id",
+        "profile_id",
+        "profile_generation",
+        "agent_version",
+        "policy_version",
+        "origin",
+        "path_prefix",
+        "max_actions",
+        "actions_used",
+        "typed_characters",
+        "approval_id",
+        "approved_by",
+        "created_at",
+        "expires_at",
+        "last_used_at",
+        "revoked_at",
+        "ended_at",
+        "end_reason",
+    }
+    forbidden = {"cookies", "tokens", "storage_state", "credential", "material", "blob", "url"}
+    assert forbidden.isdisjoint(table.columns.keys())
+    assert {constraint.name for constraint in table.constraints} >= {
+        "ck_browser_task_grants_generation_nonnegative",
+        "ck_browser_task_grants_path_prefix_segment",
+        "ck_browser_task_grants_max_actions_bounded",
+        "ck_browser_task_grants_actions_used_bounded",
+        "ck_browser_task_grants_typed_characters_bounded",
+        "ck_browser_task_grants_time_window",
+        "ck_browser_task_grants_end_reason_closed",
+        "ck_browser_task_grants_end_paired",
+        "ck_browser_task_grants_revoked_ends_revoked",
+        "fk_browser_task_grants_session_id_sessions",
+        "fk_browser_task_grants_profile_id_browser_profiles",
+        "uq_browser_task_grants_approval_id",
+    }
+    foreign_keys = {key.parent.name: key.ondelete for key in table.foreign_keys}
+    assert foreign_keys == {"session_id": "CASCADE", "profile_id": "CASCADE"}
+    assert {index.name for index in table.indexes} == {
+        "uq_browser_task_grants_active_session",
+        "ix_browser_task_grants_tenant_principal_created",
+        "ix_browser_task_grants_open_expiry",
+        "ix_browser_task_grants_profile_open",
+    }
+
+
 def test_browser_authentications_schema_is_secret_free() -> None:
     table = Base.metadata.tables["browser_authentications"]
 

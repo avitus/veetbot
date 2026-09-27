@@ -9,10 +9,17 @@ from uuid import UUID
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
+    BrowserDispatchConstraint,
     BrowserLease,
     BrowserObservation,
+    BrowserSnapshot,
 )
+
+# ADR-0129: a page from the isolated service. A newer service returns the
+# observation with element facts beside it; an older one, the observation.
+type BrowserSessionPage = BrowserObservation | BrowserSnapshot
 
 
 class BrowserSessionControlPlane(Protocol):
@@ -27,9 +34,9 @@ class BrowserSessionControlPlane(Protocol):
         deadline_at: datetime,
     ) -> BrowserLease: ...
 
-    async def navigate(self, lease_ref: str, url: str) -> BrowserObservation: ...
+    async def navigate(self, lease_ref: str, url: str) -> BrowserSessionPage: ...
 
-    async def observe(self, lease_ref: str) -> BrowserObservation: ...
+    async def observe(self, lease_ref: str) -> BrowserSessionPage: ...
 
     async def act(
         self,
@@ -37,7 +44,8 @@ class BrowserSessionControlPlane(Protocol):
         action: BrowserAction,
         *,
         sequence: int,
-    ) -> BrowserObservation: ...
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserSessionPage: ...
 
     async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease: ...
 
@@ -52,6 +60,7 @@ class BrowserAuthenticationControlPlane(Protocol):
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView: ...
 
     async def authentication_status(

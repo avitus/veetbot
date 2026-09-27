@@ -72,12 +72,14 @@ public struct ChatView: View {
                                     approval: state.approvals.first {
                                         $0.id == activity.approvalID
                                     },
-                                    resolve: { approval, decision, reason in
+                                    activeTaskGrant: model.activeTaskGrant,
+                                    resolve: { approval, decision, reason, taskGrant in
                                         Task {
                                             await model.resolveApproval(
                                                 approval,
                                                 decision: decision,
-                                                reason: reason
+                                                reason: reason,
+                                                taskGrant: taskGrant
                                             )
                                         }
                                     },
@@ -104,12 +106,15 @@ public struct ChatView: View {
                                 !state.tools.contains { $0.approvalID == approval.id }
                             }
                         ) { approval in
-                            ApprovalCard(approval: approval) { decision, reason in
+                            ApprovalCardView(
+                                approval: approval, activeTaskGrant: model.activeTaskGrant
+                            ) { decision, reason, taskGrant in
                                 Task {
                                     await model.resolveApproval(
                                         approval,
                                         decision: decision,
-                                        reason: reason
+                                        reason: reason,
+                                        taskGrant: taskGrant
                                     )
                                 }
                             }
@@ -151,8 +156,24 @@ public struct ChatView: View {
                 .padding(.vertical, 8)
                 .accessibilityIdentifier("chat.activity")
             }
+            if model.activeTaskGrant != nil {
+                TaskGrantBanner(model: model) {
+                    Task { await model.stopTaskGrant() }
+                }
+                .padding(.horizontal, Self.transcriptHorizontalPadding)
+                .padding(.vertical, 6)
+            }
             Divider()
             composer
+        }
+        // While the conversation is on screen, its task permission is re-read
+        // every 30 seconds; a revoke or sweep elsewhere reaches no run stream.
+        .task(id: model.selectedSessionID) {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { return }
+                await model.reconcileTaskGrant()
+            }
         }
         .onDrop(
             of: [.item],
@@ -389,6 +410,38 @@ public struct ChatView: View {
             let sent = await model.send(message)
             if !sent && model.composerText.isEmpty {
                 model.composerText = message
+            }
+        }
+    }
+}
+
+/// The open conversation's task permission, above the composer: where it
+/// allows Veetbot to act, how many actions it has used and how long is left,
+/// and Stop, which needs no confirmation (ADR-0129).
+private struct TaskGrantBanner: View {
+    @ObservedObject var model: ChatViewModel
+    let stop: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            if let text = model.taskGrantBannerText(now: context.date) {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.shield.fill")
+                        .foregroundColor(AppTheme.turquoise)
+                    Text(text)
+                        .appFont(.caption, weight: .semibold)
+                        .lineLimit(2)
+                        .accessibilityIdentifier("task-grant.banner.text")
+                    Spacer(minLength: 8)
+                    Button("Stop", role: .destructive, action: stop)
+                        .accessibilityIdentifier("task-grant.banner.stop")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AppTheme.turquoise.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("task-grant.banner")
             }
         }
     }

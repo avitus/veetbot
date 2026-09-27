@@ -53,13 +53,13 @@ Three of them are worth stating up front, because they are not disagreements
 about detail. They are places where the loop as written cannot do what
 another document requires of it.
 
-**The loop cannot resolve its own agent.** `engineering-plan.md:1562` reads
+**The loop cannot resolve its own agent.** `engineering-plan.md:1566` reads
 `agents.get_version(run.agent_id, run.agent_version)`. Neither field exists
 on `Run`. Section 6.3 puts `agent_id` and `agent_version` on `Session`. The
 first four lines of the runtime do not compile against the domain model in
 Section 6.
 
-**The loop cannot suspend.** `engineering-plan.md:1591` handles a paused
+**The loop cannot suspend.** `engineering-plan.md:1595` handles a paused
 disposition with `return`. Section 27.2 requires that entering either
 `WAITING_*` state release the worker lease, checkpoint the run, and emit an
 event. A bare `return` performs none of the three, and there is no
@@ -789,6 +789,20 @@ calls, 64 tool calls, a model-call reserve of 2 and a tool-call reserve of 4.
 The composition root copies the reserves onto the default agent's limits;
 schedule revisions and delegated children carry their own.
 
+A chat bound to a website profile runs under the `browser_task` overlay in the
+same file (ADR-0130): 160 steps, 120 model calls, 160 tool calls, a cost limit
+of USD 30 and a cost reserve of USD 3, with the model-call and tool-call
+reserves taken from `run_defaults`. Startup rejects an overlay that breaks a
+reserve or lowers a default. The composition root stores the overlaid limits in
+the default agent's metadata, so the agent's content-addressed version pins
+them, and a run copies them instead of the agent's limits when its session
+carries the trusted browser-profile binding and its pinned agent version
+carries the overlay. Both are fixed when the session is created, so a chat
+created before the overlay existed keeps the ordinary limits. The cost limit
+holds to within one model call: every attempt is checked before it starts, so
+only the call in flight when the limit is crossed can exceed it, and recording
+that call fails the run with `budget_exceeded`.
+
 ## The heartbeat is a supervisor, not a statement in the loop
 
 Section 14.1 step 3 says *"refresh the lease periodically"*. The event log
@@ -1335,7 +1349,7 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Sixteen more belong to subsystems this document does not touch. They are
+Eighteen more belong to subsystems this document does not touch. They are
 listed here for the same reason: Section 6.8's list is where an implementer
 looks for the vocabulary, and these are not in it either.
 
@@ -1357,13 +1371,15 @@ memory.superseded            memory-formation-and-consolidation.md
 memory.needs_confirmation    memory-formation-and-consolidation.md
 memory.recalled              memory-retrieval-and-ranking.md
 knowledge.document.ingested  knowledge-documents.md
+browser.task_grant.created   browser-automation.md, ADR-0129
+browser.task_grant.ended     browser-automation.md, ADR-0129
 ```
 
-Twenty-four in Section 6.8 plus these thirty is the whole vocabulary
-of session-scoped events: fifty-four persisted event types, not one of
+Twenty-four in Section 6.8 plus these thirty-three is the whole vocabulary
+of session-scoped events: fifty-seven persisted event types, not one of
 them introduced here.
 
-Two of the sixteen were declared after this consolidation was written and
+Two of the eighteen were declared after this consolidation was written and
 never folded into it. `mcp.server.reauthenticated` sits in the same
 tool-system table as the seven that were taken;
 `knowledge.document.ingested` arrived with the knowledge spec. Both are
@@ -1380,8 +1396,8 @@ the run, under a span root that is explicitly not `agent.run`. A harness
 event has no session, and `events.session_id` is `NOT NULL`. They are event
 types by every other measure and they cannot be rows in `events` as the
 schema stands — the same wall `multi-device-and-surfaces.md` hits for
-device lifecycle events and leaves open. Fifty-three plus these four is
-fifty-seven declared types, of which fifty-three have somewhere to be
+device lifecycle events and leaves open. Fifty-seven plus these four is
+sixty-one declared types, of which fifty-seven have somewhere to be
 stored.
 
 Two ownership assignments close gaps that were nobody's:

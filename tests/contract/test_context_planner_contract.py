@@ -475,6 +475,59 @@ async def test_context_planner_defers_overflow_and_records_what_the_index_cannot
     assert "- system.current_time(timezone?): " in part.text
 
 
+async def test_context_planner_ranks_required_session_tools_first_and_never_defers_them() -> None:
+    """ADR-0130: a required tool keeps its definition over configured order and
+    over the agent's own deferred list; one that cannot fit fails the plan."""
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    config["classes"]["tool_definitions"]["max_items"] = 3
+    registry = StaticToolRegistry()
+    registry.register(ToolCallTool())
+    registry.register(WebFetchTool(FakeWebProvider()))
+    registry.register(CurrentTimeTool(clock))
+    registry.register(CalculatorTool())
+    configured_agent = agent().model_copy(
+        update={
+            "enabled_tools": ["web.fetch", "system.current_time", "math.calculate", "tool.call"],
+            "metadata": {"deferred_tools": ["math.calculate"]},
+        }
+    )
+
+    def planner(required: frozenset[str], factory: MemoryUnitOfWorkFactory) -> EventContextPlanner:
+        return EventContextPlanner(
+            factory,
+            registry,
+            ConservativeTokenEstimator(),
+            clock,
+            principal(),
+            config,
+            policy_version="contract-policy@1",
+            session_required_tools=lambda _session: required,
+        )
+
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    plan = await planner(frozenset({"math.calculate", "system.current_time"}), factory).plan(
+        session(), configured_agent, principal(), model
+    )
+
+    # math.calculate is named deferred by the agent, and required by the session.
+    assert plan.tool_names == ("math.calculate", "system.current_time", "web.fetch")
+    assert plan.deferred_tool_names == ()
+
+    config["classes"]["tool_definitions"]["max_items"] = 2
+    _clock, fresh, _service, _retriever = await formation_stack()
+    required = frozenset({"math.calculate", "system.current_time", "web.fetch"})
+    with pytest.raises(ValueError, match=r"system\.current_time, web\.fetch"):
+        await planner(required, fresh).plan(
+            session(),
+            configured_agent,
+            principal(),
+            model,
+        )
+
+
 async def test_context_planner_keeps_a_plan_from_an_equivalent_earlier_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -986,6 +1039,61 @@ async def test_context_planner_selects_the_session_snapshot_profile(
     assert spy.queries[0].max_items == expected_items
     assert spy.queries[0].budget_tokens == expected_tokens
     assert plan.budget.retrieved_context_tokens == expected_tokens + 2_000
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected_ttl"),
+    [
+        ({}, "default"),
+        ({"schedule_id": str(UUID(int=711))}, "1h"),
+        ({"run_kind": "delegated"}, "default"),
+        ({"email_operational": True}, "default"),
+    ],
+)
+async def test_context_planner_sets_the_cache_ttl_from_the_session_shape(
+    metadata: dict[str, object],
+    expected_ttl: str,
+) -> None:
+    """Only a scheduled occurrence is a long agentic loop (ADR-0132)."""
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+
+    plan = await planner.plan(
+        session().model_copy(update={"metadata": metadata}), agent(), principal(), model
+    )
+    reloaded = await planner.current(session().id)
+
+    assert [item.boundary for item in plan.cache_breakpoints] == [
+        "after_system",
+        "after_tools",
+        "after_history_prefix",
+    ]
+    # One TTL across the frozen prefix and the default after it keep Anthropic's
+    # longer-before-shorter rule; the history window moves every step.
+    assert [item.ttl for item in plan.cache_breakpoints] == [expected_ttl, expected_ttl, "default"]
+    assert reloaded is not None and reloaded.cache_breakpoints == plan.cache_breakpoints
 
 
 async def test_context_planner_excludes_affirmed_beliefs_from_the_snapshot() -> None:

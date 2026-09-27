@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_core.adapters.browser.task_grants import InMemoryBrowserTaskGrantRepository
 from agent_core.adapters.persistence.email_erasure import (
     erase_memory_source_locked,
     erase_postgres_source,
@@ -538,6 +539,7 @@ class InMemorySessionDeletionRepository:
         schedules: Any,
         notification_outbox: Any,
         delegations: Any,
+        browser_task_grants: InMemoryBrowserTaskGrantRepository,
     ) -> None:
         self._sessions = sessions
         self._runs = runs
@@ -557,6 +559,7 @@ class InMemorySessionDeletionRepository:
         self._schedules = schedules
         self._notification_outbox = notification_outbox
         self._delegations = delegations
+        self._browser_task_grants = browser_task_grants
         self._lock = asyncio.Lock()
         self._tombstones: dict[UUID, tuple[str, str, datetime]] = {}
         self._pending: dict[UUID, dict[UUID, ArtifactRef]] = {}
@@ -818,6 +821,7 @@ class InMemorySessionDeletionRepository:
                     self._traces._lock,
                     self._knowledge._lock,
                     self._notification_outbox._lock,
+                    self._browser_task_grants._lock,
                 )
             }.values(),
             key=id,
@@ -904,6 +908,13 @@ class InMemorySessionDeletionRepository:
                 },
                 deep=True,
             )
+        # ADR-0129: a session's task grants cascade with it, as its foreign key
+        # does in PostgreSQL.
+        self._browser_task_grants._grants = {
+            grant_id: grant
+            for grant_id, grant in self._browser_task_grants._grants.items()
+            if grant.session_id != session_id
+        }
         run_ids = {
             run_id for run_id, run in self._runs._runs.items() if run.session_id == session_id
         }

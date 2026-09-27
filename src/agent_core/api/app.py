@@ -19,6 +19,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_core.api.attachments import attachments_router
 from agent_core.api.auth import Authenticator
+from agent_core.api.boundary import MalformedRequestError
+from agent_core.api.browser_task_grants import browser_task_grants_router
 from agent_core.api.calls import call_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
@@ -63,11 +65,13 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
     BrowserGrantView,
     BrowserProfileView,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_task_grants import TaskGrantEcho
 from agent_core.domain.devices import (
     DeviceCapability,
     DeviceInvocationStatus,
@@ -123,10 +127,6 @@ IDEMPOTENCY_KEY_MAX_LENGTH = 255
 APPROVAL_REASON_MAX_LENGTH = 4096
 # What a principal-scoped body carrying user content tells caches to do with it.
 PRIVATE_NO_STORE = "private, no-store"
-
-
-class MalformedRequestError(ValueError):
-    """A syntactically invalid value detected at the HTTP boundary."""
 
 
 def _content_disposition(filename: str) -> str:
@@ -277,6 +277,17 @@ class ResolveApprovalRequest(BaseModel):
 
     decision: ApprovalResolutionType
     reason: str | None = Field(default=None, max_length=APPROVAL_REASON_MAX_LENGTH)
+    # ADR-0129: the offer's origin and prefix, repeated exactly when the owner
+    # allows the action for the task.
+    task_grant: TaskGrantEcho | None = None
+
+    @model_validator(mode="after")
+    def _task_grant_only_with_approve_for_task(self) -> "ResolveApprovalRequest":
+        if (self.task_grant is not None) != (
+            self.decision is ApprovalResolutionType.APPROVE_FOR_TASK
+        ):
+            raise ValueError("task_grant is required exactly with approve_for_task")
+        return self
 
 
 class CreateBrowserProfileRequest(BaseModel):
@@ -297,6 +308,9 @@ class BeginBrowserAuthenticationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     login_url: str = Field(min_length=1, max_length=4096)
+    # ADR-0128: "device" hands a session from the owner's own client to the
+    # isolated service; "remote" (the default) drives its headed browser.
+    mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE
 
 
 class CreateBrowserGrantRequest(BaseModel):
@@ -895,7 +909,7 @@ def create_app(
     ) -> ApprovalView:
         """Resolve the exact approval through the governed decision service."""
         return await services.approvals.resolve(
-            authenticated, approval_id, body.decision, body.reason
+            authenticated, approval_id, body.decision, body.reason, task_grant=body.task_grant
         )
 
     @app.get(
@@ -1016,17 +1030,23 @@ def create_app(
     async def begin_browser_authentication(
         profile_id: UUID,
         body: BeginBrowserAuthenticationRequest,
+        response: Response,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
     ) -> BrowserAuthenticationView:
         """Create a scoped login ceremony and return its one-time launch response."""
         try:
-            return await services.browser_profiles.begin_authentication(
+            launched = await services.browser_profiles.begin_authentication(
                 authenticated,
                 profile_id,
                 login_url=body.login_url,
+                mode=body.mode,
             )
         except BrowserLoginURLValidationError as exc:
             raise MalformedRequestError(str(exc)) from exc
+        # The launch URL carries a capability that can write profile material
+        # in device mode; no cache may keep it (ADR-0128, S4).
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return launched
 
     @app.get(
         "/v1/browser-profiles/{profile_id}/authentication-ceremonies",
@@ -1936,5 +1956,8 @@ def create_app(
         app.include_router(call_router(services.calls, secured))
     if settings.attachment_uploads_enabled:
         app.include_router(attachments_router(services.artifacts, secured))
+    task_grants = getattr(services, "browser_task_grants", None)
+    if settings.browser_task_grants_enabled and task_grants is not None:
+        app.include_router(browser_task_grants_router(task_grants, secured))
 
     return app

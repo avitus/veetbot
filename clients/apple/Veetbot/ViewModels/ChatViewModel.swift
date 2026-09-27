@@ -139,6 +139,16 @@ public final class ChatViewModel: ObservableObject {
     /// ceremony so no view can offer it after the ceremony ends.
     @Published public private(set) var websiteAuthenticationLaunchURL: URL?
     @Published public private(set) var isManagingWebsiteAccess = false
+    /// The device sign-in window on screen, if any (ADR-0128). It carries no
+    /// launch URL, capability or session value: those live only in the locals
+    /// of `completeDeviceSignIn`.
+    @Published public private(set) var deviceSignInRequest: DeviceSignInRequest?
+    /// The open conversation's active task permission, if any (ADR-0129).
+    @Published public private(set) var activeTaskGrant: BrowserTaskGrantView?
+    /// Only a conversation bound to a website profile can hold one.
+    private var selectedSessionUsesWebsiteProfile = false
+    /// Every active task permission, for Settings > Website Access.
+    @Published public private(set) var activeTaskGrants: [BrowserTaskGrantView] = []
     /// The `device.sms.send` invocation whose compose sheet the owner should
     /// see now, if any. Its recipient and body live only here and in the sheet.
     @Published public private(set) var pendingSmsInvocation: SmsInvocation?
@@ -176,6 +186,19 @@ public final class ChatViewModel: ObservableObject {
     private let artifactCache: ArtifactCache
     private let deviceRegistrationCoordinator: DeviceRegistrationCoordinator
     private let urlSession: URLSession?
+    private let deviceHandoffClient: DeviceSignInHandoffClient
+    private let deviceSignInTiming: DeviceSignInTiming
+    /// The profile a device sign-in window created and that has not become
+    /// ready, so closing the window can remove it.
+    private var deviceSignInCreatedProfile: (requestID: UUID, profileID: UUID)?
+    /// The device sign-in whose I'm signed in is being handled, if any.
+    private var confirmingDeviceSignInID: UUID?
+    /// A device sign-in whose window closed while I'm signed in was being
+    /// handled. That attempt stops at its next step and cleans up itself, in
+    /// order: its ceremony, then the profile the window created. A connection
+    /// change clears this, since nothing may be sent once the credential that
+    /// began the attempt is being replaced.
+    private var closedDuringDeviceSignInID: UUID?
     private var api: VeetbotAPIClient?
     private var eventStream: ReconnectingEventStream?
     private let watchTasks = WatchTaskBox()
@@ -207,7 +230,9 @@ public final class ChatViewModel: ObservableObject {
         deviceRegistrationCoordinator: DeviceRegistrationCoordinator =
             DeviceRegistrationCoordinator(),
         runState: RunStateReducer? = nil,
-        urlSession: URLSession? = nil
+        urlSession: URLSession? = nil,
+        deviceHandoffClient: DeviceSignInHandoffClient? = nil,
+        deviceSignInTiming: DeviceSignInTiming = .standard
     ) {
         self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
@@ -216,6 +241,8 @@ public final class ChatViewModel: ObservableObject {
         self.deviceRegistrationCoordinator = deviceRegistrationCoordinator
         self.runState = runState ?? RunStateReducer()
         self.urlSession = urlSession
+        self.deviceHandoffClient = deviceHandoffClient ?? DeviceSignInHandoffClient()
+        self.deviceSignInTiming = deviceSignInTiming
         Task { await bootstrap() }
     }
 
@@ -299,6 +326,8 @@ public final class ChatViewModel: ObservableObject {
         clearPendingSmsInvocations()
         await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
+        activeTaskGrants = []
+        activeTaskGrant = nil
         isConfigured = false
         requiresReauthentication = true
         if let revokeError {
@@ -780,6 +809,8 @@ public final class ChatViewModel: ObservableObject {
         clearAttachments()
         notificationFocus = nil
         notificationNavigationID = nil
+        activeTaskGrant = nil
+        selectedSessionUsesWebsiteProfile = false
         runState.reset()
     }
 
@@ -798,12 +829,15 @@ public final class ChatViewModel: ObservableObject {
         pendingSubmission = nil
         notificationFocus = nil
         notificationNavigationID = nil
+        activeTaskGrant = nil
+        selectedSessionUsesWebsiteProfile = false
         runState.reset()
         do {
             let session = try await api.getSession(entry.sessionID)
             guard selectionRequestID == requestID,
                 !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
+            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
             try await store(
                 session: session,
                 lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
@@ -838,6 +872,9 @@ public final class ChatViewModel: ObservableObject {
                 }
                 runState.seed(run: run)
                 watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive)
+            }
+            if selectedSessionUsesWebsiteProfile {
+                await loadTaskGrant()
             }
         } catch {
             if selectionRequestID == requestID {
@@ -1289,6 +1326,7 @@ public final class ChatViewModel: ObservableObject {
         if sessionCreation == creation {
             sessionCreation = nil
             selectedSessionID = session.id
+            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
             try await store(session: session, lastRunID: nil, suggestedTitle: suggestedTitle)
         }
         return session
@@ -1343,18 +1381,35 @@ public final class ChatViewModel: ObservableObject {
     public func resolveApproval(
         _ approval: ApprovalView,
         decision: ApprovalDecision,
-        reason: String? = nil
+        reason: String? = nil,
+        taskGrant: TaskGrantEcho? = nil
     ) async {
         guard let api else { return }
         do {
             let stored = try await api.resolveApproval(
                 approval.id,
                 decision: decision,
-                reason: reason
+                reason: reason,
+                taskGrant: taskGrant
             )
             runState.mergeApproval(stored)
+            if decision == .approveForTask {
+                await loadTaskGrant()
+            }
         } catch {
             if let apiError = apiError(from: error),
+                apiError.code == .conflict,
+                let reason = apiError.details.reason,
+                reason == "task_grant_unavailable" || reason == "task_grant_offer_mismatch"
+            {
+                // The offer is gone or changed: show the card as it is now.
+                do {
+                    runState.mergeApproval(try await api.getApproval(approval.id))
+                    errorMessage = "Allow for this task is no longer available. Allow once or Deny."
+                } catch {
+                    present(error)
+                }
+            } else if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 apiError.details.reason == "approval_already_resolved"
             {
@@ -1368,6 +1423,121 @@ public final class ChatViewModel: ObservableObject {
             } else {
                 present(error)
             }
+        }
+    }
+
+    // MARK: - Task permissions (ADR-0129)
+
+    /// Re-reads the open conversation's active task permission. The chat view
+    /// calls this every 30 seconds while it is visible.
+    public func reconcileTaskGrant() async {
+        await loadTaskGrant()
+    }
+
+    /// The banner above the composer, while the open conversation holds an
+    /// active task permission.
+    public func taskGrantBannerText(now: Date = Date()) -> String? {
+        guard let grant = activeTaskGrant, grant.isActive, grant.sessionID == selectedSessionID
+        else { return nil }
+        return grant.bannerText(now: now)
+    }
+
+    /// Settings lists every active task permission. Quiet when the server has
+    /// task permissions turned off.
+    public func refreshTaskPermissions() async {
+        guard let api else { return }
+        let generation = connectionGeneration
+        do {
+            let page = try await api.listBrowserTaskGrants(status: .active, limit: 200)
+            guard generation == connectionGeneration else { return }
+            activeTaskGrants = page.items.filter(\.isActive)
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            activeTaskGrants = []
+        } catch {
+            // Best effort; Settings keeps what it showed.
+        }
+    }
+
+    /// Stops one task permission from Settings; no confirmation.
+    public func stopTaskGrant(_ grantID: UUID) async {
+        guard let api else { return }
+        do {
+            _ = try await api.revokeBrowserTaskGrant(grantID)
+            if activeTaskGrant?.id == grantID { activeTaskGrant = nil }
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            if activeTaskGrant?.id == grantID { activeTaskGrant = nil }
+        } catch {
+            present(error)
+        }
+        await refreshTaskPermissions()
+    }
+
+    /// Ends the active task permission at once; no confirmation.
+    public func stopTaskGrant() async {
+        guard let api, let grant = activeTaskGrant else { return }
+        do {
+            let ended = try await api.revokeBrowserTaskGrant(grant.id)
+            if activeTaskGrant?.id == grant.id, !ended.isActive {
+                activeTaskGrant = nil
+            }
+            activeTaskGrants.removeAll { $0.id == grant.id }
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            activeTaskGrant = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    /// Applies one run-stream frame's task-permission meaning: a use counts
+    /// locally (by its running number, so a replayed frame counts once); a
+    /// created or ended permission is re-read.
+    func applyTaskGrantFrame(_ frame: SSEFrame) async {
+        guard let event = RunStateReducer.taskGrantEvent(from: frame) else { return }
+        switch event {
+        case .used(let grantID, let use):
+            guard var grant = activeTaskGrant, grant.id == grantID else { return }
+            grant.actionsUsed = min(grant.maxActions, max(grant.actionsUsed, use ?? grant.actionsUsed + 1))
+            activeTaskGrant = grant
+            syncTaskPermissions(sessionID: grant.sessionID, with: grant)
+        case .created, .ended:
+            await loadTaskGrant()
+        }
+    }
+
+    /// Reads the open conversation's active task permission. A server with
+    /// task permissions turned off answers as if there were none, quietly.
+    private func loadTaskGrant() async {
+        guard let api, let sessionID = selectedSessionID, selectedSessionUsesWebsiteProfile else {
+            activeTaskGrant = nil
+            return
+        }
+        do {
+            let page = try await api.listBrowserTaskGrants(
+                sessionID: sessionID, status: .active, limit: 1
+            )
+            guard selectedSessionID == sessionID else { return }
+            activeTaskGrant = page.items.first { $0.isActive && $0.sessionID == sessionID }
+            syncTaskPermissions(sessionID: sessionID, with: activeTaskGrant)
+        } catch VeetbotAPIClientError.taskGrantsUnavailable {
+            if selectedSessionID == sessionID {
+                activeTaskGrant = nil
+                syncTaskPermissions(sessionID: sessionID, with: nil)
+            }
+        } catch {
+            // Best effort: the next reconcile or stream event tries again.
+        }
+    }
+
+    /// Keeps Settings' list in step with what was just learned about one
+    /// conversation, which holds at most one active permission: a Settings
+    /// window left open on the Mac never re-reads it on appearing.
+    private func syncTaskPermissions(sessionID: UUID, with grant: BrowserTaskGrantView?) {
+        activeTaskGrants.removeAll { $0.sessionID == sessionID && $0.id != grant?.id }
+        guard let grant, grant.isActive else { return }
+        if let index = activeTaskGrants.firstIndex(where: { $0.id == grant.id }) {
+            activeTaskGrants[index] = grant
+        } else {
+            activeTaskGrants.insert(grant, at: 0)
         }
     }
 
@@ -1432,6 +1602,36 @@ public final class ChatViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             present(error)
+            return
+        }
+        await reconcileOpenCeremonies(using: api)
+    }
+
+    /// A sign-in the owner finished without checking its status would stay
+    /// unknown: for each profile that is not ready, read the status of its
+    /// newest open, unexpired ceremony, which records a ready outcome (D16).
+    /// Best effort and silent; there is no timer.
+    private func reconcileOpenCeremonies(using api: VeetbotAPIClient) async {
+        let generation = connectionGeneration
+        let now = Date()
+        var becameReady = false
+        for profile in browserProfiles where profile.status != .ready && profile.status != .revoked {
+            guard
+                let ceremonies = try? await api.listBrowserAuthentications(profileID: profile.id),
+                let open = ceremonies
+                    .filter({ !$0.status.isTerminal && $0.expiresAt > now })
+                    .max(by: { $0.expiresAt < $1.expiresAt }),
+                let refreshed = try? await api.getBrowserAuthentication(open.id),
+                generation == connectionGeneration
+            else { continue }
+            if browserAuthentication?.id == refreshed.id {
+                browserAuthentication = refreshed
+                if refreshed.status.isTerminal { websiteAuthenticationLaunchURL = nil }
+            }
+            becameReady = becameReady || refreshed.status == .ready
+        }
+        if becameReady, generation == connectionGeneration {
+            try? await reloadBrowserProfiles(using: api)
         }
     }
 
@@ -1441,33 +1641,12 @@ public final class ChatViewModel: ObservableObject {
         additionalOrigins: String = ""
     ) async -> URL? {
         guard let api else { return nil }
-        let input = websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasScheme = input.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
-        let candidate = hasScheme ? input : "https://" + input
-        guard
-            var components = URLComponents(string: candidate),
-            components.scheme?.lowercased() == "https",
-            let host = components.host, !host.isEmpty,
-            components.user == nil, components.password == nil,
-            components.port == nil || components.port == 443
-        else {
+        guard let target = Self.websiteLoginTarget(websiteURL) else {
             errorMessage = "Enter a valid HTTPS website URL without a username or password."
             return nil
         }
-        components.scheme = "https"
-        components.host = host.lowercased()
-        components.port = nil
-        guard let normalizedLoginURL = components.url?.absoluteString else {
-            errorMessage = "Enter a valid HTTPS website URL."
-            return nil
-        }
-        components.path = ""
-        components.query = nil
-        components.fragment = nil
-        guard let primaryOrigin = components.url?.absoluteString else {
-            errorMessage = "Enter a valid HTTPS website URL."
-            return nil
-        }
+        let normalizedLoginURL = target.loginURL
+        let primaryOrigin = target.origin
         let extraOrigins = additionalOrigins
             .components(separatedBy: CharacterSet(charactersIn: ",\n\r"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1566,6 +1745,411 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Device sign-in (ADR-0128)
+
+    /// Opens the sign-in window for a new website; same URL rules as the
+    /// remote path. The window first loads the address as typed.
+    @discardableResult
+    public func beginDeviceSignIn(websiteURL: String) -> DeviceSignInRequest? {
+        guard api != nil else { return nil }
+        guard let target = Self.websiteLoginTarget(websiteURL),
+            let startURL = URL(string: target.loginURL)
+        else {
+            errorMessage = "Enter a valid HTTPS website URL without a username or password."
+            return nil
+        }
+        let request = DeviceSignInRequest(
+            startURL: startURL,
+            allowedOrigins: [target.origin],
+            profileID: nil,
+            adoptableOrigin: DeviceSignInNavigationPolicy.adoptableOrigin(for: target.origin)
+        )
+        openDeviceSignIn(request)
+        return request
+    }
+
+    /// Opens the sign-in window to sign in again to an existing, unrevoked
+    /// profile, at the root of its first origin.
+    @discardableResult
+    public func beginDeviceSignIn(profile: BrowserProfileView) -> DeviceSignInRequest? {
+        guard api != nil, profile.status != .revoked,
+            let origin = profile.allowedOrigins.first,
+            let startURL = URL(string: origin + "/")
+        else { return nil }
+        let request = DeviceSignInRequest(
+            startURL: startURL,
+            allowedOrigins: profile.allowedOrigins,
+            profileID: profile.id,
+            adoptableOrigin: nil
+        )
+        openDeviceSignIn(request)
+        return request
+    }
+
+    /// The owner tapped I'm signed in: create the profile if it is new, begin
+    /// a device ceremony, hand the session over once and learn the outcome
+    /// (0128-design §5.2). The launch URL and its capability exist only in
+    /// this function's locals.
+    public func completeDeviceSignIn(
+        _ request: DeviceSignInRequest,
+        handoff: DeviceSessionHandoff,
+        adoptedOrigin: String?
+    ) async -> DeviceSignInResult {
+        let offersRemote = request.profileID == nil
+        // The remote browser is the alternative when this device cannot start
+        // or carry the sign-in of a new website (B5).
+        func failure(_ message: String, canRetry: Bool = true) -> DeviceSignInResult {
+            let remoteMayHelp =
+                message == DeviceSignInMessage.couldNotStart
+                || message == DeviceSignInMessage.tooMuchData
+            return .failed(
+                DeviceSignInFailure(
+                    message: message,
+                    canRetry: canRetry,
+                    offersRemoteBrowser: offersRemote && remoteMayHelp
+                )
+            )
+        }
+        guard let api else { return failure(DeviceSignInMessage.couldNotStart) }
+        let generation = connectionGeneration
+        let origins = request.profileID == nil
+            ? (adoptedOrigin.map { [$0] } ?? request.allowedOrigins)
+            : request.allowedOrigins
+        let body: Data
+        do {
+            body = try WebsiteSessionScope(allowedOrigins: origins).encode(handoff)
+        } catch WebsiteSessionScopeError.tooLarge {
+            return failure(DeviceSignInMessage.tooMuchData, canRetry: false)
+        } catch {
+            return failure(DeviceSignInMessage.couldNotStart)
+        }
+        guard let confirmed = URL(string: handoff.confirmedURL),
+            let confirmedOrigin = WebsiteSessionScope.origin(of: confirmed)
+        else { return failure(DeviceSignInMessage.couldNotStart) }
+        // An attempt belongs to the window on screen.
+        guard deviceSignInRequest?.id == request.id else {
+            return failure(DeviceSignInMessage.couldNotStart)
+        }
+
+        isManagingWebsiteAccess = true
+        confirmingDeviceSignInID = request.id
+        defer {
+            isManagingWebsiteAccess = false
+            if confirmingDeviceSignInID == request.id { confirmingDeviceSignInID = nil }
+        }
+
+        // The window can close, or the connection change, during any await
+        // below, so each step after one checks first.
+        func superseded() -> Bool {
+            deviceSignInRequest?.id != request.id || generation != connectionGeneration
+        }
+        // What a superseded attempt undoes: the profile a new website's window
+        // created, and a ceremony that may still be open.
+        var createdProfileID: UUID?
+        var openCeremonyID: UUID?
+        let stopped = failure(DeviceSignInMessage.couldNotFinish, canRetry: false)
+        /// A superseded attempt ends here and selects nothing. If its window
+        /// closed, it ends its ceremony and then removes the profile the window
+        /// created, as closing the window would have (§5.2). After a connection
+        /// change it sends nothing: the old client would carry the new
+        /// credential.
+        func settle(_ result: DeviceSignInResult) async -> DeviceSignInResult {
+            guard superseded() else { return result }
+            guard closedDuringDeviceSignInID == request.id, generation == connectionGeneration else {
+                return stopped
+            }
+            closedDuringDeviceSignInID = nil
+            if let openCeremonyID {
+                _ = try? await api.cancelBrowserAuthentication(openCeremonyID)
+            }
+            if let createdProfileID {
+                if deviceSignInCreatedProfile?.profileID == createdProfileID {
+                    deviceSignInCreatedProfile = nil
+                }
+                await discardDeviceSignInProfile(createdProfileID, using: api)
+            }
+            return stopped
+        }
+
+        let profileID: UUID
+        if let existing = request.profileID {
+            profileID = existing
+        } else if let created = deviceSignInCreatedProfile, created.requestID == request.id {
+            profileID = created.profileID
+            createdProfileID = profileID
+        } else {
+            let profile: BrowserProfileView
+            do {
+                profile = try await api.createBrowserProfile(allowedOrigins: origins)
+            } catch {
+                return await settle(failure(DeviceSignInMessage.couldNotStart))
+            }
+            createdProfileID = profile.id
+            guard !superseded() else { return await settle(stopped) }
+            deviceSignInCreatedProfile = (request.id, profile.id)
+            profileID = profile.id
+        }
+
+        // D19: the begin names the root of the confirmed page's origin, which
+        // is allowed by construction and keeps the page's path and query off
+        // the API.
+        let ceremony: BrowserAuthenticationView
+        switch await beginDeviceCeremony(
+            using: api, profileID: profileID, loginURL: confirmedOrigin + "/",
+            while: { !superseded() }
+        ) {
+        case .success(let begun):
+            ceremony = begun
+            openCeremonyID = begun.id
+        case .failure(let error):
+            return await settle(failure(error.message))
+        }
+        guard !superseded() else { return await settle(stopped) }
+        guard let target = DeviceSignInHandoffTarget(launchURL: ceremony.launchURL) else {
+            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+            openCeremonyID = nil
+            return await settle(failure(DeviceSignInMessage.couldNotStart))
+        }
+
+        let outcome = await deviceHandoffClient.send(body, to: target)
+        // A sealed session made the ceremony ready: there is nothing to end.
+        if outcome == .sealed { openCeremonyID = nil }
+        guard !superseded() else { return await settle(stopped) }
+        let status: BrowserAuthenticationStatus?
+        switch outcome {
+        case .sealed, .transportFailed:
+            status = await deviceCeremonyStatus(
+                using: api, id: ceremony.id, polling: true, while: { !superseded() }
+            )
+        case .capabilityRejected:
+            status = await deviceCeremonyStatus(
+                using: api, id: ceremony.id, polling: false, while: { !superseded() }
+            )
+        case .tooLarge:
+            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+            openCeremonyID = nil
+            return await settle(failure(DeviceSignInMessage.tooMuchData, canRetry: false))
+        case .rejected(let code) where code == "internal_error" || code.hasPrefix("http_5"):
+            status = await deviceCeremonyStatus(
+                using: api, id: ceremony.id, polling: false, while: { !superseded() }
+            )
+        case .rejected(let code):
+            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+            openCeremonyID = nil
+            if code == "tool.browser.profile_unavailable" {
+                if !superseded() { try? await reloadBrowserProfiles(using: api) }
+                return await settle(failure(DeviceSignInMessage.profileUnavailable, canRetry: false))
+            }
+            return await settle(failure(Self.deviceSignInMessage(for: code)))
+        }
+        if status?.isTerminal ?? false { openCeremonyID = nil }
+        guard !superseded() else { return await settle(stopped) }
+
+        guard status == .ready else {
+            if !(status?.isTerminal ?? false) {
+                _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+                openCeremonyID = nil
+            }
+            return await settle(failure(DeviceSignInMessage.couldNotConfirm))
+        }
+        // The profile is signed in: a remote ceremony still remembered for it
+        // is superseded, and Start over must not remove the ready profile.
+        if browserAuthentication?.profileID == profileID {
+            clearWebsiteAuthenticationState()
+        }
+        if deviceSignInCreatedProfile?.profileID == profileID {
+            deviceSignInCreatedProfile = nil
+        }
+        try? await reloadBrowserProfiles(using: api)
+        guard !superseded() else { return await settle(stopped) }
+        if browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready }) {
+            selectedBrowserProfileID = profileID
+            await configurationStore.saveBrowserProfileID(profileID)
+        }
+        errorMessage = nil
+        return .signedIn(profileID: profileID)
+    }
+
+    /// The window closed after a successful sign-in. A window that is no
+    /// longer the current one changes nothing.
+    public func finishDeviceSignIn(_ request: DeviceSignInRequest) {
+        guard deviceSignInRequest?.id == request.id else { return }
+        deviceSignInRequest = nil
+        deviceSignInCreatedProfile = nil
+    }
+
+    /// The window closed without a sign-in: a profile it created and that never
+    /// became ready is removed. While I'm signed in is being handled, that
+    /// attempt stops at its next step and does the removal itself, after it
+    /// ends its ceremony.
+    public func abandonDeviceSignIn() async {
+        if let request = deviceSignInRequest, confirmingDeviceSignInID == request.id {
+            deviceSignInRequest = nil
+            closedDuringDeviceSignInID = request.id
+            return
+        }
+        let created = deviceSignInCreatedProfile?.profileID
+        deviceSignInRequest = nil
+        deviceSignInCreatedProfile = nil
+        guard let api, let created else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        await discardDeviceSignInProfile(created, using: api)
+    }
+
+    /// Removes a profile a device sign-in window created and no longer needs.
+    private func discardDeviceSignInProfile(_ profileID: UUID, using api: VeetbotAPIClient) async {
+        let cleanupError = await discardUnusedBrowserProfile(
+            using: api, profileID: profileID, authenticationID: nil
+        )
+        browserProfiles.removeAll { $0.id == profileID }
+        try? await reloadBrowserProfiles(using: api)
+        if let cleanupError {
+            errorMessage =
+                "The unused website login could not be fully removed: \(displayMessage(for: cleanupError)). Refresh Website Access and use the trash button to try again."
+        }
+    }
+
+    /// The owner chose the remote browser from the sign-in window of a new
+    /// website: the device attempt is abandoned and today's remote path begins.
+    @discardableResult
+    public func switchDeviceSignInToRemoteBrowser(_ request: DeviceSignInRequest) async -> URL? {
+        await abandonDeviceSignIn()
+        guard request.profileID == nil else { return nil }
+        return await createWebsiteAccess(websiteURL: request.startURL.absoluteString)
+    }
+
+    /// The app became active or Website Access appeared: re-read an open remote
+    /// ceremony, whose outcome the owner may have finished elsewhere (D16).
+    public func refreshOpenRemoteAuthentication() async {
+        guard let browserAuthentication, !browserAuthentication.status.isTerminal else { return }
+        await refreshBrowserAuthentication()
+    }
+
+    private func openDeviceSignIn(_ request: DeviceSignInRequest) {
+        deviceSignInCreatedProfile = nil
+        deviceSignInRequest = request
+        errorMessage = nil
+    }
+
+    /// Begin, recovering once from a lost answer or an open ceremony by
+    /// cancelling the newest open one (D20, 0128-design §2.5 item 9).
+    /// `isCurrent` is checked before each request after the first: a closed
+    /// window or a changed connection stops the recovery.
+    private func beginDeviceCeremony(
+        using api: VeetbotAPIClient,
+        profileID: UUID,
+        loginURL: String,
+        while isCurrent: () -> Bool
+    ) async -> Result<BrowserAuthenticationView, DeviceSignInError> {
+        func begin() async throws -> BrowserAuthenticationView {
+            try await api.beginBrowserAuthentication(
+                profileID: profileID, loginURL: loginURL, mode: .device
+            )
+        }
+        let conflict: Bool
+        do {
+            return .success(try await begin())
+        } catch HTTPTransportError.connection {
+            conflict = false
+        } catch {
+            guard apiError(from: error)?.statusCode == 409 else {
+                return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+            }
+            conflict = true
+        }
+        guard isCurrent() else { return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart)) }
+        let ceremonies: [BrowserAuthenticationView]
+        do {
+            ceremonies = try await api.listBrowserAuthentications(profileID: profileID)
+        } catch {
+            return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+        }
+        let now = Date()
+        let open = ceremonies
+            .filter {
+                ($0.status == .authenticationRequired || $0.status == .needsUser) && $0.expiresAt > now
+            }
+            .max { $0.expiresAt < $1.expiresAt }
+        guard isCurrent() else { return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart)) }
+        if let open {
+            do {
+                _ = try await api.cancelBrowserAuthentication(open.id)
+            } catch {
+                return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+            }
+            // A remote ceremony it cancelled is over: its link and Start over
+            // no longer apply.
+            if browserAuthentication?.id == open.id {
+                clearWebsiteAuthenticationState()
+            }
+        } else if conflict {
+            return .failure(DeviceSignInError(DeviceSignInMessage.websiteInUse))
+        }
+        guard isCurrent() else { return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart)) }
+        do {
+            return .success(try await begin())
+        } catch {
+            return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
+        }
+    }
+
+    /// The ceremony's status after a handoff whose answer is missing or says
+    /// nothing final: polled every interval up to the limit, or read once.
+    /// Nil when it never answered. Reading stops once `isCurrent` is false.
+    private func deviceCeremonyStatus(
+        using api: VeetbotAPIClient,
+        id: UUID,
+        polling: Bool,
+        while isCurrent: () -> Bool
+    ) async -> BrowserAuthenticationStatus? {
+        let deadline = Date().addingTimeInterval(deviceSignInTiming.pollLimit)
+        var last: BrowserAuthenticationStatus?
+        while isCurrent() {
+            if let view = try? await api.getBrowserAuthentication(id) {
+                last = view.status
+                if view.status.isTerminal { return view.status }
+            }
+            guard polling, Date() < deadline, !Task.isCancelled, isCurrent() else { return last }
+            try? await Task.sleep(nanoseconds: UInt64(deviceSignInTiming.pollInterval * 1_000_000_000))
+        }
+        return last
+    }
+
+    private static func deviceSignInMessage(for code: String) -> String {
+        switch code {
+        case "session_empty": return DeviceSignInMessage.sessionEmpty
+        case "session_signed_out": return DeviceSignInMessage.sessionSignedOut
+        case "session_unconfirmed": return DeviceSignInMessage.sessionUnconfirmed
+        case "tool.browser.provider_unavailable": return DeviceSignInMessage.couldNotCheck
+        default: return DeviceSignInMessage.couldNotFinish
+        }
+    }
+
+    /// The login URL and primary origin a typed website names: HTTPS is
+    /// added when omitted; credentials and ports other than 443 are refused.
+    static func websiteLoginTarget(_ websiteURL: String) -> (loginURL: String, origin: String)? {
+        let input = websiteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasScheme = input.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
+        let candidate = hasScheme ? input : "https://" + input
+        guard
+            var components = URLComponents(string: candidate),
+            components.scheme?.lowercased() == "https",
+            let host = components.host, !host.isEmpty,
+            components.user == nil, components.password == nil,
+            components.port == nil || components.port == 443
+        else { return nil }
+        components.scheme = "https"
+        components.host = host.lowercased()
+        components.port = nil
+        guard let loginURL = components.url?.absoluteString else { return nil }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        guard let origin = components.url?.absoluteString else { return nil }
+        return (loginURL, origin)
+    }
+
     public func selectBrowserProfile(_ profileID: UUID?) async {
         guard profileID == nil
             || browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready })
@@ -1645,8 +2229,20 @@ public final class ChatViewModel: ObservableObject {
     /// forgets the ceremony either way, so nothing can offer the capability.
     private func abandonWebsiteAuthenticationCeremony() async {
         let ceremony = browserAuthentication
+        let createdByDeviceSignIn = deviceSignInCreatedProfile?.profileID
         clearWebsiteAuthenticationState()
-        guard let api, let ceremony, !ceremony.status.isTerminal else { return }
+        deviceSignInRequest = nil
+        deviceSignInCreatedProfile = nil
+        // An attempt still being handled sends nothing more; its profile is
+        // removed here, under the credential that created it.
+        closedDuringDeviceSignInID = nil
+        guard let api else { return }
+        if let createdByDeviceSignIn {
+            _ = await discardUnusedBrowserProfile(
+                using: api, profileID: createdByDeviceSignIn, authenticationID: nil
+            )
+        }
+        guard let ceremony, !ceremony.status.isTerminal else { return }
         _ = try? await api.cancelBrowserAuthentication(ceremony.id)
     }
 
@@ -1738,6 +2334,7 @@ public final class ChatViewModel: ObservableObject {
         isReconfiguring = true
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
+        activeTaskGrants = []
         await artifactCache.removeAll()
         pendingSubmission = nil
         clearAttachments()
@@ -1765,6 +2362,7 @@ public final class ChatViewModel: ObservableObject {
     private func clearInstalledConnection() {
         dismissCallResult()
         resetFolderState()
+        activeTaskGrants = []
         api = nil
         eventStream = nil
         baseURL = nil
@@ -1779,6 +2377,7 @@ public final class ChatViewModel: ObservableObject {
                 for try await frame in eventStream.frames(runID: runID) {
                     guard let self else { return }
                     self.runState.reduce(frame)
+                    await self.applyTaskGrantFrame(frame)
                     if frame.event == "approval.requested"
                         || frame.event == "run.waiting_for_approval"
                     {
@@ -1902,6 +2501,13 @@ public final class ChatViewModel: ObservableObject {
     private func displayMessage(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
+}
+
+/// A device sign-in failure message, carried through begin recovery.
+private struct DeviceSignInError: Error {
+    let message: String
+
+    init(_ message: String) { self.message = message }
 }
 
 /// Main-actor callers own all task reads and writes; `deinit` may only cancel off-actor.

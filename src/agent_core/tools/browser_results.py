@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -52,6 +53,9 @@ _FAILURE_KINDS = {
     "tool.browser.element_not_found": ToolFailureKind.NOT_FOUND,
     "tool.browser.page_changed": ToolFailureKind.INVALID_ARGUMENTS,
     "tool.browser.action_not_allowed": ToolFailureKind.INVALID_ARGUMENTS,
+    # ADR-0129: the runtime refused before dispatch; nothing happened, and the
+    # model observes again, so the outcome is failed, never uncertain.
+    "tool.browser.grant_not_applicable": ToolFailureKind.INVALID_ARGUMENTS,
 }
 
 
@@ -155,4 +159,31 @@ def observation_result(
         content=[TextPart(text=serialized)],
         structured=structured,
         output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+        evidence_key=observation_evidence_key(structured),
     )
+
+
+def observation_evidence_key(structured: dict[str, Any]) -> str:
+    """ADR-0130: a digest of what the model saw, without provider, revision or refs.
+
+    Two observations of the same page share it even though every observation
+    gets a new revision; a page that changed gets a new one. The loop breaker
+    reads it; it is never model-visible and never stored.
+    """
+
+    evidence = {
+        "url": structured.get("url"),
+        "title": structured.get("title"),
+        "text": structured.get("text"),
+        "elements": [
+            [
+                element.get("role"),
+                element.get("name"),
+                element.get("disabled"),
+                element.get("checked"),
+            ]
+            for element in structured.get("elements", ())
+        ],
+    }
+    canonical = json.dumps(evidence, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]

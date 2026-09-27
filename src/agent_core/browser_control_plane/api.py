@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import re
-from collections.abc import Callable
-from typing import Any
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
@@ -17,12 +19,25 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from agent_core.browser_control_plane.sessions import HostedProfileSessionService
+from agent_core.browser_control_plane.handoff import (
+    MAX_DEVICE_HANDOFF_BYTES,
+    DeviceSessionHandoff,
+)
+from agent_core.browser_control_plane.sessions import (
+    CeremonyCapabilityRejected,
+    DeviceHandoffInvalid,
+    DeviceSessionRejected,
+    HostedProfileSessionService,
+    SurfaceOperation,
+)
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserAuthenticationMode,
+    BrowserDispatchConstraint,
     BrowserInteractiveEvent,
     BrowserProviderError,
+    BrowserSnapshot,
 )
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.errors import ConflictError
@@ -31,9 +46,24 @@ from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 MAX_PROFILE_SERVICE_BODY_BYTES = 64 * 1024
 MAX_AUTHENTICATION_EVENT_BYTES = 8 * 1024
 _LOGGER = logging.getLogger(__name__)
+# A surface path exactly as the service issues it: the ceremony id in its
+# canonical lowercase, hyphenated form. \Z, unlike $, admits no final newline.
 _AUTHENTICATION_PATH = re.compile(
-    r"^/authentication/(?P<ceremony>[0-9a-fA-F-]{36})(?:/(?P<operation>frame|events))?$"
+    r"/authentication/(?P<ceremony>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"(?:/(?P<operation>frame|events|handoff))?\Z"
 )
+_AUTHENTICATION_SCRIPT_PATH = "/authentication-surface.js"
+# The largest body each authenticated surface operation accepts.
+_OPERATION_BODY_BYTES = {
+    "events": MAX_AUTHENTICATION_EVENT_BYTES,
+    "handoff": MAX_DEVICE_HANDOFF_BYTES,
+}
+# Fixed messages for the handoff's verification outcomes (ADR-0128 section 2.3).
+_HANDOFF_REJECTIONS = {
+    "session_empty": "no session for this website was found",
+    "session_signed_out": "the website showed this page signed out",
+    "session_unconfirmed": "the website shows this page without signing in",
+}
 
 
 class _ProvisionRequest(BaseModel):
@@ -77,10 +107,14 @@ class _NavigateRequest(_LeaseRequest):
 class _ActRequest(_LeaseRequest):
     action: BrowserAction
     sequence: int = Field(ge=1)
+    # ADR-0129: a grant-authorized act carries what the grant allows; the
+    # service and the runtime use it only to refuse.
+    constraint: BrowserDispatchConstraint | None = None
 
 
 class _BeginAuthenticationRequest(_LifecycleRequest):
     login_url: str = Field(min_length=1, max_length=4096)
+    mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE
 
 
 class _CeremonyRequest(BaseModel):
@@ -205,13 +239,12 @@ class _AuthenticationSurfaceBoundary:
                 message = {**message, "headers": headers}
             await send(message)
 
-        match = _AUTHENTICATION_PATH.fullmatch(str(scope["path"]))
-        if match is None or match.group("operation") is None:
-            await self._app(scope, receive, secured_send)
-            return
-        try:
-            ceremony_id = UUID(match.group("ceremony"))
-        except ValueError:
+        path = str(scope["path"])
+        match = _AUTHENTICATION_PATH.fullmatch(path)
+        if match is None and path != _AUTHENTICATION_SCRIPT_PATH:
+            # Any other spelling, such as a decoded %0A after the operation or
+            # an undashed id, would still reach FastAPI's looser routes and
+            # have its body parsed before any capability check (ADR-0128 D5).
             await _send_response(
                 _error(404, "not_found", "resource not found"),
                 scope,
@@ -219,9 +252,31 @@ class _AuthenticationSurfaceBoundary:
                 secured_send,
             )
             return
+        if match is None or match.group("operation") is None:
+            await self._app(scope, receive, secured_send)
+            return
+        ceremony_id = UUID(match.group("ceremony"))
+        operation = cast(SurfaceOperation, match.group("operation"))
         headers = {key.lower(): value for key, value in scope["headers"]}
         capability = headers.get(b"x-browser-ceremony-capability", b"").decode("latin-1")
-        if not await self._sessions.authenticate_surface(ceremony_id, capability):
+        try:
+            authenticated = await self._sessions.authenticate_surface(
+                ceremony_id, capability, operation
+            )
+        except Exception as exc:
+            # Nothing may leave the handoff path as an exception (ADR-0128 D18).
+            _LOGGER.error(
+                "authentication surface check failed",
+                extra={"failure_type": type(exc).__name__},
+            )
+            await _send_response(
+                _error(500, "internal_error", "service unavailable"),
+                scope,
+                receive,
+                secured_send,
+            )
+            return
+        if not authenticated:
             await _send_response(
                 _error(401, "unauthorized", "authentication required"),
                 scope,
@@ -229,7 +284,8 @@ class _AuthenticationSurfaceBoundary:
                 secured_send,
             )
             return
-        if match.group("operation") != "events":
+        maximum_body = _OPERATION_BODY_BYTES.get(operation)
+        if maximum_body is None:
             await self._app(scope, receive, secured_send)
             return
         media_type = headers.get(b"content-type", b"").split(b";", 1)[0].strip().lower()
@@ -244,7 +300,7 @@ class _AuthenticationSurfaceBoundary:
         raw_length = headers.get(b"content-length")
         if raw_length is not None:
             try:
-                if int(raw_length) > MAX_AUTHENTICATION_EVENT_BYTES:
+                if int(raw_length) > maximum_body:
                     raise ValueError
             except ValueError:
                 await _send_response(
@@ -260,7 +316,7 @@ class _AuthenticationSurfaceBoundary:
             if message["type"] == "http.disconnect":
                 return
             body.extend(message.get("body", b""))
-            if len(body) > MAX_AUTHENTICATION_EVENT_BYTES:
+            if len(body) > maximum_body:
                 await _send_response(
                     _error(413, "payload_too_large", "request body too large"),
                     scope,
@@ -297,8 +353,25 @@ def create_profile_service_app(
     *,
     readiness: Callable[[], bool] = lambda: True,
     sessions: HostedProfileSessionService | None = None,
+    sweep_interval_seconds: float = 15.0,
 ) -> FastAPI:
-    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # ADR-0128 D16: sweep on a timer, not only when traffic arrives.
+        sweeping = (
+            asyncio.create_task(_sweep_forever(sessions, sweep_interval_seconds))
+            if sessions is not None and sweep_interval_seconds > 0
+            else None
+        )
+        try:
+            yield
+        finally:
+            if sweeping is not None:
+                sweeping.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sweeping
+
+    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.add_middleware(_ProfileServiceBoundary, authorization=authorization)
     if sessions is not None:
         app.add_middleware(_AuthenticationSurfaceBoundary, sessions=sessions)
@@ -419,13 +492,13 @@ def create_profile_service_app(
 
         @app.post("/v1/browser-sessions:navigate", response_model=None)
         async def navigate(payload: _NavigateRequest) -> dict[str, Any]:
-            result = await sessions.navigate(payload.lease_ref, payload.url)
-            return result.model_dump(mode="json")
+            result = await sessions.navigate_snapshot(payload.lease_ref, payload.url)
+            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:observe", response_model=None)
         async def observe(payload: _LeaseRequest) -> dict[str, Any]:
-            result = await sessions.observe(payload.lease_ref)
-            return result.model_dump(mode="json")
+            result = await sessions.observe_snapshot(payload.lease_ref)
+            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:act", response_model=None)
         async def act(payload: _ActRequest, request: Request) -> dict[str, Any] | JSONResponse:
@@ -435,12 +508,13 @@ def create_profile_service_app(
             rejected = _require_idempotency(request, expected)
             if rejected is not None:
                 return rejected
-            result = await sessions.act(
+            result = await sessions.act_snapshot(
                 payload.lease_ref,
                 payload.action,
                 sequence=payload.sequence,
+                constraint=payload.constraint,
             )
-            return result.model_dump(mode="json")
+            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:renew", response_model=None)
         async def renew(payload: _RenewRequest, request: Request) -> dict[str, Any] | JSONResponse:
@@ -476,6 +550,7 @@ def create_profile_service_app(
                 _principal(payload.tenant_id, payload.principal_id),
                 payload.provider_ref,
                 login_url=payload.login_url,
+                mode=payload.mode,
             )
             return result.model_dump(mode="json")
 
@@ -503,6 +578,43 @@ def create_profile_service_app(
                 _principal(payload.tenant_id, payload.principal_id),
             )
             return result.model_dump(mode="json")
+
+        @app.post("/authentication/{ceremony_id}/handoff", response_model=None)
+        async def device_handoff(
+            ceremony_id: UUID,
+            payload: DeviceSessionHandoff,
+            request: Request,
+        ) -> JSONResponse:
+            """Seal a session the owner's device signed in; every outcome is an answer.
+
+            No exception leaves this route (ADR-0128 D18): Starlette re-raises
+            anything that reaches the generic handler, and uvicorn would log it
+            with its message and traceback.
+            """
+            try:
+                await sessions.accept_device_session(
+                    ceremony_id,
+                    request.headers.get("x-browser-ceremony-capability", ""),
+                    payload,
+                )
+            except DeviceSessionRejected as rejected:
+                message = _HANDOFF_REJECTIONS.get(rejected.code, "session rejected")
+                return _error(422, rejected.code, message)
+            except DeviceHandoffInvalid:
+                return _error(400, "invalid_request", "request is invalid")
+            except CeremonyCapabilityRejected:
+                return _error(401, "unauthorized", "authentication required")
+            except BrowserProviderError as exc:
+                return _error(409, exc.reason_code, "browser operation rejected")
+            except ConflictError:
+                return _error(409, "conflict", "profile lifecycle conflict")
+            except Exception as exc:
+                _LOGGER.error(
+                    "device handoff failed",
+                    extra={"failure_type": type(exc).__name__},
+                )
+                return _error(500, "internal_error", "service unavailable")
+            return JSONResponse({"status": "ready"})
 
         @app.get("/authentication-surface.js", response_model=None)
         async def authentication_script() -> PlainTextResponse:
@@ -542,6 +654,30 @@ def create_profile_service_app(
             return Response(status_code=204)
 
     return app
+
+
+async def _sweep_forever(sessions: HostedProfileSessionService, interval: float) -> None:
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await sessions.sweep()
+        except Exception as exc:
+            _LOGGER.error(
+                "profile session sweep failed",
+                extra={"failure_type": type(exc).__name__},
+            )
+
+
+def _snapshot_response(snapshot: BrowserSnapshot) -> dict[str, Any]:
+    """The observation's fields at the top level, and facts as an optional sibling.
+
+    An older worker parses the response as a plain observation and ignores
+    ``facts`` (ADR-0129 D26).
+    """
+    response = snapshot.observation.model_dump(mode="json")
+    if snapshot.facts is not None:
+        response["facts"] = snapshot.facts.model_dump(mode="json")
+    return response
 
 
 def _principal(tenant_id: str, principal_id: str) -> Principal:

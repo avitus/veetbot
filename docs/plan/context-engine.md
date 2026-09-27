@@ -110,7 +110,7 @@ Assembly order is fixed and total:
 | 11 | B | Loaded skill bodies, in load order | per skill |
 | 12 | B | Working-state block | per entry |
 | 13 | B | In-turn recall and correction lines | `MEMORY` |
-| 14 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
+| 14 | B | Runtime metadata: current date, principal scope, surface; the origins `browser.navigate` accepts when the plan offers it | `PLATFORM` |
 | 15 | B | The current user message | `USER` |
 
 Rows 7 and 11 are added by [skills.md](skills.md), which owns their content,
@@ -218,6 +218,47 @@ plan as a new epoch with its canonical hashes and reason
 `prefix_hash_canonicalized`. It does not rebuild the plan under a run that
 may be parked on an approval, and the provider receives the same bytes, so
 nothing is re-cached.
+
+### The history cache window
+
+Region A is cached by the plan's `after_system` and `after_tools` breakpoints.
+Region B is cached by its third, `after_history_prefix`: the rolling window
+Section 10.1 asks for. The builder places it on every request as up to two
+markers, each naming the last conversation item its cached prefix includes
+(`CacheBreakpoint.through_item`):
+
+- **The carried-history marker** closes the compacted summary and the retained
+  history. It is the only Region B prefix the next run repeats, because rows 11
+  to 14 and the new run's items follow it and can differ between runs. A first
+  run carries nothing and has no such marker.
+- **The run marker** closes the longest prefix the run's next step repeats: the
+  whole conversation, stopping before a replayed provider continuation. The
+  runtime replays only the latest turn's reasoning items (ADR-0007), so the
+  next step no longer carries these, and every envelope nonce after them moves
+  with their indices.
+
+A marker past either point would write a cache entry that no later request
+reads, paying the provider's write premium on every request for nothing. Both
+markers follow the prefix breakpoints in priority order, so a four-breakpoint
+provider sends all four and a smaller budget drops the run marker first
+([model-gateway.md](model-gateway.md)). A provider finds an earlier entry only
+within its lookback, about twenty blocks on Anthropic, so a run that appended
+more than that re-caches the carried history once on the next run's first
+request. The window is a provider cache marker, not prompt text: it is outside
+`prefix_sha256`, it changes no byte the model reads, and a plan persisted
+before it gains the window when loaded, without rotating its epoch.
+
+The plan also chooses how long the provider keeps each entry (ADR-0132). Both
+prefix breakpoints carry one TTL, fixed when the plan is built. A scheduled
+occurrence gets the one-hour TTL, because its single autonomous run waits on
+children, slow tools and the async queue. Every other session gets the default,
+delegated children included. The history window keeps the default in every
+session: its markers move every step, so a one-hour write there would pay the
+premium on each request, and a shorter entry after a longer one is the order
+the provider requires. The TTL is not prefix identity either. It never rotates
+an epoch, and a plan built before ADR-0132 keeps the default until a rotation
+for another reason rebuilds it; a `prefix_hash_canonicalized` epoch copies the
+plan and keeps its breakpoints.
 
 ### The persona row
 
@@ -336,6 +377,12 @@ capabilities still fail at plan time if they exceed the token cap. The selected
 set is then sorted by name for stable rendering. Adding an MCP account must not
 evict an explicitly enabled web, clock, or workspace capability merely because
 its name sorts earlier.
+
+In a session bound to a website profile, `browser.navigate`,
+`browser.observe` and `browser.act` are required definitions (ADR-0130): they
+rank ahead of every other candidate, neither the agent's deferral list nor
+overflow moves them to the index, and a plan that cannot define them fails at
+plan time. What they displace moves to the index in the order above.
 
 When anything is deferred and the agent enables `tool.call`, `tool.call` takes
 a definition slot, and every candidate without a definition becomes an index

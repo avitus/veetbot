@@ -28,7 +28,12 @@ from agent_core.domain.errors import (
 from agent_core.domain.events import NewEvent
 from agent_core.domain.hazards import contains_injection_pattern
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
-from agent_core.domain.messages import CacheBreakpoint, ConversationItem, ResolvedModel
+from agent_core.domain.messages import (
+    CacheBreakpoint,
+    CacheTtl,
+    ConversationItem,
+    ResolvedModel,
+)
 from agent_core.domain.persona import render_persona
 from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunKind
@@ -54,6 +59,14 @@ BUILDER_VERSION = "context-builder@12"
 # fail a run parked on an approval if its selection moved (ADR-0123).
 _EQUIVALENT_EARLIER_BUILDERS = frozenset({"context-builder@11"})
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
+# In priority order: the adapter keeps the earliest a model's breakpoint budget
+# allows. The history window is placed per request by the builder (Section 10.1).
+CACHE_BREAKPOINTS = (
+    CacheBreakpoint(boundary="after_system"),
+    CacheBreakpoint(boundary="after_tools"),
+    CacheBreakpoint(boundary="after_history_prefix"),
+)
+_PREFIX_BOUNDARIES = frozenset({"after_system", "after_tools"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
 _SKILL_LOAD_TOOL_NAME = "skill.load"
@@ -63,7 +76,15 @@ _READ_SIDE_EFFECTS = frozenset(
     {SideEffectClass.NONE, SideEffectClass.WORKSPACE_READ, SideEffectClass.NETWORK_READ}
 )
 
+_BROWSER_NAVIGATE_TOOL_NAME = "browser.navigate"
+# A profile holds at most 64 origins (domain/browser.py).
+_MAXIMUM_BROWSER_ORIGINS = 64
 type SessionToolFilter = Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]
+# ADR-0130: tool names a session must define in full, ranked ahead of every
+# configured tool and never deferred.
+type SessionRequiredTools = Callable[[Session], frozenset[str]]
+# ADR-0130: the origins browser.navigate accepts in a session.
+type SessionBrowserOrigins = Callable[[Session, Principal], Awaitable[tuple[str, ...]]]
 type DeviceToolAttach = Callable[[UUID, Principal], Awaitable[None]]
 
 
@@ -76,6 +97,25 @@ def _authority_scope_hashes(principal: Principal) -> tuple[str, ...]:
 
 def _builder_is_current(version: str) -> bool:
     return version == BUILDER_VERSION or version in _EQUIVALENT_EARLIER_BUILDERS
+
+
+def _with_history_window(plan: ContextPlan) -> ContextPlan:
+    """Give a plan persisted before the history window its breakpoint, in place.
+
+    A breakpoint is a provider cache marker, not prompt text: adding one changes
+    neither ``prefix_sha256`` nor a byte the model reads, so the plan keeps its
+    epoch instead of rotating and re-caching its whole prefix for nothing.
+    """
+    if any(item.boundary == "after_history_prefix" for item in plan.cache_breakpoints):
+        return plan
+    return plan.model_copy(
+        update={
+            "cache_breakpoints": (
+                *plan.cache_breakpoints,
+                CacheBreakpoint(boundary="after_history_prefix"),
+            )
+        }
+    )
 
 
 def _tool_schema_sha256(tools: Sequence[ToolSpec]) -> str:
@@ -94,6 +134,34 @@ def _discovered_rank(tool: ToolSpec) -> tuple[int, str, str]:
         0 if tool.side_effect in _READ_SIDE_EFFECTS else 1,
         tool.server_id or tool.device_id or "",
         tool.name,
+    )
+
+
+def _cache_ttl(session: Session) -> CacheTtl:
+    """A scheduled occurrence is the long agentic loop that caches for an hour (ADR-0132).
+
+    A read refreshes a five-minute entry for free, so the one-hour write pays only
+    across a gap of five to sixty minutes between calls. An occurrence is one
+    autonomous run whose calls wait on children, slow tools and the async queue.
+    A delegated child is a short loop in a session that ends with it, and an
+    interactive session takes the default (Section 10.1).
+    """
+    if session.metadata.get(SESSION_RUN_KIND_METADATA_KEY) == RunKind.DELEGATED.value:
+        return "default"
+    return "1h" if SESSION_SCHEDULE_ID_METADATA_KEY in session.metadata else "default"
+
+
+def _cache_breakpoints(session: Session) -> tuple[CacheBreakpoint, ...]:
+    """The frozen prefix takes the session's TTL; the history window keeps the default.
+
+    One TTL across the prefix, and the default after it, keeps every longer-lived
+    entry ahead of every shorter one. The window moves every step, so a one-hour
+    write there would pay the premium on each call.
+    """
+    ttl = _cache_ttl(session)
+    return tuple(
+        item.model_copy(update={"ttl": ttl} if item.boundary in _PREFIX_BOUNDARIES else {})
+        for item in CACHE_BREAKPOINTS
     )
 
 
@@ -116,6 +184,8 @@ class EventContextPlanner:
         skill_catalogs: SkillCatalog | None = None,
         memory_retriever: MemoryRetriever | None = None,
         session_tool_filter: SessionToolFilter | None = None,
+        session_required_tools: SessionRequiredTools | None = None,
+        session_browser_origins: SessionBrowserOrigins | None = None,
         attach_device_tools: DeviceToolAttach | None = None,
         snapshot_profiles: SnapshotProfiles | None = None,
         cache_capacity: int = 1_024,
@@ -132,6 +202,8 @@ class EventContextPlanner:
         self._skill_catalogs = skill_catalogs
         self._memory_retriever = memory_retriever
         self._session_tool_filter = session_tool_filter
+        self._session_required_tools = session_required_tools
+        self._session_browser_origins = session_browser_origins
         self._attach_device_tools = attach_device_tools
         self._snapshot_profiles = (
             SnapshotProfiles() if snapshot_profiles is None else snapshot_profiles
@@ -189,7 +261,7 @@ class EventContextPlanner:
         ]
         if not plans:
             return None
-        plan = max(plans, key=lambda candidate: candidate.epoch)
+        plan = _with_history_window(max(plans, key=lambda candidate: candidate.epoch))
         if plan.memory_snapshot and plan.snapshot_id is not None:
             async with self._uow_factory() as uow:
                 try:
@@ -478,15 +550,37 @@ class EventContextPlanner:
             ),
             key=lambda tool: configured_order[tool.name],
         )
+        # ADR-0130: tools the session requires rank first, by name, and are
+        # never deferred, whatever the configuration names.
+        required_names = (
+            frozenset()
+            if self._session_required_tools is None
+            else self._session_required_tools(session)
+            & {tool.name for tool in tools if tool.name != _TOOL_CALL_TOOL_NAME}
+        )
+        required = sorted(
+            (tool for tool in tools if tool.name in required_names), key=lambda tool: tool.name
+        )
         explicitly_deferred = [
             tool
             for tool in configured
-            if tool.name in requested_deferred and tool.kind is not ToolKind.CONTROL
+            if tool.name in requested_deferred
+            and tool.kind is not ToolKind.CONTROL
+            and tool.name not in required_names
         ]
         ranked = [
-            *(tool for tool in configured if tool not in explicitly_deferred),
+            *required,
+            *(
+                tool
+                for tool in configured
+                if tool not in explicitly_deferred and tool.name not in required_names
+            ),
             *sorted(
-                (tool for tool in tools if tool.name not in configured_order),
+                (
+                    tool
+                    for tool in tools
+                    if tool.name not in configured_order and tool.name not in required_names
+                ),
                 key=_discovered_rank,
             ),
         ]
@@ -520,6 +614,13 @@ class EventContextPlanner:
             assert control is not None
             # tool.call takes a definition slot only when something is deferred.
             selected_tools, overflow = select([control])
+        missing_required = required_names - {tool.name for tool in selected_tools}
+        if missing_required:
+            # Explicit capabilities still fail at plan time (ADR-0130).
+            raise ValueError(
+                "required session tools do not fit the tool-definition cap: "
+                + ", ".join(sorted(missing_required))
+            )
         index_candidates = [*explicitly_deferred, *overflow] if deferring else []
         skipped_tools: list[ToolSpec] = [] if deferring else list(overflow)
         deferred_tools: list[ToolSpec] = []
@@ -674,6 +775,18 @@ class EventContextPlanner:
             prefix_tokens=prefix_tokens,
             memory_snapshot_tokens=memory_token_cap,
         )
+        # ADR-0130: tell the model which origins browser.navigate accepts. The
+        # row is outside the prefix, so this never rotates a plan's cache.
+        offers_navigation = any(
+            tool.name == _BROWSER_NAVIGATE_TOOL_NAME for tool in (*tools, *deferred_tools)
+        )
+        browser_origins = (
+            tuple(dict.fromkeys(await self._session_browser_origins(session, principal)))[
+                :_MAXIMUM_BROWSER_ORIGINS
+            ]
+            if offers_navigation and self._session_browser_origins is not None
+            else ()
+        )
         plan = ContextPlan(
             session_id=session.id,
             epoch=epoch,
@@ -691,10 +804,7 @@ class EventContextPlanner:
             persona_version=persona_version,
             skill_pins=() if catalog is None else catalog.pins,
             skill_catalog=catalog_metadata,
-            cache_breakpoints=(
-                CacheBreakpoint(boundary="after_system"),
-                CacheBreakpoint(boundary="after_tools"),
-            ),
+            cache_breakpoints=_cache_breakpoints(session),
             policy_version=self._policy_version,
             builder_version=BUILDER_VERSION,
             budget=budget,
@@ -702,6 +812,7 @@ class EventContextPlanner:
             deferred_tool_names=tuple(tool.name for tool in deferred_tools),
             deferred_tool_specs=tuple(tool.model_copy(deep=True) for tool in deferred_tools),
             skipped_tool_names=tuple(tool.name for tool in skipped_tools),
+            browser_origins=browser_origins,
         )
         return await self._append(plan, event_type, reason)
 

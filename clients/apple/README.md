@@ -80,12 +80,25 @@ The isolated browser automatically loads the site's public HTTPS scripts,
 styles, images, fonts, APIs, and embedded verification frames, including those
 hosted on CDNs. No additional domain configuration is required, including for
 existing profiles. Top-level navigation remains scoped to the profile's website
-origins, and private-network access is blocked. The app opens the
+origins, and private-network access is blocked. By default the app signs in on
+this device: it opens the website in a private sign-in window that Veetbot
+does not read or keep, the user signs in there, and after I'm signed in the
+app hands only that website's session to Veetbot's isolated browser service,
+once, and clears the window. The window cannot be closed while the sign-in is
+being checked; if it closes anyway, the sign-in stops, nothing is chosen for
+new chats, and a website login the window created is removed. Passkeys and
+sign-in through another website's identity provider do not work in that
+window. Sign in again on a profile row opens the same window for a profile
+that is not revoked; if a remote sign-in is still open for that profile, the
+device sign-in cancels it and the app forgets its link, so Start over cannot
+remove the signed-in profile. Use Veetbot's remote
+browser remains available, and the sign-in window offers it when a new
+website's sign-in cannot start on this device: the app opens the
 server-provided isolated login ceremony only after a separate Continue in web
-browser action, where the user enters website
-credentials directly; usernames, passwords, passkeys, MFA values, cookies, and
-browser storage never pass through this client or chat. Selecting a ready
-profile binds only its opaque UUID to newly created conversations.
+browser action, where the user enters website credentials directly. In either mode, usernames, passwords, cookies,
+and browser storage never pass through chat, the Veetbot API, or the agent.
+Selecting a ready profile binds only its opaque UUID to newly created
+conversations.
 Veetbot reuses the encrypted browser session across runs while the website
 accepts it. There is no fixed reauthentication interval: expiration, logout, or
 a site's MFA/CAPTCHA challenge requires user sign-in again. The five-minute
@@ -98,6 +111,15 @@ platform rejects the browser handoff, the app cancels the ceremony and removes
 the unused profile. Start over provides the same recovery for a closed,
 reloaded, or expired one-time link. The installed version and build number are
 shown under Data & Privacy; this recovery release is 0.1.1 (2).
+
+A `browser.act` approval card names the action, the element and the page,
+and shows the website's own text in quotes, labelled as coming from the
+website. When the server offers it, Allow for this task lets Veetbot act
+inside that site scope without asking again, for up to thirty minutes and
+two hundred actions. A banner above the composer counts them, and Stop ends
+the permission at once; Website Access lists active permissions in a compact
+Task permissions row whose menu stops each one. Passwords, payments,
+purchases, account changes and messages still ask every time.
 
 In Email feedback, **This kind of content** offers the topics identified on the
 selected thread. Choose a topic before marking it Important or Less important;

@@ -32,6 +32,7 @@ models:
       input_per_mtok: "5.00"
       cached_input_per_mtok: "0.50"
       cache_write_per_mtok: "6.25"
+      cache_write_1h_per_mtok: "10.00"
       output_per_mtok: "25.00"
       reasoning_per_mtok: null
       reasoning_priced_separately: false
@@ -47,8 +48,9 @@ models:
     pricing:
       input_per_mtok: "10.00"
       cached_input_per_mtok: "0.25"
-      # The adapter uses ephemeral caching with the default five-minute TTL.
+      # Five-minute writes; scheduled runs write their prefix for an hour (ADR-0132).
       cache_write_per_mtok: "12.50"
+      cache_write_1h_per_mtok: "20.00"
       output_per_mtok: "50.00"
       reasoning_per_mtok: null
       reasoning_priced_separately: false

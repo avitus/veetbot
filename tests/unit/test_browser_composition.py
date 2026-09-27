@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -20,15 +21,22 @@ from agent_core.adapters.browser.hosted_provider import (
 )
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.models.fake import FakeModelProvider
+from agent_core.api import create_app
 from agent_core.application.browser_leases import browser_run_state
+from agent_core.application.browser_task_grants import (
+    BrowserTaskGrantAuthorizer,
+    CompositeStandingAuthorizer,
+)
 from agent_core.bootstrap import Composition, build
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
-from agent_core.config import Settings, load_settings
+from agent_core.config import ConfigurationError, Settings, load_settings
+from agent_core.context.builder import _browser_origins_field
 from agent_core.context.estimator import ConservativeTokenEstimator
-from agent_core.domain.agents import Principal
+from agent_core.domain.agents import BROWSER_TASK_LIMITS_METADATA_KEY, Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserAction,
@@ -43,9 +51,17 @@ from agent_core.domain.browser import (
     BrowserRunState,
 )
 from agent_core.domain.errors import InvalidStateTransition, NotFoundError
-from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
+from agent_core.domain.execution import EgressPolicy
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    StopReason,
+    TextPart,
+    UserMessage,
+)
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolInvocation,
@@ -60,6 +76,9 @@ from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.registry import RegisteredTool
 from tests.contract.support import principal as contract_principal
 from tests.contract.test_hosted_profile_session_service_contract import FakeSessionRuntime
+from tests.unit.test_browser_playwright import FakeProxy as PlaywrightFakeProxy
+from tests.unit.test_browser_playwright import FakeRuntime as PlaywrightFakeRuntime
+from tests.unit.test_browser_playwright import lesson_constraint
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_config import base_environment
 from tests.unit.test_web_tools import FakeWebProvider
@@ -177,6 +196,47 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         assert isinstance(observe.implementation, BrowserObserveTool)
         assert isinstance(act.implementation, BrowserActTool)
         assert isinstance(navigate.implementation._provider, PlaywrightBrowserProvider)
+
+
+async def test_configured_playwright_provider_rechecks_a_constraint_on_the_composition_clock() -> (
+    None
+):
+    """ADR-0129 R2: the local provider hands its runtime the composition's clock.
+
+    Without one, the runtime cannot check a grant's expiry and refuses every
+    constrained act.
+    """
+
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "playwright",
+            "BROWSER_ALLOWED_ORIGINS": "https://example.org",
+        }
+    )
+    runtime = PlaywrightFakeRuntime()
+
+    async def start_proxy(policy: EgressPolicy, *, tenant_id: str) -> PlaywrightFakeProxy:
+        del policy, tenant_id
+        return PlaywrightFakeProxy()
+
+    constraint = lesson_constraint(origins=("https://example.org",))
+    async with build(settings=settings, fixed_clock_at=GRANT_NOW) as composition:
+        registered = cast(RegisteredTool, composition.tool_pipeline._registry.get("browser.act"))
+        provider = cast(BrowserActTool, registered.implementation)._provider
+        assert isinstance(provider, PlaywrightBrowserProvider)
+        provider._runtime = runtime
+        provider._proxy_factory = start_proxy
+        await provider.act(
+            BrowserAction(
+                kind=BrowserActionKind.CLICK, expected_revision="revision-1", ref="revision-1:0"
+            ),
+            constraint=constraint,
+        )
+        await provider.close()
+
+    assert runtime.constraints == [(constraint, GRANT_NOW)]
 
 
 async def test_configured_hosted_provider_binds_the_trusted_profile_adapter() -> None:
@@ -297,6 +357,257 @@ async def test_selected_profile_browser_plan_stays_within_the_tool_definition_ca
         for value in cast(list[dict[str, object]], plan["tool_specs"])
     ]
     assert ConservativeTokenEstimator().estimate_tools(tool_specs, "fake:scripted") <= 6_000
+
+
+BROWSER_TASK_LIMITS = RunLimits(
+    max_steps=160,
+    max_model_calls=120,
+    max_tool_calls=160,
+    max_cost=Decimal("30"),
+    synthesis_reserve_model_calls=2,
+    synthesis_reserve_tool_calls=4,
+    synthesis_reserve_cost=Decimal("3"),
+)
+INTERACTIVE_LIMITS = RunLimits(
+    max_steps=32,
+    max_model_calls=24,
+    max_tool_calls=64,
+    synthesis_reserve_model_calls=2,
+    synthesis_reserve_tool_calls=4,
+)
+
+
+def one_text_turn() -> FakeModelScript:
+    return FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+
+
+async def test_bound_chat_runs_under_the_browser_task_limits() -> None:
+    """ADR-0130 decision 1: a chat bound to a website profile gets the overlay."""
+
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await composition.runs.submit("Open my selected website.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+
+    assert run.status is RunStatus.COMPLETED
+    assert run.limits == BROWSER_TASK_LIMITS
+
+
+async def test_the_default_agent_version_pins_the_overlay() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        created = await composition.services.sessions.create(composition.principal, "general", {})
+        async with composition.uow_factory() as uow:
+            session = await uow.sessions.get(created.id, composition.principal)
+            agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+
+    assert BROWSER_TASK_LIMITS_METADATA_KEY in agent.metadata
+    assert RunLimits.model_validate(agent.metadata[BROWSER_TASK_LIMITS_METADATA_KEY]) == (
+        BROWSER_TASK_LIMITS
+    )
+    assert agent.limits == INTERACTIVE_LIMITS
+
+
+async def test_an_overlay_below_the_defaults_is_refused_at_startup(tmp_path: Path) -> None:
+    overlay = tmp_path / "runtime" / "limits.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("browser_task:\n  max_model_calls: 2\n", encoding="utf-8")
+    settings = load_settings(
+        {**base_environment(), "SANDBOX_MECHANISM": "fake", "AGENT_CONFIG_DIR": str(tmp_path)}
+    )
+
+    with pytest.raises(ConfigurationError, match=r"browser_task\.max_model_calls"):
+        async with build(settings=settings):
+            pass
+
+
+async def test_unbound_chat_keeps_the_interactive_limits() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        created = await composition.services.sessions.create(composition.principal, "general", {})
+        run_id = await composition.runs.submit("Check the weather.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+
+    assert run.limits == INTERACTIVE_LIMITS
+
+
+async def test_chat_pinned_before_the_overlay_keeps_the_interactive_limits() -> None:
+    """A bound session pinned to a version without the overlay keeps 32/24/64."""
+
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        async with composition.uow_factory() as uow:
+            session = await uow.sessions.get(created.id, composition.principal)
+            current = await uow.agents.get_version(session.agent_id, session.agent_version)
+            earlier = current.model_copy(
+                update={
+                    "version": "0.9.0",
+                    "metadata": {
+                        key: value
+                        for key, value in current.metadata.items()
+                        if key != BROWSER_TASK_LIMITS_METADATA_KEY
+                    },
+                },
+                deep=True,
+            )
+            await uow.agents.put(earlier)
+            pinned = session.model_copy(
+                update={"id": UUID(int=0xF0F0), "agent_version": "0.9.0"}, deep=True
+            )
+            await uow.sessions.create(pinned)
+        run_id = await composition.runs.submit("Open my selected website.", pinned.id)
+        run = await composition.runs.wait_terminal(run_id)
+
+    assert run.limits == INTERACTIVE_LIMITS
+
+
+REQUIRED_TOOLS_ENABLED = [
+    "web.fetch",
+    "system.current_time",
+    "math.calculate",
+    "browser.navigate",
+    "browser.observe",
+    "browser.act",
+    "tool.call",
+]
+
+
+async def _plan_with_four_definitions(tmp_path: Path, *, bound: bool) -> dict[str, object]:
+    overlay = tmp_path / "context" / "plan.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("classes:\n  tool_definitions:\n    max_items: 4\n", encoding="utf-8")
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            "AGENT_CONFIG_DIR": str(tmp_path),
+        }
+    )
+    provider = FakeWebProvider()
+    async with build(
+        settings=settings,
+        script=one_text_turn(),
+        enabled_tools=REQUIRED_TOOLS_ENABLED,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal,
+            "general",
+            {},
+            browser_profile_id=PROFILE_ID if bound else None,
+        )
+        run_id = await composition.runs.submit("Open my selected website.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+        assert run.status is RunStatus.COMPLETED
+        return await context_plan_payload(composition, created.id)
+
+
+async def test_bound_chat_defines_the_browser_tools_ahead_of_every_configured_tool(
+    tmp_path: Path,
+) -> None:
+    """ADR-0130 decision 6: the item cap never defers a bound chat's browser tools."""
+
+    plan = await _plan_with_four_definitions(tmp_path, bound=True)
+
+    assert set(cast(list[str], plan["tool_names"])) == {
+        "tool.call",
+        "browser.navigate",
+        "browser.observe",
+        "browser.act",
+    }
+    assert set(cast(list[str], plan["deferred_tool_names"])) == {
+        "web.fetch",
+        "system.current_time",
+        "math.calculate",
+    }
+    assert tuple(cast(list[str], plan["skipped_tool_names"])) == ()
+
+
+async def test_unbound_chat_keeps_its_configured_tools_under_the_same_cap(
+    tmp_path: Path,
+) -> None:
+    plan = await _plan_with_four_definitions(tmp_path, bound=False)
+
+    assert {"web.fetch", "system.current_time", "math.calculate"} <= set(
+        cast(list[str], plan["tool_names"])
+    )
+    assert not set(cast(list[str], plan["tool_names"])) & {
+        "browser.navigate",
+        "browser.observe",
+        "browser.act",
+    }
+
+
+def runtime_metadata_rows(composition: Composition) -> list[str]:
+    # A non-routed development policy answers from the composition's scripted
+    # provider, which records every request it receives.
+    provider = cast(FakeModelProvider, composition.executor._model_provider)
+    return [
+        part.text
+        for item in provider.requests[0].conversation
+        if isinstance(item, UserMessage)
+        for part in item.content
+        if isinstance(part, TextPart) and part.text.startswith("Runtime metadata")
+    ]
+
+
+async def test_bound_chat_request_names_the_origins_navigate_accepts() -> None:
+    """ADR-0130 decision 9: the model is told which origins the profile allows."""
+
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await composition.runs.submit("Open my selected website.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+        [row] = runtime_metadata_rows(composition)
+
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert "; browser_origins=https://example.org" in row
+    assert str(PROFILE_ID) not in row
+
+
+async def test_unbound_chat_request_names_no_browser_origins() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=one_text_turn()
+    ) as composition:
+        created = await composition.services.sessions.create(composition.principal, "general", {})
+        run_id = await composition.runs.submit("Check the weather.", created.id)
+        await composition.runs.wait_terminal(run_id)
+        [row] = runtime_metadata_rows(composition)
+
+    assert "browser_origins" not in row
+
+
+def test_the_runtime_row_names_at_most_sixteen_origins() -> None:
+    origins = tuple(f"https://site{index}.example.org" for index in range(20))
+
+    assert _browser_origins_field(()) == ""
+    assert _browser_origins_field(origins[:2]) == (
+        "; browser_origins=https://site0.example.org,https://site1.example.org"
+    )
+    rendered = _browser_origins_field(origins)
+    assert rendered.endswith(",https://site15.example.org,+4 more")
+    assert "site16" not in rendered
 
 
 async def test_session_creation_binds_only_a_ready_principal_owned_browser_profile() -> None:
@@ -548,6 +859,33 @@ async def test_exact_standing_browser_grant_authorizes_without_interactive_appro
     authorized = next(event for event in events if event.event_type == "tool.call.authorized")
     assert authorized.payload["authorization_kind"] == "standing_browser_grant"
     assert authorized.payload["authorization_ref"] == str(GRANT_ID)
+
+
+async def test_a_standing_grant_dispatch_carries_its_routine_constraint() -> None:
+    """ADR-0129 D17: the executor hands the grant's constraint to the tool,
+    which carries it to the provider's runtime."""
+
+    provider = GrantBrowserProvider()
+    async with build(
+        settings=hosted_grant_settings(),
+        script=browser_action_script(),
+        browser_provider_override=provider,
+        fixed_clock_at=GRANT_NOW,
+        enabled_tools=["browser.act"],
+    ) as composition:
+        await seed_browser_authority(composition)
+        run_id = await composition.runs.submit("Continue my language practice.")
+        run = await composition.runs.get(run_id)
+
+    assert run.status is RunStatus.COMPLETED
+    [constraint] = provider.constraints
+    assert constraint is not None
+    assert (constraint.grant_kind, constraint.consequence_ceiling, constraint.origins) == (
+        "standing",
+        "routine",
+        ("https://example.org",),
+    )
+    assert constraint.not_after == GRANT_NOW + timedelta(days=7)
 
 
 async def test_revoked_standing_browser_grant_falls_back_to_interactive_approval() -> None:
@@ -887,3 +1225,102 @@ async def test_run_workers_keep_hosted_leases_on_a_periodic_upkeep() -> None:
             await asyncio.wait_for(worker.run_forever(), timeout=5)
 
     assert provider.calls == 2
+
+
+def task_grant_settings(**extra: str) -> Settings:
+    return load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            **extra,
+        }
+    )
+
+
+def _task_grant_paths(composition: Composition) -> set[str]:
+    app = create_app(
+        composition.services,
+        composition.settings,
+        composition.principal,
+        composition.new_request_id,
+        composition.readiness_probe,
+    )
+    return {path for path in app.openapi()["paths"] if "browser-task-grants" in path}
+
+
+async def test_task_grants_flag_off_composes_nothing() -> None:
+    """ADR-0129 D20: off by default; no authorizer, offer, resolver or route."""
+
+    async with build(settings=task_grant_settings()) as composition:
+        registered = cast(RegisteredTool, composition.tool_pipeline._registry.get("browser.act"))
+        act = cast(BrowserActTool, registered.implementation)
+        paths = _task_grant_paths(composition)
+        standing = composition.tool_pipeline._standing_authorizer
+
+    assert standing is None
+    assert act._presenter._enabled is False
+    assert composition.services.browser_task_grants is None
+    assert composition.services.approvals._task_grants is None  # type: ignore[attr-defined]
+    assert paths == set()
+
+
+async def test_task_grants_flag_on_composes_every_part() -> None:
+    settings = task_grant_settings(
+        BROWSER_TASK_GRANTS_ENABLED="1",
+        BROWSER_TASK_GRANT_SCOPES="https://www.example.org/lesson",
+    )
+    async with build(settings=settings) as composition:
+        registered = cast(RegisteredTool, composition.tool_pipeline._registry.get("browser.act"))
+        act = cast(BrowserActTool, registered.implementation)
+        paths = _task_grant_paths(composition)
+        standing = composition.tool_pipeline._standing_authorizer
+        worker = composition.maintenance_factory()
+
+    assert isinstance(standing, CompositeStandingAuthorizer)
+    assert any(
+        isinstance(authorizer, BrowserTaskGrantAuthorizer) for authorizer in standing._authorizers
+    )
+    assert act._presenter._enabled is True
+    assert act._presenter._scopes == settings.browser_task_grant_scopes
+    assert composition.services.browser_task_grants is not None
+    assert composition.services.approvals._task_grants is not None  # type: ignore[attr-defined]
+    assert paths == {
+        "/v1/browser-task-grants",
+        "/v1/browser-task-grants/{grant_id}",
+        "/v1/browser-task-grants/{grant_id}/revoke",
+    }
+    assert worker._sweep_browser_task_grants is not None  # type: ignore[attr-defined]
+
+
+def test_task_grants_require_the_hosted_provider() -> None:
+    with pytest.raises(ConfigurationError, match="BROWSER_TASK_GRANTS_ENABLED"):
+        load_settings(
+            {
+                **base_environment(),
+                "SANDBOX_MECHANISM": "fake",
+                "BROWSER_PROVIDER": "playwright",
+                "BROWSER_ALLOWED_ORIGINS": "https://www.example.org",
+                "BROWSER_TASK_GRANTS_ENABLED": "1",
+            }
+        )
+
+
+def test_task_grant_scopes_require_the_flag() -> None:
+    with pytest.raises(ConfigurationError, match="BROWSER_TASK_GRANTS_ENABLED"):
+        task_grant_settings(BROWSER_TASK_GRANT_SCOPES="https://www.example.org/lesson")
+
+
+def test_env_examples_list_the_task_grant_settings() -> None:
+    """Both examples name the two settings, off, right after the purpose."""
+
+    root = Path(__file__).resolve().parents[2]
+    for relative in (".env.example", "deploy/veetbot.env.example"):
+        lines = (root / relative).read_text(encoding="utf-8").splitlines()
+        purpose = lines.index("BROWSER_RUN_PURPOSE=")
+        following = [line for line in lines[purpose + 1 :] if not line.startswith("#")][:2]
+        assert following == ["BROWSER_TASK_GRANTS_ENABLED=0", "BROWSER_TASK_GRANT_SCOPES="], (
+            relative
+        )

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -12,7 +14,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from playwright.async_api import ElementHandle, Locator, Page
 from playwright.async_api import Error as PlaywrightError
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, Response
+from starlette.routing import Route
 
+from agent_core.adapters.browser import playwright as playwright_adapter
 from agent_core.adapters.browser.playwright import (
     PlaywrightBrowserProvider,
     PythonPlaywrightRuntime,
@@ -21,11 +28,17 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserAuthenticationStatus,
+    BrowserDispatchConstraint,
+    BrowserFieldKind,
     BrowserInteractiveEvent,
+    BrowserLabelSource,
     BrowserObservation,
+    BrowserPageEvidence,
     BrowserProviderError,
+    BrowserTargetFacts,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
+from tests.real_browser_support import RealBrowserRuntime, local_https_site, require_real_browser
 
 
 async def test_observation_pipelines_slow_controls_with_bounded_concurrency() -> None:
@@ -69,6 +82,7 @@ async def test_observation_pipelines_slow_controls_with_bounded_concurrency() ->
     page.url = "https://site.example/login"
     page.title = AsyncMock(return_value="Sign in")
     page.locator.side_effect = lambda selector: body if selector == "body" else controls
+    page.evaluate = AsyncMock(return_value=[True] * len(handles))
 
     observation = await asyncio.wait_for(PythonPlaywrightRuntime()._observation(page), 1)
 
@@ -109,6 +123,7 @@ async def test_observation_keeps_the_element_snapshot_when_the_page_replaces_con
     page.url = "https://site.example/login"
     page.title = AsyncMock(return_value="Sign in")
     page.locator.side_effect = lambda selector: body if selector == "body" else controls
+    page.evaluate = AsyncMock(return_value=[True])
     runtime = PythonPlaywrightRuntime()
 
     observation = await runtime._observation(page)
@@ -120,6 +135,85 @@ async def test_observation_keeps_the_element_snapshot_when_the_page_replaces_con
     assert runtime._elements[observation.elements[0].ref] is handle
 
 
+def observed_page(handles: list[AsyncMock], flags: list[bool]) -> Mock:
+    """A page whose controls are ``handles`` and whose visibility pass returns ``flags``."""
+
+    controls = Mock(spec=Locator)
+    controls.element_handles = AsyncMock(return_value=handles)
+    body = Mock(spec=Locator)
+    body.inner_text = AsyncMock(return_value="Lesson")
+    page = Mock(spec=Page)
+    page.url = "https://site.example/lesson"
+    page.title = AsyncMock(return_value="Lesson")
+    page.locator.side_effect = lambda selector: body if selector == "body" else controls
+    page.evaluate = AsyncMock(return_value=flags)
+    return page
+
+
+def control(name: str, *, visible: bool = True) -> AsyncMock:
+    handle = AsyncMock(spec=ElementHandle)
+    handle.is_visible.return_value = visible
+    handle.is_disabled.return_value = False
+    handle.evaluate.return_value = {"tag": "button", "role": None, "inputType": None, "name": name}
+    return handle
+
+
+async def test_hidden_controls_never_take_an_element_slot() -> None:
+    """ADR-0130 decision 8: visibility is decided before the 256-element cap."""
+
+    hidden = [control(f"Hidden {index}", visible=False) for index in range(300)]
+    visible = [control(f"Answer {index}") for index in range(5)]
+    page = observed_page(hidden + visible, [False] * 300 + [True] * 5)
+
+    observation = await PythonPlaywrightRuntime()._observation(page)
+
+    assert [element.name for element in observation.elements] == [
+        f"Answer {index}" for index in range(5)
+    ]
+    for handle in hidden:
+        handle.is_visible.assert_not_awaited()
+
+
+async def test_observation_disposes_unkept_and_replaced_handles() -> None:
+    """Handles the runtime no longer references are released in the page (decision 8)."""
+
+    first_hidden = control("Hidden", visible=False)
+    first_kept = control("Check")
+    runtime = PythonPlaywrightRuntime()
+    await runtime._observation(observed_page([first_hidden, first_kept], [False, True]))
+    first_hidden.dispose.assert_awaited_once()
+    first_kept.dispose.assert_not_awaited()
+
+    second_kept = control("Continue")
+    await runtime._observation(observed_page([second_kept], [True]))
+
+    first_kept.dispose.assert_awaited_once()
+    second_kept.dispose.assert_not_awaited()
+    assert list(runtime._elements.values()) == [second_kept]
+
+
+async def test_disposal_failures_never_fail_an_observation() -> None:
+    stale = control("Hidden", visible=False)
+    stale.dispose.side_effect = PlaywrightError("Target page, context or browser has been closed")
+
+    observation = await PythonPlaywrightRuntime()._observation(
+        observed_page([stale, control("Check")], [False, True])
+    )
+
+    assert [element.name for element in observation.elements] == ["Check"]
+
+
+async def test_observation_scans_at_most_4096_candidates() -> None:
+    handles = [control(f"Hidden {index}", visible=False) for index in range(4100)]
+    page = observed_page(handles, [False] * 4096)
+
+    await PythonPlaywrightRuntime()._observation(page)
+
+    page.evaluate.assert_awaited_once()
+    scanned = page.evaluate.await_args.args[1]
+    assert len(scanned) == 4096
+
+
 @dataclass
 class FakeRuntime:
     starts: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
@@ -127,6 +221,9 @@ class FakeRuntime:
     closed: bool = False
     fail: bool = False
     actions: list[BrowserAction] = field(default_factory=list)
+    constraints: list[tuple[BrowserDispatchConstraint | None, datetime | None]] = field(
+        default_factory=list
+    )
 
     async def start(self, proxy_url: str, allowed_origins: tuple[str, ...]) -> None:
         self.starts.append((proxy_url, allowed_origins))
@@ -145,8 +242,15 @@ class FakeRuntime:
     async def observe(self) -> BrowserObservation:
         return await self.navigate("https://example.org/current")
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        now: datetime | None = None,
+    ) -> BrowserObservation:
         self.actions.append(action)
+        self.constraints.append((constraint, now))
         return BrowserObservation(
             url="https://example.org/current",
             title="Example",
@@ -717,3 +821,744 @@ async def test_text_sent_beside_hidden_challenge_text_is_not_sign_in_evidence() 
     status = await runtime.authentication_status()
 
     assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+
+
+class FakeEvidencePage(FakeCeremonyPage):
+    """A page that loads one URL, optionally redirected, and reports its challenge."""
+
+    def __init__(self, *, lands_on: str | None = None, refused_hop: str | None = None) -> None:
+        super().__init__("about:blank")
+        self.lands_on = lands_on
+        self.refused_hop = refused_hop
+        self.failure: PlaywrightError | None = None
+        self.handlers: dict[str, list[Callable[[Any], None]]] = {}
+        self.loads: list[tuple[str, str, int]] = []
+        self.idle_waits: list[tuple[str, int]] = []
+
+    def on(self, event: str, handler: Callable[[Any], None]) -> None:
+        self.handlers.setdefault(event, []).append(handler)
+
+    async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+        self.loads.append((url, wait_until, timeout))
+        if self.refused_hop is not None:
+            for handler in self.handlers.get("request", ()):
+                handler(FakeNavigationRequest(self.refused_hop))
+            raise PlaywrightError(f"net::ERR_BLOCKED_BY_CLIENT at {self.refused_hop}")
+        if self.failure is not None:
+            raise self.failure
+        self.url = self.lands_on or url
+
+    async def wait_for_load_state(self, state: str, *, timeout: int) -> None:
+        self.idle_waits.append((state, timeout))
+        raise PlaywrightError("Timeout 5000ms exceeded.")
+
+
+def evidence_runtime(page: FakeEvidencePage) -> PythonPlaywrightRuntime:
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://www.duolingo.com",)
+    runtime._attach_page(page)  # type: ignore[arg-type]
+    return runtime
+
+
+async def test_page_evidence_reports_origin_path_and_challenge() -> None:
+    """ADR-0128: a verification load reports where it landed and whether it asks to sign in."""
+
+    members = FakeEvidencePage()
+    signed_out = FakeEvidencePage(lands_on="https://www.duolingo.com/log-in?next=/learn")
+    signed_out.password_visible = True
+    refused = FakeEvidencePage(refused_hop="https://accounts.example.net/login")
+
+    kept = await evidence_runtime(members).load_page_evidence("https://www.duolingo.com/learn")
+    challenged = await evidence_runtime(signed_out).load_page_evidence(
+        "https://www.duolingo.com/learn"
+    )
+    left = await evidence_runtime(refused).load_page_evidence("https://www.duolingo.com/learn")
+
+    assert kept == BrowserPageEvidence(
+        on_allowed_origin=True, path="/learn", challenge_visible=False
+    )
+    assert challenged == BrowserPageEvidence(
+        on_allowed_origin=True, path="/log-in", challenge_visible=True
+    )
+    assert left.on_allowed_origin is False
+    assert members.loads == [("https://www.duolingo.com/learn", "load", 20_000)]
+    assert members.idle_waits == [("networkidle", 5_000)]
+    assert "learn" not in repr(kept)
+
+
+async def test_page_evidence_normalizes_other_load_failures() -> None:
+    page = FakeEvidencePage()
+    page.failure = PlaywrightError("net::ERR_CONNECTION_RESET at https://www.duolingo.com/learn")
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await evidence_runtime(page).load_page_evidence("https://www.duolingo.com/learn")
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert "duolingo" not in str(raised.value)
+
+
+async def test_the_context_seam_carries_todays_arguments_and_only_a_subclass_extends_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production never ignores certificate errors; a test runtime may (ADR-0128 R-4)."""
+
+    class TestOnlyRuntime(PythonPlaywrightRuntime):
+        def _context_options(self, storage_state: dict[str, object] | None) -> dict[str, Any]:
+            return super()._context_options(storage_state) | {"ignore_https_errors": True}
+
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    await PythonPlaywrightRuntime().start("http://127.0.0.1:9", ("https://site.example",))
+    await TestOnlyRuntime().start("http://127.0.0.1:9", ("https://site.example",))
+
+    assert chromium.contexts[0] == {
+        "accept_downloads": False,
+        "service_workers": "block",
+        "storage_state": None,
+    }
+    assert chromium.contexts[1] == {**chromium.contexts[0], "ignore_https_errors": True}
+
+
+class FakeSettlingPage:
+    """A lesson page whose in-page quiet wait is where late content lands (ADR-0130)."""
+
+    def __init__(
+        self,
+        text: str,
+        *,
+        settles_to: str | None = None,
+        never_settles: bool = False,
+        navigation_destroys_first_wait: bool = False,
+    ) -> None:
+        self.url = "about:blank"
+        self.text = text
+        self.settles_to = settles_to
+        self.never_settles = never_settles
+        self.navigation_destroys_first_wait = navigation_destroys_first_wait
+        self.quiet_waits: list[Any] = []
+        self.load_waits: list[str] = []
+        self.handlers: dict[str, list[Callable[[Any], None]]] = {}
+        self.buttons: list[AsyncMock] = []
+
+    def button(self, name: str, *, on_click: Callable[[], None] | None = None) -> AsyncMock:
+        handle = control(name)
+        handle.get_attribute.return_value = None
+        handle.is_enabled.return_value = True
+
+        async def evaluate(expression: str) -> object:
+            if "tagName.toLowerCase()" in expression and "getAttribute" not in expression:
+                return "button"
+            return {"tag": "button", "role": None, "inputType": None, "name": name}
+
+        async def click(*, timeout: int) -> None:
+            del timeout
+            if on_click is not None:
+                on_click()
+
+        handle.evaluate.side_effect = evaluate
+        handle.click.side_effect = click
+        self.buttons.append(handle)
+        return handle
+
+    def on(self, event: str, handler: Callable[[Any], None]) -> None:
+        self.handlers.setdefault(event, []).append(handler)
+
+    async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+        del wait_until, timeout
+        self.url = url
+
+    def locator(self, selector: str) -> Mock:
+        located = Mock(spec=Locator)
+        if selector == "body":
+            located.inner_text = AsyncMock(side_effect=lambda **_: self.text)
+        else:
+            located.element_handles = AsyncMock(side_effect=lambda: list(self.buttons))
+        return located
+
+    async def title(self) -> str:
+        return "Lesson"
+
+    async def evaluate(self, script: str, argument: Any = None) -> Any:
+        if "getBoundingClientRect" in script:
+            return [True] * len(argument)
+        assert "MutationObserver" in script
+        self.quiet_waits.append(argument)
+        if self.navigation_destroys_first_wait and len(self.quiet_waits) == 1:
+            raise PlaywrightError("Execution context was destroyed, most likely a navigation")
+        if self.never_settles:
+            await asyncio.sleep(3600)
+        if self.settles_to is not None:
+            self.text = self.settles_to
+        return None
+
+    async def wait_for_load_state(self, state: str, *, timeout: float) -> None:
+        del timeout
+        self.load_waits.append(state)
+
+
+def settling_runtime(page: FakeSettlingPage) -> PythonPlaywrightRuntime:
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://site.example",)
+    runtime._attach_page(page)  # type: ignore[arg-type]
+    return runtime
+
+
+@pytest.fixture
+def quick_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(playwright_adapter, "SETTLE_SECONDS", 0.05, raising=False)
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_navigation_observes_the_page_after_it_settles() -> None:
+    """ADR-0130 decision 5: navigation waits for the network and the DOM to go quiet."""
+
+    page = FakeSettlingPage("Loading", settles_to="Exercise 1")
+    page.button("Check")
+
+    observation = await settling_runtime(page).navigate("https://site.example/lesson")
+
+    assert observation.text == "Exercise 1"
+    assert page.load_waits[:1] == ["networkidle"]
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_action_observes_the_page_after_it_settles() -> None:
+    """ADR-0130 decision 6: act returns the page after the action's effect settles."""
+
+    page = FakeSettlingPage("Exercise 1")
+
+    def check() -> None:
+        page.text = "Checking"
+        page.settles_to = "Correct!"
+
+    page.button("Check", on_click=check)
+    runtime = settling_runtime(page)
+    before = await runtime.navigate("https://site.example/lesson")
+
+    after = await runtime.act(
+        BrowserAction(
+            kind=BrowserActionKind.CLICK,
+            expected_revision=before.revision,
+            ref=before.elements[0].ref,
+        )
+    )
+
+    assert after.text == "Correct!"
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_a_page_that_never_settles_is_observed_at_the_bound() -> None:
+    page = FakeSettlingPage("Clock 1", never_settles=True)
+    page.button("Stay")
+
+    observation = await asyncio.wait_for(
+        settling_runtime(page).navigate("https://site.example/lesson"), 1
+    )
+
+    assert observation.text == "Clock 1"
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_settling_survives_a_navigation_that_destroys_the_context() -> None:
+    page = FakeSettlingPage("Old", settles_to="New", navigation_destroys_first_wait=True)
+    page.button("Next")
+
+    observation = await settling_runtime(page).navigate("https://site.example/lesson")
+
+    assert observation.text == "New"
+    assert "domcontentloaded" in page.load_waits
+    assert len(page.quiet_waits) == 2
+
+
+@pytest.mark.usefixtures("quick_settle")
+async def test_act_can_follow_act_without_observe() -> None:
+    page = FakeSettlingPage("Exercise 1")
+    page.button("Check", on_click=lambda: setattr(page, "text", "Correct!"))
+    runtime = settling_runtime(page)
+    first = await runtime.navigate("https://site.example/lesson")
+    action = BrowserAction(
+        kind=BrowserActionKind.CLICK,
+        expected_revision=first.revision,
+        ref=first.elements[0].ref,
+    )
+
+    second = await runtime.act(action)
+    third = await runtime.act(
+        action.model_copy(
+            update={
+                "expected_revision": second.revision,
+                "ref": second.elements[0].ref,
+            }
+        )
+    )
+
+    assert third.revision not in {first.revision, second.revision}
+
+
+FACTS_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<input type="password" aria-label="Password">
+<input autocomplete="cc-number" aria-label="Card number">
+<input type="email" aria-label="Email">
+<textarea aria-label="Answer"></textarea>
+<a href="/settings">Settings</a>
+<form action="/lesson/submit"><button formaction="/lesson/../checkout">Check</button></form>
+<a href="/files/report.pdf" download>Report</a>
+<dialog open aria-label="Try Super free"><button>Keep going</button></dialog>
+<button aria-label="Continue">Pay $12.99</button>
+<a href="/lesson/2">Next lesson</a>
+<a href="#top">Top</a>
+<a href="mailto:owner@example.org">Write</a>
+<div role="textbox" contenteditable="true" aria-label="Story" style="min-height:20px"></div>
+<input type="checkbox" aria-label="Sound">
+<select aria-label="Word"><option>gato</option></select>
+<div role="checkbox" aria-checked="false" aria-label="Hints">Hints</div>
+<button aria-label="Next">Next $</button>
+</body></html>"""
+
+
+async def test_element_facts_classify_fields_links_forms_dialogs() -> None:
+    """ADR-0129 section 4.5: facts are derived from live attributes, in a real Chromium."""
+
+    require_real_browser()
+
+    async def lesson(request: Request) -> Response:
+        del request
+        return HTMLResponse(FACTS_PAGE)
+
+    async with local_https_site(Starlette(routes=[Route("/lesson/1", lesson)])) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,))
+        try:
+            observation = await runtime.navigate(site.url("/lesson/1"))
+            facts = runtime.facts(observation.revision)
+            stale = runtime.facts("another-revision")
+        finally:
+            await runtime.close()
+
+    assert facts is not None
+    assert stale is None
+    assert facts.revision == observation.revision
+    by_name = {element.name: facts.elements[element.ref] for element in observation.elements}
+    assert by_name["Password"].field_kind is BrowserFieldKind.PASSWORD
+    assert by_name["Card number"].field_kind is BrowserFieldKind.PAYMENT
+    assert by_name["Email"].field_kind is BrowserFieldKind.EMAIL
+    assert by_name["Answer"].field_kind is BrowserFieldKind.MULTILINE
+    # Kinds follow what the runtime acts on: it types only into an input or a
+    # text area, selects only in a select and checks only a native check box.
+    assert by_name["Story"].field_kind is BrowserFieldKind.EDITABLE
+    assert by_name["Sound"].field_kind is BrowserFieldKind.CHOICE
+    assert by_name["Word"].field_kind is BrowserFieldKind.SELECT
+    assert by_name["Hints"].field_kind is BrowserFieldKind.CUSTOM_CHOICE
+    assert by_name["Settings"].link_target == BrowserTargetFacts(
+        same_origin=True, first_segment="settings", sensitive_path=True
+    )
+    assert by_name["Check"].form_target == BrowserTargetFacts(
+        same_origin=True, first_segment="checkout", sensitive_path=True
+    )
+    assert by_name["Report"].download is True
+    assert by_name["Keep going"].context_name == "Try Super free"
+    assert by_name["Continue"].labels == {BrowserLabelSource.VISIBLE_TEXT: "Pay $12.99"}
+    # A source that normalizes to the name but reads differently is carried.
+    assert by_name["Next"].labels == {BrowserLabelSource.VISIBLE_TEXT: "Next $"}
+    assert by_name["Hints"].labels == {}
+    assert by_name["Next lesson"].link_target == BrowserTargetFacts(
+        same_origin=True, first_segment="lesson", sensitive_path=False
+    )
+    assert by_name["Top"].link_target is None
+    assert by_name["Write"].link_target is not None
+    assert by_name["Write"].link_target.same_origin is False
+    rendered = facts.model_dump_json()
+    assert "/settings" not in rendered and "checkout" in rendered
+    assert "report.pdf" not in rendered and "mailto" not in rendered
+
+
+GRANT_NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
+
+
+def lesson_constraint(**overrides: Any) -> BrowserDispatchConstraint:
+    fields: dict[str, Any] = {
+        "grant_kind": "task",
+        "origins": ("https://site.test",),
+        "path_prefix": "/lesson",
+        "not_after": GRANT_NOW + timedelta(minutes=30),
+        "consequence_ceiling": "unknown",
+        "max_text_characters": 256,
+    }
+    fields.update(overrides)
+    return BrowserDispatchConstraint.model_validate(fields)
+
+
+async def test_local_provider_passes_the_constraint_to_the_runtime() -> None:
+    runtime = FakeRuntime()
+
+    async def start_proxy(policy: EgressPolicy, *, tenant_id: str) -> FakeProxy:
+        del policy, tenant_id
+        return FakeProxy()
+
+    provider = PlaywrightBrowserProvider(
+        tenant_id="tenant-a",
+        allowed_origins=("https://example.org",),
+        runtime=runtime,
+        proxy_factory=start_proxy,
+        now=lambda: GRANT_NOW,
+    )
+    action = BrowserAction(
+        kind=BrowserActionKind.CLICK, expected_revision="revision-1", ref="revision-1:0"
+    )
+    constraint = lesson_constraint(origins=("https://example.org",))
+
+    await provider.act(action, constraint=constraint)
+    await provider.act(action)
+
+    assert runtime.constraints == [(constraint, GRANT_NOW), (None, None)]
+
+
+GRANT_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button id="go" onclick="window.clicks.push('go')">Continue</button>
+<button id="rename" onclick="window.clicks.push('rename')">Continue</button>
+<button id="pay" aria-label="Continue" onclick="window.clicks.push('pay')">Pay $12.99</button>
+<a id="leave" href="/settings" onclick="window.clicks.push('leave');return false">Continue</a>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+@asynccontextmanager
+async def grant_page() -> AsyncIterator[tuple[RealBrowserRuntime, BrowserObservation]]:
+    require_real_browser()
+
+    async def lesson(request: Request) -> Response:
+        del request
+        return HTMLResponse(GRANT_PAGE)
+
+    async with local_https_site(Starlette(routes=[Route("/lesson/1", lesson)])) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,))
+        try:
+            yield runtime, await runtime.navigate(site.url("/lesson/1"))
+        finally:
+            await runtime.close()
+
+
+def _click_on(observation: BrowserObservation, index: int) -> BrowserAction:
+    element = observation.elements[index]
+    return BrowserAction(
+        kind=BrowserActionKind.CLICK, expected_revision=observation.revision, ref=element.ref
+    )
+
+
+async def _clicks(runtime: RealBrowserRuntime) -> list[str]:
+    clicks: list[str] = await runtime._current_page().evaluate("window.clicks")
+    return clicks
+
+
+async def test_a_covered_click_dispatches_under_the_constraint() -> None:
+    async with grant_page() as (runtime, observation):
+        acted = await runtime.act(
+            _click_on(observation, 0), constraint=lesson_constraint(), now=GRANT_NOW
+        )
+        clicks = await _clicks(runtime)
+
+    assert clicks == ["go"]
+    assert acted.revision != observation.revision
+
+
+async def _refused(
+    runtime: RealBrowserRuntime, action: BrowserAction, **constraint: Any
+) -> BrowserProviderError:
+    with pytest.raises(BrowserProviderError) as raised:
+        await runtime.act(action, constraint=lesson_constraint(**constraint), now=GRANT_NOW)
+    return raised.value
+
+
+async def test_live_page_outside_prefix_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        await runtime._current_page().evaluate("history.pushState({}, '', '/settings')")
+        refusal = await _refused(runtime, _click_on(observation, 0))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_renamed_element_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        await runtime._current_page().evaluate(
+            "document.getElementById('rename').textContent = 'Buy now'"
+        )
+        refusal = await _refused(runtime, _click_on(observation, 1))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_hidden_label_source_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        assert observation.elements[2].name == "Continue"
+        refusal = await _refused(runtime, _click_on(observation, 2))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_sensitive_link_target_is_refused_before_dispatch() -> None:
+    async with grant_page() as (runtime, observation):
+        refusal = await _refused(runtime, _click_on(observation, 3))
+        clicks = await _clicks(runtime)
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_expired_or_foreign_constraints_are_refused_in_the_runtime() -> None:
+    async with grant_page() as (runtime, observation):
+        expired = await _refused(
+            runtime, _click_on(observation, 0), not_after=GRANT_NOW - timedelta(seconds=1)
+        )
+        observation = await runtime.observe()
+        foreign = await _refused(
+            runtime, _click_on(observation, 0), origins=("https://elsewhere.test",)
+        )
+        clicks = await _clicks(runtime)
+
+    assert expired.reason_code == foreign.reason_code == "tool.browser.grant_not_applicable"
+    assert clicks == []
+
+
+async def test_refusal_forgets_the_revision() -> None:
+    """ADR-0129 D16: after a refusal the model must observe again."""
+
+    async with grant_page() as (runtime, observation):
+        await _refused(runtime, _click_on(observation, 3))
+        with pytest.raises(BrowserProviderError) as stale:
+            await runtime.act(_click_on(observation, 0))
+        clicks = await _clicks(runtime)
+        forgotten = runtime.facts(observation.revision)
+
+    assert stale.value.reason_code == "tool.browser.page_changed"
+    assert clicks == []
+    assert forgotten is None
+
+
+@asynccontextmanager
+async def lesson_pages(
+    pages: dict[str, str],
+) -> AsyncIterator[
+    tuple[RealBrowserRuntime, Callable[[str], Awaitable[BrowserObservation]], list[str]]
+]:
+    """Serve ``pages`` and record every request for any other path.
+
+    Yields the runtime, a function that opens one of the pages, and the
+    requests that left them.
+    """
+
+    require_real_browser()
+    left: list[str] = []
+
+    async def page(request: Request) -> Response:
+        return HTMLResponse(pages[request.url.path])
+
+    async def elsewhere(request: Request) -> Response:
+        if request.url.path != "/favicon.ico":
+            left.append(f"{request.method} {request.url.path}")
+        return HTMLResponse("<!doctype html><title>Elsewhere</title><p>Elsewhere</p>")
+
+    routes = [Route(path, page) for path in pages]
+    routes.append(Route("/{rest:path}", elsewhere, methods=["GET", "POST"]))
+    async with local_https_site(Starlette(routes=routes)) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,))
+        try:
+            yield runtime, lambda path: runtime.navigate(site.url(path)), left
+        finally:
+            await runtime.close()
+
+
+def _ref(observation: BrowserObservation, name: str, *, role: str | None = None) -> str:
+    return next(
+        element.ref
+        for element in observation.elements
+        if element.name == name and (role is None or element.role == role)
+    )
+
+
+def _press(
+    observation: BrowserObservation, name: str, key: str, *, role: str | None = None
+) -> BrowserAction:
+    return BrowserAction.model_validate(
+        {
+            "kind": "press",
+            "expected_revision": observation.revision,
+            "ref": _ref(observation, name, role=role),
+            "key": key,
+        }
+    )
+
+
+def _click_named(
+    observation: BrowserObservation, name: str, *, role: str | None = None
+) -> BrowserAction:
+    return BrowserAction(
+        kind=BrowserActionKind.CLICK,
+        expected_revision=observation.revision,
+        ref=_ref(observation, name, role=role),
+    )
+
+
+SUBMITTING_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<form method="post" action="/courses/remove-course">
+<button type="submit">Check</button>
+<button type="submit" role="radio" aria-checked="false">Spanish</button>
+</form>
+</body></html>"""
+
+
+async def test_space_and_choice_role_submissions_off_the_prefix_are_refused() -> None:
+    """Rule 11: Space on a submit button, or a click on one with a choice role, submits."""
+
+    async with lesson_pages({"/lesson/1": SUBMITTING_PAGE}) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        space = await _refused(runtime, _press(page, "Check", "Space"))
+        page = await runtime.observe()
+        choice = await _refused(runtime, _click_named(page, "Spanish"))
+
+    assert space.reason_code == choice.reason_code == "tool.browser.grant_not_applicable"
+    assert left == []
+
+
+TARGETS_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<form method="post" action="/lesson/check">
+<input type="text" aria-label="Answer">
+<button type="submit" formaction="/settings/delete">Go</button>
+</form>
+<form method="post" action="/lesson/check">
+<button type="submit" formaction="/courses/remove"><span role="radio">Spanish</span></button>
+</form>
+<form id="away" method="post" action="/courses/leave"></form>
+<button type="submit" form="away" aria-label="Outer"><span role="radio">French</span></button>
+<form id="quiz" method="post" action="/lesson/check">
+<button id="quit" type="submit" formaction="/courses/quit">Quit</button>
+</form>
+<label role="button" for="quit">Keep going</label>
+<form method="post" action="/courses/delete">
+<input type="text" formaction="/lesson/check" aria-label="Word">
+</form>
+<a href="#top">Top</a>
+<a href="">Here</a>
+</body></html>"""
+BASE_PAGE = """<!doctype html><html><head><title>Lesson</title>
+<base href="/courses/remove-course"></head><body>
+<a href="#next">Continue</a>
+</body></html>"""
+
+
+async def test_facts_record_the_target_the_browser_submits_to() -> None:
+    """Section 4.5: the default button's formaction, the activated submitter's own
+    target, and a fragment link under a ``<base>`` elsewhere (review finding)."""
+
+    pages = {"/lesson/1": TARGETS_PAGE, "/lesson/2": BASE_PAGE}
+    async with lesson_pages(pages) as (runtime, visit, _left):
+        targets = await visit("/lesson/1")
+        targets_facts = runtime.facts(targets.revision)
+        based = await visit("/lesson/2")
+        based_facts = runtime.facts(based.revision)
+
+    assert targets_facts is not None and based_facts is not None
+
+    def fact(observation: BrowserObservation, name: str, role: str | None = None) -> Any:
+        facts = targets_facts if observation is targets else based_facts
+        assert facts is not None
+        return facts.elements[_ref(observation, name, role=role)]
+
+    def target(first_segment: str, *, sensitive: bool) -> BrowserTargetFacts:
+        return BrowserTargetFacts(
+            same_origin=True, first_segment=first_segment, sensitive_path=sensitive
+        )
+
+    found = {
+        "Answer": fact(targets, "Answer").form_target,
+        "Spanish": fact(targets, "Spanish", "radio").form_target,
+        "French": fact(targets, "French", "radio").form_target,
+        "Keep going": fact(targets, "Keep going").form_target,
+        "Word": fact(targets, "Word").form_target,
+        "Top": fact(targets, "Top").link_target,
+        "Here": fact(targets, "Here").link_target,
+        "Continue": fact(based, "Continue").link_target,
+    }
+    assert found == {
+        "Answer": target("settings", sensitive=True),
+        "Spanish": target("courses", sensitive=True),
+        "French": target("courses", sensitive=False),
+        "Keep going": target("courses", sensitive=False),
+        "Word": target("courses", sensitive=True),
+        "Top": None,
+        "Here": None,
+        "Continue": target("courses", sensitive=True),
+    }
+
+
+async def test_enter_and_a_based_fragment_link_off_the_prefix_are_refused() -> None:
+    """Enter submits through the default button; ``<base>`` moves a fragment link."""
+
+    pages = {"/lesson/1": TARGETS_PAGE, "/lesson/2": BASE_PAGE}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        enter = await _refused(runtime, _press(page, "Answer", "Enter"))
+        page = await visit("/lesson/2")
+        link = await _refused(runtime, _click_named(page, "Continue"))
+
+    assert enter.reason_code == link.reason_code == "tool.browser.grant_not_applicable"
+    assert left == []
+
+
+def test_a_fragment_link_has_no_target_only_on_its_own_page() -> None:
+    page = "https://site.test/lesson/1"
+
+    def link(raw: str, resolved: str) -> BrowserTargetFacts | None:
+        metadata = {"linkHref": raw, "link": resolved}
+        return playwright_adapter._link_target(metadata, page_url=page)
+
+    assert link("#top", f"{page}#top") is None
+    assert link("", page) is None
+    assert link("#next", "https://site.test/courses/remove-course#next") == BrowserTargetFacts(
+        same_origin=True, first_segment="courses", sensitive_path=True
+    )
+    assert link("", "https://elsewhere.test/lesson/1") == BrowserTargetFacts(
+        same_origin=False, first_segment="lesson", sensitive_path=False
+    )
+
+
+def test_a_link_to_any_other_scheme_is_a_target_outside_every_origin() -> None:
+    """Section 4.5: ``javascript:`` is not "no target"; nor is any non-HTTPS scheme."""
+
+    page = "https://site.test/lesson/1"
+    outside = BrowserTargetFacts(same_origin=False, first_segment=None, sensitive_path=True)
+
+    def link(raw: str) -> BrowserTargetFacts | None:
+        return playwright_adapter._link_target({"linkHref": raw, "link": raw}, page_url=page)
+
+    assert link("javascript:location='/settings'") == outside
+    assert link("JAVASCRIPT:void(0)") == outside
+    assert link("data:text/html,hi") == outside
+    assert link("http://site.test/lesson/2") == outside
+
+
+RADIO_PAGE = """<!doctype html><html><head><title>Lesson</title></head><body>
+<label><input type="radio" name="plan" id="keep" checked> Keep learning</label>
+<label><input type="radio" name="plan" id="trial"> Start Super trial $12.99</label>
+</body></html>"""
+
+
+async def test_an_arrow_key_on_a_radio_is_refused_before_dispatch() -> None:
+    """Rule 7: ArrowDown would check the payment-labelled radio unclassified."""
+
+    async with lesson_pages({"/lesson/1": RADIO_PAGE}) as (runtime, visit, _left):
+        page = await visit("/lesson/1")
+        refusal = await _refused(runtime, _press(page, "", "ArrowDown", role="radio"))
+        state = await runtime._current_page().evaluate(
+            "[document.getElementById('keep').checked, document.getElementById('trial').checked]"
+        )
+
+    assert refusal.reason_code == "tool.browser.grant_not_applicable"
+    assert state == [True, False]

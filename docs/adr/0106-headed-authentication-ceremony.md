@@ -3,6 +3,9 @@
 - Status: Proposed; implements the owner's 2026-09-17 direction after a local acceptance test
 - Date: 2026-09-17
 - Related: ADR-0058; ADR-0098
+- Amended by: ADR-0128 (2026-09-25), which lets the owner's own client hand one
+  site's session to the isolated service, reversing this ADR's rejection of
+  session import
 - Design: [Browser automation](../plan/browser-automation.md)
 
 ## Context

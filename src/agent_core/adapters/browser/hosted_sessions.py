@@ -10,22 +10,67 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import (
+    BaseModel,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_validator,
+)
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
+    BrowserDispatchConstraint,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserProviderError,
+    BrowserSnapshot,
     require_service_origin,
 )
 from agent_core.domain.credentials import CredentialRef
 from agent_core.ports.credentials import CredentialResolver
 
-MAXIMUM_SESSION_RESPONSE_BYTES = 640 * 1024
+# ADR-0129: 640 KiB of observation plus at most 64 KiB of element facts.
+MAXIMUM_SESSION_RESPONSE_BYTES = 720 * 1024
 CREDENTIAL_NAME = "browser_profile_control_plane"
+
+
+class BrowserSessionObservation(BrowserObservation):
+    """A navigate, observe or act answer (ADR-0129 D26).
+
+    The observation's fields sit at the top level, as they always have, and a
+    newer service adds element facts beside them. It is still an observation,
+    so callers that know nothing of facts keep working; ``snapshot()`` splits
+    it. Facts that fail validation or describe another revision are dropped:
+    an element without facts is never covered by a grant.
+    """
+
+    facts: BrowserObservationFacts | None = None
+
+    @field_validator("facts", mode="wrap")
+    @classmethod
+    def _doubtful_facts_are_none(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler
+    ) -> BrowserObservationFacts | None:
+        try:
+            facts: BrowserObservationFacts | None = handler(value)
+        except ValidationError:
+            return None
+        return facts
+
+    @model_validator(mode="after")
+    def _facts_describe_this_revision(self) -> BrowserSessionObservation:
+        if self.facts is not None and self.facts.revision != self.revision:
+            self.facts = None
+        return self
+
+    def snapshot(self) -> BrowserSnapshot:
+        observation = BrowserObservation.model_validate(self.model_dump(exclude={"facts"}))
+        return BrowserSnapshot(observation=observation, facts=self.facts)
 
 
 class HostedBrowserSessionControlPlane:
@@ -141,22 +186,22 @@ class HostedBrowserSessionControlPlane:
         assert isinstance(result, BrowserLease)
         return result
 
-    async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
+    async def navigate(self, lease_ref: str, url: str) -> BrowserSessionObservation:
         result = await self._post(
             "/v1/browser-sessions:navigate",
             payload={"lease_ref": lease_ref, "url": url},
-            response_model=BrowserObservation,
+            response_model=BrowserSessionObservation,
         )
-        assert isinstance(result, BrowserObservation)
+        assert isinstance(result, BrowserSessionObservation)
         return result
 
-    async def observe(self, lease_ref: str) -> BrowserObservation:
+    async def observe(self, lease_ref: str) -> BrowserSessionObservation:
         result = await self._post(
             "/v1/browser-sessions:observe",
             payload={"lease_ref": lease_ref},
-            response_model=BrowserObservation,
+            response_model=BrowserSessionObservation,
         )
-        assert isinstance(result, BrowserObservation)
+        assert isinstance(result, BrowserSessionObservation)
         return result
 
     async def act(
@@ -165,19 +210,24 @@ class HostedBrowserSessionControlPlane:
         action: BrowserAction,
         *,
         sequence: int,
-    ) -> BrowserObservation:
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserSessionObservation:
         digest = _private_ref_digest(lease_ref)
+        # ADR-0129: only a grant-authorized act names a constraint; the
+        # service answers a malformed one with 400 and dispatches nothing.
+        granted = {} if constraint is None else {"constraint": constraint.model_dump(mode="json")}
         result = await self._post(
             "/v1/browser-sessions:act",
             payload={
                 "lease_ref": lease_ref,
                 "action": action.model_dump(mode="json"),
                 "sequence": sequence,
+                **granted,
             },
-            response_model=BrowserObservation,
+            response_model=BrowserSessionObservation,
             idempotency_key=f"browser-session:{digest}:act:{sequence}",
         )
-        assert isinstance(result, BrowserObservation)
+        assert isinstance(result, BrowserSessionObservation)
         return result
 
     async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease:
@@ -207,13 +257,18 @@ class HostedBrowserSessionControlPlane:
         provider_ref: str,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView:
+        # ADR-0128: only a device begin names its mode, so a remote begin stays
+        # byte-compatible with a service that predates device sign-in.
+        device = {"mode": mode.value} if mode is BrowserAuthenticationMode.DEVICE else {}
         result = await self._post(
             "/v1/browser-authentications:begin",
             payload={
                 "profile_id": str(profile_id),
                 "provider_ref": provider_ref,
                 "login_url": login_url,
+                **device,
                 **self._principal_payload(principal),
             },
             response_model=BrowserAuthenticationView,

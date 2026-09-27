@@ -234,6 +234,7 @@ class MaintenanceWorker:
         sweep_folder_proposals: Callable[[], Awaitable[int]] | None = None,
         sweep_upload_ingests: Callable[[], Awaitable[int]] | None = None,
         sweep_people_duplicates: Callable[[], Awaitable[int]] | None = None,
+        sweep_browser_task_grants: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
@@ -262,6 +263,7 @@ class MaintenanceWorker:
         self._sweep_folder_proposals = sweep_folder_proposals
         self._sweep_upload_ingests = sweep_upload_ingests
         self._sweep_people_duplicates = sweep_people_duplicates
+        self._sweep_browser_task_grants = sweep_browser_task_grants
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         if email_cache_sweep_interval_seconds <= 0:
@@ -343,6 +345,11 @@ class MaintenanceWorker:
                 await self._sweep_device_invocations()
             except Exception:
                 logger.exception("device invocation expiry sweep failed")
+        if self._sweep_browser_task_grants is not None:
+            try:
+                await self._sweep_browser_task_grants()
+            except Exception:
+                logger.exception("browser task grant expiry sweep failed")
         if self._sweep_exports is not None:
             try:
                 await self._sweep_exports()

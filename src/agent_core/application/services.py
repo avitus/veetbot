@@ -12,10 +12,12 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationView,
     BrowserGrantView,
     BrowserProfileView,
 )
+from agent_core.domain.browser_task_grants import BrowserTaskGrantView, TaskGrantEcho
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
@@ -146,6 +148,24 @@ class RunService(Protocol):
     ) -> AsyncIterator[StreamFrame]: ...
 
 
+class BrowserTaskGrantService(Protocol):
+    """ADR-0129: read and stop the owner's task grants; there is no create."""
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None,
+        status: Literal["active", "all"],
+        limit: int,
+        cursor: str | None,
+    ) -> Page[BrowserTaskGrantView]: ...
+
+    async def get(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView: ...
+
+    async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView: ...
+
+
 class ApprovalService(Protocol):
     async def list(
         self,
@@ -163,6 +183,8 @@ class ApprovalService(Protocol):
         approval_id: UUID,
         decision: ApprovalResolutionType,
         reason: str | None,
+        *,
+        task_grant: TaskGrantEcho | None = None,
     ) -> ApprovalView: ...
 
 
@@ -212,6 +234,7 @@ class BrowserProfileService(Protocol):
         profile_id: UUID,
         *,
         login_url: str,
+        mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE,
     ) -> BrowserAuthenticationView: ...
 
     async def list_authentications(

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from agent_core.adapters.browser.hosted_sessions import BrowserSessionObservation
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS,
@@ -17,19 +18,25 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionConsequence,
     BrowserActionContext,
+    BrowserActionKind,
+    BrowserDispatchConstraint,
     BrowserElement,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationFacts,
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProviderError,
     BrowserRunState,
+    BrowserSnapshot,
     browser_origin,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_classification import classify_browser_action
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.tools import ToolExecutionContext
-from agent_core.ports.browser_sessions import BrowserSessionControlPlane
+from agent_core.ports.browser import GRANT_NOT_APPLICABLE
+from agent_core.ports.browser_sessions import BrowserSessionControlPlane, BrowserSessionPage
 
 ProfileLoader = Callable[[Principal, UUID], Awaitable[BrowserProfile]]
 ProfileSelector = Callable[[ToolExecutionContext], Awaitable[UUID]]
@@ -48,13 +55,15 @@ _LEASE_FAILURES = frozenset(
     {"tool.browser.profile_unavailable", "tool.browser.provider_unavailable"}
 )
 # Refusals the runtime gives before it dispatches an action; the lease and its
-# action sequence are unchanged.
+# action sequence are unchanged. GRANT_NOT_APPLICABLE (ADR-0129) also ends the
+# cached observation, so the model must observe again (D16).
 _ACTION_REFUSALS = frozenset(
     {
         "tool.browser.page_changed",
         "tool.browser.element_not_found",
         "tool.browser.action_not_allowed",
         "tool.browser.url_disallowed",
+        GRANT_NOT_APPLICABLE,
     }
 )
 
@@ -110,6 +119,8 @@ class HostedBrowserProvider:
         self._renewal_exhausted = False
         self._sequence = 0
         self._observation: BrowserObservation | None = None
+        # ADR-0129: element facts for the cached observation's revision.
+        self._facts: BrowserObservationFacts | None = None
         # Leases this provider gave up on but has not yet closed on the service.
         self._unclosed: list[str] = []
         self._lock = asyncio.Lock()
@@ -177,7 +188,7 @@ class HostedBrowserProvider:
         async with self._lock:
             lease = self._required_lease()
             try:
-                observation = await self._sessions.navigate(lease.lease_ref, url)
+                page = await self._sessions.navigate(lease.lease_ref, url)
             except BrowserProviderError as error:
                 if error.reason_code in _LEASE_FAILURES:
                     await self._close_locked(strict=False)
@@ -185,14 +196,13 @@ class HostedBrowserProvider:
             except Exception:
                 await self._close_locked(strict=False)
                 raise
-            self._observation = self._validated_observation(observation)
-            return self._observation
+            return self._cache_page(page)
 
     async def observe(self) -> BrowserObservation:
         async with self._lock:
             lease = self._required_lease()
             try:
-                observation = await self._sessions.observe(lease.lease_ref)
+                page = await self._sessions.observe(lease.lease_ref)
             except BrowserProviderError as error:
                 if error.reason_code in _LEASE_FAILURES:
                     await self._close_locked(strict=False)
@@ -200,21 +210,32 @@ class HostedBrowserProvider:
             except Exception:
                 await self._close_locked(strict=False)
                 raise
-            self._observation = self._validated_observation(observation)
-            return self._observation
+            return self._cache_page(page)
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
         async with self._lock:
             lease = self._required_lease()
             sequence = self._sequence + 1
             try:
-                observation = await self._sessions.act(
-                    lease.lease_ref,
-                    action,
-                    sequence=sequence,
+                page = (
+                    await self._sessions.act(lease.lease_ref, action, sequence=sequence)
+                    if constraint is None
+                    else await self._sessions.act(
+                        lease.lease_ref, action, sequence=sequence, constraint=constraint
+                    )
                 )
             except BrowserProviderError as error:
                 if error.reason_code in _ACTION_REFUSALS:
+                    if error.reason_code == GRANT_NOT_APPLICABLE:
+                        # D16: the lease and sequence stay; the observation the
+                        # refused action named does not.
+                        self._observation = None
+                        self._facts = None
                     raise
                 # Without a definite refusal the action may have landed and the
                 # service's sequence moved on: give the lease up, never retry.
@@ -235,8 +256,7 @@ class HostedBrowserProvider:
                     retryable=False,
                 ) from exc
             self._sequence = sequence
-            self._observation = self._validated_observation(observation)
-            return self._observation
+            return self._cache_page(page)
 
     async def action_context(self, action: BrowserAction) -> BrowserActionContext:
         async with self._lock:
@@ -254,6 +274,21 @@ class HostedBrowserProvider:
                 revision=observation.revision,
                 ref=element.ref,
             )
+
+    def snapshot(self) -> BrowserSnapshot | None:
+        """The cached observation and its facts (ADR-0129); never model-visible."""
+
+        if self._observation is None:
+            return None
+        return BrowserSnapshot(observation=self._observation, facts=self._facts)
+
+    async def snapshot_in_session(self, session_id: UUID) -> BrowserSnapshot | None:
+        """A pinned provider serves the whole deployment; an action's revision
+        decides whether its cached page still describes it."""
+
+        del session_id
+        async with self._lock:
+            return self.snapshot()
 
     async def release_run(self, run_id: UUID) -> None:
         """Close, and so seal, the lease an ended run held; leave any other run's."""
@@ -366,6 +401,21 @@ class HostedBrowserProvider:
             raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
         return observation
 
+    def _cache_page(self, page: BrowserSessionPage) -> BrowserObservation:
+        """Cache a page's observation and, when they describe it, its facts."""
+
+        if isinstance(page, BrowserSessionObservation):
+            page = page.snapshot()
+        if isinstance(page, BrowserSnapshot):
+            observation, facts = page.observation, page.facts
+        else:
+            observation, facts = page, None
+        self._observation = self._validated_observation(observation)
+        self._facts = (
+            facts if facts is not None and facts.revision == observation.revision else None
+        )
+        return self._observation
+
     def _forget_locked(self) -> None:
         self._lease = None
         self._lease_scope = None
@@ -374,6 +424,7 @@ class HostedBrowserProvider:
         self._renewal_exhausted = False
         self._sequence = 0
         self._observation = None
+        self._facts = None
 
     def _abandon_locked(self) -> None:
         """Stop using the lease now and queue it for closing; no I/O."""
@@ -495,11 +546,33 @@ class SessionBoundHostedBrowserProvider:
     async def observe(self) -> BrowserObservation:
         return await self._required_provider().observe()
 
-    async def act(self, action: BrowserAction) -> BrowserObservation:
-        return await self._required_provider().act(action)
+    async def act(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+    ) -> BrowserObservation:
+        return await self._required_provider().act(action, constraint=constraint)
 
     async def action_context(self, action: BrowserAction) -> BrowserActionContext:
         return await self._required_provider().action_context(action)
+
+    async def snapshot_in_session(self, session_id: UUID) -> BrowserSnapshot | None:
+        """One session's cached observation and facts, whichever session's call
+        bound this provider last (ADR-0129)."""
+
+        async with self._lock:
+            binding = self._bindings.get(session_id)
+        return None if binding is None else binding.provider.snapshot()
+
+    async def action_context_in_session(
+        self, session_id: UUID, action: BrowserAction
+    ) -> BrowserActionContext | None:
+        async with self._lock:
+            binding = self._bindings.get(session_id)
+        if binding is None:
+            return None
+        return await binding.provider.action_context(action)
 
     async def release_run(self, run_id: UUID) -> None:
         async with self._lock:
@@ -568,56 +641,18 @@ class SessionBoundHostedBrowserProvider:
         return provider
 
 
-_HARD_EXCLUSION_WORDS = frozenset(
-    {
-        "accept",
-        "agree",
-        "buy",
-        "checkout",
-        "delete",
-        "download",
-        "order",
-        "password",
-        "pay",
-        "post",
-        "publish",
-        "recover",
-        "remove",
-        "security",
-        "submit",
-        "upload",
-    }
-)
-_ROUTINE_CLICK_NAMES = frozenset(
-    {
-        "continue",
-        "done",
-        "finish",
-        "got it",
-        "next",
-        "practice",
-        "review",
-        "skip",
-        "start",
-        "try again",
-    }
-)
-
-
 def _classify_consequence(
     action: BrowserAction,
     element: BrowserElement,
 ) -> BrowserActionConsequence:
-    normalized_name = " ".join(element.name.lower().split())
-    words = frozenset(normalized_name.replace("-", " ").split())
-    if words & _HARD_EXCLUSION_WORDS:
-        return BrowserActionConsequence.UNKNOWN
-    if (
-        action.kind.value == "click"
-        and element.role in {"button", "link"}
-        and normalized_name in _ROUTINE_CLICK_NAMES
-    ):
-        return BrowserActionConsequence.ROUTINE
-    if action.kind.value == "scroll":
-        return BrowserActionConsequence.ROUTINE
-    return BrowserActionConsequence.UNKNOWN
+    """The shared classifier over what the worker's cached observation shows."""
+
+    return classify_browser_action(
+        kind=action.kind,
+        role=element.role,
+        labels=(element.name,),
+        facts=None,
+        option_texts=(action.value,)
+        if action.kind is BrowserActionKind.SELECT and action.value is not None
+        else (),
+    )
