@@ -134,6 +134,8 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarResizesWithItsDivider \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testOlderServerSidebarStaysFlatWithoutFolderControls \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRecentChatsIncludesFiledChatsAndCollapses \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRecentChatsWorksWithoutFolders \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFolderSectionsGroupConversations \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testNewFolderSheetCreatesAFolder \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingAFolderThroughItsMenuUpdatesTheSection \

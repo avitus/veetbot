@@ -27,6 +27,50 @@ import Testing
     }
 
     @Test
+    func testRecentChatsIncludesFiveLatestFiledAndUnfiledChatsWithoutMovingThem() {
+        let work = folder(1, "Work")
+        let history = (1...7).map { entry($0, "Chat \($0)", folderID: $0.isMultiple(of: 2) ? work.id : nil) }
+        for available in [true, false] {
+            let grouped = GroupedConversationHistory.make(
+                history: history.reversed(), folders: [work], available: available
+            )
+            #expect(grouped.recent == Array(history.prefix(5)))
+            let originalIDs = Set(grouped.uncategorized.map(\.id) + grouped.folders.flatMap { $0.entries.map(\.id) })
+            #expect(originalIDs == Set(history.map(\.id)))
+            #expect(grouped.recent.dropFirst().contains { $0.folderID == work.id })
+        }
+    }
+
+    @Test
+    func testRecentChatsExcludesSchedulesBeforeLimitingAndHandlesShortHistory() {
+        let chats = (2...7).map { entry($0, "Chat \($0)") }
+        var scheduled = entry(1, "Daily briefing")
+        scheduled.scheduleID = UUID()
+        let grouped = GroupedConversationHistory.make(
+            history: [scheduled] + chats, folders: [], available: true
+        )
+        #expect(grouped.recent == Array(chats.prefix(5)))
+        let short = GroupedConversationHistory.make(history: [scheduled, chats[0]], folders: [], available: false)
+        #expect(short.recent == [chats[0]])
+        #expect(GroupedConversationHistory.make(history: [scheduled], folders: [], available: false).recent.isEmpty)
+        #expect(GroupedConversationHistory.make(history: [], folders: [], available: false).recent.isEmpty)
+    }
+
+    @Test
+    func testRecentChatsFollowsNewActivityAndDeletionWithStableTies() {
+        var older = entry(2, "Older filed chat", folderID: folder(1, "Work").id)
+        let newer = entry(1, "Newer chat")
+        older.updatedAt = newer.updatedAt
+        let tied = GroupedConversationHistory.make(history: [newer, older], folders: [], available: false)
+        #expect(tied.recent == [older, newer])
+        older.updatedAt = newer.updatedAt.addingTimeInterval(1)
+        let active = GroupedConversationHistory.make(history: [newer, older], folders: [], available: false)
+        #expect(active.recent == [older, newer])
+        let deleted = GroupedConversationHistory.make(history: [newer], folders: [], available: false)
+        #expect(deleted.recent == [newer])
+    }
+
+    @Test
     func testUncategorizedComeFirstAndFoldersSortCaseInsensitively() throws {
         let work = folder(1, "Work")
         let travel = folder(2, "travel")
@@ -221,6 +265,26 @@ import Testing
         #expect(!second.expansion.solo)
         #expect(second.expansion.isExpanded(travel))
         #expect(!second.expansion.isExpanded(work))
+    }
+
+    @MainActor
+    @Test
+    func testRecentChatsExpansionPersistsIndependentlyOfFolders() throws {
+        let suite = "com.veetbot.tests.recent-chats.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = FolderSidebarPreferences(defaults: defaults)
+        #expect(first.recentChatsExpanded)
+        first.recentChatsExpanded = false
+        let work = folder(1, "Work").id
+        first.expansion.setExpanded(true, folder: work)
+        first.expansion.setSolo(false, order: [work])
+        let restored = FolderSidebarPreferences(defaults: defaults)
+        #expect(!restored.recentChatsExpanded)
+        #expect(restored.expansion.isExpanded(work))
+        restored.recentChatsExpanded = true
+        #expect(FolderSidebarPreferences(defaults: defaults).recentChatsExpanded)
+        #expect(restored.expansion == first.expansion)
     }
 
     @MainActor

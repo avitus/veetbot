@@ -1,5 +1,34 @@
 import SwiftUI
 
+/// Shortcuts stay reachable even while every folder is closed.
+struct RecentChatsHeaderRow: View {
+    let count: Int
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 8) {
+                Label("Recent chats", systemImage: "clock")
+                Spacer()
+                Text("\(count)")
+                    .appFont(.caption)
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.right")
+                    .appFont(.caption, weight: .semibold)
+                    .foregroundColor(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Recent chats")
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint(isExpanded ? "Collapses recent chats" : "Expands recent chats")
+        .accessibilityIdentifier("sidebar.recent-chats")
+    }
+}
+
 /// What the folder name sheet is for: a new folder, optionally filing one
 /// conversation on creation, renaming an existing one, or accepting a
 /// suggested folder under a name the owner may change first.

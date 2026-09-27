@@ -487,8 +487,15 @@ The Apple client's sidebar keeps mirroring the server's authoritative index
 under the contract in [apple-client.md](../apple-client.md): the cache gains
 the server-assigned `folder_id` beside the title, the server's value wins on
 every reconciliation, and the list of folders and open proposals is fetched
-with the history and held in memory. The sidebar renders, in order, a
-suggested-folders section with one row per open proposal — the proposed name
+with the history and held in memory. On macOS, iPhone, and iPad, the sidebar
+first offers a collapsible Recent chats section below New conversation: up to
+five non-scheduled conversations in activity order across all folders and
+unfiled history. These shortcuts open the existing conversation and leave its
+folder and history placement intact. The section starts expanded, remembers
+its toggle on the device independently of folder expansion and solo mode,
+works without the folder surface, and is hidden when no chats exist. This
+owner-requested discoverability improvement adds no server state or gate.
+The sidebar then renders a suggested-folders section with one row per open proposal — the proposed name
 or target, each member title resolved from the cached history on a line of
 its own, and accept and decline controls, plus for a new folder a rename
 control that accepts it under the owner's name through the route's optional
@@ -509,7 +516,7 @@ with a message saying that the conversations return to history and nothing is
 deleted.
 
 Against a server without the flag — a 404 or 405 on the folder list — the
-client marks folders unavailable, renders exactly today's flat history, hides
+client marks folders unavailable, renders the history without folders, hides
 every folder control, and shows no banner; the unavailability is contained
 in the reconciliation and never surfaces as an error, so an older server
 costs one extra request per poll and nothing else. Native behavior is
@@ -520,7 +527,8 @@ Scheduled sessions are not chat conversations, so they never enter a folder
 and their rows carry no move menu. The sidebar groups them by schedule in a
 Scheduled section between the folders and the unfiled history, a scheduler
 presentation designed in [scheduling.md](scheduling.md) (ADR-0113). "Flat
-history" above means no folder sections or controls; schedule groups derive
+history" above means no folder sections or controls; Recent chats remains
+available, and schedule groups derive
 from session metadata alone and do not depend on the folder flag.
 
 ## Events, telemetry, and privacy

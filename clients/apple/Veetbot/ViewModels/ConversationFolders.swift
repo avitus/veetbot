@@ -35,6 +35,8 @@ public struct ScheduledConversationGroup: Identifiable, Equatable, Sendable {
 /// next reconciliation; and an unavailable folder surface flattens every
 /// folder. Scheduled sessions group by schedule either way (ADR-0113).
 public struct GroupedConversationHistory: Equatable, Sendable {
+    /// Shortcuts across folders and history, never a change to membership.
+    public let recent: [SessionHistoryEntry]
     public let uncategorized: [SessionHistoryEntry]
     public let folders: [ConversationFolderSection]
     public let schedules: [ScheduledConversationGroup]
@@ -42,11 +44,13 @@ public struct GroupedConversationHistory: Equatable, Sendable {
     public init(
         uncategorized: [SessionHistoryEntry],
         folders: [ConversationFolderSection],
-        schedules: [ScheduledConversationGroup] = []
+        schedules: [ScheduledConversationGroup] = [],
+        recent: [SessionHistoryEntry] = []
     ) {
         self.uncategorized = uncategorized
         self.folders = folders
         self.schedules = schedules
+        self.recent = recent
     }
 
     public static func make(
@@ -71,7 +75,8 @@ public struct GroupedConversationHistory: Equatable, Sendable {
             }
             : []
         return GroupedConversationHistory(
-            uncategorized: uncategorized, folders: sections, schedules: schedules
+            uncategorized: uncategorized, folders: sections, schedules: schedules,
+            recent: Array(history.filter { $0.scheduleID == nil }.sortedForHistoryList().prefix(5))
         )
     }
 
@@ -241,11 +246,18 @@ public struct FolderExpansionState: Equatable, Codable, Sendable {
     }
 }
 
-/// The sidebar's folder expansion, remembered on this device and never sent to
-/// the server. An unreadable stored value falls back to the default.
+/// The sidebar's folder and recent-chat expansion, remembered on this device
+/// and never sent to the server. An unreadable stored value uses the default.
 @MainActor
 public final class FolderSidebarPreferences: ObservableObject {
     static let expansionKey = "veetbot.folders.expansion"
+    private static let recentChatsKey = "veetbot.recent-chats.expanded"
+
+    @Published public var recentChatsExpanded: Bool {
+        didSet {
+            defaults.set(recentChatsExpanded, forKey: Self.recentChatsKey)
+        }
+    }
 
     @Published public var expansion: FolderExpansionState {
         didSet {
@@ -260,6 +272,7 @@ public final class FolderSidebarPreferences: ObservableObject {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        recentChatsExpanded = defaults.object(forKey: Self.recentChatsKey) as? Bool ?? true
         expansion = defaults.data(forKey: Self.expansionKey)
             .flatMap { try? JSONDecoder().decode(FolderExpansionState.self, from: $0) }
             ?? FolderExpansionState()
