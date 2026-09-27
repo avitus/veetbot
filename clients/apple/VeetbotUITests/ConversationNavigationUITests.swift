@@ -29,6 +29,54 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
+    #if os(macOS)
+    /// A loaded SVG used to rebuild the viewer's implicit navigation columns,
+    /// raising an AppKit exception before the owner could save the file.
+    func testSVGArtifactCanBeDownloadedOnMac() throws {
+        app.launchArguments.append("--ui-testing-artifact")
+        app.launch()
+        let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        let file = app.buttons["garden.svg"]
+        XCTAssertTrue(file.waitForExistence(timeout: 5))
+        file.click()
+        let download = app.buttons["Download"]
+        XCTAssertTrue(download.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["image/svg+xml"].waitForExistence(timeout: 5))
+        XCTAssertTrue(download.isEnabled)
+        download.click()
+        let cancel = app.sheets.buttons["CancelButton"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.click()
+        XCTAssertTrue(download.waitForExistence(timeout: 5))
+        XCTAssertTrue(download.isEnabled)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        download.click()
+        let save = app.sheets.buttons["OKButton"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        let goToFolder = app.sheets.textFields["PathTextField"]
+        XCTAssertTrue(goToFolder.waitForExistence(timeout: 5))
+        goToFolder.typeKey("a", modifierFlags: .command)
+        goToFolder.typeText(directory.path)
+        goToFolder.typeKey(.return, modifierFlags: [])
+        save.click()
+        let destination = directory.appendingPathComponent("garden.svg")
+        let written = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in FileManager.default.fileExists(atPath: destination.path) }, object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [written], timeout: 5), .completed)
+        let expected = #"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>"#
+        XCTAssertEqual(try Data(contentsOf: destination), Data(expected.utf8))
+        app.buttons["Close"].click()
+        XCTAssertTrue(file.waitForExistence(timeout: 5))
+    }
+    #endif
+
     /// Twenty mixed calls occupy one compact row; each original result remains expandable.
     func testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails() {
         app.launchArguments.append("--ui-testing-mixed-tools")

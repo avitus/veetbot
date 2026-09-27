@@ -6,6 +6,8 @@ import AppKit
 
 enum ConversationNavigationUITestFixture {
     static let launchArgument = "--ui-testing-conversation-navigation"
+    static let artifactID = "00000000-0000-0000-0000-000000000A01"
+    static let artifactSVG = #"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>"#
     static let firstSessionID = "00000000-0000-0000-0000-000000000123"
     static let secondSessionID = "00000000-0000-0000-0000-000000000456"
     static let memoryID = "00000000-0000-0000-0000-000000000321"
@@ -232,6 +234,14 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let statusCode: Int
         var holdOpen = false
         switch (request.httpMethod, url.path) {
+        case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"):
+            statusCode = 200
+            body = """
+                {"id":"\(ConversationNavigationUITestFixture.artifactID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","run_id":"\(Self.runID)","name":"garden.svg","media_type":"image/svg+xml","sha256":"fixture","size_bytes":\(ConversationNavigationUITestFixture.artifactSVG.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
+                """
+        case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)/content"):
+            statusCode = 200
+            body = ConversationNavigationUITestFixture.artifactSVG
         case ("GET", "/v1/people") where ProcessInfo.processInfo.arguments.contains(Self.peopleDirectoryArgument):
             statusCode = 200
             let secondPage = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
@@ -408,10 +418,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/messages"
         ):
             statusCode = 200
+            let filePart = ProcessInfo.processInfo.arguments.contains("--ui-testing-artifact")
+                ? ",{\"type\":\"file\",\"artifact_id\":\"\(ConversationNavigationUITestFixture.artifactID)\",\"media_type\":\"image/svg+xml\",\"filename\":\"garden.svg\"}"
+                : ""
             body = """
                 {"items":[
                   {"sequence":1,"role":"user","content":[{"type":"text","text":"Historical question"}]},
-                  {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Historical answer loaded"}]}
+                  {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Historical answer loaded"}\(filePart)]}
                 ],"next_cursor":null}
                 """
         case (

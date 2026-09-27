@@ -118,6 +118,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleEvidencePreservesTheOpenConversation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMemoryPeopleShowsEachChosenPerson \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFinishedAnswerOffersCopyAndSelectText \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSVGArtifactCanBeDownloadedOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleIdentityPreviewRemainsReviewableAfterEditorCloses \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleMailboxImportPreviewShowsExplicitCoverage \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleForgetExplainsSourceRetentionAndPendingCleanup \

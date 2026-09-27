@@ -360,7 +360,12 @@ cache sends `If-None-Match` and reuses bytes on `304`, retains at most 32 MiB,
 and evicts least-recently-used values. It is cleared when the app leaves the
 foreground, the connection changes, or credentials are forgotten; it never
 writes artifact bytes to disk. Artifacts can be previewed or exported through
-the operating system file picker.
+the operating system file picker. The Mac viewer uses a single-pane sheet with
+Close and Download controls; loading a file does not rebuild navigation columns.
+Cancelling the save picker keeps the viewer open, and saving preserves the
+original bytes, including SVG files whose preview cannot be decoded. The macOS
+UI regression loads an SVG from a reply, cancels a download, then saves it and
+compares the exported bytes.
 
 The current public SSE contract exposes tool result content and trust but does
 not expose every invocation's stored `structured_result`, effect classification,
