@@ -8,12 +8,14 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.cache import session_cache_key
 from agent_core.domain.email import EmailRecord
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
 from agent_core.domain.email_semantics import EmailSemanticSource
 from agent_core.domain.errors import ContextOverflow, ToolValidationError
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
+    CacheHints,
     ConversationItem,
     ModelAttempt,
     ModelRequest,
@@ -217,6 +219,9 @@ class PeopleEmailImportProcessor:
         )
         request = ModelRequest(
             model_policy=model.policy_name,
+            cache_hints=CacheHints(
+                session_key=session_cache_key(context.run.tenant_id, context.run.session_id)
+            ),
             conversation=conversation,
             tools=[],
             response_schema=schema,

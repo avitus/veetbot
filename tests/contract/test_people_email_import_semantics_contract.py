@@ -325,6 +325,9 @@ async def test_email_import_uses_original_date_one_assessment_and_shared_budget(
         assert result.state == "completed", (await app.runs.get(result.run_id)).failure
         assert result.source_read_complete and result.analysis_complete
         assert result.records_processed == 1 and len(provider.requests) == passages
+        assert all(
+            request.cache_hints and request.cache_hints.session_key for request in provider.requests
+        )
         assert result.spent_usd == Decimal("0.01") * passages
         assert sent_at.isoformat() in provider.requests[0].model_dump_json()
         async with app.uow_factory() as uow:

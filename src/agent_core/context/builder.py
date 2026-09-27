@@ -20,6 +20,7 @@ from agent_core.context.rendering import (
 )
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.cache import session_cache_key
 from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure, WorkingState
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.memory import MemoryCorrection, RecallProfile
@@ -102,6 +103,7 @@ def _canonical_json(value: object) -> bytes:
 def _history_window(
     breakpoints: Sequence[CacheBreakpoint],
     *,
+    conversation: Sequence[ConversationItem],
     carried_through: int | None,
     stable_through: int | None,
 ) -> list[CacheBreakpoint]:
@@ -123,7 +125,22 @@ def _history_window(
         for through in dict.fromkeys(
             index for index in (carried_through, stable_through) if index is not None
         ):
-            placed.append(hint.model_copy(update={"through_item": through}))
+            input_through = next(
+                (
+                    index
+                    for index in range(through, -1, -1)
+                    if isinstance(conversation[index], (UserMessage, ToolResultItem))
+                ),
+                None,
+            )
+            placed.append(
+                hint.model_copy(
+                    update={
+                        "through_item": through,
+                        "through_input_item": input_through,
+                    }
+                )
+            )
     return placed
 
 
@@ -241,15 +258,17 @@ class MinimalContextBuilder:
                 "context_origin_trust": TrustLevel.USER.value,
             },
             cache_hints=CacheHints(
+                session_key=session_cache_key(run.tenant_id, run.session_id),
                 breakpoints=_history_window(
                     [
                         CacheBreakpoint(boundary="after_system"),
                         CacheBreakpoint(boundary="after_tools"),
                         CacheBreakpoint(boundary="after_history_prefix"),
                     ],
+                    conversation=[*prefix, *body],
                     carried_through=None,
                     stable_through=len(prefix) + stable - 1 if stable else None,
-                )
+                ),
             ),
         )
 
@@ -583,11 +602,13 @@ class BudgetedContextBuilder:
                 ),
             },
             cache_hints=CacheHints(
+                session_key=session_cache_key(run.tenant_id, run.session_id),
                 breakpoints=_history_window(
                     plan.cache_breakpoints,
+                    conversation=[*prefix, *rendered_body],
                     carried_through=len(prefix) + carried - 1 if carried else None,
                     stable_through=len(prefix) + stable - 1,
-                )
+                ),
             ),
         )
         return ContextAssembly(request=request, pressure=pressure)

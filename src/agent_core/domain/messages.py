@@ -278,10 +278,14 @@ class CacheBreakpoint(BaseModel):
     # A request's history breakpoint names the index, in its conversation, of the
     # last item the cached prefix includes; None marks the conversation's final block.
     through_item: int | None = Field(default=None, ge=0)
+    # Alternative boundary at a user/tool input, eligible for implicit lookback
+    # even when a later request no longer carries this explicit marker.
+    through_input_item: int | None = Field(default=None, ge=0)
 
 
 class CacheHints(BaseModel):
     breakpoints: list[CacheBreakpoint] = Field(default_factory=list)
+    session_key: str | None = Field(default=None, pattern=r"^session-[0-9a-f]{32}$")
 
 
 class ModelRequest(BaseModel):

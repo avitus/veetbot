@@ -80,7 +80,7 @@ def mutate(root: Path, name: str) -> None:
     elif name == "capability_missing":
         profile["capabilities"].pop("streaming")
     elif name == "capability_widened":
-        profile["capabilities"]["explicit_cache_control"] = True
+        profile["capabilities"]["audio"] = True
     elif name == "limit_missing":
         profile["limits"].pop("max_tool_count")
     elif name == "in_band_unexpected":
@@ -170,6 +170,8 @@ async def test_shipped_models_declare_the_efforts_and_names_the_owner_chooses_fr
     local = await router.resolve("local", tenant_id="tenant-a")
 
     assert registry.policies.selectable_chat_policies == ["astra", "fable", "balanced"]
+    assert astra.capabilities.explicit_cache_control
+    assert astra.limits.max_cache_breakpoints == 3
     assert (astra.display_name, astra.reasoning_efforts) == ("GPT-6 Astra", every_effort)
     assert (fable.display_name, fable.reasoning_efforts) == ("Claude Fable 5.1", every_effort)
     assert (sol.display_name, sol.reasoning_efforts) == ("GPT-5.6 Sol", every_effort)

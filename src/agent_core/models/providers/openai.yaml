@@ -13,11 +13,12 @@ capabilities:
   files: true
   reasoning: native
   provider_managed_state: true
-  explicit_cache_control: false
+  explicit_cache_control: true
   structured_output: true
   streaming: true
 limits:
-  max_cache_breakpoints: 0
+  # Three supplied boundaries plus OpenAI's implicit write.
+  max_cache_breakpoints: 3
   default_output_reserve: 8192
   max_tool_count: 128
 models:

@@ -12,6 +12,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
+from agent_core.domain.cache import session_cache_key
 from agent_core.domain.correspondence import (
     CORRESPONDENCE_SUMMARIES_PER_SLICE,
     CORRESPONDENCE_SUMMARY_DEADLINE_SECONDS,
@@ -53,6 +54,7 @@ from agent_core.domain.errors import (
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
     AssistantMessage,
+    CacheHints,
     ModelRequest,
     TextPart,
     ToolCallItem,
@@ -1342,6 +1344,9 @@ class _TaskIO:
         ).hexdigest()
         request = ModelRequest(
             model_policy=c.agent.model_policy,
+            cache_hints=CacheHints(
+                session_key=session_cache_key(c.run.tenant_id, c.run.session_id)
+            ),
             conversation=conversation,
             tools=[],
             response_schema=response_schema,

@@ -39,7 +39,7 @@ This is worth stating because the gateway is where every provider difference
 first becomes visible, and the cheapest fix for a provider difference is
 almost always a special case one layer up. Anthropic rejects a request whose
 signed thinking blocks were altered; OpenAI does not. Anthropic reports cache
-writes as a separate token class; OpenAI does not report them at all. Anthropic
+writes as a separate token class; current OpenAI models report cache writes too. Anthropic
 has no equivalent of `response.incomplete`; OpenAI has no equivalent of
 `stop_sequence`. Each of those has an obvious local fix in the runtime, and
 each of those local fixes is the thing Milestone 1's acceptance criterion
@@ -618,7 +618,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:1036-1038`). The gateway translates those hints into
+(`context-engine.md:1067-1069`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -627,18 +627,37 @@ The translation differs sharply between the two first providers:
 
 | Aspect | Anthropic | OpenAI |
 | --- | --- | --- |
-| Mechanism | explicit `cache_control` | automatic prefix |
-| Breakpoints | at most 4 | hints ignored |
-| Minimum | model-dependent, ~1024 | provider-managed |
-| TTL control | `default` or `1h` | none |
-| Reported as | `cache_creation`/`cache_read` | `cached_tokens` |
+| Mechanism | explicit `cache_control` | implicit plus supplied explicit markers on supported profiles |
+| Breakpoints | at most 4 | 3 supplied markers plus the implicit write; unsupported hints recorded as dropped |
+| Minimum | model-dependent, ~1024 | 1,024 visible tokens on GPT-5.6 and later |
+| TTL control | `default` or `1h` | provider default 30 minutes on shipped models |
+| Reported as | `cache_creation`/`cache_read` | `cache_write_tokens` / `cached_tokens` |
 
-Because OpenAI may ignore breakpoints entirely, the OpenAI adapter drops
-`CacheHints` after recording that it did so. This is not a failure and must
-not be logged as one. What it does mean is that on OpenAI the prefix-stability
-invariant is the whole mechanism: there is no explicit marker to fall back on,
-so a prefix that changes byte-for-byte simply stops caching with no signal
-other than the ratio falling.
+The context builder supplies `CacheHints.session_key`, a truncated SHA-256 of
+canonical tenant/session identity, and the OpenAI adapter sends it as
+`prompt_cache_key`. It contains no raw identifier and excludes the plan epoch.
+Anthropic and `chat_completions` ignore the identity. See
+[ADR-0135](../adr/0135-openai-chat-cache-identity-and-history.md) for the routing,
+privacy and cross-session reuse trade-off and measured diagnosis.
+
+For a profile declaring explicit cache control and a cache-write price, OpenAI
+translates `after_system` to the final system item and history hints to the
+builder's `through_input_item` alternative (otherwise `through_item`, or the
+final item for an unpositioned hint). Text messages and tool outputs carry a
+content-block `prompt_cache_breakpoint`; assistant text uses `output_text`,
+other text uses `input_text`. Existing attachment blocks retain their content.
+The request keeps implicit mode, so at most three distinct supplied boundaries
+are sent in priority order. `after_tools`, unsupported item kinds, duplicate
+positions and overflow hints are dropped and counted on the completed attempt.
+A profile without support or a write price drops every breakpoint. The cache key
+is independent of this count. The adapter never invents a history boundary.
+
+Shipped GPT-5.6 Sol and Astra profiles support these markers and price writes.
+Their sole supported TTL is 30 minutes; ADR-0132's `1h` cannot be mapped to
+`prompt_cache_retention: "24h"`, an older-model option. Leave retention at the
+provider default. Parse `input_tokens_details.cache_write_tokens` into the
+normalized write class and charge it instead of ordinary input, never in
+addition. Missing write usage retains the legacy zero default.
 
 The breakpoint budget is where the two providers force a real decision. Four
 breakpoints, three natural boundaries (`after_system`, `after_tools`,
@@ -683,7 +702,7 @@ they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:1014-1016` and the
+The cached-prefix ratio is defined in `context-engine.md:1041-1043` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -702,7 +721,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:319`
+native tool calling, how much output to reserve. `context-engine.md:346`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -761,8 +780,8 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:285's second half
-    max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
+    default_output_reserve: int  # context-engine.md:312's second half
+    max_cache_breakpoints: int   # 4 on Anthropic, 3 on shipped OpenAI profiles
     max_tool_count: int | None
 ```
 
@@ -770,7 +789,7 @@ class ModelLimits(BaseModel):
 class ModelPricing(BaseModel):
     input_per_mtok: Decimal
     cached_input_per_mtok: Decimal
-    cache_write_per_mtok: Decimal | None     # five-minute TTL
+    cache_write_per_mtok: Decimal | None     # provider-default TTL
     cache_write_1h_per_mtok: Decimal | None  # one-hour TTL (ADR-0132)
     output_per_mtok: Decimal
     reasoning_per_mtok: Decimal | None
@@ -1582,7 +1601,7 @@ the same accepted levels, and effort is not part of the pin.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:576-580` requires that a
+be answerable by a tool result; `context-engine.md:603-607` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
