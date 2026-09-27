@@ -2326,6 +2326,7 @@ async def _compose(
     identical_denial_threshold: int,
     max_parallel_calls: int,
     hard_ceiling_multiplier: int,
+    inline_output_bytes: int,
     lease_seconds: float,
     heartbeat_divisor: int,
     worker_poll_interval: float,
@@ -3326,6 +3327,7 @@ async def _compose(
             query_former,
             session_project_scope,
             recall_revision=None if people_retriever is None else people_retriever.revision,
+            inline_output_bytes=inline_output_bytes,
         )
         compactor = StructuredCompactor(
             estimator,
@@ -3510,6 +3512,7 @@ async def _compose(
             current_principal=principal,
             max_parallel_calls=max_parallel_calls,
             hard_ceiling_multiplier=hard_ceiling_multiplier,
+            inline_output_bytes=inline_output_bytes,
             maximum_loaded_skills=int(skill_bodies_config["max_items"]),
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
@@ -5335,6 +5338,7 @@ async def build(
             identical_denial_threshold=int(circuit_breaker["identical_denied_threshold"]),
             max_parallel_calls=int(parallel["maximum_calls"]),
             hard_ceiling_multiplier=int(output_config["hard_ceiling_multiplier"]),
+            inline_output_bytes=int(output_config["inline_maximum_bytes"]),
             lease_seconds=float(worker_config["lease_seconds"]),
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),

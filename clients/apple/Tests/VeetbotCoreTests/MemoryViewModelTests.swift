@@ -495,7 +495,12 @@ import Testing
         #expect(!plainQuery.contains(where: { $0.name == "flagged" }), "the default list asks for both")
 
         model.setFlaggedOnly(true)
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Wait for the reload request, not a fixed delay that can expire
+        // before a loaded UI actor schedules the filter's task.
+        for _ in 0 ..< 600 where lock.withLock({ requests.count }) < 2 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        try #require(lock.withLock { requests.count } == 2)
         #expect(model.flaggedOnly)
         let queue = try #require(lock.withLock { requests.last })
         let queueQuery = URLComponents(url: queue.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []

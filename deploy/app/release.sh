@@ -118,6 +118,7 @@ PRODUCTION_IMAGE="$SANDBOX_REPOSITORY:production"
 PROFILE_RELEASE_IMAGE="$PROFILE_REPOSITORY:$RELEASE_ID"
 PREVIOUS_RELEASE=""
 PROMOTED=0
+WORKERS_STOPPED=0
 HEALTH_HEADERS=""
 
 mkdir -p "$RELEASES_DIR" "$SHARED_DIR/uv-cache"
@@ -129,6 +130,10 @@ cleanup() {
   trap - EXIT
   if [[ -n "$HEALTH_HEADERS" ]]; then
     rm -f -- "$HEALTH_HEADERS"
+  fi
+  if (( status != 0 && PROMOTED == 0 && WORKERS_STOPPED == 1 )); then
+    sudo systemctl restart veetbot-worker veetbot-async-worker || \
+      printf 'warning: could not restart the previous run workers\n' >&2
   fi
   if (( status != 0 && PROMOTED == 0 )) && [[ -d "$STAGE" ]]; then
     local active=""
@@ -195,6 +200,7 @@ for required in \
   deploy/systemd/veetbot-call-ingress.service \
   execution/sandbox.Dockerfile \
   scripts/check_schedule_database_permissions.py \
+  scripts/check_provider_pins.py \
   scripts/check_production_deployment.py; do
   [[ -f "$STAGE/$required" ]] || fail "staged release is missing $required"
 done
@@ -395,6 +401,12 @@ if [[ "${AGENT_CALL_ENABLED:-0}" == "1" ]]; then
   done
 fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
+if [[ -n "$PREVIOUS_RELEASE" ]]; then
+  # Most incompatibilities are parked approvals. Reject before migrations,
+  # container replacement or service interruption so the owner can finish them.
+  "$STAGE/.venv/bin/python" scripts/check_provider_pins.py || fail \
+    "the staged provider registry cannot resume active runs"
+fi
 export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
   --project-name "$COMPOSE_PROJECT_NAME" \
@@ -416,6 +428,15 @@ if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
     fail "schedule database role does not satisfy the materialization contract"
   fi
 fi
+
+if [[ -n "$PREVIOUS_RELEASE" ]]; then
+  # Only these workers create provider pins. Stop both before checking again:
+  # a run may have pinned the old registry since the live preflight above.
+  WORKERS_STOPPED=1
+  sudo systemctl stop veetbot-worker veetbot-async-worker
+fi
+"$STAGE/.venv/bin/python" scripts/check_provider_pins.py || fail \
+  "the staged provider registry cannot resume active runs"
 
 sudo install -d -m 0755 "$SYSTEMD_DIR"
 sudo install -m 0644 "$STAGE/deploy/systemd/"*.service "$SYSTEMD_DIR/"

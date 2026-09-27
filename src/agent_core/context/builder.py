@@ -39,6 +39,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import Run, RunCheckpoint
+from agent_core.domain.tool_output import content_bytes, context_view, output_excerpt
 from agent_core.domain.tools import ToolSpec
 
 # The delta block is the same rendering the retriever produced for the base
@@ -221,7 +222,7 @@ class MinimalContextBuilder:
             principal_id=None,
         )
         checkpoint_items: list[ConversationItem] = [
-            item
+            context_view(item)
             for item in checkpoint.conversation
             if isinstance(item, (SystemMessage, UserMessage))
             or getattr(item, "kind", None)
@@ -290,6 +291,7 @@ class BudgetedContextBuilder:
         query_former: QueryFormer | None = None,
         session_scope: Callable[[UUID], Awaitable[str]] | None = None,
         recall_revision: Callable[[], Awaitable[int]] | None = None,
+        inline_output_bytes: int = 4096,
     ) -> None:
         self._planner = planner
         self._estimator = estimator
@@ -299,6 +301,9 @@ class BudgetedContextBuilder:
         self._query_former = query_former
         self._session_scope = session_scope
         self._recall_revision = recall_revision
+        if inline_output_bytes < 1024:
+            raise ValueError("inline output byte limit must be at least 1024")
+        self._inline_output_bytes = inline_output_bytes
         self._recall_tasks: OrderedDict[tuple[UUID, int, str], asyncio.Task[_RecallBundle]] = (
             OrderedDict()
         )
@@ -362,10 +367,26 @@ class BudgetedContextBuilder:
         for item in checkpoint.conversation:
             sequence = getattr(item, "source_event_sequence", None)
             if sequence is not None and sequence < run.seed_event_sequence:
-                history.append(item.model_copy(deep=True))
+                history.append(context_view(item))
             else:
-                active.append(item.model_copy(deep=True))
+                active.append(context_view(item))
         active = _insert_provider_continuation(active, checkpoint)
+        # Old sessions predate admission-time excerpts. Their event is the
+        # immutable source, so every assembly selects the same bounded bytes.
+        legacy_excerpted = False
+        for item in history:
+            if isinstance(item, ToolResultItem):
+                rendered = content_bytes(item.content)
+                if len(rendered) > self._inline_output_bytes:
+                    item.content = output_excerpt(
+                        rendered,
+                        budget=self._inline_output_bytes,
+                        location=f"event:{item.source_event_sequence}",
+                        reference=next(
+                            (p for p in item.content if isinstance(p, FileReferencePart)), None
+                        ),
+                    )
+                    legacy_excerpted = True
         history_count = len(history)
         combined, tool_truncated = self._truncate_tool_results([*history, *active], plan)
         history = combined[:history_count]
@@ -488,7 +509,7 @@ class BudgetedContextBuilder:
         retained_conversation = [*retained_history, *active_with_recall]
         validate_tool_pairs(retained_conversation)
 
-        yield_steps: list[str] = []
+        yield_steps: list[str] = ["legacy_tool_excerpts"] if legacy_excerpted else []
         if tool_truncated:
             yield_steps.append("tool_results")
         if cut:

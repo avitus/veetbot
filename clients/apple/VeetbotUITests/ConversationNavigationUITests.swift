@@ -392,6 +392,15 @@ final class ConversationNavigationUITests: XCTestCase {
         element("sidebar.session.\(id)")
     }
 
+    /// The phone's list lazily creates folder rows below the five shortcuts.
+    /// Close Recent chats before exercising the existing folder-only journeys.
+    private func collapseRecentChats() {
+        let header = app.buttons["sidebar.recent-chats"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        if header.value as? String == "Expanded" { activate(header) }
+        XCTAssertTrue(waitForFolder(header, expanded: false))
+    }
+
     private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval = 5) {
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
         wait(for: [gone], timeout: timeout)
@@ -457,6 +466,42 @@ final class ConversationNavigationUITests: XCTestCase {
         add(attachment)
     }
 
+    func testRecentChatsIncludesFiledChatsAndCollapses() {
+        addFolderFixture()
+        app.launch()
+        let header = app.buttons["sidebar.recent-chats"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertEqual(header.value as? String, "Expanded")
+        let recentIDs = [Self.firstSessionID, Self.secondSessionID, Self.planningSessionID,
+                         "00000000-0000-0000-0000-0000000004A2",
+                         "00000000-0000-0000-0000-0000000004A3"]
+        for id in recentIDs {
+            XCTAssertTrue(element("sidebar.recent.session.\(id)").exists)
+        }
+        XCTAssertFalse(element("sidebar.recent.session.00000000-0000-0000-0000-0000000004A4").exists)
+        attachFolderScreenshot("Five recent chats including filed conversations")
+        activate(header)
+        XCTAssertTrue(waitForFolder(header, expanded: false))
+        XCTAssertFalse(element("sidebar.recent.session.\(Self.secondSessionID)").exists)
+        XCTAssertTrue(waitForFolder(folderHeader(Self.folderID), expanded: false))
+        activate(header)
+        XCTAssertTrue(waitForFolder(header, expanded: true))
+        let filedChat = element("sidebar.recent.session.\(Self.secondSessionID)")
+        activate(filedChat)
+        XCTAssertTrue(app.staticTexts["Second historical answer loaded"].waitForExistence(timeout: 5))
+    }
+
+    func testRecentChatsWorksWithoutFolders() {
+        app.launch()
+        let header = app.buttons["sidebar.recent-chats"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        let recent = element("sidebar.recent.session.\(Self.firstSessionID)")
+        XCTAssertTrue(recent.exists)
+        XCTAssertFalse(element("sidebar.new-folder").exists)
+        activate(recent)
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+    }
+
     /// The default fixture is an older server whose index has no `folder_id`
     /// key: the sidebar stays flat and shows no folder control at all.
     func testOlderServerSidebarStaysFlatWithoutFolderControls() {
@@ -474,6 +519,7 @@ final class ConversationNavigationUITests: XCTestCase {
     func testFolderSectionsGroupConversations() {
         addFolderFixture()
         app.launch()
+        collapseRecentChats()
         let travel = folderHeader(Self.folderID)
         XCTAssertTrue(travel.waitForExistence(timeout: 10))
         XCTAssertTrue(waitForFolder(travel, label: "Travel", expanded: false))
@@ -492,6 +538,7 @@ final class ConversationNavigationUITests: XCTestCase {
     func testOpeningAFolderInSoloModeClosesTheOpenOne() {
         addFolderFixture()
         app.launch()
+        collapseRecentChats()
         let travel = folderHeader(Self.folderID)
         let work = folderHeader(Self.workFolderID)
         XCTAssertTrue(travel.waitForExistence(timeout: 10))
@@ -511,6 +558,7 @@ final class ConversationNavigationUITests: XCTestCase {
     func testANewProposalLeavesFolderExpansionAlone() {
         addFolderFixture()
         app.launch()
+        collapseRecentChats()
         let travel = folderHeader(Self.folderID)
         let work = folderHeader(Self.workFolderID)
         XCTAssertTrue(travel.waitForExistence(timeout: 10))
@@ -529,6 +577,7 @@ final class ConversationNavigationUITests: XCTestCase {
     func testNewFolderSheetCreatesAFolder() {
         addFolderFixture()
         app.launch()
+        collapseRecentChats()
         let newFolder = element("sidebar.new-folder")
         XCTAssertTrue(folderHeader(Self.folderID).waitForExistence(timeout: 10))
         XCTAssertTrue(reveal(newFolder))
@@ -633,6 +682,7 @@ final class ConversationNavigationUITests: XCTestCase {
     func testASuggestedFolderListsEachConversationItWouldFile() {
         addFolderFixture()
         app.launch()
+        collapseRecentChats()
         let proposal = element("sidebar.proposal.\(Self.proposalID)")
         XCTAssertTrue(proposal.waitForExistence(timeout: 10))
         attachFolderScreenshot("Suggested folder")
@@ -711,7 +761,8 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         app.launch()
         app.activate()
-        let historical = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        // At accessibility text sizes, the recent shortcut remains above History.
+        let historical = app.descendants(matching: .any)["sidebar.recent.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(historical.waitForExistence(timeout: 10))
         activate(historical)
         XCTAssertTrue(app.buttons["chat.people"].waitForExistence(timeout: 5))

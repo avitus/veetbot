@@ -656,7 +656,11 @@ class ChatCompletionsProvider:
                     },
                 }
             )
-        if not resolved.capabilities.native_tool_calling and tools:
+        if (
+            not resolved.capabilities.native_tool_calling
+            and tools
+            and request.tool_choice != "none"
+        ):
             messages.insert(
                 0,
                 {
@@ -676,6 +680,8 @@ class ChatCompletionsProvider:
         }
         if resolved.capabilities.native_tool_calling:
             payload["tools"] = tools
+            if request.tool_choice is not None:
+                payload["tool_choice"] = request.tool_choice
         if request.maximum_output_tokens is not None:
             payload["max_tokens"] = min(
                 request.maximum_output_tokens, resolved.limits.max_output_tokens

@@ -559,7 +559,7 @@ private struct SessionSidebar: View {
             .buttonStyle(.plain)
             .listRowBackground(AppTheme.brandGradient)
 
-            historySections { entry in
+            historySections { entry, isRecent in
                 HStack(spacing: 8) {
                     Button {
                         activate(.session(entry.sessionID))
@@ -568,11 +568,13 @@ private struct SessionSidebar: View {
                             .contentShape(Rectangle())
                     }
                     .accessibilityIdentifier(
-                        "sidebar.session.\(entry.sessionID.uuidString)"
+                        isRecent
+                            ? "sidebar.recent.session.\(entry.sessionID.uuidString)"
+                            : "sidebar.session.\(entry.sessionID.uuidString)"
                     )
                     .buttonStyle(.plain)
 
-                    moveMenu(for: entry)
+                    moveMenu(for: entry, isRecent: isRecent)
                     deleteButton(for: entry)
                 }
                 .listRowBackground(
@@ -618,17 +620,21 @@ private struct SessionSidebar: View {
             .accessibilityIdentifier("sidebar.new-conversation")
             .listRowBackground(AppTheme.brandGradient)
 
-            historySections { entry in
+            historySections { entry, isRecent in
                 HStack(spacing: 8) {
                     NavigationLink {
                         ChatDestination(model: model, entry: entry)
                     } label: {
                         historyLabel(entry)
                     }
-                    .accessibilityIdentifier("sidebar.session.\(entry.sessionID.uuidString)")
+                    .accessibilityIdentifier(
+                        isRecent
+                            ? "sidebar.recent.session.\(entry.sessionID.uuidString)"
+                            : "sidebar.session.\(entry.sessionID.uuidString)"
+                    )
                     .buttonStyle(.plain)
 
-                    moveMenu(for: entry)
+                    moveMenu(for: entry, isRecent: isRecent)
                     deleteButton(for: entry)
                 }
                 .listRowBackground(
@@ -642,16 +648,35 @@ private struct SessionSidebar: View {
 
     /// One builder for both list variants, so folder sections cannot drift
     /// between the direct-activation and the compact-navigation sidebars.
-    /// Order: suggested folders, the folders, the scheduled groups, then the
+    /// Order: recent chats, suggested folders, folders, scheduled groups, then
     /// unfiled history; with folders unavailable no folder section or control
     /// renders, while schedule groups still do (ADR-0113). Folders and groups
     /// each share one section, each header followed by its conversations while
     /// it is expanded, so no per-folder section gap separates them.
     @ViewBuilder
     private func historySections<Row: View>(
-        @ViewBuilder row: @escaping (SessionHistoryEntry) -> Row
+        @ViewBuilder row: @escaping (SessionHistoryEntry, Bool) -> Row
     ) -> some View {
         let grouped = model.groupedHistory
+        if !grouped.recent.isEmpty {
+            Section {
+                RecentChatsHeaderRow(
+                    count: grouped.recent.count,
+                    isExpanded: folderSidebar.recentChatsExpanded,
+                    onToggle: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            folderSidebar.recentChatsExpanded.toggle()
+                        }
+                    }
+                )
+                if folderSidebar.recentChatsExpanded {
+                    ForEach(grouped.recent) { entry in
+                        row(entry, true)
+                            .padding(.leading, 24)
+                    }
+                }
+            }
+        }
         if model.foldersAvailable, !model.suggestedFolders.isEmpty {
             Section("Suggested folders") {
                 ForEach(model.suggestedFolders) { proposal in
@@ -679,7 +704,7 @@ private struct SessionSidebar: View {
                     )
                     if expanded {
                         ForEach(section.entries) { entry in
-                            row(entry)
+                            row(entry, false)
                                 .padding(.leading, 24)
                         }
                     }
@@ -697,7 +722,7 @@ private struct SessionSidebar: View {
                     )
                     if expanded {
                         ForEach(group.entries) { entry in
-                            row(entry)
+                            row(entry, false)
                                 .padding(.leading, 24)
                         }
                     }
@@ -706,7 +731,7 @@ private struct SessionSidebar: View {
         }
         Section("History") {
             ForEach(grouped.uncategorized) { entry in
-                row(entry)
+                row(entry, false)
             }
             if model.foldersAvailable {
                 Button {
@@ -738,7 +763,7 @@ private struct SessionSidebar: View {
     /// A scheduled session is never a chat conversation, and the move route
     /// refuses it, so it offers no move menu.
     @ViewBuilder
-    private func moveMenu(for entry: SessionHistoryEntry) -> some View {
+    private func moveMenu(for entry: SessionHistoryEntry, isRecent: Bool) -> some View {
         if model.foldersAvailable, entry.scheduleID == nil {
             Menu {
                 ForEach(model.folders) { folder in
@@ -773,7 +798,11 @@ private struct SessionSidebar: View {
             .menuStyle(.borderlessButton)
             #endif
             .accessibilityLabel("Move \(entry.title) to a folder")
-            .accessibilityIdentifier("sidebar.session.move.\(entry.sessionID.uuidString)")
+            .accessibilityIdentifier(
+                isRecent
+                    ? "sidebar.recent.session.move.\(entry.sessionID.uuidString)"
+                    : "sidebar.session.move.\(entry.sessionID.uuidString)"
+            )
         }
     }
 

@@ -96,6 +96,8 @@ class ToolFailure(BaseModel):
 class ToolResult(BaseModel):
     ok: bool
     content: list[ContentPart]
+    # Set only by the pipeline, never accepted from an upstream tool.
+    context_content: list[ContentPart] | None = Field(default=None, exclude=True)
     structured: dict[str, Any] | None = None
     artifacts: list[Any] = Field(default_factory=list)
     failure: ToolFailure | None = None

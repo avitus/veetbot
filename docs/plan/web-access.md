@@ -178,8 +178,10 @@ decoding; a larger response is invalid provider output. Search snippets,
 titles, result counts, fetched content, and final tool outputs have lower
 contract bounds: `web.fetch` truncates page content to its declared tool
 output limit, and `web.search` drops trailing results until its rendered
-output fits the declared limit, so one schema-bounded result always returns
-inline. Redirect following is disabled for provider API calls so a bearer
+output fits the declared acquisition limit. The tool pipeline then applies
+its separate inline admission ceiling: large pages become a persisted excerpt
+and an owner-readable artifact containing the acquired result. The acquisition
+limit is unchanged; the excerpt does not replace the full capture. Redirect following is disabled for provider API calls so a bearer
 credential cannot be forwarded to another host.
 
 Search has a 30-second total tool deadline. Fetch has a 60-second total tool

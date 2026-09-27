@@ -96,6 +96,9 @@ class ToolResultItem(BaseModel):
     kind: Literal["tool_result"] = "tool_result"
     call_id: str
     content: list[ContentPart]
+    # Canonical content remains available to source receipts and machine callers.
+    # Context assembly selects this persisted, same-trust presentation when set.
+    context_content: list[ContentPart] | None = None
     is_error: bool = False
     trust: TrustLevel = TrustLevel.INTERNAL_TOOL
     source_event_sequence: int | None = Field(default=None, ge=1)
@@ -292,6 +295,8 @@ class ModelRequest(BaseModel):
     model_policy: str
     conversation: list[ConversationItem]
     tools: list[Any]
+    # None keeps the provider default; synthesis retains schemas for history replay.
+    tool_choice: Literal["none"] | None = None
     response_schema: dict[str, Any] | None = None
     temperature: float | None = None
     maximum_output_tokens: int | None = None

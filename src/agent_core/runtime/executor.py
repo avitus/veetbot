@@ -18,6 +18,7 @@ from agent_core.domain.errors import (
     ConflictError,
     ContextOverflow,
     NotFoundError,
+    ProviderPinUnavailableError,
     RunCancelledError,
     UserInputRequiredError,
     WorkerFencedError,
@@ -931,6 +932,17 @@ class RunExecutor:
             )
         except WorkerFencedError:
             outcome = RunOutcome(kind=OutcomeKind.FENCED)
+        except ProviderPinUnavailableError as exc:
+            outcome = RunOutcome(
+                kind=OutcomeKind.FAILED,
+                failure=RunFailure(
+                    reason=FailureReason.MODEL_PERMANENT_ERROR,
+                    error_class=type(exc).__name__,
+                    message=str(exc),
+                    step_number=run.step_count or None,
+                    occurred_at=self._clock.now(),
+                ),
+            )
         except Exception as exc:
             # Validation errors can embed private model inputs in their traceback.
             logger.error(
@@ -1122,6 +1134,10 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
     else:
         raise RuntimeError(f"Milestone 2 cannot finalize outcome {outcome.kind.value}")
 
+    if status in TERMINAL_RUN_STATUSES:
+        # A resume can fail before entering the model loop. Its continuation
+        # belongs only to the active run, including on this early-failure path.
+        context.checkpoint.provider_continuation = None
     context.checkpoint.version += 1
     context.checkpoint.status = status
     context.checkpoint.created_at = context.clock.now()

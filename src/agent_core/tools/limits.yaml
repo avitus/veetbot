@@ -1,6 +1,7 @@
 schema_version: 1
 output:
   global_maximum_bytes: 4194304
+  inline_maximum_bytes: 4096
   hard_ceiling_multiplier: 4
   excerpt_head_ratio: 0.6
   excerpt_tail_ratio: 0.2

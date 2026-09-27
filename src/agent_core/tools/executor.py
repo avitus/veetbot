@@ -67,6 +67,7 @@ from agent_core.domain.policies import (
 )
 from agent_core.domain.runs import Run, RunCheckpoint, Step
 from agent_core.domain.skills import LoadedSkillBody
+from agent_core.domain.tool_output import content_bytes, output_excerpt
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolFailure,
@@ -455,6 +456,7 @@ class ToolPipeline:
         current_principal: Principal | None = None,
         max_parallel_calls: int = 8,
         hard_ceiling_multiplier: int = 4,
+        inline_output_bytes: int = 4096,
         maximum_loaded_skills: int = 2,
         maximum_skill_body_tokens: int = 6_000,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
@@ -486,6 +488,9 @@ class ToolPipeline:
         if hard_ceiling_multiplier < 1:
             raise ValueError("hard ceiling multiplier must be positive")
         self._hard_ceiling_multiplier = hard_ceiling_multiplier
+        if inline_output_bytes < 1024:
+            raise ValueError("inline output byte limit must be at least 1024")
+        self._inline_output_bytes = inline_output_bytes
         if maximum_loaded_skills <= 0 or maximum_skill_body_tokens <= 0:
             raise ValueError("skill body limits must be positive")
         self._maximum_loaded_skills = maximum_loaded_skills
@@ -1451,12 +1456,10 @@ class ToolPipeline:
         run: Run,
         principal: Principal,
     ) -> ToolResult:
-        rendered = json.dumps(
-            [part.model_dump(mode="json") for part in result.content],
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        if len(rendered) <= tool.spec.maximum_output_bytes:
+        result = result.model_copy(update={"context_content": None})
+        rendered = content_bytes(result.content)
+        budget = min(tool.spec.maximum_output_bytes, self._inline_output_bytes)
+        if len(rendered) <= budget:
             result.metrics["output_bytes"] = len(rendered)
             return result
         if self._artifact_writers is None:
@@ -1466,21 +1469,23 @@ class ToolPipeline:
                 failure=ToolFailure(
                     kind=ToolFailureKind.OUTPUT_TOO_LARGE,
                     reason_code="tool.output_invalid",
-                    detail="tool output exceeded its declared byte limit",
+                    detail="tool output exceeded its inline byte limit",
                     retryable=False,
                 ),
             )
         hard_ceiling = tool.spec.maximum_output_bytes * self._hard_ceiling_multiplier
         artifact_bytes = rendered[:hard_ceiling]
         partial_capture = len(artifact_bytes) < len(rendered)
-        budget = tool.spec.maximum_output_bytes
         structured = None if result.structured is None else dict(result.structured)
-        if structured is not None:
+        if structured is not None and len(rendered) > tool.spec.maximum_output_bytes:
+            structured_budget = tool.spec.maximum_output_bytes
             for key in ("stdout", "stderr"):
                 value = structured.get(key)
-                if isinstance(value, str) and len(value.encode("utf-8")) > budget // 2:
+                if isinstance(value, str) and len(value.encode("utf-8")) > structured_budget // 2:
                     structured[key] = (
-                        value.encode("utf-8")[: budget // 4].decode("utf-8", errors="ignore")
+                        value.encode("utf-8")[: structured_budget // 4].decode(
+                            "utf-8", errors="ignore"
+                        )
                         + "\n[TRUNCATED]"
                     )
         # Validate the bounded structured candidate before creating a durable
@@ -1501,42 +1506,55 @@ class ToolPipeline:
         filename = f"{tool.spec.name.replace('.', '-')}-output"
         filename += ".partial.json" if partial_capture else ".json"
         media_type = "application/octet-stream" if partial_capture else "application/json"
-        ref = await writer.create(stream(), filename, media_type, trust)
         capture_label = (
             f"captured first {len(artifact_bytes):,} of {len(rendered):,} bytes"
             if partial_capture
             else "full output"
         )
-        provisional_marker = (
-            f"\n[... {len(rendered):,} bytes elided; {capture_label}: "
-            f"artifact:{ref.artifact_id} ...]\n"
-        ).encode()
-        excerpt_budget = max(0, budget - len(provisional_marker))
-        head_bytes = int(excerpt_budget * 0.75)
-        tail_bytes = excerpt_budget - head_bytes
-        elided = max(0, len(rendered) - head_bytes - tail_bytes)
-        marker = (
-            f"\n[... {elided:,} bytes elided; {capture_label}: artifact:{ref.artifact_id} ...]\n"
-        ).encode()
-        if len(marker) > budget:
-            excerpt = marker[:budget]
-        else:
-            remaining = budget - len(marker)
-            head_bytes = min(head_bytes, remaining)
-            tail_bytes = min(tail_bytes, remaining - head_bytes)
-            excerpt = (
-                rendered[:head_bytes] + marker + (rendered[-tail_bytes:] if tail_bytes else b"")
+        # Reject a tiny per-tool limit before creating an orphaned capture.
+        try:
+            output_excerpt(
+                rendered,
+                budget=budget,
+                location=f"artifact:{UUID(int=0)}",
+                capture_label=capture_label,
+                reference=FileReferencePart(
+                    artifact_id=UUID(int=0), media_type=media_type, filename=filename
+                ),
             )
+        except ValueError:
+            return ToolResult(
+                ok=False,
+                content=[],
+                failure=ToolFailure(
+                    kind=ToolFailureKind.OUTPUT_TOO_LARGE,
+                    reason_code="tool.output_invalid",
+                    detail="tool byte limit cannot hold an artifact reference",
+                    retryable=False,
+                ),
+            )
+        ref = await writer.create(stream(), filename, media_type, trust)
+        reference = FileReferencePart(
+            artifact_id=ref.artifact_id,
+            media_type=ref.media_type,
+            filename=filename,
+        )
+
+        excerpt = output_excerpt(
+            rendered,
+            budget=budget,
+            location=f"artifact:{ref.artifact_id}",
+            capture_label=capture_label,
+            reference=reference,
+        )
+        # Preserve the pre-existing canonical result for provenance validators
+        # and machine callers. Only a per-tool oversize result loses canonical
+        # inline bytes, exactly as it did before the smaller context allowance.
+        canonical_fits = len(rendered) <= tool.spec.maximum_output_bytes
         return result.model_copy(
             update={
-                "content": [
-                    TextPart(text=excerpt.decode("utf-8", errors="ignore")),
-                    FileReferencePart(
-                        artifact_id=ref.artifact_id,
-                        media_type=ref.media_type,
-                        filename=filename,
-                    ),
-                ],
+                "content": result.content if canonical_fits else excerpt,
+                "context_content": excerpt if canonical_fits else None,
                 "structured": structured,
                 "artifacts": [
                     *result.artifacts,
@@ -2091,7 +2109,12 @@ class ToolPipeline:
             event_type = "tool.call.uncertain" if uncertain else "tool.call.failed"
         if result.ok:
             trust = _effective_output_trust(result, tool)
-            result_item = ToolResultItem(call_id=call.call_id, content=result.content, trust=trust)
+            result_item = ToolResultItem(
+                call_id=call.call_id,
+                content=result.content,
+                context_content=result.context_content,
+                trust=trust,
+            )
         else:
             result_item = _outcome_item(
                 call.call_id,

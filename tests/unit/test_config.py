@@ -982,6 +982,11 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
             r"identical_call_threshold must be at least 2",
         ),
         (
+            "tools/limits.yaml",
+            "output:\n  inline_maximum_bytes: 1023\n",
+            r"inline_maximum_bytes must be at least 1024",
+        ),
+        (
             "context/plan.yaml",
             "classes:\n  tool_definitions:\n    max_items: many\n",
             r"tool_definitions\.max_items must be an integer",
@@ -1173,14 +1178,15 @@ def test_browser_task_overlay_raises_only_bound_chat_limits() -> None:
     }
 
 
-def test_all_193_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_194_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 193
+    assert len(qualified_paths) == 194
     assert {
+        "tools/limits.yaml:output.inline_maximum_bytes",
         "runtime/limits.yaml:browser_task.max_steps",
         "runtime/limits.yaml:browser_task.max_model_calls",
         "runtime/limits.yaml:browser_task.max_tool_calls",

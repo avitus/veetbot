@@ -433,9 +433,10 @@ async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -
     assert runtime._sign_in_entered is False
 
 
-@dataclass
+@dataclass(eq=False)
 class FakeNavigationRequest:
     url: str
+    resource_type: str = "document"
 
     @property
     def frame(self) -> SimpleNamespace:
@@ -838,6 +839,9 @@ class FakeEvidencePage(FakeCeremonyPage):
     def on(self, event: str, handler: Callable[[Any], None]) -> None:
         self.handlers.setdefault(event, []).append(handler)
 
+    def remove_listener(self, event: str, handler: Callable[[Any], None]) -> None:
+        self.handlers[event].remove(handler)
+
     async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
         self.loads.append((url, wait_until, timeout))
         if self.refused_hop is not None:
@@ -881,9 +885,41 @@ async def test_page_evidence_reports_origin_path_and_challenge() -> None:
         on_allowed_origin=True, path="/log-in", challenge_visible=True
     )
     assert left.on_allowed_origin is False
-    assert members.loads == [("https://www.duolingo.com/learn", "load", 30_000)]
+    assert members.loads == [("https://www.duolingo.com/learn", "domcontentloaded", 30_000)]
     assert members.idle_waits == [("networkidle", 5_000)]
     assert "learn" not in repr(kept)
+    for page in (members, signed_out, refused):
+        assert len(page.handlers["request"]) == 1  # Only the permanent origin guard remains.
+        assert not page.handlers["requestfinished"]
+        assert not page.handlers["requestfailed"]
+
+
+async def test_verification_cancellation_removes_its_request_listeners() -> None:
+    """Cancelling a pending session check must not leave request tracking behind."""
+    started = asyncio.Event()
+
+    class PendingEvidencePage(FakeEvidencePage):
+        async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+            await super().goto(url, wait_until=wait_until, timeout=timeout)
+            request = FakeNavigationRequest(url, resource_type="fetch")
+            for handler in self.handlers["request"]:
+                handler(request)
+            started.set()
+
+    page = PendingEvidencePage()
+    checking = asyncio.create_task(
+        evidence_runtime(page).load_page_evidence("https://www.duolingo.com/learn")
+    )
+    try:
+        async with asyncio.timeout(1):
+            await started.wait()
+    finally:
+        checking.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await checking
+    assert len(page.handlers["request"]) == 1
+    assert not page.handlers["requestfinished"]
+    assert not page.handlers["requestfailed"]
 
 
 async def test_page_evidence_normalizes_other_load_failures() -> None:

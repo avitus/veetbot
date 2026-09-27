@@ -226,6 +226,15 @@ Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.
 
+On macOS, iPhone, and iPad, a collapsible **Recent chats** section immediately
+below New conversation shows up to five conversations in descending activity
+order, including conversations inside closed folders. Scheduled sessions are
+excluded. These are shortcuts to the same conversations: their folder and
+History rows remain in place, and selecting a shortcut does not change its
+activity or folder. The section starts expanded, remembers the owner's toggle
+on the device independently of folder solo mode, and works with older servers
+that do not offer folders. An empty history shows no Recent chats section.
+
 Conversation folders (Milestone 29, `thread-folders.md`) are server state the
 sidebar mirrors, never a local organization. The index's `folder_id` is merged
 into the cached row on every reconciliation and the server's value wins, nil
@@ -249,7 +258,7 @@ conversations return to history.
 Unfiling sends an explicit null, so an omitted field can never unfile a
 conversation. Against a server whose index lacks the key, or that answers 404
 or 405 on the folder list, the client makes no further folder request, keeps
-every control hidden, and renders exactly the flat history; that unavailability
+every folder control hidden, and renders the history without folders; that unavailability
 is contained in reconciliation and never surfaces as an error.
 
 Scheduled sessions never enter a folder (ADR-0113, `scheduling.md`). The

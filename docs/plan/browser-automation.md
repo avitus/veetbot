@@ -741,8 +741,19 @@ The first well-formed handoff consumes the capability, whatever follows; a
 repeated or concurrent handoff is `401`. The service verifies without holding
 its service-wide lock. It starts two headless run-attempt runtimes through the
 audited egress proxy, one from the filtered state and one from none, and loads
-the confirmed page in both until the document has loaded and the network is
-briefly idle, within thirty seconds in total.
+the confirmed page in both until `DOMContentLoaded`, including deferred
+scripts, then waits up to five seconds for the network to be briefly idle,
+within thirty seconds in total. A pending image, including one inside an
+embedded page, does not hold verification until the full-page `load` event.
+The five-second network wait expiring does not make a pending authentication
+request safe to ignore: documents, scripts, stylesheets, XHR and fetch requests
+must finish and remain idle for 500 ms before the path and challenge evidence
+below can be positive. A visible sign-in challenge, disallowed origin, or path
+outside the confirmed page is already negative evidence; background work on
+that signed-out page does not hold verification open. A possible signed-in
+page whose application requests never settle fails verification at the
+overall deadline. Request listeners are removed on every
+exit, including cancellation; no request URL or content becomes a diagnostic.
 
 The result is `ready` only when the site itself tells the two apart. With the
 session, the page stays on an allowed origin at the confirmed path or below it

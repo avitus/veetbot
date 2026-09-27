@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.bootstrap import build
-from agent_core.domain.runs import RunStatus
+from agent_core.config import PACKAGE_ROOT
+from agent_core.domain.runs import FailureReason, RunStatus
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from tests.contract.model_fixtures import ScriptedRawSource, anthropic_text_events
 from tests.contract.support import NOW
@@ -74,8 +78,9 @@ def thinking_tool_events() -> list[dict[str, Any]]:
     ]
 
 
+@pytest.mark.parametrize("registry_changed", [False, True])
 async def test_pin_and_opaque_continuation_survive_worker_reconstruction(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, registry_changed: bool
 ) -> None:
     from agent_core.runtime import loop as loop_module
 
@@ -126,8 +131,16 @@ async def test_pin_and_opaque_continuation_survive_worker_reconstruction(
     clock.advance(timedelta(seconds=31))
     resumed_source = ScriptedRawSource([anthropic_text_events("391")])
     resumed_provider = AnthropicMessagesProvider(event_source=resumed_source)
+    resumed_settings = database_settings()
+    if registry_changed:
+        path = tmp_path / "models/providers/anthropic.yaml"
+        path.parent.mkdir(parents=True)
+        profile = yaml.safe_load((PACKAGE_ROOT / "models/providers/anthropic.yaml").read_text())
+        profile["models"][0]["pricing"]["input_per_mtok"] = "99"
+        path.write_text(yaml.safe_dump(profile))
+        resumed_settings = replace(resumed_settings, config_dir=tmp_path)
     async with build(
-        settings=database_settings(),
+        settings=resumed_settings,
         storage="postgres",
         clock=clock,
         model_provider_overrides={"anthropic": resumed_provider},
@@ -146,10 +159,18 @@ async def test_pin_and_opaque_continuation_survive_worker_reconstruction(
         async with composition.uow_factory() as uow:
             final_checkpoint = await uow.checkpoints.latest(run_id)
 
-    assert recovered.status is RunStatus.COMPLETED
-    assert recovered.final_message == "391"
     assert final_checkpoint is not None
     assert final_checkpoint.provider_pin == initial_pin
     assert final_checkpoint.provider_continuation is None
-    assert "signed-state" in str(resumed_source.requests[0])
-    assert "resume-call-id" in str(resumed_source.requests[0])
+    assert recovered.provider_pin == initial_pin
+    if registry_changed:
+        assert recovered.status is RunStatus.FAILED
+        assert recovered.failure is not None
+        assert recovered.failure.reason is FailureReason.MODEL_PERMANENT_ERROR
+        assert recovered.failure.error_class == "ProviderPinUnavailableError"
+        assert resumed_source.requests == []
+    else:
+        assert recovered.status is RunStatus.COMPLETED
+        assert recovered.final_message == "391"
+        assert "signed-state" in str(resumed_source.requests[0])
+        assert "resume-call-id" in str(resumed_source.requests[0])

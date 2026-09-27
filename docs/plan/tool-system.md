@@ -738,10 +738,26 @@ The rules:
   it is cancelled with `OUTPUT_TOO_LARGE`, and its partial output is still
   artifactized, because a truncated log is usually the thing an operator most
   wants after a runaway.
-- Between `maximum_output_bytes` and the hard ceiling, the whole result is
-  written to an artifact and the model receives a **head and tail excerpt**:
-  the first 60% and the last 20% of the byte budget, split at character
-  boundaries, joined by an explicit elision marker.
+- The model-visible result has a separate admission ceiling:
+  `min(maximum_output_bytes, output.inline_maximum_bytes)`, with a shipped
+  inline limit of 4,096 bytes (operator minimum 1,024). Above that ceiling,
+  the whole result, up to the unchanged hard capture ceiling, is written to
+  an artifact **before** the invocation result and event are persisted. The
+  model receives a **head and tail excerpt**: at most the first 60% and last
+  20% of the inline budget, split at UTF-8 character boundaries. The excerpt
+  shrinks further to fit JSON escaping, the elision marker, and the file
+  reference within that same byte budget. Limits too small to hold the
+  reference fail before creating an artifact. A missing artifact writer
+  fails with `OUTPUT_TOO_LARGE`; it never silently discards the full result.
+- The persisted `ToolResultItem.context_content` excerpt is selected by context
+  assembly and replayed verbatim. A later tool result does not change its size
+  or selection. Canonical `content` stays intact within the original per-tool
+  limit, so source receipts, email continuation, and programmatic callers still
+  read complete results. Above that original limit, the canonical content is
+  excerpted as before. Validated structured control results remain available; `stdout` and `stderr` retain their existing bounded
+  treatment. This separates model context admission from tool acquisition and
+  artifact capture; it does not reduce the bytes web or workspace tools may
+  acquire. ADR-0137 records the production history/cache failure this repairs.
 
 ```text
 [... 41,882 bytes elided; full output: artifact:a/9d02 ...]
@@ -875,6 +891,18 @@ name and state, without the revision or element references), so re-observing a
 page that changed is not a loop, five identical calls that keep returning the
 same page are, and a page that changes on every observation allows at most 36
 identical observations in a run.
+
+**Answer before the limit** (ADR-0136). After a completed batch leaves any
+identical-call count at one below its threshold, the next model turn is
+synthesis-only, after applying the evidence resets above. The runtime directs
+the model to answer from retained evidence, state remaining gaps and explain
+that research stopped because it was repeating. It disables new tool choices
+while retaining the pinned definitions and prior call/result pairs. Any tool
+returned during that turn fails with `ToolLoopDetected` before dispatch. The
+existing hard breaker still rejects a batch that already reaches the threshold;
+all budgets, cancellation and model-failure rules remain in force. The control
+is derived from checkpointed counts, so approval and crash resumption obey the
+same rule; it is not persisted as conversation content.
 
 ## Parallel calls, and what a step actually is
 

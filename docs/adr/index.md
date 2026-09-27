@@ -144,3 +144,5 @@ implementation without one.
 - [ADR-0133 — Each commit answers for its own reading lane (Accepted; amends ADR-0060)](0133-each-commit-answers-for-its-own-reading-lane.md)
 - [ADR-0134 — Tool scope sets serialize sorted (Accepted)](0134-tool-scope-sets-serialize-sorted.md)
 - [ADR-0135 — OpenAI Chat cache identity and discoverable history boundaries (Proposed)](0135-openai-chat-cache-identity-and-history.md)
+- [ADR-0136 — Synthesize before the identical-tool-call limit (Accepted)](0136-synthesize-before-the-tool-loop-limit.md)
+- [ADR-0137 — Stable tool-output admission before context pressure (Proposed)](0137-stable-tool-output-admission.md)

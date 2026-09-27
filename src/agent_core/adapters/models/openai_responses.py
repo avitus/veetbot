@@ -600,6 +600,8 @@ class OpenAIResponsesProvider:
             "store": False,
             "timeout": request.timeout_seconds,
         }
+        if request.tool_choice is not None:
+            payload["tool_choice"] = request.tool_choice
         if request.cache_hints is not None and request.cache_hints.session_key is not None:
             payload["prompt_cache_key"] = request.cache_hints.session_key
         positions = _cache_positions(request, resolved)

@@ -126,3 +126,12 @@ Do not freeze recall corrections or working state to improve a cache metric.
 Persisting every reasoning item across turns would be a separate privacy and
 runtime decision, not part of this repair. The repair uses the history-window and ADR-0132 prerequisites now present on
 origin/dev. The provider-neutral request extension is the only new cache policy.
+
+## Production follow-up
+
+The September 27 deployment included this repair. A subsequent large-web Chat
+run exposed a separate failure: oversized tool results rewrote earlier history
+under the aggregate tool-result budget, reducing later cache reads. ADR-0137
+records the reproduced cause, stable admission repair, and broader regression
+coverage. The small calculator probe above remains valid for its workload;
+it is not evidence of successful production caching for large web batches.
