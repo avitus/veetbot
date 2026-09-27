@@ -292,6 +292,8 @@ class ModelRequest(BaseModel):
     model_policy: str
     conversation: list[ConversationItem]
     tools: list[Any]
+    # None keeps the provider default; synthesis retains schemas for history replay.
+    tool_choice: Literal["none"] | None = None
     response_schema: dict[str, Any] | None = None
     temperature: float | None = None
     maximum_output_tokens: int | None = None

@@ -114,6 +114,55 @@ def resolved(provider: str) -> ResolvedModel:
     )
 
 
+@pytest.mark.parametrize("disabled", [False, True])
+@pytest.mark.parametrize("provider", ["openai", "anthropic", "chat_completions", "xml"])
+def test_synthesis_disables_tools_on_the_wire_without_losing_history(
+    provider: str, disabled: bool
+) -> None:
+    model = resolved(provider)
+    model = model.model_copy(
+        update={
+            "capabilities": model.capabilities.model_copy(
+                update={"native_tool_calling": provider != "xml"}
+            )
+        }
+    )
+    ordinary = request(
+        [
+            ToolCallItem(
+                call_id="read-1",
+                item_index=0,
+                name="math.calculate",
+                arguments={"expression": "17 * 23"},
+                raw_arguments=ARGUMENTS,
+            ),
+            ToolResultItem(call_id="read-1", content=[TextPart(text="391")]),
+            UserMessage(content=[TextPart(text="Conclude from the existing evidence.")]),
+        ]
+    )
+    synthesis = ordinary.model_copy(update={"tool_choice": "none" if disabled else None})
+    if provider == "openai":
+        payload = OpenAIResponsesProvider._request_payload(synthesis, model)
+    elif provider == "anthropic":
+        payload, _, _ = AnthropicMessagesProvider._request_payload(synthesis, model)
+    else:
+        payload, _ = ChatCompletionsProvider._request_payload(synthesis, model)
+    if disabled and provider != "xml":
+        assert payload["tool_choice"] == ({"type": "none"} if provider == "anthropic" else "none")
+    else:
+        assert "tool_choice" not in payload
+    if provider == "xml":
+        assert ("Available tool schemas" in str(payload)) is not disabled
+        assert "tools" not in payload
+    else:
+        assert payload["tools"], "pinned definitions are required to replay prior tool calls"
+    if provider == "anthropic":
+        assert payload["thinking"] == {"type": "adaptive"}
+    assert "391" in str(payload)
+    assert str(payload).count("read-1") == 2
+    assert ordinary.model_dump().get("tool_choice") is None
+
+
 def providers_for_tool(arguments: str = ARGUMENTS) -> list[tuple[str, ModelProvider]]:
     openai_source = ScriptedRawSource([openai_tool_events(arguments)])
     anthropic_source = ScriptedRawSource([anthropic_tool_events(arguments)])

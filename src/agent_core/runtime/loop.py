@@ -424,25 +424,43 @@ def _synthesis_reserve_dimension(
     return None
 
 
+def _loop_synthesis_needed(context: RunContext) -> bool:
+    """Leave an answer opportunity before another unchanged call trips the breaker.
+
+    Read the checkpoint counter after tool evidence has reset progressing calls,
+    including a batch finished by approval or crash recovery.
+    """
+
+    counts = context.checkpoint.working_state.get("identical_calls", {})
+    return isinstance(counts, dict) and any(
+        int(count) >= context.identical_call_threshold - 1 for count in counts.values()
+    )
+
+
 def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelRequest:
     """Add a volatile platform control that protects final-synthesis headroom."""
 
+    reason = (
+        "Runtime control: repeated-tool synthesis is required because an identical "
+        "tool call is one repetition away from the loop limit. Do not call tools. "
+        "Synthesize the best-supported final answer from evidence already in the "
+        "conversation, state any remaining gap, and explain that research stopped "
+        "because it was repeating. Do not claim the unfinished work is complete."
+        if dimension == "repeated_tool_calls"
+        else (
+            "Runtime control: the final-synthesis reserve is active "
+            f"because the run {dimension} budget is exhausted. Do not call "
+            "tools. Synthesize the best-supported final answer from evidence "
+            "already in the conversation and state any remaining gap."
+        )
+    )
     control = UserMessage(
-        content=[
-            TextPart(
-                text=(
-                    "Runtime control: the final-synthesis reserve is active "
-                    f"because the run {dimension} budget is exhausted. Do not call "
-                    "tools. Synthesize the best-supported final answer from evidence "
-                    "already in the conversation and state any remaining gap."
-                )
-            )
-        ],
+        content=[TextPart(text=reason)],
         trust=TrustLevel.PLATFORM,
         principal_id=None,
     )
     return request.model_copy(
-        update={"conversation": [*request.conversation, control]},
+        update={"conversation": [*request.conversation, control], "tool_choice": "none"},
         deep=True,
     )
 
@@ -811,11 +829,12 @@ async def run_loop(context: RunContext) -> RunOutcome:
         )
         request = await build_with_pressure(context, step)
         _apply_context_origin_trust(context.checkpoint, request)
+        loop_synthesis = _loop_synthesis_needed(context)
         invoked = await _invoke_model(
             context,
             step,
             request,
-            synthesis_reserve,
+            synthesis_reserve or ("repeated_tool_calls" if loop_synthesis else None),
         )
         if isinstance(invoked, RunOutcome):
             return invoked
@@ -865,6 +884,16 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 "the model requested another tool inside its final synthesis reserve",
                 step,
                 {"synthesis_reserve": synthesis_reserve},
+            )
+
+        if loop_synthesis:
+            return _failure(
+                context,
+                FailureReason.TOOL_LOOP_DETECTED,
+                "ToolLoopDetected",
+                "the model requested another tool during repeated-tool synthesis",
+                step,
+                {"identical_call_threshold": context.identical_call_threshold},
             )
 
         call_counts = context.checkpoint.working_state.setdefault("identical_calls", {})

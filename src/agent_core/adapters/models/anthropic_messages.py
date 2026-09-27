@@ -661,6 +661,8 @@ class AnthropicMessagesProvider:
             "tools": tools,
             "timeout": request.timeout_seconds,
         }
+        if request.tool_choice is not None:
+            payload["tool_choice"] = {"type": request.tool_choice}
         if resolved.capabilities.reasoning.value == "native":
             payload["thinking"] = {"type": "adaptive"}
             if request.reasoning_effort is not None:

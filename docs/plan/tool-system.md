@@ -876,6 +876,18 @@ page that changed is not a loop, five identical calls that keep returning the
 same page are, and a page that changes on every observation allows at most 36
 identical observations in a run.
 
+**Answer before the limit** (ADR-0136). After a completed batch leaves any
+identical-call count at one below its threshold, the next model turn is
+synthesis-only, after applying the evidence resets above. The runtime directs
+the model to answer from retained evidence, state remaining gaps and explain
+that research stopped because it was repeating. It disables new tool choices
+while retaining the pinned definitions and prior call/result pairs. Any tool
+returned during that turn fails with `ToolLoopDetected` before dispatch. The
+existing hard breaker still rejects a batch that already reaches the threshold;
+all budgets, cancellation and model-failure rules remain in force. The control
+is derived from checkpointed counts, so approval and crash resumption obey the
+same rule; it is not persisted as conversation content.
+
 ## Parallel calls, and what a step actually is
 
 Section 12.4 gives five conditions for parallel execution and one warning.

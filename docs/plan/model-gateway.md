@@ -1488,7 +1488,14 @@ class ModelRequest(BaseModel):
     # ... fields from Section 10.1 ...
     timeout_seconds: float = 600.0     # whole call, first byte to last
     stream_idle_seconds: float = 60.0  # gap between two events
+    tool_choice: Literal["none"] | None = None  # None preserves provider defaults
 ```
+
+For runtime synthesis (ADR-0136), `tool_choice="none"` disables new tool calls
+without removing definitions needed to replay prior calls. Responses and native
+Chat Completions send `"none"`; Messages sends `{"type": "none"}`. The XML
+fallback omits its tool-use instruction and schemas. The runtime still rejects
+any tool call returned in synthesis mode before dispatch.
 
 The idle timeout is the one that matters. A total timeout large enough for a
 long reasoning turn is also large enough to sit on a dead socket for ten
