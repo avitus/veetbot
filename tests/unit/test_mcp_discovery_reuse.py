@@ -40,6 +40,7 @@ class _Factory:
         self.discovery = _discovery()
         self.failing: set[str] = set()
         self.failures_left: Counter[str] = Counter()
+        self.close_failing: set[str] = set()
         self.on_discover: Callable[[], None] | None = None
         self.discover_seconds = 0.0
         self.discovering = 0
@@ -72,6 +73,11 @@ class _Factory:
 
             async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPCallResult:
                 return MCPCallResult(content=("ok",))
+
+            async def __aexit__(self, *exc_info: Any) -> None:
+                await super().__aexit__(*exc_info)
+                if config.server_id in factory.close_failing:
+                    raise RuntimeError("the transport did not close")
 
         client = Client(
             ScriptedMCPServer(name=config.server_id, discovery=self.discovery),
@@ -364,3 +370,21 @@ async def test_a_warm_up_starts_one_server_at_a_time() -> None:
 
     assert factory.started == Counter({"alpha": 1, "beta": 1, "gamma": 1})
     assert factory.most_discovering == 1
+
+
+async def test_a_warm_up_keeps_going_when_a_server_fails_to_close() -> None:
+    factory = _Factory()
+    factory.close_failing.add("alpha")
+    async with build(
+        settings=_settings(),
+        fixed_clock_at=START,
+        mcp_servers=(_server("alpha"), _server("beta")),
+        mcp_client_factory=factory,
+    ) as app:
+        await app.start_mcp_discovery_warmup()
+        assert factory.started == Counter({"alpha": 1, "beta": 1})
+
+        session = await app.sessions.create()
+
+        assert factory.started == Counter({"alpha": 1, "beta": 1})
+        assert len(_payloads(await _events(app, session), "mcp.server.pinned")) == 2

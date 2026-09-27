@@ -643,12 +643,16 @@ privacy and cross-session reuse trade-off and measured diagnosis.
 For a profile declaring explicit cache control and a cache-write price, OpenAI
 translates `after_system` to the final system item and history hints to the
 builder's `through_input_item` alternative (otherwise `through_item`, or the
-final item for an unpositioned hint). Text messages and tool outputs carry a
-content-block `prompt_cache_breakpoint`; assistant text uses `output_text`,
-other text uses `input_text`. Existing attachment blocks retain their content.
-The request keeps implicit mode, so at most three distinct supplied boundaries
-are sent in priority order. `after_tools`, unsupported item kinds, duplicate
-positions and overflow hints are dropped and counted on the completed attempt.
+final item for an unpositioned hint). Responses declares the content-block
+`prompt_cache_breakpoint` on input blocks only, so system and user text, as
+`input_text`, and tool outputs carry it. A boundary that names an assistant
+reply, a reasoning item or a tool call moves back to the nearest earlier input
+item, and the cached prefix stops just before that output. Existing attachment
+blocks retain their content. The request keeps implicit mode, so at most three
+distinct supplied boundaries are sent in priority order. The mode travels in the
+request body (`extra_body`), so every SDK release the project allows can send
+it. `after_tools`, boundaries with no earlier input item, duplicate positions
+and overflow hints are dropped and counted on the completed attempt.
 A profile without support or a write price drops every breakpoint. The cache key
 is independent of this count. The adapter never invents a history boundary.
 

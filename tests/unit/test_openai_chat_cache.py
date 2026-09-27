@@ -350,3 +350,113 @@ def test_old_cache_hints_remain_readable_and_reject_raw_session_keys() -> None:
     assert CacheHints.model_validate({"breakpoints": []}).session_key is None
     with pytest.raises(ValidationError):
         CacheHints(session_key=str(session().id))
+
+
+def test_a_breakpoint_never_lands_on_an_assistant_message() -> None:
+    """Responses declares prompt_cache_breakpoint on input blocks, never output_text."""
+    from decimal import Decimal
+
+    from agent_core.domain.messages import (
+        AssistantMessage,
+        CacheBreakpoint,
+        CacheHints,
+        ModelCapabilities,
+        ModelLimits,
+        ModelPricing,
+        ModelRequest,
+        SystemMessage,
+    )
+
+    model = ResolvedModel(
+        provider="openai",
+        model="gpt-6-astra",
+        resolved_at=NOW,
+        capabilities=ModelCapabilities(explicit_cache_control=True),
+        limits=ModelLimits(max_cache_breakpoints=3),
+        pricing=ModelPricing(cache_write_per_mtok=Decimal("12.5")),
+    )
+    request = ModelRequest(
+        model_policy="balanced",
+        conversation=[
+            SystemMessage(content=[TextPart(text="Be exact.")]),
+            UserMessage(content=[TextPart(text="Plan the trip.")]),
+            AssistantMessage(content=[TextPart(text="Here is a plan.")]),
+            UserMessage(content=[TextPart(text="Continue.")]),
+        ],
+        tools=[],
+        # A hint recorded before input boundaries existed names the assistant reply.
+        cache_hints=CacheHints(
+            breakpoints=[CacheBreakpoint(boundary="after_history_prefix", through_item=2)]
+        ),
+    )
+
+    payload = OpenAIResponsesProvider._request_payload(request, model)
+
+    marked = [
+        block
+        for item in payload["input"]
+        if isinstance(item.get("content"), list)
+        for block in item["content"]
+        if "prompt_cache_breakpoint" in block
+    ]
+    assert all(block["type"] != "output_text" for block in marked)
+    assert "prompt_cache_breakpoint" not in str(payload["input"][2])
+    # The cached prefix stops at the user message before the reply.
+    assert payload["input"][1]["content"][-1]["prompt_cache_breakpoint"] == {"mode": "explicit"}
+
+
+async def test_the_sdk_receives_cache_options_in_the_request_body() -> None:
+    """Every SDK release in the declared range can carry an option sent in the body."""
+    from typing import Any
+
+    captured: dict[str, Any] = {}
+
+    class Stream:
+        def __aiter__(self) -> "Stream":
+            return self
+
+        async def __anext__(self) -> dict[str, Any]:
+            raise StopAsyncIteration
+
+    class Responses:
+        async def create(self, **options: Any) -> Stream:
+            captured.update(options)
+            return Stream()
+
+    class Client:
+        responses = Responses()
+
+    provider = OpenAIResponsesProvider(client=Client())
+    payload = {"model": "gpt-6-astra", "input": [], "prompt_cache_options": {"mode": "implicit"}}
+
+    events = [event async for event in provider._sdk_events(payload)]
+
+    assert events == []
+    assert "prompt_cache_options" not in captured
+    assert captured["extra_body"] == {"prompt_cache_options": {"mode": "implicit"}}
+    assert captured["stream"] is True
+    assert payload["prompt_cache_options"] == {"mode": "implicit"}
+
+
+def test_usage_reads_an_absent_token_count_as_zero() -> None:
+    """The SDK dumps input_tokens_details.cache_write_tokens as None when nothing was written."""
+    model = ResolvedModel(provider="openai", model="gpt-6-astra", resolved_at=NOW)
+    usage = OpenAIResponsesProvider._usage(
+        {
+            "usage": {
+                "input_tokens": 100,
+                "input_tokens_details": {"cached_tokens": 40, "cache_write_tokens": None},
+                "output_tokens": 10,
+                "output_tokens_details": {"reasoning_tokens": None},
+            }
+        },
+        model,
+    )
+
+    assert (
+        usage.input_tokens,
+        usage.cached_input_tokens,
+        usage.cache_write_input_tokens,
+        usage.output_tokens,
+        usage.reasoning_tokens,
+    ) == (100, 40, 0, 10, 0)

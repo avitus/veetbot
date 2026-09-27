@@ -1766,7 +1766,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1518` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2655` against
-    `model-gateway.md:1921` and `milestone-map.md:1856`. The map
+    `model-gateway.md:1925` and `milestone-map.md:1856`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

@@ -1288,7 +1288,14 @@ class MCPRuntime:
             )
             return False
         if discovered.client is not None:
-            await self._close_preparation_client(discovered.client)
+            try:
+                await self._close_preparation_client(discovered.client)
+            except Exception as exc:
+                # The catalog is already remembered; one stuck close must not stop the rest.
+                logger.warning(
+                    "mcp_discovery_warmup_close_failed",
+                    extra={"server_id": config.server_id, "error_class": type(exc).__name__},
+                )
         return True
 
     async def close_session(self, session_id: UUID) -> None:
