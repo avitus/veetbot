@@ -828,11 +828,18 @@ The worker entry takes the role flag and attaches either the claim loop or
 the sweeps. One binary, three roles, one `build`.
 
 The API and the interactive worker are the two entries that pin Chat catalogs,
-so after `build` they start the MCP runtime's discovery warm-up (ADR-0131). It
-runs in the background, discovers each enabled server of the configured tenant
-one at a time with a patient handshake timeout, retries the ones that fail, and
-closes each. Serving does not wait for it, and one-shot CLI commands and tests
-never start it.
+so they start the MCP runtime's discovery warm-up (ADR-0131): the interactive
+worker after `build`, and the API once its socket accepts connections, so
+readiness never waits on an MCP server and no server startup delays the bind.
+It runs in the background, discovers each enabled server of the configured
+tenant one at a time with a patient handshake timeout, retries the ones that
+fail, and closes each. One-shot CLI commands and tests never start it.
+
+Told to stop, the API gives in-flight requests `API_SHUTDOWN_GRACE_SECONDS`
+(5 s) and then cancels them. A run's event stream never ends by itself, and its
+client resumes from `Last-Event-ID`; without the grace, one open stream held the
+API until systemd killed it at its 30 s stop timeout. The rest of that timeout
+is left to the composition's teardown.
 
 ## Milestone 1: the in-memory tier
 

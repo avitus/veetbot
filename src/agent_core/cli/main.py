@@ -9,7 +9,7 @@ import math
 import os
 import signal
 import socket
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import aclosing
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -66,6 +66,9 @@ RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export", "latency"})
 DEFAULT_RUN_WAIT_TIMEOUT_SECONDS = 300.0
 EVENT_READ_TIMEOUT_SECONDS = 30.0
 API_BIND_HOST = "127.0.0.1"
+# In-flight requests get this long once the API is told to stop. A run's event
+# stream never ends by itself, and its client resumes from Last-Event-ID.
+API_SHUTDOWN_GRACE_SECONDS = 5
 
 
 class WorkerRole(StrEnum):
@@ -830,8 +833,6 @@ def worker_command(
 
 async def _serve_api() -> None:
     async with build(storage="postgres", service_logging=True) as composition:
-        # Chat creation pins MCP catalogs here too; serving never waits (ADR-0131).
-        composition.start_mcp_discovery_warmup()
         api = create_app(
             composition.services,
             composition.settings,
@@ -839,8 +840,33 @@ async def _serve_api() -> None:
             composition.new_request_id,
             composition.readiness_probe,
         )
-        server = uvicorn.Server(uvicorn.Config(api, host=API_BIND_HOST, port=8000, log_config=None))
-        await server.serve()
+        server = uvicorn.Server(
+            uvicorn.Config(
+                api,
+                host=API_BIND_HOST,
+                port=8000,
+                log_config=None,
+                timeout_graceful_shutdown=API_SHUTDOWN_GRACE_SECONDS,
+            )
+        )
+        # Chat creation pins MCP catalogs here too, so the API warms them, but
+        # only once it listens: readiness never waits on an MCP server (ADR-0131).
+        await _serve_then(server, composition.start_mcp_discovery_warmup)
+
+
+async def _serve_then(server: uvicorn.Server, listening: Callable[[], object]) -> None:
+    """Serve, calling ``listening`` once the server accepts connections."""
+    serving = asyncio.create_task(server.serve())
+    try:
+        while not (server.started or serving.done()):
+            await asyncio.wait({serving}, timeout=0.05)
+        if server.started:
+            listening()
+        await serving
+    finally:
+        if not serving.done():
+            serving.cancel()
+            await asyncio.gather(serving, return_exceptions=True)
 
 
 @app.command("api")

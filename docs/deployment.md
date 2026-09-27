@@ -78,7 +78,8 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 1. takes `/opt/veetbot/shared/deploy.lock`;
 2. refuses a timestamped release older than the currently active release;
 3. installs a release-local `.venv` from `uv.lock` using a shared download
-   cache;
+   cache, and compiles the bytecode of its dependencies and of `src`, because
+   the units' read-only filesystem keeps Python from caching it at run time;
 4. builds `agent-core-sandbox:<release-id>`;
 5. ensures the local PostgreSQL service is running;
 6. applies `alembic upgrade head` and runs the production preflight;
@@ -95,9 +96,17 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
     `veetbot-browser-profile-service` image tags and prunes build cache that
     no build has used for 48 hours.
 
-Release pruning normally runs as the deployment identity. Older releases may
-contain service-owned Python bytecode from deployments that predate the strict
-read-only systemd filesystem policy. If direct removal of such a release fails,
+Before step 3 compiled bytecode, every service start and every stdio MCP server
+spawn compiled its imports from source. On the idle production host, importing
+the CLI took 17.5 s of CPU from source and 8.4 s from bytecode, and a Gmail
+server's module 4.1 s and 2.2 s. The API gives in-flight requests five seconds
+when it is stopped, then cancels them; clients resume a cut run event stream
+from `Last-Event-ID`.
+
+Release pruning normally runs as the deployment identity, which also owns the
+bytecode each release compiles. Older releases may contain service-owned Python
+bytecode from deployments that predate the strict read-only systemd filesystem
+policy. If direct removal of such a release fails,
 the script retries with the just-built sandbox image as uid 0 in a one-shot,
 network-disabled container. The container has a read-only root filesystem, only
 the releases directory is mounted writable, and its fixed entrypoint removes

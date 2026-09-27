@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-26 — The API starts and stops faster on each release
+
+- Every service recompiled its Python code each time it started, because the
+  servers cannot write Python's compiled-code cache. With every service
+  starting at once on a release, the API needed 75 seconds before it answered,
+  and the MCP servers the warm-up starts ran past their handshake limit.
+  Releases now compile the code before they switch over. On the production
+  host that halves the CPU a service or an MCP server spends importing it.
+- A stopping API waited for every open live-update connection and was killed
+  after 30 seconds, which held back the new one. It now allows five seconds,
+  and the apps reconnect on their own.
+- The API starts the MCP warm-up only once it answers requests.
+
 ## 2026-09-26 — The MCP warm-up survives a restart
 
 - Yesterday's change reached production but rarely helped. At each restart

@@ -187,3 +187,19 @@ user.
   A server still failing after the last round is logged as
   `mcp_discovery_warmup_abandoned`.
 
+
+## Amendment, 2026-09-26: the API warms once it listens
+
+The same day's 23:37 release failed its readiness probe, and it was first read
+as the API waiting on this warm-up before it bound its port. It was not. Nginx
+received the new API's first response at 23:37:55, before its warm-up
+handshakes failed at 23:37:57 and 23:38:10. The port stayed closed because the
+process needed 75 s to reach `serve()`: the release held no compiled bytecode
+for most modules, and every service was importing from source at once.
+
+The API did create its warm-up task before calling `serve()`, though. The task
+first ran during uvicorn's lifespan startup and began starting servers before
+the socket was bound. The API now starts the warm-up only once uvicorn reports
+the socket bound. Readiness never waits on an MCP server, and no server startup
+competes with the bind. The interactive worker has no port and still starts its
+warm-up after `build`.

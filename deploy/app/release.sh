@@ -209,7 +209,12 @@ printf 'VEETBOT_RELEASE_ID=%s\nAGENT_EXECUTION_SERVICE_SOCKET=%s\n' \
 
 cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
-uv sync --frozen --no-dev
+# The units mount the release read-only (ProtectSystem=strict), so Python can
+# never cache bytecode at run time. Compile it here, dependencies and the
+# editable project alike, or every service start and every MCP server spawn
+# recompiles its imports from source.
+uv sync --frozen --no-dev --compile-bytecode
+"$STAGE/.venv/bin/python" -m compileall -q src
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
 docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
 

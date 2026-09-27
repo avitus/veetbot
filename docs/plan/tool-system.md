@@ -1279,7 +1279,8 @@ registrations, conflict and rejection events as a live pin, and emits
 `mcp.server.pinned` in place of `mcp.server.connected`. Its server starts on the
 first call of one of its tools, through the reconnection comparison above. The
 API and the interactive worker warm the memory in the background when they
-start; the warm-up connects, discovers and closes, and records nothing. It
+start, the API only once it listens; the warm-up connects, discovers and
+closes, and records nothing. It
 starts one server at a time, waits up to `mcp.warmup_connect_timeout_seconds`
 for each handshake rather than the connect timeout a user waits on, and
 retries failed servers every `mcp.warmup_retry_seconds` for at most

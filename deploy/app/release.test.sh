@@ -384,6 +384,12 @@ cat "$TEST_ROOT/first.out"
 grep -Fxq 'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
   "$DEPLOY_ROOT/releases/$release_id/.release.env"
 grep -Fq 'alembic upgrade head' "$LOG_FILE"
+# Services cannot write bytecode under ProtectSystem=strict, so the release
+# compiles it before promotion or every process start recompiles its imports.
+grep -Fxq 'uv sync --frozen --no-dev --compile-bytecode' "$LOG_FILE"
+grep -Fxq 'python -m compileall -q src' "$LOG_FILE"
+[[ "$(grep -Fnx 'python -m compileall -q src' "$LOG_FILE" | cut -d: -f1)" -lt \
+  "$(grep -Fn 'systemctl restart' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 grep -Fxq 'execution socket /run/veetbot/execution.sock' "$LOG_FILE"
 grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
