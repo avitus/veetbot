@@ -266,6 +266,7 @@ make_stage() {
     "$stage/deploy/veetbot-call-ingress.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_schedule_database_permissions.py" \
+    "$stage/scripts/check_provider_pins.py" \
     "$stage/scripts/check_production_deployment.py"
   for unit in \
     veetbot-api \
@@ -301,6 +302,16 @@ make_stage() {
   printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "${1:-}" == scripts/check_schedule_database_permissions.py ]]; then exit 1; fi\n' \
     >"$stage/.venv/bin/python"
   chmod +x "$stage/.venv/bin/alembic" "$stage/.venv/bin/python"
+  cat >>"$stage/.venv/bin/python" <<'PYTHON_STUB'
+if [[ "${1:-}" == scripts/check_provider_pins.py ]]; then
+  if [[ "${VEETBOT_TEST_PIN_FAILURE:-}" == early ]] || \
+    { [[ "${VEETBOT_TEST_PIN_FAILURE:-}" == final ]] && \
+      grep -Fxq 'sudo systemctl stop veetbot-worker veetbot-async-worker' "$VEETBOT_TEST_LOG"; }; then
+    printf 'FAIL: active run requires an unavailable provider registry; finish or cancel it first\n' >&2
+    exit 1
+  fi
+fi
+PYTHON_STUB
 }
 
 run_release() {
@@ -445,6 +456,35 @@ if run_release "$release_id" >"$TEST_ROOT/active.out" 2>&1; then
 fi
 grep -Fq 'refusing to modify the active release in place' "$TEST_ROOT/active.out"
 [[ -d "$DEPLOY_ROOT/releases/$release_id" ]]
+
+# A provider-registry change must fail before promotion, including a run
+# pinned between the live preflight and the final check with workers stopped.
+for pin_failure in early final; do
+  pin_release_id="20260810-152234-0000001"
+  make_stage "$pin_release_id"
+  rm -f -- "$PROCESS_ROOT/4242/cwd"
+  ln -s "$DEPLOY_ROOT/releases/$pin_release_id" "$PROCESS_ROOT/4242/cwd"
+  : >"$LOG_FILE"
+  if VEETBOT_TEST_PIN_FAILURE="$pin_failure" run_release "$pin_release_id" \
+    >"$TEST_ROOT/pin-$pin_failure.out" 2>&1; then
+    printf 'release with incompatible active provider pins unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  grep -Fq 'active run requires an unavailable provider registry' "$TEST_ROOT/pin-$pin_failure.out"
+  [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
+  [[ ! -e "$DEPLOY_ROOT/releases/$pin_release_id" ]]
+  assert_log_lacks "docker tag agent-core-sandbox:$pin_release_id"
+  assert_log_lacks 'sudo install'
+  if [[ "$pin_failure" == early ]]; then
+    assert_log_lacks 'systemctl stop'
+    assert_log_lacks 'alembic upgrade'
+  else
+    grep -Fxq 'sudo systemctl stop veetbot-worker veetbot-async-worker' "$LOG_FILE"
+    grep -Fxq 'sudo systemctl restart veetbot-worker veetbot-async-worker' "$LOG_FILE"
+  fi
+done
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$release_id" "$PROCESS_ROOT/4242/cwd"
 
 stale_id="20260809-010101-1234567"
 make_stage "$stale_id"

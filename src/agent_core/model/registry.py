@@ -17,6 +17,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_core.config import ConfigurationError
+from agent_core.domain.errors import ProviderPinUnavailableError
 from agent_core.domain.messages import (
     CapabilitySet,
     CostSource,
@@ -575,9 +576,12 @@ class StaticModelRouter:
             and profile.registry_version == pin.registry_version
         ]
         if len(matching) != 1:
-            raise ConfigurationError("pinned provider registry version is unavailable")
+            raise ProviderPinUnavailableError()
         profile = matching[0]
-        model = self._find_model(profile, pin.model)
+        # Pins contain canonical model IDs, never a policy or a moving alias.
+        model = next((model for model in profile.models if model.model_id == pin.model), None)
+        if model is None:
+            raise ProviderPinUnavailableError()
         return ResolvedModel(
             provider=pin.provider,
             model=model.model_id,

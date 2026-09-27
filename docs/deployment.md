@@ -81,9 +81,11 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    cache, and compiles the bytecode of its dependencies and of `src`, because
    the units' read-only filesystem keeps Python from caching it at run time;
 4. builds `agent-core-sandbox:<release-id>`;
-5. ensures the local PostgreSQL service is running;
+5. checks active provider pins against the staged registry on an existing
+   installation, then ensures the local PostgreSQL service is running;
 6. applies `alembic upgrade head` and runs the production preflight;
-7. switches `/opt/veetbot/current`, tags the sandbox image as `production`, and
+7. stops both run workers, rechecks active provider pins, then switches
+   `/opt/veetbot/current`, tags the sandbox image as `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
@@ -95,6 +97,25 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 10. retains the two newest timestamped `agent-core-sandbox` and
     `veetbot-browser-profile-service` image tags and prunes build cache that
     no build has used for 48 hours.
+
+The provider-pin checks enforce ADR-0119's requirement to drain runs before a
+provider-registry change. They include queued, running, approval-waiting and
+user-waiting runs across every tenant. A mismatch, malformed pin or failed
+probe refuses promotion; the report names only run IDs. Finish or explicitly
+cancel the listed runs on the current release, then retry deployment. Terminal
+runs and queued runs that have not selected a provider do not block a release.
+The second check runs with both pin-writing workers stopped, closing the race
+with the first check. A failure before promotion restarts the previous workers.
+Install the updated `deploy/sudoers/veetbot-deploy` contract before the first
+release using this guard; its two additional exact commands stop and restart
+`veetbot-worker veetbot-async-worker`.
+
+A run already stranded by an earlier registry change fails as
+`model_permanent_error` with `ProviderPinUnavailableError` and asks the owner to
+send a new message. It never substitutes the new registry or executes the
+pending tool. The provider pin and approval history remain intact; a terminal
+failed run is not automatically retried. Terminal checkpoints discard provider
+continuation state even when failure precedes entry to the model loop.
 
 Before step 3 compiled bytecode, every service start and every stdio MCP server
 spawn compiled its imports from source. On the idle production host, importing

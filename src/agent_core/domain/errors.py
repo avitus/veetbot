@@ -268,6 +268,16 @@ class ModelPermanentError(AgentCoreError):
     """A model provider reported a permanent failure."""
 
 
+class ProviderPinUnavailableError(ModelPermanentError):
+    """A saved run cannot be resumed under the deployed provider registry."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The model configuration changed while this run was paused. "
+            "Send a new message to continue with the current configuration."
+        )
+
+
 class ModelProtocolError(AgentCoreError):
     """A model provider response violated its protocol."""
 

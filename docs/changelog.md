@@ -19,6 +19,18 @@ title: Changelog
   decisions, sign-in challenges, redirects, rotated cookies and the overall
   deadline. The thirty-second deadline is unchanged.
 
+## 2026-09-27 — Registry changes cannot strand paused chat runs
+
+- Releases check that every active run's saved provider configuration exists
+  in the candidate release, then check again with both run workers stopped.
+  An incompatible release is refused and the previous workers resume, so an
+  approval waiting across a deployment cannot lose its model configuration.
+- Runs already affected by an earlier registry change explain the cause and
+  ask for a new message instead of reporting an unexpected internal error.
+  Pending tools are not executed and provider pins are never silently changed.
+  Terminal checkpoints discard provider continuation state even when resuming
+  fails before the model loop starts.
+
 ## 2026-09-26 — Device sign-in verification has enough browser storage
 
 - After signing in on the device, "I'm signed in" could fail with "Couldn't

@@ -2158,6 +2158,8 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
         for unit_property in ("MainPID", "NRestarts"):
             assert f"/usr/bin/systemctl show --property {unit_property} --value {unit}" in specs
     assert "/usr/bin/systemctl daemon-reload" in specs
+    assert "/usr/bin/systemctl stop veetbot-worker veetbot-async-worker" in specs
+    assert "/usr/bin/systemctl restart veetbot-worker veetbot-async-worker" in specs
     assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
     assert "/usr/bin/systemctl disable --now veetbot-notify" in specs
     assert "/usr/bin/systemctl disable --now veetbot-surface" in specs
