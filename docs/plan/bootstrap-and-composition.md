@@ -827,6 +827,14 @@ from having its own loop, so it does not build its own graph.
 The worker entry takes the role flag and attaches either the claim loop or
 the sweeps. One binary, three roles, one `build`.
 
+Every production unit, the execution service and the calling ingress
+included, starts through that binary, so each start imports whatever
+`cli/main.py` and `bootstrap.py` import. The composition root therefore
+imports the provider SDK adapters and the MCP SDK client factory where it
+constructs them, not at module scope: a role that never builds a model provider
+or an MCP client, such as the schedule, notification, or execution-service
+role, never loads those SDKs.
+
 The API and the interactive worker are the two entries that pin Chat catalogs,
 so they start the MCP runtime's discovery warm-up (ADR-0131): the interactive
 worker after `build`, and the API once its socket accepts connections, so
