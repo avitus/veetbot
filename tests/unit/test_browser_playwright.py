@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
+import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -134,6 +136,37 @@ async def test_headed_document_failure_aborts_without_retrying() -> None:
     route.fetch.assert_awaited_once_with(headers={"cookie": ""}, max_redirects=0, max_retries=0)
     route.abort.assert_awaited_once_with("failed")
     route.fulfill.assert_not_awaited()
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "br"])
+async def test_headed_document_renders_compressed_responses(encoding: str) -> None:
+    """The fulfillment path renders wire encodings without decoding the body twice."""
+    require_real_browser()
+    html = b"<!doctype html><title>Compressed sign-in</title><p>Ready</p>"
+    # The Brotli fixture encodes the same HTML without adding a test dependency.
+    encoded = {
+        "gzip": gzip.compress(html),
+        "deflate": zlib.compress(html),
+        "br": bytes.fromhex(
+            "1b3b0000c4032e4bac7125001c72c0feed40712609051eb2123e41516c2c50ae966e"
+            "85e5c1fd11e4dc3a914c"
+        ),
+    }[encoding]
+
+    async def document(request: Request) -> Response:
+        """Serve an encoded document with its original wire content length."""
+        del request
+        return Response(encoded, media_type="text/html", headers={"content-encoding": encoding})
+
+    async with local_https_site(Starlette(routes=[Route("/login", document)])) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,), interactive=True)
+        try:
+            page = await runtime.navigate(site.url("/login"))
+            assert page.title == "Compressed sign-in"
+            assert page.text == "Ready"
+        finally:
+            await runtime.close()
 
 
 async def test_headed_popup_policy_preserves_sign_in_and_redirect_boundaries() -> None:

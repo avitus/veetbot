@@ -394,18 +394,22 @@ class _CountingUnitsOfWork:
     """Count the transactions the MCP runtime opens, delegating everything else."""
 
     def __init__(self, factory: Any) -> None:
+        """Wrap the real factory with a transaction-opening counter."""
         self.factory = factory
         self.opened = 0
 
     def __call__(self) -> Any:
+        """Count each opened unit of work while preserving its normal behavior."""
         self.opened += 1
         return self.factory()
 
     def __getattr__(self, name: str) -> Any:
+        """Preserve the factory's remaining capabilities."""
         return getattr(self.factory, name)
 
 
 async def test_a_chat_commits_its_pins_in_one_transaction_at_each_step() -> None:
+    """Creation and a later preparation each read once and commit all pins once."""
     factory = _Factory()
     async with build(
         settings=_settings(),
@@ -432,6 +436,7 @@ async def test_a_chat_commits_its_pins_in_one_transaction_at_each_step() -> None
 async def test_a_process_records_each_catalog_generation_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Repeated chats reuse recorded generations; changed discovery gets one new write."""
     from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
 
     recorded: list[tuple[str, str]] = []
@@ -440,6 +445,7 @@ async def test_a_process_records_each_catalog_generation_once(
     async def spy(
         self: Any, tenant_id: str, server_id: str, catalog_hash: str, records: Any
     ) -> None:
+        """Record generation writes without replacing repository behavior."""
         recorded.append((server_id, catalog_hash))
         await original(self, tenant_id, server_id, catalog_hash, records)
 

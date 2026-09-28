@@ -64,6 +64,7 @@ async def test_the_report_measures_turn_phases_models_and_tools_from_events() ->
 
 
 async def test_a_chat_bound_to_a_browser_profile_is_still_chat() -> None:
+    """A browser binding remains Chat metadata in both turn and queue reports."""
     from uuid import uuid4
 
     from sqlalchemy import text

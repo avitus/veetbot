@@ -645,10 +645,12 @@ class MCPRuntime:
 
     @staticmethod
     def _generation(connection: _Connection) -> tuple[str, str, str]:
+        """Identify one tenant's server catalog generation for process-local deduplication."""
         config = connection.config
         return (config.tenant_id, config.server_id, connection.report.catalog_hash)
 
     def _catalog_records(self, connection: _Connection) -> tuple[MCPToolCatalogRecord, ...]:
+        """Materialize the accepted tools for a generation's first durable write."""
         config = connection.config
         return tuple(
             MCPToolCatalogRecord(
@@ -1178,6 +1180,7 @@ class MCPRuntime:
         event_type: str,
         payload: dict[str, Any],
     ) -> None:
+        """Commit one event emitted outside a batched preparation or activation."""
         async with self._uow_factory() as uow:
             await self._append_event(uow, session_id, event_type, payload)
 
@@ -1185,6 +1188,7 @@ class MCPRuntime:
     async def _append_event(
         uow: RepositoryUnitOfWork, session_id: UUID, event_type: str, payload: dict[str, Any]
     ) -> None:
+        """Append an MCP runtime event inside the caller's transaction."""
         await uow.events.append(
             NewEvent(
                 session_id=session_id,
@@ -1197,13 +1201,20 @@ class MCPRuntime:
 
     async def activate_session(self, session_id: UUID) -> None:
         """Write the events a new session's preparation held, in one transaction."""
-        self._deferred_events.discard(session_id)
-        pending = self._pending_events.pop(session_id, [])
-        if not pending:
-            return
-        async with self._uow_factory() as uow:
-            for event_type, payload in pending:
-                await self._append_event(uow, session_id, event_type, payload)
+        async with self._lock(session_id):
+            pending = self._pending_events.get(session_id)
+            if not pending:
+                self._pending_events.pop(session_id, None)
+                self._deferred_events.discard(session_id)
+                return
+            batch = list(pending)
+            async with self._uow_factory() as uow:
+                for event_type, payload in batch:
+                    await self._append_event(uow, session_id, event_type, payload)
+            del pending[: len(batch)]
+            if not pending:
+                self._pending_events.pop(session_id, None)
+                self._deferred_events.discard(session_id)
 
     async def _release_connection(self, connection: _Connection) -> None:
         """Drop credential-bearing clients through the SDK's owned cleanup path."""

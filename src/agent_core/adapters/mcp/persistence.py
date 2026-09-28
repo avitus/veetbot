@@ -97,6 +97,7 @@ class PostgresMCPServerRepository:
         catalog_hash: str,
         records: tuple[MCPToolCatalogRecord, ...],
     ) -> None:
+        """Validate and record an immutable generation with one bulk tool insertion."""
         normalized: dict[str, MCPToolCatalogRecord] = {}
         for record in records:
             if (
