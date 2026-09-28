@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-28 — A new chat writes its tool pins once
+
+- After the warm-up fix, recording which MCP tools a new chat pinned still
+  took about 1.1 s, 0.1 s per server in two transactions each. Each
+  preparation now writes all of its pins in one transaction, and skips tool
+  lists the table already holds, so a new chat's setup should drop by most
+  of that second, both when the chat is created and before its first reply.
+- `agent run latency` counted no chats bound to a browser profile, which is
+  every new chat in the app. It counts them now.
+
 ## 2026-09-27 — Sign-in verification does not wait for every page resource
 
 - "I'm signed in" could still fail with "Couldn't check the sign-in" after

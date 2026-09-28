@@ -61,3 +61,40 @@ async def test_the_report_measures_turn_phases_models_and_tools_from_events() ->
     assert report.queue and all(wait.session_kind for wait in report.queue)
     assert empty.turns == 0
     assert empty.phases == [] and empty.models == [] and empty.tools == []
+
+
+async def test_a_chat_bound_to_a_browser_profile_is_still_chat() -> None:
+    from uuid import uuid4
+
+    from sqlalchemy import text
+
+    from agent_core.adapters.persistence.database import create_engine
+
+    script = FakeModelScript(turns=[ScriptedTurn(text="Hello.")], on_exhausted="repeat_last")
+    async with build(settings=database_settings(), storage="postgres", script=script) as app:
+        started = datetime.now(UTC)
+        await _complete(app, "Say hello.")
+        await _complete(app, "Say hello again.")
+        engine = create_engine(database_settings().database_url)
+        try:
+            async with engine.begin() as connection:
+                sessions = (
+                    (await connection.execute(text("select id from sessions order by created_at")))
+                    .scalars()
+                    .all()
+                )
+                await connection.execute(
+                    text("update sessions set metadata = cast(:metadata as jsonb) where id = :id"),
+                    [
+                        {"id": sessions[0], "metadata": f'{{"browser_profile_id": "{uuid4()}"}}'},
+                        {"id": sessions[1], "metadata": '{"email_operational": true}'},
+                    ],
+                )
+        finally:
+            await engine.dispose()
+        assert app.latency_report is not None
+
+        report = await app.latency_report(started - timedelta(days=1))
+
+    assert report.turns == 1
+    assert {wait.session_kind for wait in report.queue} == {"chat", "email_operational"}

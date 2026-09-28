@@ -388,3 +388,79 @@ async def test_a_warm_up_keeps_going_when_a_server_fails_to_close() -> None:
 
         assert factory.started == Counter({"alpha": 1, "beta": 1})
         assert len(_payloads(await _events(app, session), "mcp.server.pinned")) == 2
+
+
+class _CountingUnitsOfWork:
+    """Count the transactions the MCP runtime opens, delegating everything else."""
+
+    def __init__(self, factory: Any) -> None:
+        self.factory = factory
+        self.opened = 0
+
+    def __call__(self) -> Any:
+        self.opened += 1
+        return self.factory()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.factory, name)
+
+
+async def test_a_chat_commits_its_pins_in_one_transaction_at_each_step() -> None:
+    factory = _Factory()
+    async with build(
+        settings=_settings(),
+        fixed_clock_at=START,
+        mcp_servers=(_server("alpha"), _server("beta"), _server("gamma")),
+        mcp_client_factory=factory,
+    ) as app:
+        await app.sessions.create()
+        counting = _CountingUnitsOfWork(app.mcp._uow_factory)
+        app.mcp._uow_factory = counting
+
+        session = await app.sessions.create()
+        at_creation = counting.opened
+        await app.mcp.close_session(session)
+        counting.opened = 0
+        await app.mcp.prepare(session, app.principal)
+        at_first_reply = counting.opened
+
+        # One read of the configured servers, then one write of every pin.
+        assert (at_creation, at_first_reply) == (2, 2)
+        assert len(_payloads(await _events(app, session), "mcp.server.pinned")) == 6
+
+
+async def test_a_process_records_each_catalog_generation_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
+
+    recorded: list[tuple[str, str]] = []
+    original = InMemoryMCPServerRepository.record_catalog
+
+    async def spy(
+        self: Any, tenant_id: str, server_id: str, catalog_hash: str, records: Any
+    ) -> None:
+        recorded.append((server_id, catalog_hash))
+        await original(self, tenant_id, server_id, catalog_hash, records)
+
+    monkeypatch.setattr(InMemoryMCPServerRepository, "record_catalog", spy)
+    factory = _Factory()
+    async with build(
+        settings=_settings(),
+        fixed_clock_at=START,
+        mcp_servers=(_server("alpha"), _server("beta")),
+        mcp_client_factory=factory,
+    ) as app:
+        await app.sessions.create()
+        second = await app.sessions.create()
+        assert [server for server, _ in recorded] == ["alpha", "beta"]
+
+        # A changed catalog seen by a reconnection is a new generation, recorded once.
+        factory.discovery = MCPDiscovery()
+        spec = app.mcp._registry.get("mcp.alpha.echo", tenant_id="local").spec
+        await app.mcp.call_tool(_context(app, second), spec, "echo", {})
+        await app.sessions.create()
+        await app.sessions.create()
+
+    assert [server for server, _ in recorded] == ["alpha", "beta", "alpha"]
+    assert recorded[0][1] != recorded[2][1]

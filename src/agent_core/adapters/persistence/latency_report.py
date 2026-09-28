@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
 from agent_core.observability.latency import (
     ChatLatencyReport,
     Distribution,
@@ -21,12 +22,20 @@ from agent_core.observability.latency import (
     QueueWait,
 )
 
+# Metadata a Chat session may carry. Email, schedule, surface and device sessions
+# add other keys, so a session holding only these keys is a Chat.
+CHAT_METADATA_KEYS = (SESSION_BROWSER_PROFILE_METADATA_KEY,)
+_CHAT_SESSION = (
+    "not exists (select 1 from jsonb_object_keys(s.metadata) as key"
+    " where not (key = any(:chat_keys)))"
+)
+
 # Completed top-level Chat turns that never waited for a person.
-_CHAT_RUNS = """
+_CHAT_RUNS = f"""
 chat_runs as (
   select r.id, r.session_id, r.usage
   from runs r join sessions s on s.id = r.session_id
-  where s.tenant_id = :tenant and s.metadata = '{}'::jsonb and r.parent_run_id is null
+  where s.tenant_id = :tenant and {_CHAT_SESSION} and r.parent_run_id is null
     and lower(r.status) = 'completed' and r.created_at > :since
     and not exists (
       select 1 from events w where w.run_id = r.id
@@ -156,16 +165,16 @@ _MCP_CONNECTIONS = f"""
 with connections as (
   select e.payload->>'server_id' as name, (e.payload->>'duration_ms')::float8 / 1000.0 as v
   from events e join sessions s on s.id = e.session_id
-  where s.tenant_id = :tenant and s.metadata = '{{}}'::jsonb and e.created_at > :since
+  where s.tenant_id = :tenant and {_CHAT_SESSION} and e.created_at > :since
     and e.event_type = 'mcp.server.connected'
     and jsonb_typeof(e.payload->'duration_ms') = 'number'
 )
 select name, {_DISTRIBUTION} from connections group by name
 """
 
-_MCP_PINS = """
+_MCP_PINS = f"""
 select count(*) from events e join sessions s on s.id = e.session_id
-where s.tenant_id = :tenant and s.metadata = '{}'::jsonb and e.created_at > :since
+where s.tenant_id = :tenant and {_CHAT_SESSION} and e.created_at > :since
   and e.event_type = 'mcp.server.pinned'
 """
 
@@ -174,7 +183,7 @@ with waits as (
   select r.priority,
     coalesce(
       (select string_agg(key, ',' order by key) from jsonb_object_keys(s.metadata) as key
-        where key ~ '^[a-z][a-z0-9_]*$'),
+        where key ~ '^[a-z][a-z0-9_]*$' and not (key = any(:chat_keys))),
       'chat') as kind,
     extract(epoch from claimed.at - queued.created_at) as v
   from runs r join sessions s on s.id = r.session_id
@@ -225,7 +234,7 @@ async def chat_latency_report(
 ) -> ChatLatencyReport:
     """Aggregate recent Chat turns in one read-only transaction."""
 
-    parameters = {"tenant": tenant_id, "since": since}
+    parameters = {"tenant": tenant_id, "since": since, "chat_keys": list(CHAT_METADATA_KEYS)}
     async with sessions() as session, session.begin():
         await session.execute(text("SET TRANSACTION READ ONLY"))
 

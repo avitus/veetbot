@@ -50,7 +50,7 @@ from agent_core.mcp.mapping import MCPMappingReport, map_discovered_tools
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.mcp import MCPClient, MCPClientFactory
-from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.tools import ToolRegistry
 
 _SKILL_CHARACTERS = re.compile(r"[^a-z0-9-]")
@@ -210,6 +210,9 @@ class MCPRuntime:
         self._warmup_attempts = warmup_attempts
         # The last live discovery of each configured server in this process (ADR-0131).
         self._discoveries: dict[str, _RememberedDiscovery] = {}
+        # Catalog generations this process has written; the table is a history, so a
+        # generation it already holds is never written again.
+        self._recorded_generations: set[tuple[str, str, str]] = set()
         self._warmup_task: asyncio.Task[None] | None = None
         self._maintenance_task: asyncio.Task[None] | None = None
         self._principals: dict[UUID, Principal] = {}
@@ -546,18 +549,21 @@ class MCPRuntime:
                 self._unregister_session(session_id, keep=earlier)
                 raise
             connections: dict[str, _Connection] = {}
+            # Catalog generations and events commit together, in configured order (ADR-0131).
+            writes: list[_Connection | tuple[str, dict[str, Any]]] = []
             try:
                 if self._closing:
                     raise MCPUnavailableError("tool.server_unreachable")
                 for result in prepared:
                     if isinstance(result, _DisconnectedServer):
-                        await self._event(
-                            session_id,
-                            "mcp.server.disconnected",
-                            {
-                                "server_id": result.config.server_id,
-                                "reason_code": result.reason_code,
-                            },
+                        writes.append(
+                            (
+                                "mcp.server.disconnected",
+                                {
+                                    "server_id": result.config.server_id,
+                                    "reason_code": result.reason_code,
+                                },
+                            )
                         )
                         continue
                     connection = result
@@ -565,7 +571,8 @@ class MCPRuntime:
                     discovery = connection.discovery
                     report = connection.report
                     connections[config.server_id] = connection
-                    await self._record_catalog(connection)
+                    if self._generation(connection) not in self._recorded_generations:
+                        writes.append(connection)
                     for mapped in report.accepted:
                         self._register(
                             session_id,
@@ -573,16 +580,18 @@ class MCPRuntime:
                             MCPTool(self, mapped.spec, mapped.remote_name),
                         )
                     for group in report.conflicts:
-                        await self._event(
-                            session_id,
-                            "mcp.catalog.conflict",
-                            {"server_id": config.server_id, "remote_names": list(group)},
+                        writes.append(
+                            (
+                                "mcp.catalog.conflict",
+                                {"server_id": config.server_id, "remote_names": list(group)},
+                            )
                         )
                     for remote_name in report.rejected:
-                        await self._event(
-                            session_id,
-                            "mcp.tool.rejected",
-                            {"server_id": config.server_id, "remote_name": remote_name},
+                        writes.append(
+                            (
+                                "mcp.tool.rejected",
+                                {"server_id": config.server_id, "remote_name": remote_name},
+                            )
                         )
                     if discovery.resources:
                         spec = self._resource_spec(config, report.catalog_hash)
@@ -592,13 +601,10 @@ class MCPRuntime:
                             MCPResourceTool(self, spec),
                         )
                     if connection.reused:
-                        await self._event(
-                            session_id, "mcp.server.pinned", self._catalog_payload(connection)
-                        )
+                        writes.append(("mcp.server.pinned", self._catalog_payload(connection)))
                     else:
-                        await self._event(
-                            session_id, "mcp.server.connected", self._connected_payload(connection)
-                        )
+                        writes.append(("mcp.server.connected", self._connected_payload(connection)))
+                await self._commit_pins(session_id, writes)
                 if self._closing:
                     raise MCPUnavailableError("tool.server_unreachable")
             except BaseException:
@@ -637,9 +643,14 @@ class MCPRuntime:
             return True
         return server_ids is not None and server_ids <= self._attempted.get(session_id, set())
 
-    async def _record_catalog(self, connection: _Connection) -> None:
+    @staticmethod
+    def _generation(connection: _Connection) -> tuple[str, str, str]:
         config = connection.config
-        records = tuple(
+        return (config.tenant_id, config.server_id, connection.report.catalog_hash)
+
+    def _catalog_records(self, connection: _Connection) -> tuple[MCPToolCatalogRecord, ...]:
+        config = connection.config
+        return tuple(
             MCPToolCatalogRecord(
                 id=self._ids.new_id(),
                 tenant_id=config.tenant_id,
@@ -652,13 +663,33 @@ class MCPRuntime:
             )
             for mapped in connection.report.accepted
         )
-        async with self._uow_factory() as uow:
-            await uow.mcp_servers.record_catalog(
-                config.tenant_id,
-                config.server_id,
-                connection.report.catalog_hash,
-                records,
-            )
+
+    async def _commit_pins(
+        self, session_id: UUID, writes: list[_Connection | tuple[str, dict[str, Any]]]
+    ) -> None:
+        """Write one preparation's new catalog generations and its events in one transaction.
+
+        A session that does not exist yet keeps its events until activation, as before.
+        """
+        deferred = session_id in self._deferred_events
+        generations = [write for write in writes if isinstance(write, _Connection)]
+        events = [write for write in writes if not isinstance(write, _Connection)]
+        if generations or (events and not deferred):
+            async with self._uow_factory() as uow:
+                for write in writes:
+                    if isinstance(write, _Connection):
+                        config = write.config
+                        await uow.mcp_servers.record_catalog(
+                            config.tenant_id,
+                            config.server_id,
+                            write.report.catalog_hash,
+                            self._catalog_records(write),
+                        )
+                    elif not deferred:
+                        await self._append_event(uow, session_id, *write)
+        if deferred:
+            self._pending_events.setdefault(session_id, []).extend(events)
+        self._recorded_generations.update(self._generation(write) for write in generations)
 
     @staticmethod
     def _resource_spec(config: MCPServerConfig, catalog_hash: str) -> ToolSpec:
@@ -1148,20 +1179,31 @@ class MCPRuntime:
         payload: dict[str, Any],
     ) -> None:
         async with self._uow_factory() as uow:
-            await uow.events.append(
-                NewEvent(
-                    session_id=session_id,
-                    run_id=None,
-                    event_type=event_type,
-                    actor_type="runtime",
-                    payload=payload,
-                )
+            await self._append_event(uow, session_id, event_type, payload)
+
+    @staticmethod
+    async def _append_event(
+        uow: RepositoryUnitOfWork, session_id: UUID, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=None,
+                event_type=event_type,
+                actor_type="runtime",
+                payload=payload,
             )
+        )
 
     async def activate_session(self, session_id: UUID) -> None:
+        """Write the events a new session's preparation held, in one transaction."""
         self._deferred_events.discard(session_id)
-        for event_type, payload in self._pending_events.pop(session_id, []):
-            await self._persist_event(session_id, event_type, payload)
+        pending = self._pending_events.pop(session_id, [])
+        if not pending:
+            return
+        async with self._uow_factory() as uow:
+            for event_type, payload in pending:
+                await self._append_event(uow, session_id, event_type, payload)
 
     async def _release_connection(self, connection: _Connection) -> None:
         """Drop credential-bearing clients through the SDK's owned cleanup path."""
