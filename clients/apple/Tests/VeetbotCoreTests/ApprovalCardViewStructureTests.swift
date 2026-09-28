@@ -162,6 +162,7 @@ import Testing
         #expect(!cardSource.contains(".arguments"))
     }
 
+    /// Website quotes stay verbatim while the task scope and decisions remain visible.
     @Test
     func websiteTextUsesVerbatimRenderingCappedAtThreeLines() throws {
         let cardSource = try source("Veetbot/Views/BrowserActionApprovalCard.swift")

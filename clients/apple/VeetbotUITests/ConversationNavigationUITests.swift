@@ -950,7 +950,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
     }
 
-    /// ADR-0129: a `browser.act` card offers Allow for this task; the owner
+    /// ADR-0129: a `browser.act` card offers Allow all actions for this task; the owner
     /// confirms the server's offer text, the resolve repeats the offer's scope
     /// (the fixture refuses anything else), the banner counts the permission,
     /// and Stop ends it without a confirmation.

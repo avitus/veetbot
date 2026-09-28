@@ -12,6 +12,7 @@ struct BrowserActionApprovalCard: View {
     @State private var denialReason = ""
     @State private var confirmingTask = false
 
+    /// Show the action and server-provided permission scope before an owner decides.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Website action", systemImage: "hand.raised.fill")
@@ -238,6 +239,7 @@ private struct TaskGrantConfirmation: View {
     let allow: () -> Void
     let cancel: () -> Void
 
+    /// Confirm the exact server offer before creating a task permission.
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Allow all actions for this task?")

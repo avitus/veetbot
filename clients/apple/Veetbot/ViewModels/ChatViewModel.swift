@@ -1378,6 +1378,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Resolve the owner's decision and refresh an offer that the server withdrew.
     public func resolveApproval(
         _ approval: ApprovalView,
         decision: ApprovalDecision,

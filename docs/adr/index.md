@@ -146,3 +146,4 @@ implementation without one.
 - [ADR-0135 — OpenAI Chat cache identity and discoverable history boundaries (Proposed)](0135-openai-chat-cache-identity-and-history.md)
 - [ADR-0136 — Synthesize before the identical-tool-call limit (Accepted)](0136-synthesize-before-the-tool-loop-limit.md)
 - [ADR-0137 — Stable tool-output admission before context pressure (Proposed)](0137-stable-tool-output-admission.md)
+- [ADR-0138 — Deny browser popups before creation (Proposed)](0138-browser-popup-denial-before-creation.md)
