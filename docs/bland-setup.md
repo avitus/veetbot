@@ -252,9 +252,11 @@ restart only units supported by the target release and restore its flags and
 proxy configuration.
 
 With an explicitly approved test recipient, verify one inbound call and one
-outbound call. Confirm the greeting, transcription disclosure, voice quality,
-duration limit, exact-brief approval, signed callback, summary, notification,
-deletion, no-answer behavior and post-dispatch termination. A successful dispatch
+outbound call. Confirm the greeting, the truthful answer when asked about AI
+identity or transcription, voice quality, duration limit, exact-brief approval,
+signed callback, summary, notification, deletion, no-answer behavior (a hang-up,
+or the voicemail text the owner approved with the brief as `voicemail_message`)
+and post-dispatch termination. A successful dispatch
 means accepted, not answered. If its outcome is uncertain, reconciliation reads
 provider history and never redials; keep the reservation until resolved.
 

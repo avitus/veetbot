@@ -34,6 +34,10 @@ box.
   inspectable.
 - **Keep you in control.** Deterministic policy rules, scoped credentials,
   isolated execution, and approval prompts guard consequential actions.
+- **Work with your mail and the people in it.** The optional Gmail integration
+  searches, triages, and drafts, sends only what you approve, and can help you
+  unsubscribe from bulk senders; People memory keeps track of who you know and
+  write to, with the evidence behind each fact.
 - **Handle work while you are away.** Durable schedules, offline results, and
   notifications let useful work continue beyond an open chat window.
 - **Meet you where you work.** Use the command line, the versioned HTTP API and
@@ -196,7 +200,8 @@ its own [setup guide](clients/apple/README.md).
 contract tests block network access; only explicitly enabled live tests may
 contact model providers and incur cost. The provider-assisted memory evaluator
 currently makes 25 bounded provider calls (at most USD 1.25 under its per-call
-ceiling).
+ceiling). `make check` does not run the integration suite; hosted CI does, and
+the recipe below runs it locally.
 
 Use one `make check` after the final edits: documentation and website checks
 are included, so no separate repeat is needed on unchanged inputs. Static tests

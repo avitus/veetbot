@@ -210,9 +210,9 @@ with their flag or provider: `skill.manage` with skill authoring, the two
 and worker, the three `people.*` tools with People, `email.context` and
 `email.feedback` with Email mode, and `email.subscriptions` and
 `email.unsubscribe` with email unsubscribe. Historical versions of
-`memory.remember`, `skill.load`, `artifact.export`, `schedule.list`, and
-`delegate.run` register beside their current versions, and step 6 validates
-every registered version.
+`memory.remember`, `skill.load`, `artifact.export`, `schedule.list`,
+`delegate.run`, and `people.history` (ADR-0126) register beside their current
+versions, and step 6 validates every registered version.
 [tool-system.md](tool-system.md) deferred `delegate.run` with the
 general-purpose-subagent extension, and Milestone 13 supplied it:
 [subagents-and-delegation.md](subagents-and-delegation.md) is its checked-in
@@ -602,8 +602,8 @@ which produces a confidently wrong answer with no failure anywhere. The
 cost of this choice is that someone reading the implementation has to
 notice the operators are not `Decimal`'s. A comment covers that.
 
-`//` and `%` with a zero divisor are `division_by_zero`, the same as
-`/`.
+`//` and `%` with a zero divisor, and zero raised to a negative power,
+are `division_by_zero`, the same as `/`.
 
 ### Functions and constants
 

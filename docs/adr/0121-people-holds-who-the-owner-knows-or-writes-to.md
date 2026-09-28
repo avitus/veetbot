@@ -1,6 +1,7 @@
 # ADR-0121: People holds who the owner knows or writes to
 
-- Status: Accepted (authorized by the repository owner, 2026-09-23)
+- Status: Accepted (authorized by the repository owner, 2026-09-23); amended
+  by ADR-0125 and ADR-0126
 - Date: 2026-09-23
 - Related: ADR-0100, ADR-0101, ADR-0113, ADR-0116, ADR-0117; Sections 1, 5,
   7 and 9 of `docs/plan/people-and-relationships.md`

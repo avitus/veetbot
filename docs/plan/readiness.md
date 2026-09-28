@@ -13,12 +13,12 @@ the corpus runs out?
 The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
-were written. The present answer is different: Milestones 0 through 12 are
-complete, and Milestone 13 subagents and delegation is the next sequential,
-fully specified milestone. Milestone 16 memory evaluation and lifecycle
-completed on 2026-08-23 as a separately authorized parallel workstream.
-Milestones 17 through 21 are also authorized parallel workstreams with
-complete designs and registered gates.
+were written. The present answer is different: Milestones 0 through 13 are
+complete, and Milestone 14 inbound surfaces and pairing is the next sequential,
+fully specified milestone. Milestones 16, 17, 19, 20, 22, 23, and 29 completed
+as separately authorized parallel workstreams; Milestones 18, 21, and 24
+through 31 are authorized parallel workstreams in progress, each with a
+complete design and registered gates.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -88,17 +88,25 @@ rather than smoothed.
 | 10 | Memory maturation, self-authored skills, web access, browser automation | Complete | 38 | Tenant activation remains roadmap item B1 (ADR-0061) |
 | 11 | Scheduled runs | Complete | 23 | Nothing |
 | 12 | Notifications and device identity | Complete | 20 | The Apple push key and capability are owner actions outside the corpus |
-| 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
+| 13 | General-purpose subagents and delegation | Complete | 21 | Nothing; the delegating re-run scored above the failed single-agent trajectory, and tenant activation stays default-off |
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
 | 16 | Memory evaluation and lifecycle | Complete | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
-| 17 | Memory read API and browser | Authorized | 10 | Nothing; the owner decided on 2026-08-23 to expose the three provenance fields, so the projection carries twenty-six fields |
-| 18 | First-class email integration | Authorized | 13 | Nothing in the corpus; OAuth consent and the real-mailbox smoke are owner actions outside it |
-| 19 | Conversational schedule creation | Authorized | 5 | Nothing; the surface is deliberately limited to approved one-time creation |
-| 20 | Calendar recurrence and conversational schedules | Authorized | 6 | Nothing; ADR-0073 fixes the monthly, yearly, and recurring-tool semantics |
-| 21 | Adaptive memory distillation | Authorized | 29 | Nothing in the corpus; the three-arm live evidence for the production tuple was published on 2026-09-03 |
-| 22 | Persona surface and curated belief promotion | Authorized | 14 | Nothing; ADR-0079 fixes the human-only promotion boundary |
-| 23 | Conversational schedule lifecycle | Authorized | 12 | Nothing; ADR-0080 and ADR-0088 fix discovery, approval, lifecycle, and update semantics |
+| 17 | Memory read API and browser | Complete | 10 | Nothing; the owner decided on 2026-08-23 to expose the three provenance fields, so the projection carries twenty-six fields |
+| 18 | First-class email integration | Authorized | 17 | Nothing in the corpus; OAuth consent and the real-mailbox smoke are owner actions outside it |
+| 19 | Conversational schedule creation | Complete | 5 | Nothing; the surface is deliberately limited to approved one-time creation |
+| 20 | Calendar recurrence and conversational schedules | Complete | 6 | Nothing; ADR-0073 fixes the monthly, yearly, and recurring-tool semantics |
+| 21 | Adaptive memory distillation | Authorized | 31 | Nothing in the corpus; the three-arm live evidence for the production tuple was published on 2026-09-03 |
+| 22 | Persona surface and curated belief promotion | Complete | 14 | Nothing; ADR-0079 fixes the human-only promotion boundary |
+| 23 | Conversational schedule lifecycle | Complete | 12 | Nothing; ADR-0080 and ADR-0088 fix discovery, approval, lifecycle, and update semantics |
+| 24 | SMS through the owner's iPhone | Authorized | 12 | Nothing in the corpus; the physical-iPhone verification is an owner action outside it |
+| 25 | WhatsApp business surface | Authorized | 12 | Nothing in the corpus; the Meta ceremony, template approval, and live-number smoke are owner actions outside it |
+| 26 | Client modes and adaptive email experience | Authorized | 32 | Nothing in the corpus; the private quality evaluations and two-account acceptance need the owner |
+| 27 | Bland calling and public reception | Authorized | 14 | Nothing in the corpus; the provider dashboard and live-call checks are owner actions outside it |
+| 28 | People and relationship memory | Authorized | 36 | Nothing in the corpus; every gate binding is still pending, and quality evaluation needs the owner |
+| 29 | Chat thread folders | Complete | 17 | Nothing; ADR-0110 adds the typed-judgment port and its matcher |
+| 30 | Advisory approval layer | Authorized | 5 | Nothing in the corpus; threshold calibration and the enforce decision need the owner |
+| 31 | Email unsubscribe assistance | Authorized | 20 | Nothing in the corpus; the real-mailbox smoke is an owner action outside it |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -478,9 +486,9 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1217-1218` and the resolve at
-`policy-and-approvals.md:1245`, and one reference in
-`runtime-loop.md:1239` to `POST /runs/{id}/input` that routed to an
+at `policy-and-approvals.md:1221-1222` and the resolve at
+`policy-and-approvals.md:1249`, and one reference in
+`runtime-loop.md:1240` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -987,7 +995,7 @@ That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1816`, and the sibling join
-at `runtime-loop.md:1197` reads it. Restricted context is
+at `runtime-loop.md:1198` reads it. Restricted context is
 `context-engine.md:493`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
@@ -996,7 +1004,7 @@ gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:1052`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
-`runtime-loop.md:1204`: *"the parent's `deadline_at` is copied onto
+`runtime-loop.md:1205`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:1048`. Two are partial: the explicit objective has a
@@ -1120,7 +1128,7 @@ as a production APNs target and the authenticated test-notification route
 delivered the Test notification alert. The activation does not change the
 milestone's repository completion contract or its default-off design boundary.
 
-## Milestone 13: subagents and delegation, authorized and specified
+## Milestone 13: subagents and delegation, complete
 
 [subagents-and-delegation.md](subagents-and-delegation.md) supplies the four
 items this review measured as partial or absent under Milestone 10 and
@@ -1138,10 +1146,12 @@ admitted from a real failed trajectory and a two-arm case 32, and twenty-one
 hard gates in the `delegate` area cover the rest. ADR-0063 records the
 decisions.
 
-The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. What remains outside the
-corpus is the owner's failed trajectory for the capability scenario, and the
-verified ceiling, which advances in order.
+The readiness verdict is therefore **Complete**: there was no unnamed design
+choice between the corpus and the first red tests, the owner's failed
+trajectory was admitted as the capability scenario, and the delegating re-run
+scored above it. Pull request 72 passed hosted CI and a clean final review on
+2026-08-27; recorded on 2026-09-28, that advanced the verified ceiling to
+Milestone 13 and 268 gates.
 
 ## Milestone 14: inbound surfaces and pairing, authorized and specified
 
@@ -1161,8 +1171,8 @@ area; ADR-0064 records the decisions.
 
 The readiness verdict is therefore **Authorized**: there is no unnamed design
 choice between the corpus and the first red tests. What remains outside the
-corpus is the owner's bot and its private token file, and Milestone 12
-landing first.
+corpus is the owner's bot and its private token file; every milestone before
+it has now completed.
 
 ## Milestone 15: operational hardening, authorized and specified
 
@@ -1335,7 +1345,7 @@ overlaps this milestone carries — the policy condition, the configuration
 surface, and the MCP adapter's non-idempotent failure mapping — are named in
 the ADR rather than discovered in review.
 
-## Milestone 19: conversational schedule creation, authorized and specified
+## Milestone 19: conversational schedule creation, complete
 
 [scheduling.md](scheduling.md#model-callable-creation) closes the
 specific gap between two already delivered capabilities: Milestone 11 exposed
@@ -1355,12 +1365,13 @@ notification path is unchanged: the scheduled run reaches an ordinary
 terminal event, and the Milestone 12 outbox wakes the client with its existing
 content-free payload.
 
-The readiness verdict is **Authorized**: ADR-0072, the five new
-`gate.schedule.*` entries, and the Milestone 19 census row specify the whole
-surface. Recurring creation and every other schedule lifecycle operation
+The readiness verdict is **Complete**: ADR-0072, the five new
+`gate.schedule.*` entries, and the Milestone 19 census row specified the whole
+surface, and pull requests 64 and 66 delivered it with hosted CI and a clean
+review. Recurring creation and every other schedule lifecycle operation
 remain HTTP-only rather than becoming implicit parts of the model tool.
 
-## Milestone 20: calendar recurrence and conversational schedules, authorized and specified
+## Milestone 20: calendar recurrence and conversational schedules, complete
 
 The owner authorized the calendar-recurrence part of roadmap item B5 on
 2026-08-27 after identifying daily, weekly, monthly, and yearly schedules as
@@ -1380,9 +1391,9 @@ and content-free outcome notification remain unchanged. The HTTP create and
 update routes accept the same widened domain union without a new route, table,
 migration, scheduler, or queue.
 
-The readiness verdict is **Authorized**: ADR-0073, six new
-`gate.schedule.*` entries, and the Milestone 20 census row specify the complete
-surface. Arbitrary cron or RFC 5545 input, interval multipliers,
+The readiness verdict is **Complete**: ADR-0073, six new
+`gate.schedule.*` entries, and the Milestone 20 census row specified the complete
+surface, and pull request 74 delivered it with hosted CI and a clean review. Arbitrary cron or RFC 5545 input, interval multipliers,
 continuous-session recurrence, dependency graphs, and delegated scopes remain
 explicit deferrals rather than unnamed choices. Lifecycle tools entered
 Milestone 23 on 2026-09-02.
@@ -1428,7 +1439,7 @@ memory providers, temporal graphs, global consolidation, and a
 public write API remain deferred; persona editing has since entered as
 Milestone 22 (ADR-0079).
 
-## Milestone 22: the persona surface, authorized and specified
+## Milestone 22: the persona surface, complete
 
 On 2026-09-01 the owner authorized Milestone 22, the persona surface and
 curated belief promotion, as a seventh parallel workstream. The feature is
@@ -1450,14 +1461,14 @@ entry stands. The write surfaces are the `agent persona` CLI, six
 a native editor; the memory read API gains no verb, and secret refusal and
 injection scanning guard the row's content on the way in and the way out.
 
-The readiness verdict is **Authorized**: ADR-0079, fourteen new
+The readiness verdict is **Complete**: ADR-0079, fourteen new
 `gate.persona.*` entries in an area of their own, the Milestone 22 census
 row, a five-step build sequence, and the entry-condition adjustment recorded
-in the ADR specify the workstream before production-code changes begin.
+in the ADR specified the workstream, and pull request 82 delivered it.
 Automatic promotion at any threshold, belief writes over HTTP, and per-agent
 persona variants remain excluded.
 
-## Milestone 23: conversational schedule lifecycle, authorized and specified
+## Milestone 23: conversational schedule lifecycle, complete
 
 On 2026-09-02 the owner authorized conversational pause, resume, and delete
 after a failed briefing auto-paused and the agent honestly reported that it had
@@ -1482,10 +1493,11 @@ no-backfill resume, state-idempotent lifecycle methods, and schedule/run
 cancellation separation remain authoritative. Conversational “delete” means
 terminal cancellation and preserves the retained audit history.
 
-The readiness verdict is **Authorized**: ADR-0080, ADR-0088, twelve total
+The readiness verdict is **Complete**: ADR-0080, ADR-0088, twelve total
 `gate.schedule.*` entries (five added by schedule update), the Milestone 23
 census row, a three-step build extension, closed schemas, and explicit failure
-and retry behavior specify the workstream before production-code changes begin.
+and retry behavior specified the workstream, and pull requests 89 and 98
+delivered it.
 Occurrence and run history
 tools, hard deletion, delegated scopes, new cadence kinds, native lifecycle
 controls, and model control of execution authority or limits remain excluded.
@@ -1875,8 +1887,8 @@ thirty-day aggregate automatic-email budgets, and implementation as a new
 parallel milestone on 2026-09-11 under ADR-0092. The canonical
 [email-experience.md](email-experience.md) declares thirty-two blocking gates.
 Its readiness verdict is **Authorized and specified; implementation in progress**.
-No pending implementation or private quality evidence is marked complete and the
-verified ceiling remains Milestone 12. It reuses the Gmail MCP boundary, shared
+No pending implementation or private quality evidence is marked complete, and the
+milestone does not move the verified sequential ceiling. It reuses the Gmail MCP boundary, shared
 agent/persona/memory, ordinary durable worker and approval lifecycle while
 explicitly extending the email application surface and evaluated semantic source
 policy. Live owner judgments, account smoke and production delivery remain
@@ -1886,7 +1898,8 @@ external verification requirements rather than design omissions.
 
 The owner approved [bland-calling.md](bland-calling.md) on 2026-09-11 under
 ADR-0097. Fourteen gates are registered. This independent workstream remains
-in progress; number setup and authorized live evidence are required for activation.
+in progress; calling is active in production, and the provider dashboard checks,
+the remaining live checks, and the two pending gate bindings are still required.
 
 ## Milestone 28: People and relationship memory
 
@@ -1901,7 +1914,7 @@ lands; no quality or production requirement is marked complete by admission.
 ADR-0101 makes all implemented People features available by default. Pending
 quality measurements do not gate runtime functionality or release.
 
-## Milestone 29: Chat thread folders
+## Milestone 29: Chat thread folders, complete
 
 The owner authorized [thread-folders.md](thread-folders.md) on 2026-09-16
 under ADR-0102. Twelve gates are registered in a new `gate.folder.*` area for
@@ -1910,8 +1923,8 @@ eligibility, the bounded open set, durable decline, withdrawal, grounded
 grouping with a deterministic fallback, atomic acceptance, exact scopes under
 the flag, content-free prompts and logs, and native degradation. The design
 touches no roadmap item: it adds no embedding, no retrieval arm and no memory
-read. Every gate is bound to an executable check as of 2026-09-16; hosted CI,
-review and delivery evidence remain open and the verified ceiling remains 12.
+read. Every gate is bound to an executable check as of 2026-09-16, and pull
+request 118 delivered the milestone with hosted CI and a clean review.
 
 ADR-0110 amended the milestone on 2026-09-19. [typed-judgment.md](typed-judgment.md)
 designs the typed-judgment port, its value types, the TypeSafe Jev adapter's
@@ -1924,7 +1937,8 @@ registers no model profile, so B2's model routing stays deferred, it adds no
 embedding, so B6 is unamended, and the policy advisory layer stays in B8 until
 its own policy ADR. The four `gate.judgment.*` gates and
 `gate.folder.judgment_matching` are bound to executable checks as of
-2026-09-20.
+2026-09-20, and pull request 127 delivered them with hosted CI and a clean
+review on 2026-09-21. The readiness verdict is therefore **Complete**.
 
 ## Milestone 30: Advisory approval layer
 
@@ -1946,8 +1960,8 @@ composes without changing any caller does not hold for an advisor whose
 answer can differ between calls. Every gate is bound to an executable check
 as of 2026-09-20. ADR-0111's amendment of the same day moves observing to an
 environment flag, because any profile change moves the policy version the
-memory-formation release evidence is bound to. The verified ceiling remains
-12.
+memory-formation release evidence is bound to. The milestone does not move
+the verified ceiling.
 
 ## Milestone 31: Email unsubscribe assistance
 
@@ -1965,4 +1979,5 @@ roadmap item: every action keeps its approval, nothing runs unattended, and
 no new Google permission is requested. Its one posture change, a dedicated
 public-HTTPS egress transport for a single tool, is owned by ADR-0112
 decision 5. Nineteen gates bind executable checks as of 2026-09-20; integrated
-release evidence remains pending, and the verified ceiling remains 12.
+release evidence remains pending, and the milestone does not move the verified
+ceiling.

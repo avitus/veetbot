@@ -18,7 +18,7 @@ The owner approved implementation on 2026-09-15. This document specifies
 [ADR-0100](../adr/0100-people-and-relationship-memory.md). It expands the
 [engineering plan](engineering-plan.md) only for People-specific identity,
 temporal relationships, person-linked history, and governed People edits.
-The verified sequential ceiling stays at Milestone 12. Historical imports,
+Milestone 28 does not move the verified sequential ceiling. Historical imports,
 provider evaluation spend, PR creation, merging, and deployment retain the
 explicit scope described below. The implementation and its 36 gates remain
 in progress until their evidence is complete.
@@ -826,7 +826,10 @@ history coverage, per-stage cost, and erasure backlog. Keep “stored,” “lin
 “eligible for current recall,” and “actually injected” distinct.
 
 The operator CLI provides `agent people list`, `get`, `history`,
-`diagnose`, `merge`, `split`, `forget`, and `import` subcommands. These must call
+`diagnose`, `merge`, `split`, `undo`, `forget`, `import`, and `import-status`
+subcommands, plus `link-existing`, `repair-directory` (ADR-0121), `dedupe`
+(ADR-0125), and the signed erasure-recovery pair `export-erasure` and
+`restore-erasure`. These must call
 the same services as HTTP and use explicit owner selection for destructive
 operations. A diagnostic should explain why a person is
 missing from a reply: absent source, pending extraction, unresolved identity,

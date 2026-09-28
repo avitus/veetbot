@@ -11,12 +11,32 @@ milestone appears here under the wrong group, under a stale title, or with a
 checklist that disagrees with that file's `open_items`. Update the state file
 first; this page follows it.
 
-The **verified gate ceiling is Milestone 12** (247 cumulative gates). The
+The **verified gate ceiling is Milestone 13** (268 cumulative gates). The
 parallel workstreams below advance their own gates independently but never
-move that ceiling; it advances only as Milestones 13 through 15 complete in
+move that ceiling; it advances only as Milestones 14 and 15 complete in
 order. Which gate belongs to which milestone is the
 [milestone map](../plan/milestone-map.md); the authoritative acceptance
 criteria live in the [engineering plan](../plan/engineering-plan.md).
+
+## At a glance
+
+State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
+runs as release `20260928-202932-e55551f`. Twenty-one of thirty-two milestones
+are complete; ten are in progress and one is authorized but not started.
+
+| Milestone | State | What remains | Who acts |
+| --- | --- | --- | --- |
+| 14 Inbound surfaces | In progress | Telegram smoke; 16 open review findings | Owner; engineering |
+| 15 Operational hardening | Not started | All sixteen gates | Engineering, then owner |
+| 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
+| 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
+| 24 SMS | In progress | Physical-iPhone verification | Owner |
+| 25 WhatsApp | In progress | Meta ceremony, live smoke; 16 open review findings | Owner; engineering |
+| 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance; expired-body drafting | Owner with engineering |
+| 27 Bland calling | In progress | Dashboard and live checks; final-head review | Owner; engineering |
+| 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
+| 30 Advisory approval | In progress | Threshold calibration and enforce decision; final-head review | Owner; engineering |
+| 31 Email unsubscribe | In progress | Simulator journeys, mailbox smoke; final-head review | Engineering; owner |
 
 ## Complete
 
@@ -34,39 +54,52 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
 - **Milestone 11 — Scheduled runs**
 - **Milestone 12 — Notifications and device identity** — completed with
   production APNs delivery owner-verified on a physical iPhone.
+- **Milestone 13 — General-purpose subagents and delegation** — completed on
+  2026-08-27, when pull request 72 passed hosted CI and a clean CodeRabbit
+  review on its final head; the delegating arm scored above the failed
+  single-agent baseline. Recorded on 2026-09-28, moving the verified ceiling
+  to Milestone 13.
 - **Milestone 16 — Memory evaluation and lifecycle** — the first parallel
   workstream to complete; hosted review finished clean on 2026-08-23.
 - **Milestone 17 — Memory read API and browser** — the second completed
   parallel workstream; hosted review finished clean on 2026-08-24, followed by
   supplemental end-to-end PostgreSQL and native navigation coverage.
+- **Milestone 19 — Conversational schedule creation** — hosted CI and review
+  finished clean on pull requests 64 and 66 (2026-08-25).
+- **Milestone 20 — Calendar recurrence and conversational schedules** — hosted
+  CI and review finished clean on pull request 74 (2026-08-28).
+- **Milestone 22 — Persona surface and curated belief promotion** — hosted CI
+  and review finished clean on pull request 82 (2026-09-01).
+- **Milestone 23 — Conversational schedule lifecycle** — hosted CI and review
+  finished clean on pull requests 89 and 98 (2026-09-03 and 2026-09-06).
+- **Milestone 29 — Chat thread folders** — hosted CI and review finished clean
+  on pull requests 118 and 127, including the ADR-0110 typed-judgment
+  amendment, and the owner activated folders in production (2026-09-21).
 
 Evidence for completed milestones lives in
-[`verification-history.yaml`](verification-history.yaml).
+[`verification-history.yaml`](verification-history.yaml). Milestones 13, 19,
+20, 22, 23, and 29 met their completion rules weeks before this page caught
+up; their status was recorded on 2026-09-28 from the pull requests' review and
+hosted-CI records.
 
 ## In progress
 
-### Milestone 13 — General-purpose subagents and delegation
-
-The next sequential milestone. The delegation domain, the ledger persistence,
-`delegate.run` with its one-transaction materializer, child-run suspension,
-join, and the cancel cascade are implemented, and all twenty-one registered
-gates pass locally. Remaining:
-
-- [ ] Hosted CI on the milestone's final head
-- [ ] CodeRabbit review loop on the dev to main pull request (build step 7)
-
 ### Milestone 14 — Inbound surfaces and pairing
 
-The channel-neutral surface model, five durable persistence ports, one-time
-pairing and lockout ceremony, session-key routing, shared ordinary-run
-submission, Telegram long polling, replies, notifications, approval and input
-round-trips, API and CLI management surfaces, admission limits, and isolated
-surface role are implemented. All twenty-one `gate.surface.*` entries now
-resolve to live checks and pass locally, including the PostgreSQL migration,
-RLS, admission, and crash/re-delivery lane. Remaining:
+The next sequential milestone. The channel-neutral surface model, five durable
+persistence ports, one-time pairing and lockout ceremony, session-key routing,
+shared ordinary-run submission, Telegram long polling, replies, notifications,
+approval and input round-trips, API and CLI management surfaces, admission
+limits, and isolated surface role are implemented. All twenty-one
+`gate.surface.*` entries resolve to live checks and pass locally, including the
+PostgreSQL migration, RLS, admission, and crash/re-delivery lane. The code
+reached `main` in pull request 104, which merged with sixteen CodeRabbit
+findings on the surface code unresolved, among them an authorization-bypass
+finding and three sensitive-data-exposure findings. Remaining:
 
+- [ ] Fix surface admission on PostgreSQL, where the shipped default agent sets no limits.max_cost, so every paired Telegram or WhatsApp message ends REJECTED_ADMISSION (surface.cost_reservation_missing); choose a surface per-run cost cap or a default-agent max_cost, then remove the strict xfail on tests/integration/test_golden_surface_chat.py::test_the_shipped_default_agent_admits_a_paired_telegram_message
 - [ ] Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke
-- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+- [ ] Resolve the sixteen CodeRabbit findings pull request 104 left open on the surface code, then pass hosted CI and the CodeRabbit review loop on a dev to main pull request
 
 ### Milestone 25 — WhatsApp business surface
 
@@ -75,22 +108,15 @@ seam: its loopback webhook verifies the handshake and raw-body signature,
 normalizes Meta message IDs into shared receipts, confines outbound calls to
 the Meta Graph origin, and enforces template-only delivery outside the
 twenty-four-hour window. All twelve `gate.whatsapp.*` entries resolve to live
-checks and pass locally. The
+checks and pass locally. It shipped in pull request 104 with Milestone 14 and
+shares its unresolved review findings. The
 [WhatsApp integration runbook](../whatsapp-integration-runbook.md) owns the
 remaining operator ceremony. Remaining:
 
+- [ ] Fix surface admission on PostgreSQL, where the shipped default agent sets no limits.max_cost, so every paired Telegram or WhatsApp message ends REJECTED_ADMISSION (surface.cost_reservation_missing); choose a surface per-run cost cap or a default-agent max_cost, then remove the strict xfail on tests/integration/test_golden_surface_chat.py::test_the_shipped_default_agent_admits_a_paired_telegram_message
 - [ ] Complete the owner Meta ceremony and obtain approval for the content-free utility template
 - [ ] Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
-- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
-
-### Milestone 19 — Conversational schedule creation
-
-A parallel workstream, deliberately narrow: one-time schedule creation through
-the model-callable `schedule.create` tool. Its five gates, complete non-live
-suite, PostgreSQL lane, and clarification-to-approval journey pass locally.
-Remaining:
-
-- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+- [ ] Resolve the sixteen CodeRabbit findings pull request 104 left open on the surface code, then pass hosted CI and the CodeRabbit review loop on a dev to main pull request
 
 ### Milestone 18 — First-class email integration
 
@@ -101,22 +127,15 @@ repository check pass; ADR-0085 owns the four multi-account additions. The
 final head of
 [pull request 73](https://github.com/avitus/veetbot/pull/73) passed hosted CI,
 GitGuardian, and CodeRabbit with every review thread resolved before merge
-([Glen review](https://app.tryglen.com/avitus/veetbot/pull/73)). Follow the
+([Glen review](https://app.tryglen.com/avitus/veetbot/pull/73)). The
+multi-account extension reached `main` in pull request 94, which merged with
+one CodeRabbit finding unresolved and still unfixed. Follow the
 [Gmail integration runbook](../gmail-integration-runbook.md) for the remaining
 owner-controlled work. Remaining:
 
 - [ ] Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
 - [ ] Work-account bootstrap, production manifest activation, and work-only draft smoke
-- [ ] Hosted CI and the CodeRabbit review loop for the multi-account extension
-
-### Milestone 20 — Calendar recurrence and conversational schedules
-
-A fifth parallel workstream extending the existing scheduler with monthly and
-yearly civil-calendar rules and widening `schedule.create` to daily, weekly,
-monthly, and yearly recurrence. Its six gates, complete non-live suite, and
-fresh PostgreSQL integration lane pass locally. Remaining:
-
-- [ ] Hosted CI and the CodeRabbit review loop on the dev to main pull request
+- [ ] Resolve the CodeRabbit finding pull request 94 left open (a root-level --account-id never reaches bootstrap), then pass hosted CI and the CodeRabbit review loop for the multi-account extension
 
 ### Milestone 21 — Adaptive memory distillation
 
@@ -153,36 +172,14 @@ on 2026-09-10 lifted holdout hypothesis recall to 0.800 and the development
 corpus to full direct recall, but the holdout still failed on direct recall
 and precision. The owner then set a recall-first bar (`distillation-scorer@7`,
 a 0.75 holdout precision floor) and gating over three pooled repeats; the run
-at `0e3ca2f` passed and its `formation@9` artifact is bundled. Remaining:
+at `0e3ca2f` passed and its `formation@9` artifact is bundled. It reached
+`main` in pull request 104 and was first deployed by the next merge; the
+artifact stays bound to the unchanged shipped policy, but no production
+selection audit naming `formation@9` has been recorded since. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
 - [ ] Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
 - [ ] Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093; audit scorer semantics and compare Sol/Astra under controlled reasoning settings before changing the memory tuple with new activation evidence.
-
-### Milestone 22 — Persona surface and curated belief promotion
-
-A seventh parallel workstream: an owner-edited persona document rendered as a
-trusted Region A prefix row, with curated promotion — a formed belief reaches
-instruction text only through the owner's explicit affirmation of a governed
-nomination. All fourteen `gate.persona.*` checks, the full local repository
-check, the Apple package lane, and a fresh PostgreSQL lane pass locally.
-Remaining:
-
-- [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
-
-### Milestone 23 — Conversational schedule lifecycle
-
-An eighth parallel workstream adding bounded summary discovery and
-approval-gated update, pause, resume, and terminal cancellation through the
-existing schedule service. All twelve `gate.schedule.*` checks pass locally,
-covering immutable content/cadence edits with preserved execution authority,
-no-backfill resume, audit-preserving cancellation, exact-scope denial,
-fail-closed revision handling, and idempotent retry. ADR-0089 separately adds a
-Current/Recent History native split and thirty-day maintenance retention for
-terminal schedule-owned state without adding a milestone gate or a
-conversational hard-delete capability. Remaining:
-
-- [ ] Run hosted CI and the CodeRabbit review loop on the dev-to-main pull request
 
 ### Milestone 24 — SMS through the owner's iPhone
 
@@ -203,14 +200,15 @@ The owner approved the complete email experience and aggregate automatic-email
 budgets on 2026-09-11 under ADR-0092. Twenty-seven of its thirty-two registered
 gates now bind implemented backend and native acceptance checks; four private
 quality gates and the integrated release gate remain pending. No private quality or owner-smoke
-evidence is claimed. The milestone stays in progress and the verified ceiling
-remains Milestone 12. Remaining:
+evidence is claimed. The milestone stays in progress and does not move the
+verified ceiling. Remaining:
 
 - [ ] Calibrate aggregate cost and performance with authorized representative mailbox work
 - [ ] Execute frozen private importance, reply relevance and writing-style evaluations with the owner
 - [ ] Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
 - [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
 - [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
+- [ ] Make reply drafting refetch a thread whose retained body has expired, as email-experience.md requires; today the draft run fails as internal_error (EmailToolError) before any model request, so tests/unit/test_email_scan_cost.py::test_draft_generation_never_receives_an_expired_body passes vacuously
 
 ### Milestone 27 — Bland calling and public reception
 
@@ -221,6 +219,9 @@ Live inbound calls and one owner-approved outbound call are retained, readable f
 Chat and announced to every device. Reaching that point took two fixes: ADR-0105's
 tool-definition budget and the missing `call_finished` lock-screen alert. Bland's
 signed post-call webhook has been verified in production against the raw bytes.
+Every pull request that carried calling to `main` passed hosted CI and a clean
+review; the final-head review waits for the two pending gates,
+`gate.call.admission_bounds` and `gate.call.live_release`, to be bound.
 
 - [ ] Verify provider-side admission controls and account-level memory or persona attachments in the Bland dashboard
 - [ ] Live approval denial, no-answer, post-dispatch cancellation and owner deletion checks
@@ -232,30 +233,16 @@ Thirty-six gates; independent workstream under ADR-0100.
 
 ADR-0101 makes the complete implemented Milestone 28 People experience available
 by default. Quality measurements remain open evidence work, without gating runtime
-functionality or release. Production delivery still follows exact-head CI/review.
+functionality or release. None of the thirty-six `gate.people.*` registry
+entries is bound to an executable check yet; every one still points at the
+pending check. Production delivery still follows exact-head CI/review.
 
-
+- [ ] Bind each of the thirty-six gate.people.* registry entries to an executable check; every one still points at the pending check
 - [ ] Review complete temporal/source-erasure gate coverage and worst-case initial-fence latency
 - [ ] Finish native accessibility, load/contention and signed restore verification
 - [ ] Independently reviewed labels, version-bound quality and private owner evaluation evidence
 - [ ] Private quality evaluation of the generated correspondence summaries that ADR-0126 activated ahead of it
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
-
-### Milestone 29 — Chat thread folders
-
-Seventeen gates; independent workstream under ADR-0102, amended by ADR-0110.
-Flat, single-parent folders over chat conversations as server-owned state; a
-maintenance pass proposes groupings the owner accepts or declines; nothing
-files a conversation without the owner's acceptance. The schema, both store
-adapters, the manual operations, the proposal lifecycle, the grounded grouping
-with its lexical fallback, the routes behind the flag and the native sidebar
-are implemented with their twelve gates bound to executable checks. ADR-0110
-admitted the typed-judgment port and an optional judgment matcher on
-2026-09-19. The port, the TypeSafe adapter, the fake, the default-off selector
-and the judgment matcher with its two knobs are implemented, and all seventeen
-gates are bound to executable checks. The matcher is off in every deployment.
-
-- [ ] Exact-head hosted CI and explicitly authorized review evidence
 
 ### Milestone 30 — Advisory approval layer
 
@@ -265,8 +252,9 @@ allowed web search, page fetch or browser navigation to an approval; it never
 denies, abstains on any failure, and is consulted once per invocation. The
 port, the composite engine, the judgment-backed advisor and the pipeline's
 recovery policy are implemented with all five gates bound to executable
-checks. Observing is an environment flag that moves no policy version;
-enforcing is the profile value and does. The layer is off in every deployment.
+checks, and reached `main` in pull request 127 with a clean review. Observing
+is an environment flag that moves no policy version; enforcing is the profile
+value and does, and the shipped profile keeps it disabled.
 
 - [ ] Calibrate the advisor's thresholds while observing, then decide whether to enforce
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
@@ -277,11 +265,13 @@ Twenty gates; independent workstream under ADR-0112. A header-derived census
 of bulk senders, the authenticated one-click unsubscribe request to a
 server-derived destination through a dedicated public-HTTPS transport, and
 Report spam, `mailto:` and sender-cleanup fallbacks, each behind the owner's
-tap. Nineteen gates bind passing checks; the feature stays default-off.
+tap. Nineteen gates bind passing checks. The milestone reached `main` in pull
+request 131 with a clean review, and its flag was switched on in production by
+2026-09-21, ahead of the owner's real-mailbox smoke.
 
-- [ ] Add and pass simulator UI journeys for the native Subscriptions view on iPhone, iPad and Mac
+- [ ] Pass the five native Subscriptions journeys (added 2026-09-28 and passing locally on the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
+- [ ] Show the Subscriptions detail beside its list on regular-width iPad as email-unsubscribe.md requires; the iPad sheet is a 580-point compact-width form sheet, so the detail pushes as on iPhone
 - [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, spam with Not spam, and cleanup
-- [ ] Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED after the smoke
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
 ## Outside a milestone
@@ -291,13 +281,21 @@ ADRs, and specification-versus-code gaps found in completed milestones. It
 mirrors `open_items_outside_milestones` in
 [`project-state.yaml`](project-state.yaml).
 
-- [ ] Owner, after the main pull request carrying ADR-0127 to ADR-0130 merges: confirm deploy-app and deploy-nginx succeeded on the merge commit, and install the macOS TestFlight build on every Mac
+- [ ] Owner: install a macOS TestFlight build carrying ADR-0127 to ADR-0130 (merge a9b81420 or later) on every Mac
 - [ ] Owner: confirm production AUTH_SCOPES contains browser.profile.read, browser.profile.write, browser.grant.read and browser.grant.write
 - [ ] Owner: production acceptance of device sign-in (ADR-0128 V1, V3 and V4; V2 once the iOS build ships)
 - [ ] Owner: once a client build that decodes approve_for_task runs on every device, set BROWSER_TASK_GRANT_SCOPES=https://www.duolingo.com/lesson and BROWSER_TASK_GRANTS_ENABLED=1 for the API and workers
 - [ ] Owner: production acceptance of the task grant (ADR-0129 Validation): one approval runs a lesson while the banner counts actions and minutes; Stop brings the card back; an action outside the lesson, such as a payment or settings control, still asks and says why; activity rows the grant authorized show "Allowed by task permission" and what was clicked or typed. Then measure the budget of the first lesson in a new bound chat (ADR-0130)
 - [ ] Owner: keep BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED unset or true in production; to turn device sign-in off, set it to false in /etc/veetbot/veetbot.env and recreate the browser-profile-service container with the block in docs/deployment.md (a restart keeps the old value)
 - [ ] Tool system: the circuit-breaker section of tool-system.md specifies one counter keyed on name, arguments hash, outcome and reason, but runtime/loop.py keeps separate identical-denial and identical-call counters; change the code or propose an ADR that accepts two (found during ADR-0130)
+- [ ] Command line: engineering-plan.md Section 17 and bootstrap-and-composition.md require `agent chat`, arriving at Milestone 3, but the CLI registers no chat command although Milestone 3 is complete; implement it or propose an ADR that removes it (found in the 2026-09-28 documentation audit)
+- [ ] HTTP API: event-log-and-persistence.md and ADR-0032 decision 9 require `POST /v1/runs/{run_id}/export`, but no such route is mounted and only `agent run export` exists; mount it or propose an ADR that drops it (found in the 2026-09-28 documentation audit)
+- [ ] Owner: accept or reject ADR-0104, ADR-0105, ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138, which are still Proposed although their mechanisms are implemented, specified and on main
+- [ ] Owner decision: the hardline protected_host_path rule blocks .git/config only at the workspace root, so sub/.git/config is not blocked, while .env and ~/.ssh already match at any depth; decide whether it should, knowing that a change to the matcher in policy/hardline.py leaves policy_version unchanged but an edit to hardline.yaml moves it and unbinds the memory-formation release evidence (found in the 2026-09-28 test audit)
+
+The earlier item asking the owner to confirm the ADR-0127 to ADR-0130 deploy
+is closed: after the owner reran the workflow, deploy-app and deploy-nginx
+succeeded on merge `a9b81420` (`outside_milestone_evidence` in the state file).
 
 ## Authorized
 

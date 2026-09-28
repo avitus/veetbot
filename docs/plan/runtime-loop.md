@@ -774,15 +774,16 @@ becoming `RUNNING` again.
 `synthesis_reserve_tool_calls`, and `synthesis_reserve_cost` apply to every run
 kind when positive (ADR-0078, ADR-0115). At the first reached dimension, the
 loop adds a volatile platform instruction to the next request requiring final
-synthesis from evidence already in context. The instruction is not
-checkpointed. A tool call returned while that control is active fails closed
-with `SynthesisReserveViolation` naming the dimension; all-zero reserve fields
-preserve the ordinary loop with one exception: an *exhausted* tool-call budget
+synthesis from evidence already in context. The instruction is not checkpointed.
+A tool call returned while that control is active fails closed with
+`SynthesisReserveViolation` naming the dimension; all-zero reserve fields
+preserve the ordinary loop with two exceptions: an *exhausted* tool-call budget
 always puts the next request into synthesis-only mode, because the alternative
-is a run that can neither call a tool nor be allowed to answer. This is
-separate from hard-limit accounting: the reserve protects a pre-call
-opportunity to synthesize, while `record_*` remains the authoritative post-call
-budget check.
+is a run that can neither call a tool nor be allowed to answer, and so does a
+batch leaving an identical-call count one below its threshold (ADR-0136,
+[tool-system.md](tool-system.md)). This is separate from hard-limit accounting:
+the reserve protects a pre-call opportunity to synthesize, while `record_*`
+remains the authoritative post-call budget check.
 
 The interactive defaults in `runtime/limits.yaml` are 32 steps, 24 model
 calls, 64 tool calls, a model-call reserve of 2 and a tool-call reserve of 4.

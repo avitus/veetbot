@@ -142,7 +142,7 @@ is the same "zero rows updated means stop, not retry" discipline that
 An append that carries no state change has no guarded `UPDATE` to inspect and is
 not subject to the check. The diagnostic `run.fenced` is the case in point: a
 fenced worker performs no transition, no lease release, and no checkpoint write,
-and appends exactly one event, which must commit (`runtime-loop.md:868-877`).
+and appends exactly one event, which must commit (`runtime-loop.md:869-878`).
 
 ### Gaps are normal; missing writes are not
 
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1253-1261`) run over every message body,
+   (`bootstrap-and-composition.md:1272-1280`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1266-1268`).
+(`bootstrap-and-composition.md:1285-1287`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides

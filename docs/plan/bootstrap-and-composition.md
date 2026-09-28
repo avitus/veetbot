@@ -323,7 +323,7 @@ enabled, so it cannot create, alter, or reactivate work that no materializer
 will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
-`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 17,000-token
+`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 22,000-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
 cap. Not one of them differs between two deployments of the same revision.
 They differ between *revisions*, which is another way of saying they belong in
@@ -415,7 +415,7 @@ src/agent_core/
   policy/default.yaml      the v0.1 policy profile
   models/policies.yaml     model_policies and provider profiles
   models/catalog.yaml      aliases, limits, context windows, prices
-  context/plan.yaml        region caps, reserves, snapshot caps, the 17,000 ceiling
+  context/plan.yaml        region caps, reserves, snapshot caps, the 22,000 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
   memory/profiles.yaml     RRF k, decay and usage knobs
@@ -680,7 +680,7 @@ decisions that can be made from configuration alone, before anything is
 built. Authentication configured or fail. Production refuses the development
 sandbox. Production refuses any policy profile, principal, or tenant name
 beginning with `eval.` or `tenant_eval`. The configured context plan's prefix
-classes sum to at most 17,000 tokens. Nothing has been constructed yet, so
+classes sum to at most 22,000 tokens. Nothing has been constructed yet, so
 nothing has to be torn down, which is the entire reason these checks are
 first rather than convenient.
 
@@ -765,7 +765,7 @@ the probe is built from a `Composition` that has no provider client on it.
 | Production refuses the dev sandbox | ADR-0008 | 1 |
 | Production cannot load an eval identity | eval spec | 1 and 4 |
 | Readiness must not call a provider | plan §16 | 5 |
-| Prefix classes fit the 17,000 ceiling | context spec | 1 and per session |
+| Prefix classes fit the 22,000 ceiling | context spec | 1 and per session |
 | Role-conditional composition | runtime spec | 5 |
 | Migrations upgrade cleanly | plan §25 | not startup |
 | A port with no contract module fails | eval spec | build gate |
@@ -1112,14 +1112,27 @@ own heading repeats.
 Milestone 9's human-memory acceptance contract is the exception that later
 proved necessary: [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
 and ADR-0045 add the `agent memory` noun. Its management commands are `list`,
-`get`, `edit`, and `delete`; its diagnostic commands are `formations`, which
-may filter by source session, `diagnose`, which joins one session's formation
-flags, watermarks, provider attempts, audits, and beliefs, and `trace`, which
-reads one principal-scoped retrieval trace. `replay --session --confirm` is an
-operator repair command that reprocesses original source events through the
-ordinary formation service. These remain CLI calls over the ordinary composition
-and repositories. They do not open an HTTP management surface, insert belief
-rows directly, or implement a second runtime loop.
+`get`, `edit`, `delete`, and ADR-0117's `review`; its diagnostic commands are
+`formations`, which may filter by source session, `diagnose`, which joins one
+session's formation flags, watermarks, provider attempts, audits, and beliefs,
+and `trace`, which reads one principal-scoped retrieval trace. `replay
+--session --confirm` is an operator repair command that reprocesses original
+source events through the ordinary formation service. These remain CLI calls
+over the ordinary composition and repositories. They insert no belief rows
+directly and implement no second runtime loop; the HTTP review and deletion
+routes are ADR-0117's, not the CLI's.
+
+Later subject documents add nouns on the same terms, each owned where its
+subject is designed: `agent persona` in
+[persona-surface.md](persona-surface.md), `agent surface` in
+[inbound-surfaces.md](inbound-surfaces.md), `agent people` in
+[people-and-relationships.md](people-and-relationships.md), `agent email
+exclude-bulk` in [email-experience.md](email-experience.md) (ADR-0116), and the
+role entry points `agent execution-service` (ADR-0067) and `agent call-worker`
+and `agent call-ingress` ([bland-calling.md](bland-calling.md)). `agent session
+export-consent` is ADR-0039's, and `agent eval` carries the subcommands
+[evaluation-harness.md](evaluation-harness.md) and the memory and People
+evaluation documents add.
 
 ### Options
 
@@ -1130,7 +1143,8 @@ successful run as unreachable:
 ```text
 --json           machine-readable result on stdout, on read commands
 --session <id>   reuse a session instead of creating one
---role <role>    worker | maintenance, on agent worker
+--role <role>    worker | interactive | async | maintenance | schedule
+                 | notify | surface, on agent worker
 --follow         stream events as they arrive, on agent run events
 --wait-timeout <seconds>
                  positive terminal-state wait, on agent run; default 300
@@ -1140,6 +1154,11 @@ successful run as unreachable:
 consumes when a harness invokes it. `--role` is how the maintenance role gets
 an entry point at all — the plan names `agent worker` and the runtime spec
 names three roles, and one of the three would otherwise be unreachable.
+[scheduling.md](scheduling.md) later split the interactive and async workers
+and added the schedule role, [notifications-and-devices.md](notifications-and-devices.md)
+the notify role, and [inbound-surfaces.md](inbound-surfaces.md) the surface
+role; plain `worker`, the default, is the legacy spelling of the interactive
+worker.
 `--wait-timeout` controls only how long `agent run` waits for a terminal or
 suspended state and its persisted terminal event. Expiration keeps exit code 5
 and prints the durable run identifier; it neither cancels nor fails the run.

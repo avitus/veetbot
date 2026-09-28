@@ -48,19 +48,19 @@ checks it per commit; no trailer means lane A.
 
 | Subject | Document under `docs/plan/` |
 | --- | --- |
-| Startup, configuration, the composition root, the CLI | `bootstrap-and-composition.md` |
+| Startup, configuration, composition root, CLI | `bootstrap-and-composition.md` |
 | Makefile targets, compose, CI, local development | `development-toolchain.md` |
 | The run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
 | Tool registration, validation, execution, MCP | `tool-system.md` |
 | Builtin tools and their classification | `builtin-tools.md` |
 | Provider adapters, streaming, usage, cost | `model-gateway.md` |
 | Policy decisions, hardline rules, approvals | `policy-and-approvals.md` |
-| Events, projections, persistence, the queue | `event-log-and-persistence.md` |
+| Events, projections, persistence, queue | `event-log-and-persistence.md` |
 | Context assembly, budgeting, working state | `context-engine.md` |
 | Memory formation, tiers, consolidation | `memory-formation-and-consolidation.md` |
-| Memory retrieval, ranking, the recall trace | `memory-retrieval-and-ranking.md` |
+| Memory retrieval, ranking, recall trace | `memory-retrieval-and-ranking.md` |
 | Evaluation cases, gates, the harness | `evaluation-harness.md` |
-| HTTP routes, error codes, scopes, the event stream | `http-api-and-streaming.md` |
+| HTTP routes, error codes, scopes, event stream | `http-api-and-streaming.md` |
 | Isolated execution, egress, the artifact store | `sandbox-isolation.md` |
 | Skill packages, the catalog, the authoring loop | `skills.md` |
 | Knowledge documents, ingestion, passage retrieval | `knowledge-documents.md` |
@@ -96,7 +96,7 @@ checks it per commit; no trailer means lane A.
 ## Scope control
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
-- Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 proceed in that order (ADR-0061);
+- Milestones 0 through 13, 16, 17, 19, 20, 22, 23, and 29 are complete. Milestones 14 and 15 proceed in that order (ADR-0061);
   18 through 31 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0111, 0112). Milestone 21 is limited to adaptive
   memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
   the owner's iPhone, 25 to the WhatsApp business surface, 26 to client modes and the email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders and typed judgment, 30 to advisory approval, and 31 to email unsubscribe. Model routing and the plan's remaining roadmap items

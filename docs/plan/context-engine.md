@@ -500,8 +500,8 @@ the prefix is what turns that property into a guarantee about seeding, and it
 needs no gate of its own: the dispensability gate is the test, and it only tests
 anything because the cut is fixed.
 
-**Legacy tool results get deterministic excerpts before selection.** New results
-carry the tool pipeline's persisted `context_content` excerpt alongside their
+**Legacy tool results get deterministic excerpts before selection** (ADR-0137). New
+results carry the tool pipeline's persisted `context_content` excerpt beside their
 canonical content. Both context builders select that excerpt on a deep copy
 before estimation or provider rendering, and clear the alternate field in the
 request. The checkpoint and event retain canonical content for source receipts. For a carried result

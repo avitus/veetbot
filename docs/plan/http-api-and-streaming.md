@@ -1585,8 +1585,8 @@ HTTP specification permits for a server that does not implement ranges.
 ## Browser profiles, authentication, and grants
 
 Milestone 10 adds the fourteen scoped browser routes enumerated in the scope
-table, bringing the current public route surface to thirty-one without changing
-the completed fourteen-route Milestone 5 baseline. The canonical request,
+table, bringing the public route surface at that milestone to thirty-one without
+changing the completed fourteen-route Milestone 5 baseline. The canonical request,
 response, tenancy, secret-exclusion, lifecycle, and idempotency contracts are in
 [browser-automation.md](browser-automation.md#profile-api-contract). Public
 views never include provider references, key versions, lease references,

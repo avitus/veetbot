@@ -686,6 +686,7 @@ normal contract naming review:
 | `/v1/email/threads/{id}/drafts` and draft detail | Start/refine a governed generation run; read/save revisions; discard internal proposals. |
 | `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references. |
 | `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
+| `/v1/email/threads/{id}/discussion`, `/dismiss`, and `/exclude` | Open the thread in Chat once (`email.discussion.opened`, which also needs `session.write`); set or clear handled state at the revision the client saw; exclude the thread as a learning source. |
 | Existing approval routes | Resolve every send once; no alternate direct-send HTTP route. |
 
 The exact platform scopes are `email.read` and `email.write` for application

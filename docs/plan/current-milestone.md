@@ -4,16 +4,17 @@ title: Current Milestone
 
 # Current milestone
 
-- **Active milestone:** Milestone 12 — notifications and device identity — is
-  complete. Milestone 13 — general-purpose subagents and delegation — is the
+- **Active milestone:** Milestone 14 — inbound surfaces and pairing — is the
   next sequential authorized milestone, is specified by
+  [inbound-surfaces.md](inbound-surfaces.md) with twenty-one gates, and is in
+  progress: the Telegram surface is implemented and every registered gate
+  passes locally, while the owner's production Telegram smoke and the sixteen
+  CodeRabbit findings pull request 104 left unresolved on the surface code
+  remain. Milestone 13 — general-purpose subagents and delegation, specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
-  gates, and is in progress: build steps 1 through 5 and the deterministic
-  half of 6 are implemented, and the capability scenario schema admits
-  Milestone 13 while retaining a closed upper bound, with every registered
-  gate resolving to a live, locally passing check. Milestone 14 — inbound surfaces and
-  pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
-  twenty-one gates and follows Milestone 13. Milestone 15 — operational
+  gates — completed on 2026-08-27 when pull request 72 passed hosted CI and a
+  clean CodeRabbit review on its final head; the completion was recorded on
+  2026-09-28. Milestone 15 — operational
   hardening — is specified by
   [operational-hardening.md](operational-hardening.md) with sixteen gates and
   follows Milestone 14; its backup tranche has no dependency on the three
@@ -27,12 +28,12 @@ title: Current Milestone
   third parallel workstream on the same terms, its original shared-file
   touches named in ADR-0071 and its operator-managed multi-account extension
   in ADR-0085. Milestone 19 — conversational schedule creation — is
-  specified by [scheduling.md](scheduling.md) with five gates and is a fourth
-  parallel workstream, limited to one-time creation through the model.
-  Milestone 20 — calendar recurrence and conversational schedules — is
-  specified by [scheduling.md](scheduling.md) with six gates and is a fifth
+  specified by [scheduling.md](scheduling.md) with five gates and was a fourth
+  parallel workstream, limited to one-time creation through the model; it is
+  complete. Milestone 20 — calendar recurrence and conversational schedules —
+  is specified by [scheduling.md](scheduling.md) with six gates and was a fifth
   parallel workstream, adding monthly and yearly rules and conversational
-  creation for all four recurring calendar kinds. Milestone 21 — adaptive
+  creation for all four recurring calendar kinds; it is complete. Milestone 21 — adaptive
   memory distillation — is specified by
   [adaptive-memory-distillation.md](adaptive-memory-distillation.md) with
   thirty-one gates and is a sixth parallel workstream, adding integrated
@@ -40,13 +41,13 @@ title: Current Milestone
   forgetting; ADR-0090 widens its existing source-grounding gate to attributed
   communication without changing the gate count. Milestone 22 — the persona surface and curated belief
   promotion — is specified by [persona-surface.md](persona-surface.md) with
-  fourteen gates and is a seventh parallel workstream, adding an owner-edited
+  fourteen gates and was a seventh parallel workstream, adding an owner-edited
   trusted prefix row that a formed belief reaches only through explicit
-  owner affirmation. Milestone 23 — conversational schedule lifecycle — is
-  specified by [scheduling.md](scheduling.md) with twelve gates and is an eighth
-  parallel workstream, adding summary-only discovery and approval-gated update,
-  pause, resume, and terminal cancellation through the existing schedule
-  service. ADR-0089 separately authorizes current/recent-history native
+  owner affirmation; it is complete. Milestone 23 — conversational schedule
+  lifecycle — is specified by [scheduling.md](scheduling.md) with twelve gates
+  and was an eighth parallel workstream, adding summary-only discovery and
+  approval-gated update, pause, resume, and terminal cancellation through the
+  existing schedule service; it is complete. ADR-0089 separately authorizes current/recent-history native
   browsing and thirty-day maintenance retention for terminal schedule-owned
   state without adding a milestone or conversational deletion tool.
   Milestone 24 — SMS through the owner's iPhone — is specified by
@@ -55,8 +56,8 @@ title: Current Milestone
   its trigger-catalog and registration-source widenings named in ADR-0081.
   Milestone 25 — the WhatsApp business surface — is specified by
   [whatsapp-surface.md](whatsapp-surface.md) with twelve gates and is a
-  tenth parallel workstream whose implementation begins when Milestone
-  14's ports exist; its receipt-key generalization of the surface seam is
+  tenth parallel workstream, implemented on Milestone 14's ports and in
+  progress; its receipt-key generalization of the surface seam is
   named in ADR-0082.
 - **Milestone 26 — Client modes and adaptive email experience:** authorized on
   2026-09-11 as a new independent parallel workstream under ADR-0092;
@@ -72,21 +73,22 @@ title: Current Milestone
   single-parent folders over chat conversations, owner-resolved grouping
   proposals from a maintenance pass, grounded model-assisted grouping with a
   deterministic fallback, scoped routes behind a default-off flag, and the
-  native sidebar. All twelve gates are bound to executable checks; hosted
-  CI, review and delivery evidence remain open and the milestone is in progress.
-  ADR-0110 amended it on 2026-09-19 to admit the
+  native sidebar. ADR-0110 amended it on 2026-09-19 to admit the
   [typed-judgment port](typed-judgment.md), the TypeSafe Jev adapter behind it
   and an optional judgment matcher for add-to-folder proposals, all default
-  off. The port, the adapter and the matcher are implemented and all seventeen
-  gates are bound to executable checks; the matcher is off in every deployment.
+  off. All seventeen gates are bound to executable checks, and the milestone
+  completed on 2026-09-21 when pull request 127 followed pull request 118
+  through hosted CI and a clean CodeRabbit review; the owner had activated
+  folders in production on 2026-09-17.
 - **Milestone 30 — Advisory approval layer:** authorized on 2026-09-19 as a new
   independent parallel workstream under ADR-0111, the restrictive-only half of
   roadmap item B8; [policy-and-approvals.md](policy-and-approvals.md) declares
   five further gates for an advisor port, a composite engine that can only
   escalate an allowed web or browser network read, a judgment-backed advisor
   that never denies, a deterministic recovery policy in the tool pipeline, and
-  observe before enforce. All five gates are bound to executable checks; the
-  layer is off in every deployment and the milestone is in progress.
+  observe before enforce. All five gates are bound to executable checks and
+  pull request 127 delivered them with a clean review; enforcement stays off in
+  the shipped profile, and threshold calibration keeps the milestone in progress.
 - **Milestone 31 — Email unsubscribe assistance:** requested by the owner and
   shaped on 2026-09-19 as a new independent parallel workstream under ADR-0112;
   [email-unsubscribe.md](email-unsubscribe.md) declares twenty gates for a
@@ -95,10 +97,11 @@ title: Current Milestone
   server-derived destination, `mailto:` unsubscribe, Report spam and sender
   cleanup as fixed label actions, owner-gesture consent for a bounded batch,
   scoped routes behind a default-off flag, two Chat tools, and the native
-  Subscriptions view. It is implemented default-off with nineteen gates bound
-  to passing checks; simulator UI journeys and the owner's real-mailbox release
-  evidence remain open.
-- **Verified gate ceiling:** Milestone 12 (247 gates).
+  Subscriptions view. It is implemented with nineteen gates bound to passing
+  checks and reached `main` in pull request 131; its flag was on in production
+  by 2026-09-21, ahead of the owner's real-mailbox smoke, and simulator UI
+  journeys and the release evidence remain open.
+- **Verified gate ceiling:** Milestone 13 (268 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
   (ADR-0061) — plus Milestone 16 memory evaluation and lifecycle as an
@@ -124,18 +127,21 @@ title: Current Milestone
   Milestone 24, SMS through the owner's iPhone, was authorized on
   2026-08-26 as a ninth (ADR-0081), and Milestone 25, the WhatsApp
   business surface, on 2026-08-26 as a tenth (ADR-0082), on the same
-  terms.
+  terms. Milestones 26 through 31 followed as independent workstreams under
+  ADR-0092, ADR-0097, ADR-0100, ADR-0102, ADR-0111, and ADR-0112. Milestones
+  19, 20, 22, 23, and 29 have completed; their completion was recorded on
+  2026-09-28.
 - **Deferred:** New model-routing behavior and everything still listed in the
   engineering plan's roadmap subsection. Milestone 21 removes only adaptive
   memory distillation from that residue and Milestone 22 removes only the
   persona surface; learned memory policies, semantic
   retrieval, external memory providers, and the remaining roadmap items stay
   unauthorized.
-- **Project status:** Milestones 0 through 12 are complete: all 247 cumulative
-  gates, the full local and PostgreSQL lanes, Apple package and simulator lanes,
-  hosted CI passed on the candidate head, and the completed integration was
-  delivered directly to `dev`; code review is reserved for the final merge into
-  `main`. Milestone 13 is in progress: the
+- **Project status:** Milestones 0 through 13 are complete. Through Milestone
+  12, all 247 cumulative gates, the full local and PostgreSQL lanes, Apple
+  package and simulator lanes, and hosted CI passed on the candidate head, and
+  the completed integration was delivered directly to `dev`; code review is
+  reserved for the final merge into `main`. Milestone 13 completed next: the
   delegation domain values and limit derivation, the ledger persistence and
   erasure, delegate.run and its one-transaction materializer, the child-run
   suspension, join, and cancel cascade, the delegation limits block with
@@ -178,15 +184,19 @@ title: Current Milestone
   11.104456 cost. Its durable suite event reports `release_blocked: false`, and
   the delegating mean exceeds the baseline's 0.69 as ADR-0063 requires.
   Aggregate provider spend is USD 64.688208 of the USD 100 authorization. The
-  failed-trajectory baseline remains the comparison evidence; only hosted
-  verification and the final review loop remain.
-  Milestones 14
-  and 15 remain authorized and specified with twenty-one and sixteen
-  registered gates; neither has started. Milestone 16, the parallel memory-evaluation
+  failed-trajectory baseline remains the comparison evidence. Pull request 72
+  then passed every hosted lane and a finding-free final CodeRabbit review on
+  its final head `d9827c0b`, and merged on 2026-08-27 as `f34d021e`, completing
+  the milestone. On 2026-09-28 `agent eval gates --milestone 13` confirmed all
+  twenty-one delegation gates and the cumulative registry, with the seven
+  Milestone 6 sandbox gates passing in the hosted real-Docker lane. Milestone
+  14 is implemented and in progress with twenty-one registered gates passing
+  locally; Milestone 15 remains authorized and specified with sixteen and has
+  not started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the
   provider evidence at `formation@8`, and re-recorded its baseline, and completed on 2026-08-23 when hosted CI and
   the CodeRabbit review loop finished clean on the `dev` to `main` pull
-  request (merge `571f6d9`); the verified gate ceiling stays at Milestone 12. Its live benchmark arm ran three times — the first two failed
+  request (merge `571f6d9`); it does not move the verified gate ceiling. Its live benchmark arm ran three times — the first two failed
   only the absolute incomplete-runs condition, at two of 132 probe arms each,
   after which the harness gained a content-free failure class and one retry per
   probe arm, and the third published
@@ -201,24 +211,17 @@ title: Current Milestone
   Milestone 18, the third parallel workstream, has its first-party Gmail MCP
   package, composition, policy, bootstrap ceremony, and monitoring recipe
   implemented, with all seventeen registered gates passing locally, including
-  the four operator-managed multi-account gates added under ADR-0085. Hosted
-  verification of that extension and the owner's work-account smoke remain
-  outstanding. Milestone
-  19, the fourth parallel workstream, is in progress with
-  five registered gates; its one-time model tool, clarification-to-approval
-  regression, complete non-live suite, and PostgreSQL lane pass locally, with
-  only hosted CI and the final CodeRabbit review outstanding. Milestone 20,
-  the fifth parallel workstream, is in progress with six registered gates for
-  monthly and yearly recurrence and recurring conversational creation; its six
-  gates, complete non-live suite, and fresh PostgreSQL lane pass locally, with
-  only hosted CI and the final CodeRabbit review outstanding. Milestone 22,
-  the seventh parallel workstream, is in progress with all fourteen
-  registered gates passing locally: the persona document, its trusted
-  prefix row, curated promotion, the routes, the CLI, and the native editor
-  are implemented, with only hosted CI and the final CodeRabbit review
-  outstanding. Milestone 23, the eighth parallel workstream, is in progress
-  with all twelve registered gates passing locally for summary-only discovery
-  and approved update, pause, resume, and terminal cancellation. Each in-progress
+  the four operator-managed multi-account gates added under ADR-0085. The
+  extension reached `main` in pull request 94 with one CodeRabbit finding
+  unresolved, and the owner's mailbox smokes remain outstanding. Milestone
+  19, the fourth parallel workstream, completed with its five registered gates
+  once pull requests 64 and 66 passed hosted CI and a clean review. Milestone
+  20, the fifth, completed with its six gates on pull request 74. Milestone 22,
+  the seventh, completed with its fourteen gates on pull request 82: the
+  persona document, its trusted prefix row, curated promotion, the routes, the
+  CLI, and the native editor. Milestone 23, the eighth, completed with its
+  twelve gates on pull requests 89 and 98. Milestone 29 completed on pull
+  requests 118 and 127. Each in-progress
   milestone's remaining work is itemized on the
   [milestones page](../status/milestones.md), which `make docs-check`
   reconciles against the project state.
@@ -334,6 +337,9 @@ substitute.
 - [Milestone 20 — calendar recurrence and conversational schedules](engineering-plan.md#milestone-20-calendar-recurrence-and-conversational-schedules)
 - [Milestone 21 — adaptive memory distillation](engineering-plan.md#milestone-21-adaptive-memory-distillation)
 - [Milestone 22 — persona surface and curated belief promotion](engineering-plan.md#milestone-22-persona-surface-and-curated-belief-promotion)
+- [Milestone 23 — conversational schedule lifecycle](engineering-plan.md#milestone-23-conversational-schedule-lifecycle)
+- [Milestone 24 — SMS through the owner's iPhone](engineering-plan.md#milestone-24-sms-through-the-owners-iphone)
+- [Milestone 25 — WhatsApp business surface](engineering-plan.md#milestone-25-whatsapp-business-surface)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -385,6 +391,8 @@ Milestone 22's contract is its fourteen `gate.persona.*` entries plus the
 plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 
 - [Milestone 26 — Client modes and adaptive email experience](engineering-plan.md#milestone-26-client-modes-and-adaptive-email-experience)
+- [Milestone 27 — Bland calling and public reception](engineering-plan.md#milestone-27-bland-calling-and-public-reception)
+- [Milestone 28 — People and relationship memory](engineering-plan.md#milestone-28-people-and-relationship-memory)
 - [Milestone 29 — Chat thread folders](engineering-plan.md#milestone-29-chat-thread-folders)
 - [Milestone 30 — Advisory approval layer](engineering-plan.md#milestone-30-advisory-approval-layer)
 - [Milestone 31 — Email unsubscribe assistance](engineering-plan.md#milestone-31-email-unsubscribe-assistance)
@@ -408,6 +416,12 @@ declares and the cumulative registry pass, the PostgreSQL lanes pass where the
 milestone touches persistence, hosted CI passes on the final head, and the final
 CodeRabbit review is clean. The verified ceiling advances through each only
 after every earlier milestone has completed.
+
+Milestone 13 completed on those terms on 2026-08-27: all twenty-one delegation
+gates and the cumulative registry passed, the PostgreSQL lane passed, and hosted
+CI and a finding-free final CodeRabbit review passed on pull request 72's final
+head. It was recorded on 2026-09-28, advancing the verified ceiling to
+Milestone 13 and 268 gates.
 
 Milestone 16 completes on the same terms, with its own additional condition:
 the checked-in benchmark baseline equals a fresh deterministic run exactly and
@@ -442,13 +456,15 @@ still advances only after every earlier milestone has completed.
 Milestone 19 completes when its five gates and the cumulative registry pass,
 all relevant local and hosted lanes pass on the final head, and the final
 CodeRabbit review is clean. Because it is a parallel workstream, completion
-does not advance the verified gate ceiling past the sequential milestones.
+does not advance the verified gate ceiling past the sequential milestones. It
+completed on those terms with pull requests 64 and 66 on 2026-08-25.
 
 Milestone 20 completes when its six gates and the cumulative registry pass,
 all relevant local and PostgreSQL lanes pass, hosted CI passes on the final
 head, and the final CodeRabbit review is clean. Because it is a parallel
 workstream, completion does not advance the verified gate ceiling past the
-sequential milestones.
+sequential milestones. It completed on those terms with pull request 74 on
+2026-08-28.
 
 Milestone 21 completes when its thirty-one gates and the cumulative registry
 pass, comparative `formation@7`/`formation@8`/`formation@9` evidence for the
@@ -463,23 +479,30 @@ that implements snapshot de-duplication, the native Apple lanes pass because
 the persona editor is half of what the milestone delivers, all relevant
 local, PostgreSQL, and hosted lanes pass on the final head, and the final
 CodeRabbit review is clean. Because it is a parallel workstream, completion
-does not advance the verified gate ceiling past the sequential milestones.
+does not advance the verified gate ceiling past the sequential milestones. It
+completed on those terms with pull request 82 on 2026-09-01.
+
+Milestone 23 completed when its twelve gates and the cumulative registry
+passed, the PostgreSQL lane passed, and hosted CI and a clean final CodeRabbit
+review passed on pull requests 89 and 98, the second merged on 2026-09-06.
 
 Milestone 26 completes only when all thirty-two gates and approved quality
 requirements, relevant local/PostgreSQL/native lanes, authorized owner mailbox
 smoke, final-head hosted review and production delivery evidence pass. Until then
-its status remains in progress; the verified sequential ceiling stays at 12.
+its status remains in progress; it does not move the verified sequential ceiling.
 
 ## Milestone 27: Bland calling and public reception
 
 The owner approved [bland-calling.md](bland-calling.md) on 2026-09-11 under
 ADR-0097. Fourteen gates are registered. This independent workstream remains
-in progress; number setup and authorized live evidence are required for activation.
+in progress. Calling has been active in production since 2026-09-17, and every
+pull request that carried it to `main` passed hosted CI and a clean review.
 
 Local code now implements the scoped tool rosters, approval-bound dispatch,
 public correspondence intake, retained owner results, erasure and call-result
 notifications. Twelve gates have executable offline bindings; provider admission
-and live release remain pending. [Setup](../bland-setup.md) covers the remaining
+and live release remain pending, and binding them will set the final head that
+the exact-head review needs. [Setup](../bland-setup.md) covers the remaining
 owner configuration and external verification.
 
 ## Milestone 28: People and relationship memory
@@ -488,7 +511,8 @@ The owner authorized implementation on 2026-09-15 under ADR-0100.
 [People and relationship memory](people-and-relationships.md) specifies
 36 gates, stable identities, temporal relationships, source-linked history,
 governed formation/retrieval, correction/erasure and the native People surface.
-This independent workstream is in progress; the verified ceiling remains 12.
+This independent workstream is in progress and does not move the verified
+ceiling; none of its thirty-six gates is yet bound to an executable check.
 
 ADR-0101 removes evaluation-dependent People availability; the complete implemented
 feature is enabled by default while quality measurement continues.
@@ -502,9 +526,9 @@ proposals with a bounded open set, durable decline and withdrawal; grounded
 model-assisted grouping with a deterministic lexical fallback; nine routes on
 the session scopes behind a default-off flag; and native sidebar folder
 sections with proposal review. The implementation landed on 2026-09-16 with
-every gate bound to an executable check; exact-head hosted CI, review and
-delivery evidence remain open. This independent workstream is in progress;
-the verified ceiling remains 12.
+every gate bound to an executable check, and pull request 118 carried it to
+`main` with hosted CI and a clean review; the owner activated it in production
+on 2026-09-17.
 
 ADR-0110 amended the milestone on 2026-09-19. [Typed judgment](typed-judgment.md)
 specifies a provider-neutral port for closed, typed questions with the TypeSafe
@@ -517,8 +541,10 @@ an offline, non-activating email-importance evaluation under Milestone 26. The
 port, the adapter, the fake and the selector landed on 2026-09-20 with the
 four `gate.judgment.*` gates bound to executable checks, and the judgment
 matcher landed the same day with `gate.folder.judgment_matching` bound to a
-composed end-to-end check. No judgment request is made in any deployment until
-the owner sets the selector, the key, and the matcher's knob.
+composed end-to-end check. No judgment request is made in a deployment until
+the owner sets the selector, the key, and the matcher's knob. Pull request 127
+carried the amendment to `main` with hosted CI and a clean review on
+2026-09-21, which completed this independent workstream.
 
 ## Milestone 30: Advisory approval layer
 
@@ -537,9 +563,10 @@ check. Observing is the environment flag
 `AGENT_POLICY_ADVISORY_OBSERVE_ENABLED`, which moves no policy version;
 enforcing is the profile value `advisory.enabled`, which does and therefore
 unbinds the memory-formation release evidence until it is regenerated
-(ADR-0111, amended 2026-09-20). Threshold calibration, hosted CI, review and
-delivery evidence remain open. This independent workstream is in progress;
-the verified ceiling remains 12.
+(ADR-0111, amended 2026-09-20). Pull request 127 delivered it with hosted CI
+and a clean review; threshold calibration and the final-head review remain.
+This independent workstream is in progress and does not move the verified
+ceiling.
 
 ## Milestone 31: Email unsubscribe assistance
 
@@ -555,6 +582,8 @@ account's send server; Report spam, Not spam and sender cleanup as fixed label
 deltas; owner-gesture consent for a batch of at most twenty-five senders and
 one by-value approval per batch in Chat; four routes behind a default-off
 flag; and the native Subscriptions view and thread action. The owner directed
-implementation on 2026-09-19. Nineteen gates bind passing checks; simulator UI
-journeys and integrated release evidence remain open. This independent
-workstream is in progress; the verified ceiling remains 12.
+implementation on 2026-09-19. Nineteen gates bind passing checks, and pull
+request 131 delivered it with hosted CI and a clean review; its flag was on in
+production by 2026-09-21. Simulator UI journeys, the owner's real-mailbox
+smoke and integrated release evidence remain open. This independent
+workstream is in progress and does not move the verified ceiling.

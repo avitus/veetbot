@@ -376,7 +376,8 @@ the device surface.
   method-not-allowed on a write is presented as *this server does not support
   memory changes yet*, the way browsing already degrades; a belief that is
   person-linked shows the person's name as its subject rather than the raw
-  `person:` key.
+  `person:` key. The operator's `agent memory review --outcome` offers the
+  same three review outcomes over the ordinary composition.
 - **Rendering.** A row shows the statement as its primary text, subject and
   belief type as secondary text, a text-labeled sensitivity badge, and a
   status tag when the belief's status is not `active`; a belief that is

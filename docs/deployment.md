@@ -5,11 +5,13 @@ title: Production Deployment
 # Atomic DigitalOcean deployment
 
 Veetbot deploys to one Ubuntu Droplet at `api.veetbot.com`. PostgreSQL, the API,
-the durable worker, the maintenance worker, Docker with gVisor, and Nginx share
-that host. CircleCI packages the tested `main` commit and promotes an immutable
-release below `/opt/veetbot/releases`. The same pipeline publishes the complete
-MkDocs site at `docs.veetbot.com` from a checksummed artifact tied to that
-release.
+the interactive and asynchronous run workers, the maintenance worker, the
+credential-free execution service, the browser-profile service, Docker with
+gVisor, and Nginx share that host, with the optional schedule, notification,
+surface, and calling roles when they are enabled. CircleCI packages the tested
+`main` commit and promotes an immutable release below `/opt/veetbot/releases`.
+The same pipeline publishes the complete MkDocs site at `docs.veetbot.com` from
+a checksummed artifact tied to that release.
 
 The production deployment scripts require the Ubuntu GNU userland: Bash, GNU
 coreutils (including `mv -T` and `sha256sum`), GNU tar and findutils, and
@@ -373,6 +375,22 @@ reports the missing scopes and every model stays at the deployment default.
 The routes are always mounted. A saved chat model applies to new app chats;
 the chat effort applies to later agent runs except typed email tasks, which
 retain provider-default effort. The memory choice applies to later formation.
+
+The template's `AUTH_SCOPES` grants the owner chat, artifacts and attachments,
+Website Access and task grants, schedules, devices and notifications, memory
+review and deletion (`memory.write`, ADR-0117), People, and model settings. A
+scope grants nothing while its feature's flag is off. A host whose file
+predates a feature lacks that feature's scopes, so compare the line with the
+template after a release that adds one. Scopes are exact strings with no
+wildcard, and a name outside the platform's closed vocabulary stops the
+service at startup; MCP server scopes are derived from configuration and never
+listed here. Features the template leaves out need their own:
+`email.read,email.write` for Email mode (see the
+[Gmail runbook](gmail-integration-runbook.md)), `persona.read,persona.write`
+for the Persona screen, `call.read,call.cancel,call.delete` for calling (see
+[Bland calling setup](bland-setup.md)), and `run.delegate` for delegated child
+runs. The surface role's own environment carries `surface.read` and
+`surface.write`.
 
 The host exports no metrics, so the service log answers whether these consumers
 are running. Every long-running service writes JSON lines, one object per
