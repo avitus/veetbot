@@ -1338,6 +1338,11 @@ writes its held events in one transaction when it is activated. Activation
 keeps its pending batch and deferred marker until commit succeeds;
 failure or cancellation leaves them available for retry. Concurrent activations
 serialize on the session lock, and only the committed batch is removed.
+Each held event receives a distinct, stable derivation key when queued. Retrying
+after an uncertain commit acknowledgment or interrupted transaction cleanup
+uses that same key, so the event store returns the committed event rather than
+appending a duplicate. Separate events with identical contents retain separate
+identities.
 The catalog table is a history, so a generation this process has already
 written is not written again (ADR-0131).
 The SDK adapter owns each transport's complete lifetime in one persistent task;

@@ -236,7 +236,7 @@ class MCPRuntime:
         self._session_registrations: dict[UUID, set[_RegistrationKey]] = {}
         self._registration_owners: dict[_RegistrationKey, set[UUID]] = {}
         self._deferred_events: set[UUID] = set()
-        self._pending_events: dict[UUID, list[tuple[str, dict[str, Any]]]] = {}
+        self._pending_events: dict[UUID, list[NewEvent]] = {}
         self._preparation_cleanup_tasks: dict[asyncio.Task[bool | None], MCPClient] = {}
 
     def _lock(self, session_id: UUID) -> asyncio.Lock:
@@ -690,7 +690,8 @@ class MCPRuntime:
                     elif not deferred:
                         await self._append_event(uow, session_id, *write)
         if deferred:
-            self._pending_events.setdefault(session_id, []).extend(events)
+            for event_type, payload in events:
+                self._defer_event(session_id, event_type, payload)
         self._recorded_generations.update(self._generation(write) for write in generations)
 
     @staticmethod
@@ -1170,9 +1171,22 @@ class MCPRuntime:
         payload: dict[str, Any],
     ) -> None:
         if session_id in self._deferred_events:
-            self._pending_events.setdefault(session_id, []).append((event_type, dict(payload)))
+            self._defer_event(session_id, event_type, payload)
             return
         await self._persist_event(session_id, event_type, payload)
+
+    def _defer_event(self, session_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
+        """Assign each held event one identity that survives uncertain commit acknowledgment."""
+        self._pending_events.setdefault(session_id, []).append(
+            NewEvent(
+                session_id=session_id,
+                run_id=None,
+                event_type=event_type,
+                actor_type="runtime",
+                payload=dict(payload),
+                derivation_key=f"mcp.activation:{session_id}:{self._ids.new_id()}",
+            )
+        )
 
     async def _persist_event(
         self,
@@ -1209,8 +1223,8 @@ class MCPRuntime:
                 return
             batch = list(pending)
             async with self._uow_factory() as uow:
-                for event_type, payload in batch:
-                    await self._append_event(uow, session_id, event_type, payload)
+                for event in batch:
+                    await uow.events.append(event)
             del pending[: len(batch)]
             if not pending:
                 self._pending_events.pop(session_id, None)

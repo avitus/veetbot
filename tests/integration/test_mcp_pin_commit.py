@@ -124,7 +124,7 @@ async def test_failed_activation_preserves_its_batch_for_exactly_once_retry(
             (event.event_type, event.payload)
             for event in events
             if event.event_type.startswith("mcp.")
-        ] == pending
+        ] == [(event.event_type, event.payload) for event in pending]
 
 
 async def test_concurrent_activation_waits_for_the_same_batch_to_commit(
@@ -173,4 +173,61 @@ async def test_concurrent_activation_waits_for_the_same_batch_to_commit(
             (event.event_type, event.payload)
             for event in events
             if event.event_type.startswith("mcp.")
-        ] == pending
+        ] == [(event.event_type, event.payload) for event in pending]
+
+
+@pytest.mark.parametrize("stage", ["commit", "close"])
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_activation_retry_does_not_duplicate_a_committed_batch(
+    stage: str, cancelled: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An uncertain commit acknowledgment preserves identity across activation retries."""
+    original = getattr(AsyncSession, stage)
+    error = asyncio.CancelledError() if cancelled else RuntimeError("lost commit acknowledgment")
+
+    async def interrupt_after_success(self: AsyncSession) -> None:
+        """Interrupt only after the real database has committed or closed successfully."""
+        await original(self)
+        raise error
+
+    async with build(
+        settings=database_settings(),
+        storage="postgres",
+        mcp_servers=(_server("alpha"), _server("beta")),
+        mcp_client_factory=_client,
+    ) as app:
+        async with app.uow_factory() as uow:
+            session = await app.sessions.create_in(uow)
+        pending = list(app.mcp._pending_events[session])
+        with monkeypatch.context() as patch:
+            patch.setattr(AsyncSession, stage, interrupt_after_success)
+            with pytest.raises(type(error)):
+                await app.sessions.activate(session)
+
+        assert app.mcp._pending_events[session] == pending
+        assert session in app.mcp._deferred_events
+        async with app.uow_factory() as uow:
+            committed = [
+                event
+                for event in await uow.events.list_after(session, 0, app.principal)
+                if event.event_type.startswith("mcp.")
+            ]
+        assert len(committed) == 2
+
+        # A distinct event with the same contents must survive deduplication too.
+        await app.mcp._event(session, committed[0].event_type, committed[0].payload)
+        await app.sessions.activate(session)
+        await app.sessions.activate(session)
+
+        assert session not in app.mcp._pending_events
+        assert session not in app.mcp._deferred_events
+        async with app.uow_factory() as uow:
+            retried = [
+                event
+                for event in await uow.events.list_after(session, 0, app.principal)
+                if event.event_type.startswith("mcp.")
+            ]
+        assert len(retried) == 3
+        assert [event.id for event in retried[:2]] == [event.id for event in committed]
+        assert retried[2].payload == committed[0].payload
+        assert retried[2].id not in {event.id for event in committed}
