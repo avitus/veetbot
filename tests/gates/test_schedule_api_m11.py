@@ -332,8 +332,18 @@ async def test_schedule_http_surface_is_absent_by_default() -> None:
             composition.new_request_id,
             composition.readiness_probe,
         )
+        # Included routers are wrapped, so flatten them as the enabled test does;
+        # filtering app.routes directly would find no schedule route either way.
+        all_routes = [
+            nested
+            for route in app.routes
+            for nested in (
+                route.original_router.routes if hasattr(route, "original_router") else (route,)
+            )
+        ]
+        assert [route for route in all_routes if isinstance(route, APIRoute)]
         assert not [
             route
-            for route in app.routes
+            for route in all_routes
             if isinstance(route, APIRoute) and route.path.startswith("/v1/schedules")
         ]

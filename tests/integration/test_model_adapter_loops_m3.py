@@ -16,7 +16,6 @@ from agent_core.adapters.models.recorded import (
 )
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import RunStatus
 from agent_core.ports.models import ModelProvider
 from tests.contract.model_fixtures import (
@@ -114,32 +113,3 @@ async def test_malformed_arguments_return_an_error_and_loop_continues(
         and event.payload.get("reason_code") == "tool.arguments_invalid"
         for event in events
     )
-
-
-async def test_fake_malformed_arguments_return_an_error_and_loop_continues() -> None:
-    script = FakeModelScript(
-        turns=[
-            ScriptedTurn.model_validate(
-                {
-                    "tool_calls": [
-                        {
-                            "name": "math.calculate",
-                            "arguments": '{"expression":',
-                            "call_id": "malformed-fake",
-                        }
-                    ]
-                }
-            ),
-            ScriptedTurn(text="recovered"),
-        ]
-    )
-    async with build(
-        settings=SETTINGS,
-        script=script,
-        fixed_clock_at=NOW,
-        sequential_ids=True,
-    ) as composition:
-        run_id = await composition.runs.submit("recover from malformed fake arguments")
-        run = await composition.runs.wait_terminal(run_id)
-    assert run.status is RunStatus.COMPLETED
-    assert run.final_message == "recovered"

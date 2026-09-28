@@ -34,10 +34,6 @@ def _adapter() -> Any:
     return telegram
 
 
-def test_telegram_adapter_exists() -> None:
-    _adapter()
-
-
 async def test_surface_worker_runs_poller_only_in_its_dedicated_loop() -> None:
     class Poller:
         run_once_calls = 0

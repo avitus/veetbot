@@ -1,3 +1,5 @@
+import pytest
+
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.domain.messages import TextPart, UserMessage
 from agent_core.tools.calculator import CalculatorTool
@@ -73,3 +75,49 @@ def test_owner_attachments_are_counted_as_what_the_adapter_may_send() -> None:
     )
     # A reference outside an owner message is only ever a one-line marker.
     assert estimator.estimate(in_tool_result, "fake:scripted") < 5 * attachments.PDF_TOKENS_PER_PAGE
+
+
+def test_reconciliation_only_ever_raises_estimates_and_only_for_its_model() -> None:
+    """Over-estimates are the safe direction: observed savings never shrink the budget."""
+
+    estimator = ConservativeTokenEstimator()
+    items = [UserMessage(content=[TextPart(text="a payload that stays the same")])]
+    base = estimator.estimate(items, "fake:scripted")
+
+    estimator.reconcile("fake:scripted", base, base // 4)
+    assert estimator.estimate(items, "fake:scripted") == base
+    assert estimator.error_ratio("fake:scripted") == pytest.approx((base - base // 4) / (base // 4))
+
+    estimator.reconcile("fake:other", base, base * 3)
+    assert estimator.estimate(items, "fake:scripted") == base
+    assert estimator.estimate(items, "fake:other") == base * 3
+
+
+def test_reconciliation_accumulates_and_rejects_impossible_observations() -> None:
+    estimator = ConservativeTokenEstimator()
+    assert estimator.error_ratio("fake:scripted") is None
+    estimator.reconcile("fake:scripted", 100, 0)
+    assert estimator.error_ratio("fake:scripted") is None
+    estimator.reconcile("fake:scripted", 100, 300)
+    # Cumulative: 200 estimated against 300 used, so the factor is 1.5, not 3.
+    base = ConservativeTokenEstimator().estimate_text("x" * 30, "fake:scripted")
+    assert base == 14
+    assert estimator.estimate_text("x" * 30, "fake:scripted") == 21
+    for estimated, actual in ((0, 10), (-1, 10), (10, -1)):
+        with pytest.raises(ValueError, match="positive estimates and nonnegative use"):
+            estimator.reconcile("fake:scripted", estimated, actual)
+
+
+def test_memo_eviction_never_changes_an_estimate() -> None:
+    with pytest.raises(ValueError, match="memo capacity must be positive"):
+        ConservativeTokenEstimator(memo_capacity=0)
+    bounded = ConservativeTokenEstimator(memo_capacity=2)
+    unbounded = ConservativeTokenEstimator()
+    texts = [f"payload number {index} " * (index + 1) for index in range(6)]
+
+    first = [bounded.estimate_text(text, "fake:scripted") for text in texts]
+    again = [bounded.estimate_text(text, "fake:scripted") for text in reversed(texts)]
+
+    assert first == [unbounded.estimate_text(text, "fake:scripted") for text in texts]
+    assert again == list(reversed(first))
+    assert len(bounded._memo) == 2

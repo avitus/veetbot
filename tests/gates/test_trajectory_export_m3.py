@@ -18,7 +18,11 @@ from agent_core.domain.errors import (
     ExportConsentError,
     ExportRedactionError,
     ExportRedactionPatternError,
+    ExportStateError,
+    NotFoundError,
 )
+from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
+from agent_core.domain.runs import RunStatus
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent
 from agent_core.ports.artifacts import TrajectoryArtifactStore
 from tests.contract.support import NOW
@@ -242,3 +246,105 @@ async def test_sweeper_attempts_every_artifact_when_one_delete_fails(
         assert store.attempts == 2
         assert await composition.trajectories.sweep_once() == 1
         assert store.attempts == 3
+
+
+async def test_an_export_is_reissued_once_and_expiry_withdraws_it_until_swept(
+    tmp_path: Path,
+) -> None:
+    async with build(
+        settings=settings(tmp_path / "lifecycle", enabled=True),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+    ) as composition:
+        await composition.trajectories.grant_consent()
+        run_id = await composition.runs.submit("export me twice")
+        await composition.runs.wait_terminal(run_id)
+        first = await composition.trajectories.export(run_id)
+        again = await composition.trajectories.export(run_id)
+        content = await composition.trajectories.read(run_id)
+
+        await composition.trajectories.withdraw_consent()
+        with pytest.raises(NotFoundError):
+            await composition.trajectories.read(run_id)
+        await composition.trajectories.grant_consent()
+        with pytest.raises(ExportStateError, match="awaits its sweep"):
+            await composition.trajectories.export(run_id)
+
+        assert await composition.trajectories.sweep_once() == 1
+        reissued = await composition.trajectories.export(run_id)
+
+    assert again == first
+    assert list((tmp_path / "lifecycle").rglob("*.json")) == [
+        tmp_path / "lifecycle" / reissued.storage_uri
+    ]
+    assert reissued.id != first.id
+    assert json.loads(content)["run_id"] == str(run_id)
+
+
+async def test_only_a_terminal_run_can_be_exported(tmp_path: Path) -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="conversation.ask_user",
+                        arguments={"question": "Which region?"},
+                        call_id="ask",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            )
+        ]
+    )
+    async with build(
+        settings=settings(tmp_path / "waiting", enabled=True),
+        script=script,
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+    ) as composition:
+        await composition.trajectories.grant_consent()
+        run_id = await composition.runs.submit("ask me first")
+        assert (await composition.runs.get(run_id)).status is RunStatus.WAITING_FOR_USER
+        with pytest.raises(ExportStateError, match="terminal"):
+            await composition.trajectories.export(run_id)
+    assert list((tmp_path / "waiting").rglob("*.json")) == []
+
+
+async def test_an_export_carries_each_tool_exchange_once_and_no_reasoning_state(
+    tmp_path: Path,
+) -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                provider_reasoning_payload={"id": "rs_export", "encrypted_content": "opaque"},
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17 * 23"},
+                        call_id="calc",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="391"),
+        ]
+    )
+    async with build(
+        settings=settings(tmp_path / "exchange", enabled=True),
+        script=script,
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+    ) as composition:
+        await composition.trajectories.grant_consent()
+        run_id = await composition.runs.submit("multiply")
+        await composition.runs.wait_terminal(run_id)
+        await composition.trajectories.export(run_id)
+        document = json.loads((await composition.trajectories.read(run_id)).decode())
+
+    kinds = [message["kind"] for message in document["messages"]]
+    assert kinds.count("tool_call") == 1
+    assert kinds.count("tool_result") == 1
+    assert "provider_reasoning" not in kinds
+    rendered = json.dumps(document)
+    assert "rs_export" not in rendered
+    assert "opaque" not in rendered

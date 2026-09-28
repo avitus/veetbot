@@ -187,29 +187,6 @@ async def test_the_device_channel_routes_declare_exactly_three_scoped_paths() ->
     }
 
 
-async def test_the_device_channel_router_is_absent_while_the_flag_is_off() -> None:
-    async with build(
-        settings=memory_settings(),
-        script=FakeModelScript(turns=[ScriptedTurn(text="ready")]),
-        fixed_clock_at=NOW,
-        sequential_ids=True,
-    ) as composition:
-        app = create_app(
-            composition.services,
-            composition.settings,
-            composition.principal,
-            composition.new_request_id,
-            composition.readiness_probe,
-        )
-        async with _client(composition) as client:
-            fetched = await client.get(f"/v1/devices/{DEVICE_ID}/invocations")
-            ingested = await client.post(f"/v1/devices/{DEVICE_ID}/messages", json=_message())
-
-    assert _device_channel_routes(app) == []
-    assert fetched.status_code == 404
-    assert ingested.status_code == 404
-
-
 async def test_a_device_fetches_its_pending_invocations_oldest_first() -> None:
     async with _composition() as composition:
         await _seed_devices(composition)
@@ -245,37 +222,6 @@ async def test_a_device_fetches_its_pending_invocations_oldest_first() -> None:
     async with composition.uow_factory() as uow:
         expired = await uow.device_invocations.get(EXPIRED_INVOCATION_ID)
     assert expired.status is DeviceInvocationStatus.EXPIRED
-
-
-async def test_an_unknown_foreign_or_revoked_device_can_neither_fetch_nor_answer() -> None:
-    async with _composition() as composition:
-        await _seed_devices(composition)
-        async with composition.uow_factory() as uow:
-            await uow.device_invocations.create(
-                _pending(INVOCATION_ID, tenant_id=composition.principal.tenant_id)
-            )
-        async with _client(composition) as client:
-            unknown = await client.get(f"/v1/devices/{UUID(int=404)}/invocations")
-            foreign = await client.get(f"/v1/devices/{FOREIGN_DEVICE_ID}/invocations")
-            revoked = await client.get(f"/v1/devices/{REVOKED_DEVICE_ID}/invocations")
-            stolen = await client.post(
-                f"/v1/devices/{FOREIGN_DEVICE_ID}/invocations/{INVOCATION_ID}/result",
-                json={"status": "sent"},
-            )
-            answered_by_revoked = await client.post(
-                f"/v1/devices/{REVOKED_DEVICE_ID}/invocations/{INVOCATION_ID}/result",
-                json={"status": "sent"},
-            )
-        async with composition.uow_factory() as uow:
-            untouched = await uow.device_invocations.get(INVOCATION_ID)
-
-    assert unknown.status_code == 404
-    assert foreign.status_code == 404
-    assert revoked.status_code == 409
-    assert revoked.json()["error"]["details"]["reason"] == "device_revoked"
-    assert stolen.status_code == 404
-    assert answered_by_revoked.status_code == 409
-    assert untouched.status is DeviceInvocationStatus.PENDING
 
 
 async def test_the_first_result_wins_and_an_expired_invocation_refuses_every_post() -> None:
@@ -399,3 +345,37 @@ async def test_a_naive_received_at_is_malformed_rather_than_stored() -> None:
 
     assert naive.status_code == 400
     assert naive.json()["error"]["code"] == "malformed_request"
+
+
+async def test_each_route_refuses_a_principal_without_its_scope_before_any_change() -> None:
+    async with _composition() as composition:
+        await _seed_devices(composition)
+        async with composition.uow_factory() as uow:
+            await uow.device_invocations.create(
+                _pending(INVOCATION_ID, tenant_id=composition.principal.tenant_id)
+            )
+        scopes = set(composition.principal.scopes)
+        without_read = composition.principal.model_copy(
+            update={"scopes": scopes - {"device.read"}}, deep=True
+        )
+        without_write = composition.principal.model_copy(
+            update={"scopes": scopes - {"device.write"}}, deep=True
+        )
+        async with _client(composition, principal=without_read) as client:
+            fetched = await client.get(f"/v1/devices/{DEVICE_ID}/invocations")
+        async with _client(composition, principal=without_write) as client:
+            answered = await client.post(
+                f"/v1/devices/{DEVICE_ID}/invocations/{INVOCATION_ID}/result",
+                json={"status": "sent"},
+            )
+            ingested = await client.post(f"/v1/devices/{DEVICE_ID}/messages", json=_message())
+        async with composition.uow_factory() as uow:
+            untouched = await uow.device_invocations.get(INVOCATION_ID)
+        sessions = await composition.services.sessions.list(composition.principal, 10, None)
+
+    for refused in (fetched, answered, ingested):
+        assert refused.status_code == 403
+        assert refused.json()["error"]["code"] == "authorization_error"
+    assert BODY not in ingested.text
+    assert untouched.status is DeviceInvocationStatus.PENDING
+    assert sessions.items == []

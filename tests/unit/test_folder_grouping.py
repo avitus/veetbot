@@ -6,6 +6,8 @@ import json
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
+
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.domain.folders import FolderProposalDerivation, FolderProposalKind
@@ -229,24 +231,25 @@ async def test_an_existing_name_converts_to_an_addition_and_rationale_is_scanned
     assert model_candidates[0].rationale is None
 
 
-async def test_a_budget_breach_falls_back_to_the_lexical_result() -> None:
-    grouper, _provider = _grouper(
-        json.dumps({"groups": [_group(LISBON_IDS)]}),
-        usage=ModelUsage(
-            input_tokens=200, output_tokens=50, cost=Decimal("1.00"), provider="openai"
+@pytest.mark.parametrize(
+    ("text", "usage", "error_class"),
+    [
+        (
+            json.dumps({"groups": [_group(LISBON_IDS)]}),
+            ModelUsage(input_tokens=200, output_tokens=50, cost=Decimal("1.00"), provider="openai"),
+            "FolderGroupingBudgetError",
         ),
-    )
+        ("not json", None, "ValidationError"),
+    ],
+    ids=["budget_breach", "malformed_output"],
+)
+async def test_a_failed_model_pass_falls_back_to_the_lexical_result(
+    text: str, usage: ModelUsage | None, error_class: str
+) -> None:
+    grouper, _provider = _grouper(text, usage=usage)
     outcome = await grouper.group(_grouping(), principal=principal())
     assert outcome.fallback_used is True
-    assert outcome.error_class == "FolderGroupingBudgetError"
-    assert [candidate.name for candidate in outcome.candidates] == ["Lisbon Trip"]
-
-
-async def test_malformed_output_falls_back_to_the_lexical_result() -> None:
-    grouper, _provider = _grouper("not json")
-    outcome = await grouper.group(_grouping(), principal=principal())
-    assert outcome.fallback_used is True
-    assert outcome.error_class == "ValidationError"
+    assert outcome.error_class == error_class
     assert [candidate.name for candidate in outcome.candidates] == ["Lisbon Trip"]
 
 

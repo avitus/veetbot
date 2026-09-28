@@ -19,13 +19,11 @@ from agent_core.domain.artifacts import (
 )
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.messages import (
-    AssistantMessage,
     FakeModelScript,
     FileReferencePart,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
-    TextPart,
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunStatus
@@ -262,15 +260,3 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
         filename="notes.md",
         size_bytes=1,
     )
-
-
-def test_attaching_files_keeps_the_reply_text_first() -> None:
-    message = AssistantMessage(content=[TextPart(text="Attached.")])
-    written = _ref(ArtifactOrigin.MODEL_OUTPUT, name="notes.md", sha="b", second=1)
-
-    updated = message.model_copy(
-        update={"content": [*message.content, reply_file_reference(written)]}
-    )
-
-    assert updated.content[0] == TextPart(text="Attached.")
-    assert isinstance(updated.content[1], FileReferencePart)

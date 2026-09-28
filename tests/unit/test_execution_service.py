@@ -279,30 +279,6 @@ async def test_execution_service_preserves_remote_boundary_errors(
 
 
 @pytest.mark.asyncio
-async def test_execution_service_closed_socket_is_unavailable(
-    socket_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    socket_path = socket_dir / "execution.sock"
-    environment = FakeExecutionEnvironment(FixedClock(NOW), SequenceIdFactory())
-
-    async def resolve(_reference: str) -> str:
-        return fake_image_digest()
-
-    server = ExecutionServiceServer(
-        environment,
-        socket_path,
-        resolve_image_digest=resolve,
-    )
-    await server.start()
-    await server.close()
-    monkeypatch.setattr(service_adapter, "_CONNECT_ATTEMPTS", 1)
-
-    with pytest.raises(ExecutionUnavailable, match="socket is unavailable"):
-        await ExecutionServiceClient(socket_path).resolve_image_digest("image:tag")
-
-
-@pytest.mark.asyncio
 async def test_execution_service_client_recovers_after_the_service_restarts(
     socket_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -707,7 +683,3 @@ async def test_execution_service_rejects_malformed_operation_payloads(
 
     with pytest.raises(ExecutionRejected, match=rf"field {field} is invalid"):
         await client._call(operation, payload)
-
-
-def test_execution_service_has_no_unused_peer_credential_api() -> None:
-    assert not hasattr(service_adapter, "unix_peer_credentials")

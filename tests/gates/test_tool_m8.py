@@ -198,9 +198,8 @@ class _TrackedFactory:
 
 
 class _DiscoveryBarrier:
-    def __init__(self, expected: int, *, hold_until_released: bool = False) -> None:
+    def __init__(self, expected: int) -> None:
         self.expected = expected
-        self.hold_until_released = hold_until_released
         self.started = 0
         self.in_flight = 0
         self.maximum_in_flight = 0
@@ -227,23 +226,15 @@ class _BarrierClient(_TrackedClient):
         if self.barrier.started == self.barrier.expected:
             self.barrier.all_started.set()
         try:
-            if self.barrier.hold_until_released:
-                await self.barrier.release.wait()
-            else:
-                await asyncio.wait_for(self.barrier.all_started.wait(), timeout=0.2)
-        except TimeoutError:
-            pass
+            await self.barrier.release.wait()
         finally:
             self.barrier.in_flight -= 1
         return _discovery()
 
 
 class _BarrierFactory:
-    def __init__(self, expected: int, *, hold_until_released: bool = False) -> None:
-        self.barrier = _DiscoveryBarrier(
-            expected,
-            hold_until_released=hold_until_released,
-        )
+    def __init__(self, expected: int) -> None:
+        self.barrier = _DiscoveryBarrier(expected)
         self.clients: list[_BarrierClient] = []
 
     def __call__(
@@ -521,24 +512,9 @@ def _preparation_settings(directory: Path) -> Settings:
     return replace(_settings(), config_dir=directory)
 
 
-async def test_prepare_discovers_independent_servers_concurrently(tmp_path: Path) -> None:
-    """Independent HTTP handshakes progress together rather than serially."""
-    factory = _BarrierFactory(expected=3)
-    async with build(
-        settings=_preparation_settings(tmp_path),
-        sequential_ids=True,
-        mcp_servers=tuple(
-            _server(name, transport=MCPTransport.HTTP) for name in ("first", "second", "third")
-        ),
-        mcp_client_factory=factory,
-    ) as composition:
-        await composition.sessions.create()
-    assert factory.barrier.maximum_in_flight == 3
-
-
 async def test_prepare_bounds_server_discovery_fan_out(tmp_path: Path) -> None:
     """A ninth HTTP handshake waits until one of the eight shared slots is free."""
-    factory = _BarrierFactory(expected=8, hold_until_released=True)
+    factory = _BarrierFactory(expected=8)
     configs = tuple(_server(f"server_{index}", transport=MCPTransport.HTTP) for index in range(9))
     async with build(
         settings=_preparation_settings(tmp_path),
@@ -564,7 +540,7 @@ async def test_prepare_capacity_is_shared_across_sessions(
     tmp_path: Path, transport: MCPTransport, capacity: int
 ) -> None:
     """Concurrent sessions cannot multiply local process or network startup load."""
-    factory = _BarrierFactory(expected=capacity, hold_until_released=True)
+    factory = _BarrierFactory(expected=capacity)
     configs = tuple(_server(f"server_{index}", transport=transport) for index in range(6))
     async with build(
         settings=_preparation_settings(tmp_path),

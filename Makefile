@@ -148,6 +148,12 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingASuggestedFolderBeforeAcceptingIt \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFolderNameSheetIsSizedForItsContentOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAdjacentFoldersSitOneRowApartOnMac \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMovingAConversationIntoAFolderAndBackOut \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsCensusUnsubscribesOneSenderAfterConfirmation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsSelectAllSkipsProtectedAndUncheckedSenders \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsFailedUnsubscribeRestoresTheRowWithWhatRemains \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsThreadActionUnsubscribesTheConversationsSender \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsStayHiddenWhereNoAccountAdvertisesThem \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 

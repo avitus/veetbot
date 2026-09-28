@@ -263,7 +263,9 @@ struct EmailUnsubscribeConfirmationSheet: View {
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-            }.frame(maxHeight: 280)
+            }
+            .frame(maxHeight: 280)
+            .accessibilityIdentifier("email.unsubscribe.targets")
             Toggle("Also archive existing mail from these senders", isOn: $model.archiveExisting)
                 .accessibilityIdentifier("email.unsubscribe.archive")
             HStack {

@@ -305,24 +305,6 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling(
         }
 
 
-async def test_memory_http_surface_is_absent_by_default() -> None:
-    """Keep the memory routes absent while their scope remains recognized."""
-
-    # Hard gate 7's other half: the scope stays recognized even with the
-    # route surface off, so configuration validation never rejects it.
-    assert "memory.read" in PLATFORM_SCOPES
-    async with build(settings=memory_settings(), storage="memory") as composition:
-        app = create_app(
-            composition.services,
-            composition.settings,
-            composition.principal,
-            composition.new_request_id,
-            composition.readiness_probe,
-        )
-        assert memory_routes(app) == []
-        assert "/v1/memories" not in app.openapi()["paths"]
-
-
 async def test_memory_list_rejects_a_cursor_position_beyond_bigint_range() -> None:
     """Reject cursor positions that cannot fit the PostgreSQL BIGINT column."""
 

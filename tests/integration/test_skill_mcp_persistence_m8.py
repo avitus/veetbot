@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from agent_core.adapters.persistence.sqlalchemy_models import RunRow
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.bootstrap import build
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.mcp import (
     MCPCallResult,
     MCPDiscovery,
@@ -312,3 +312,37 @@ async def test_postgres_skill_and_mcp_round_trip(tmp_path: Path) -> None:
     assert reconstructed.final_message == "resumed completion"
     assert checkpoint is not None
     assert checkpoint.loaded_skills[0].content == "DURABLE_SKILL_BODY"
+
+
+async def test_postgres_refuses_to_persist_an_mcp_prompt_skill(tmp_path: Path) -> None:
+    """MCP prompts are session scoped and read-only; PostgreSQL stores none.
+
+    The in-memory repository's refusal is gated (`test_mcp_read_only`); this is
+    the durable adapter's own check, which must refuse before validating,
+    writing a row, or storing package bytes, and leave the unit of work usable.
+    """
+
+    settings = replace(database_settings(), artifact_root=tmp_path)
+    async with build(settings=settings, storage="postgres") as composition:
+        tenant_id = composition.principal.tenant_id
+        async with composition.uow_factory() as uow:
+            with pytest.raises(ConflictError, match="read-only and session scoped"):
+                await uow.skills.install(
+                    tenant_id, _package("remote-prompt"), SkillSource.MCP, None, None
+                )
+            installed = await uow.skills.install(
+                tenant_id, _package("operator-after-refusal"), SkillSource.OPERATOR, None, None
+            )
+        async with composition.uow_factory() as uow:
+            active = await uow.skills.list_active(tenant_id, 50)
+            with pytest.raises(NotFoundError):
+                await uow.skills.resolve(tenant_id, SkillRef(name="remote-prompt"))
+
+    assert [revision.manifest.name for revision in active] == ["operator-after-refusal"]
+    assert installed.source is SkillSource.OPERATOR
+    # Only the operator skill's package reached the store.
+    packages = tmp_path / "skill-packages"
+    stored = [
+        path.relative_to(packages).as_posix() for path in packages.rglob("*") if path.is_file()
+    ]
+    assert stored == [installed.package_key]

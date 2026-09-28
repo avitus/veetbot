@@ -146,6 +146,34 @@ def test_ledger_row_carries_children_and_erasure_clears_identifiers() -> None:
     )
     assert erased.child_run_id is None
 
+    # model_copy does not validate, so prove an erased row is still a valid ledger row.
+    stored = delegation.model_dump(mode="json")
+    stored["links_erased_at"] = NOW.isoformat()
+    for child in stored["children"]:
+        child["child_run_id"] = None
+        child["child_session_id"] = None
+    reloaded = Delegation.model_validate(stored)
+    assert reloaded.links_erased_at == NOW
+    assert [(child.index, child.child_run_id) for child in reloaded.children] == [
+        (child.index, None) for child in delegation.children
+    ]
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        RunStatus.QUEUED,
+        RunStatus.RUNNING,
+        RunStatus.WAITING_FOR_APPROVAL,
+        RunStatus.WAITING_FOR_USER,
+    ],
+)
+def test_a_ledger_child_records_only_a_terminal_status(status: RunStatus) -> None:
+    with pytest.raises(ValidationError, match="terminal run status"):
+        DelegationChild(index=0, status=status)
+    for terminal in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+        assert DelegationChild(index=0, status=terminal).status is terminal
+
 
 def test_ledger_row_requires_one_child_and_one_authority_entry_per_brief() -> None:
     with pytest.raises(ValidationError, match="per brief"):

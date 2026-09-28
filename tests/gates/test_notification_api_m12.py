@@ -326,6 +326,20 @@ async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> 
         }
 
 
+def _notification_routes(app: Any) -> list[APIRoute]:
+    """Flatten mounted routers: an included router's routes are wrapped, not top level."""
+
+    return [
+        nested
+        for route in app.routes
+        for nested in (
+            route.original_router.routes if hasattr(route, "original_router") else (route,)
+        )
+        if isinstance(nested, APIRoute)
+        and (nested.path.startswith("/v1/devices") or nested.path == "/v1/notifications")
+    ]
+
+
 async def test_notification_http_surface_and_production_are_default_off() -> None:
     async with build(settings=memory_settings(), storage="memory") as composition:
         app = create_app(
@@ -335,12 +349,7 @@ async def test_notification_http_surface_and_production_are_default_off() -> Non
             composition.new_request_id,
             composition.readiness_probe,
         )
-        assert not [
-            route
-            for route in app.routes
-            if isinstance(route, APIRoute)
-            and (route.path.startswith("/v1/devices") or route.path == "/v1/notifications")
-        ]
+        assert _notification_routes(app) == []
         assert composition.executor._notification_producer is None
         async with composition.uow_factory() as uow:
             assert await uow.notification_outbox.list(composition.principal, limit=10) == []

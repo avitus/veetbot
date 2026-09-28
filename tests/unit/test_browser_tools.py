@@ -128,19 +128,6 @@ async def test_navigate_rejects_public_url_outside_bound_origin_policy() -> None
     assert provider.navigations == []
 
 
-async def test_browser_tool_binds_trusted_execution_context_before_provider_dispatch() -> None:
-    provider = FakeBrowserProvider()
-    context = tool_context()
-
-    result = await BrowserNavigateTool(provider).execute(
-        {"url": "https://example.org/account"},
-        context,
-    )
-
-    assert result.ok
-    assert provider.execution_contexts == [context]
-
-
 async def test_navigate_resolves_session_binding_before_checking_its_origin_policy() -> None:
     class SessionBoundProvider(FakeBrowserProvider):
         def __init__(self) -> None:

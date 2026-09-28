@@ -32,6 +32,19 @@ enum ConversationNavigationUITestFixture {
     /// ADR-0129: the first conversation is bound to a website profile, and
     /// its run waits on a `browser.act` approval that offers a task permission.
     static let taskGrantLaunchArgument = "--ui-testing-browser-task-grant"
+    /// Milestone 31: the work account advertises unsubscribe support and the
+    /// census serves four senders. Served only under this argument, so every
+    /// other journey keeps an account that offers no Subscriptions entry.
+    static let subscriptionsLaunchArgument = "--ui-testing-email-subscriptions"
+    /// Each unsubscribe settles as a request the sender did not accept.
+    static let subscriptionsFailureLaunchArgument = "--ui-testing-email-subscriptions-failure"
+    /// Adds a bulk conversation whose projection carries a subscription block.
+    static let bulkThreadLaunchArgument = "--ui-testing-email-bulk-thread"
+    static let newsSubscriptionID = "00000000-0000-0000-0000-000000000B01"
+    static let dealsSubscriptionID = "00000000-0000-0000-0000-000000000B02"
+    static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
+    static let promoSubscriptionID = "00000000-0000-0000-0000-000000000B04"
+    static let bulkThreadID = "00000000-0000-0000-0000-000000000897"
 
     static func makeAppearanceIfRequested() -> AppearancePreferences? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument),
@@ -64,6 +77,8 @@ enum ConversationNavigationUITestFixture {
         ConversationNavigationUITestURLProtocol.resetFolders()
         ConversationNavigationUITestURLProtocol.resetModelSettings()
         ConversationNavigationUITestURLProtocol.resetTaskGrant()
+        ConversationNavigationUITestURLProtocol.resetSubscriptions()
+        ConversationNavigationUITestURLProtocol.resetMemory()
         #if os(macOS)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
             let availableAfter = Date().addingTimeInterval(
@@ -206,6 +221,62 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             taskGrantRevoked = false
         }
     }
+    /// One census sender. The unverified one has no mechanism sentence yet,
+    /// and the protected one is a correspondent the owner writes to.
+    private struct SubscriptionSender {
+        let id: String
+        let name: String
+        let address: String
+        let mechanism: String
+        let destination: String
+        let threads: Int
+        let verified: Bool
+        let protectedReason: String?
+        var digest: String? { verified ? "digest-\(id.suffix(3))" : nil }
+    }
+    /// Volume first and protected senders last, as the server orders the census.
+    private static let subscriptionSenders = [
+        SubscriptionSender(
+            id: ConversationNavigationUITestFixture.newsSubscriptionID, name: "Daily Brief",
+            address: "news@daily.example.test", mechanism: "one_click", destination: "daily.example.test",
+            threads: 14, verified: true, protectedReason: nil),
+        SubscriptionSender(
+            id: ConversationNavigationUITestFixture.dealsSubscriptionID, name: "Shop Deals",
+            address: "deals@shop.example.test", mechanism: "mailto", destination: "unsubscribe@shop.example.test",
+            threads: 9, verified: true, protectedReason: nil),
+        SubscriptionSender(
+            id: ConversationNavigationUITestFixture.promoSubscriptionID, name: "Promo Weekly",
+            address: "promo@weekly.example.test", mechanism: "one_click", destination: "weekly.example.test",
+            threads: 3, verified: false, protectedReason: nil),
+        SubscriptionSender(
+            id: ConversationNavigationUITestFixture.clubSubscriptionID, name: "Running Club",
+            address: "club@run.example.test", mechanism: "one_click", destination: "run.example.test",
+            threads: 4, verified: true, protectedReason: "correspondent"),
+    ]
+    private static let subscriptionLock = NSLock()
+    /// Each sender's durable state, revision and latest operation, keyed by id.
+    private static var subscriptionRecords: [String: (state: String, revision: Int, operation: String?)] = [:]
+    /// Operations admitted and not yet read back: the action and its senders.
+    private static var subscriptionOperations: [String: (action: String, targets: [String])] = [:]
+    private static var subscriptionsEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.subscriptionsLaunchArgument)
+    }
+    private static var bulkThreadEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.bulkThreadLaunchArgument)
+    }
+    /// Starts each journey with every sender active and no operation admitted.
+    static func resetSubscriptions() {
+        subscriptionLock.withLock {
+            subscriptionRecords = Dictionary(uniqueKeysWithValues: subscriptionSenders.map {
+                ($0.id, (state: "active", revision: 1, operation: nil))
+            })
+            subscriptionOperations = [:]
+        }
+    }
+    private static let memoryLock = NSLock()
+    /// Set by a governed delete, after which the browser's reads omit the belief.
+    private static var memoryDeleted = false
+    static func resetMemory() { memoryLock.withLock { memoryDeleted = false } }
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
         emailLock.lock()
@@ -320,7 +391,72 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = "{\"items\":[\(Self.emailDraftJSON)],\"next_cursor\":null}"
         case ("GET", "/v1/email/accounts"):
             statusCode = 200
-            body = Self.emailAccountsJSON
+            body = Self.subscriptionsEnabled
+                ? Self.emailAccountsJSON.replacingOccurrences(
+                    of: "\"archive_supported\":true", with: "\"archive_supported\":true,\"unsubscribe_supported\":true")
+                : Self.emailAccountsJSON
+        case ("GET", "/v1/email/subscriptions") where Self.subscriptionsEnabled:
+            statusCode = 200
+            let state = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "state" }?.value
+            let rows = Self.subscriptionLock.withLock {
+                Self.subscriptionSenders
+                    .filter { state == nil || Self.subscriptionRecords[$0.id]?.state == state }
+                    .map(Self.subscriptionJSON)
+            }
+            body = "{\"items\":[\(rows.joined(separator: ","))],\"next_cursor\":null}"
+        case ("POST", "/v1/email/subscriptions/unsubscribe") where Self.subscriptionsEnabled:
+            // The consent names each sender by identity, evidence and revision,
+            // once, under the header's idempotency key; the fixture refuses anything else.
+            let payload = requestJSON()
+            let targets = payload["targets"] as? [[String: Any]] ?? []
+            let key = payload["idempotency_key"] as? String
+            let ids = targets.compactMap { $0["subscription_id"] as? String }
+            let consented = Self.subscriptionLock.withLock {
+                !targets.isEmpty && targets.count <= 25 && Set(ids).count == ids.count
+                    && payload["archive_existing"] is Bool && key != nil
+                    && request.value(forHTTPHeaderField: "Idempotency-Key") == key
+                    && targets.allSatisfy { target in
+                        guard let id = target["subscription_id"] as? String,
+                            let sender = Self.subscriptionSenders.first(where: { $0.id == id }),
+                            let record = Self.subscriptionRecords[id]
+                        else { return false }
+                        return target["evidence_digest"] as? String == sender.digest
+                            && target["expected_revision"] as? Int == record.revision
+                            && ["active", "failed", "still_sending"].contains(record.state)
+                    }
+            }
+            guard consented else {
+                statusCode = 409
+                body = #"{"error":{"code":"conflict","message":"The consent does not match the census.","details":{},"request_id":"ui-test"}}"#
+                break
+            }
+            body = Self.admitSubscriptionOperation(action: "unsubscribe", targets: ids)
+            statusCode = 202
+        case ("POST", let path) where Self.subscriptionsEnabled
+            && path.hasPrefix("/v1/email/subscriptions/") && path.hasSuffix("/keep"):
+            let id = url.pathComponents[4]
+            let payload = requestJSON()
+            let row: String? = Self.subscriptionLock.withLock {
+                guard let sender = Self.subscriptionSenders.first(where: { $0.id == id }),
+                    let record = Self.subscriptionRecords[id],
+                    payload["expected_revision"] as? Int == record.revision,
+                    let kept = payload["kept"] as? Bool
+                else { return nil }
+                Self.subscriptionRecords[id] = (kept ? "kept" : "active", record.revision + 1, record.operation)
+                return Self.subscriptionJSON(sender)
+            }
+            statusCode = row == nil ? 409 : 200
+            body = row ?? #"{"error":{"code":"conflict","message":"stale revision","details":{},"request_id":"ui-test"}}"#
+        case ("POST", let path) where Self.subscriptionsEnabled
+            && path.hasPrefix("/v1/email/subscriptions/") && path.hasSuffix("/spam"):
+            let id = url.pathComponents[4]
+            let spam = requestJSON()["spam"] as? Bool ?? true
+            statusCode = 202
+            body = Self.admitSubscriptionOperation(action: spam ? "report_spam" : "not_spam", targets: [id])
+        case ("GET", let path) where Self.subscriptionsEnabled && path.hasPrefix("/v1/email/operations/"):
+            statusCode = 200
+            body = Self.readSubscriptionOperation(url.lastPathComponent)
         case ("GET", "/v1/email/threads"):
             statusCode = 200
             let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
@@ -331,10 +467,16 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             if view == "priority", ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-next") {
                 items += (items.isEmpty ? "" : ",") + Self.nextEmailThreadJSON
             }
+            if view == "priority", Self.bulkThreadEnabled {
+                items += (items.isEmpty ? "" : ",") + Self.bulkEmailThreadJSON
+            }
             body = "{\"items\":[\(items)],\"next_cursor\":null}"
         case ("GET", "/v1/email/threads/00000000-0000-0000-0000-000000000899"):
             statusCode = 200
             body = Self.nextEmailThreadJSON
+        case ("GET", "/v1/email/threads/\(ConversationNavigationUITestFixture.bulkThreadID)") where Self.bulkThreadEnabled:
+            statusCode = 200
+            body = Self.bulkEmailThreadJSON
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/dismiss"):
             let values = requestJSON()
             Self.emailLock.withLock { Self.emailHandled = values["dismissed"] as? Bool ?? true }
@@ -565,6 +707,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 200
             body = sessionID == ConversationNavigationUITestFixture.firstSessionID ? Self.firstSessionJSON : Self.secondSessionJSON
         case ("DELETE", let path) where path.hasPrefix("/v1/memories/"):
+            Self.memoryLock.withLock { Self.memoryDeleted = true }
             statusCode = 204
             body = ""
         case ("POST", let path) where path.hasPrefix("/v1/memories/") && path.hasSuffix("/review"):
@@ -577,8 +720,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 return
             }
             statusCode = 200
+            let deleted = Self.memoryLock.withLock { Self.memoryDeleted }
             body = """
-                {"items":[\(Self.memoryJSON)],"next_cursor":null}
+                {"items":[\(deleted ? "" : Self.memoryJSON)],"next_cursor":null}
                 """
         case ("GET", "/v1/schedules"):
             let states = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -783,6 +927,77 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let nextEmailThreadJSON = """
         {"id":"00000000-0000-0000-0000-000000000899","account_id":"work","subject":"Next conversation","senders":["sam@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"in_inbox":true,"summary":"Review the next conversation.","reason":"A separate request.","needs_reply":false,"draft_id":null,"session_id":null,"priority":0.9,"complete":true,"messages":[{"id":"next-message","account_id":"work","provider_message_id":"next-message","provider_thread_id":"next-thread","sender":"sam@example.test","to":["owner@work.example"],"cc":[],"subject":"Next conversation","body":"Here is the next email to read.","sent_at":"2026-09-11T00:00:00Z","label_ids":["INBOX"],"attachments":[],"direction":"received","complete":true}],"draft":null}
         """
+    /// Bulk mail from the Shop Deals sender. Its subscription block follows
+    /// the census, as the server's thread projection does.
+    private static var bulkEmailThreadJSON: String {
+        let (state, revision) = subscriptionLock.withLock {
+            let record = subscriptionRecords[ConversationNavigationUITestFixture.dealsSubscriptionID]
+            return (record?.state ?? "active", record?.revision ?? 1)
+        }
+        let deals = subscriptionSenders.first { $0.id == ConversationNavigationUITestFixture.dealsSubscriptionID }!
+        return """
+            {"id":"\(ConversationNavigationUITestFixture.bulkThreadID)","account_id":"work","subject":"This week's deals","senders":["\(deals.address)"],"updated_at":"2026-09-10T00:00:00Z","revision":1,"in_inbox":true,"summary":"A weekly store promotion.","reason":"Bulk mail from a store you rarely open.","needs_reply":false,"draft_id":null,"session_id":null,"priority":0.4,"complete":true,"messages":[{"id":"deals-message","account_id":"work","provider_message_id":"deals-message","provider_thread_id":"deals-thread","sender":"\(deals.address)","to":["owner@work.example"],"cc":[],"subject":"This week's deals","body":"Everything in the store is on sale this week.","sent_at":"2026-09-10T00:00:00Z","label_ids":["INBOX"],"attachments":[],"direction":"received","complete":true}],"draft":null,"subscription":{"id":"\(deals.id)","state":"\(state)","mechanism":"\(deals.mechanism)","destination":"\(deals.destination)","evidence_digest":"\(deals.digest!)","revision":\(revision)}}
+            """
+    }
+    /// The owner-facing census row; callers hold `subscriptionLock`.
+    private static func subscriptionJSON(_ sender: SubscriptionSender) -> String {
+        let record = subscriptionRecords[sender.id] ?? (state: "active", revision: 1, operation: nil)
+        let destination = sender.verified ? sender.destination : ""
+        let mailto = sender.verified && sender.mechanism == "mailto"
+            ? #"{"to":"\#(sender.destination)","subject":"unsubscribe","body":""}"# : "null"
+        let digest = sender.digest.map { "\"\($0)\"" } ?? "null"
+        let reason = sender.protectedReason.map { "\"\($0)\"" } ?? "null"
+        return """
+            {"id":"\(sender.id)","account_id":"work","display_name":"\(sender.name)","address":"\(sender.address)","list_id":"","thread_count":\(sender.threads),"thread_count_overflow":false,"first_seen_at":"2026-07-01T00:00:00Z","last_received_at":"2026-09-10T00:00:00Z","mechanism":"\(sender.mechanism)","verified":\(sender.verified),"link_only":false,"destination":"\(destination)","mailto":\(mailto),"evidence_digest":\(digest),"state":"\(record.state)","protected":\(sender.protectedReason != nil),"protected_reason":\(reason),"requested_at":null,"operation":\(record.operation ?? "null"),"revision":\(record.revision)}
+            """
+    }
+    /// Marks each sender pending behind one durable operation and returns its admission.
+    private static func admitSubscriptionOperation(action: String, targets: [String]) -> String {
+        let operationID = UUID().uuidString
+        subscriptionLock.withLock {
+            subscriptionOperations[operationID] = (action, targets)
+            for id in targets {
+                guard let record = subscriptionRecords[id] else { continue }
+                subscriptionRecords[id] = (
+                    "pending", record.revision + 1,
+                    subscriptionOperationJSON(operationID, action: action, status: "pending", code: nil, prior: record.state))
+            }
+        }
+        return "{\"operation_id\":\"\(operationID)\",\"run_id\":\"\(emailRunID)\",\"status\":\"RUNNING\",\"replayed\":false}"
+    }
+    /// The run finishes on its first read. Under the failure argument the
+    /// sender refused an unsubscribe, which the row then records honestly.
+    private static func readSubscriptionOperation(_ operationID: String) -> String {
+        let failing = ProcessInfo.processInfo.arguments.contains(
+            ConversationNavigationUITestFixture.subscriptionsFailureLaunchArgument)
+        subscriptionLock.withLock {
+            guard let operation = subscriptionOperations.removeValue(forKey: operationID) else { return }
+            let action = operation.action
+            for id in operation.targets {
+                guard let record = subscriptionRecords[id] else { continue }
+                let refused = failing && action == "unsubscribe"
+                let state = switch action {
+                case "report_spam": "reported_spam"
+                case "not_spam": "active"
+                default: refused ? "failed" : "unsubscribed"
+                }
+                subscriptionRecords[id] = (
+                    state, record.revision + 1,
+                    subscriptionOperationJSON(
+                        operationID, action: action, status: refused ? "failed" : "completed",
+                        code: refused ? "http_status" : nil, prior: "active"))
+            }
+        }
+        return "{\"operation_id\":\"\(operationID)\",\"run_id\":\"\(emailRunID)\",\"status\":\"COMPLETED\",\"replayed\":false}"
+    }
+    private static func subscriptionOperationJSON(
+        _ id: String, action: String, status: String, code: String?, prior: String
+    ) -> String {
+        let code = code.map { "\"\($0)\"" } ?? "null"
+        return """
+            {"operation_id":"\(id)","run_id":"\(emailRunID)","action":"\(action)","status":"\(status)","code":\(code),"requested_at":"2026-09-28T00:00:00Z","prior_state":"\(prior)"}
+            """
+    }
     /// Five synthetic priorities exercise real list geometry without using private mail.
     private static var fullInboxJSON: String {
         let subjects = ["Board agenda", "Design review for the autumn release", "Friday planning notes",

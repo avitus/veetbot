@@ -34,6 +34,7 @@ from agent_core.domain.browser_task_grants import (
     parse_task_grant_scopes,
     task_grant_id_for_approval,
 )
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.policies import (
     ActionKind,
     AuthorizationTurn,
@@ -503,3 +504,51 @@ async def test_the_composite_asks_the_standing_grant_first_and_keeps_the_specifi
     assert allowed == standing_allow and second.calls == 0
     assert specific == task_deny
     assert general == standing_deny
+
+
+@dataclass
+class Failing:
+    error: Exception
+    calls: int = 0
+
+    async def authorize(self, **kwargs: Any) -> StandingAuthorization:
+        del kwargs
+        self.calls += 1
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConflictError("grant row moved"), OSError("profile service unreachable"), ValueError("bad")],
+    ids=["domain", "os", "value"],
+)
+async def test_a_failing_authorizer_never_authorizes_and_falls_back_to_approval(
+    error: Exception,
+) -> None:
+    task_allow = StandingAuthorization(
+        allowed=True,
+        reason_code="browser.task_grant.authorized",
+        authorization_kind="browser_task_grant",
+        authorization_ref=str(GRANT),
+    )
+    arguments: dict[str, Any] = {
+        "action": proposed(),
+        "decision": decision(),
+        "principal": owner(),
+        "run": run(),
+        "agent_version": "agent-v1",
+        "action_deadline": WHEN,
+        "turn": BROWSER_TURN,
+    }
+    failing = Failing(error)
+
+    alone = await CompositeStandingAuthorizer([failing]).authorize(**arguments)
+    then_allowed = await CompositeStandingAuthorizer([failing, Fixed(task_allow)]).authorize(
+        **arguments
+    )
+    empty = await CompositeStandingAuthorizer([]).authorize(**arguments)
+
+    assert alone == StandingAuthorization(allowed=False, reason_code="standing.unavailable")
+    assert empty == alone
+    assert then_allowed == task_allow
+    assert failing.calls == 2

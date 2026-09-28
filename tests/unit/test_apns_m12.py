@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
@@ -17,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 
 from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.determinism import FixedClock
-from agent_core.domain.devices import PushEnvironment
+from agent_core.domain.devices import PushEnvironment, PushProvider, PushTarget
 from agent_core.domain.notifications import (
     NOTIFICATION_TITLES,
     DeliveryOutcome,
@@ -513,3 +514,123 @@ def test_apns_rejects_non_private_key_file(tmp_path: Path) -> None:
             topic="com.veetbot.app",
             clock=FixedClock(NOW),
         )
+
+
+def _sandbox_transport(
+    key_path: Path, handler: httpx.MockTransport | None = None
+) -> APNsPushTransport:
+    client = httpx.AsyncClient(
+        base_url="https://api.sandbox.push.apple.com:443",
+        transport=handler or httpx.MockTransport(lambda _request: httpx.Response(200)),
+    )
+    return APNsPushTransport(
+        key_file=key_path,
+        key_id="KEY123",
+        team_id="TEAM123",
+        topic="com.veetbot.app",
+        clock=FixedClock(NOW),
+        clients={PushEnvironment.SANDBOX: client},
+    )
+
+
+@pytest.mark.parametrize(("priority", "header"), [(10, "10"), (5, "5")])
+async def test_apns_priority_is_immediate_only_for_prompt_kinds(
+    tmp_path: Path, priority: int, header: str
+) -> None:
+    """notifications-and-devices.md: 10 for approvals and questions, 5 for terminal notices."""
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    key_path, _key = _private_key_file(tmp_path)
+    transport = _sandbox_transport(key_path, httpx.MockTransport(handler))
+    message = push_message().model_copy(update={"priority": priority})
+    await transport.deliver(push_target(), message)
+    assert requests[0].headers["apns-priority"] == header
+    await transport.aclose()
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        push_target().model_copy(update={"provider": PushProvider.WHATSAPP}),
+        push_target().model_copy(update={"environment": None}),
+        push_target().model_copy(update={"environment": PushEnvironment.PRODUCTION}),
+    ],
+    ids=["other-provider", "no-environment", "unconfigured-environment"],
+)
+async def test_apns_refuses_a_target_it_cannot_address_before_sending(
+    tmp_path: Path, target: PushTarget
+) -> None:
+    def forbidden(request: httpx.Request) -> httpx.Response:
+        pytest.fail("an unaddressable target reached Apple")
+
+    key_path, _key = _private_key_file(tmp_path)
+    transport = _sandbox_transport(key_path, httpx.MockTransport(forbidden))
+    with pytest.raises(ValueError, match="APNs"):
+        await transport.deliver(target, push_message())
+    await transport.aclose()
+
+
+@pytest.mark.parametrize(
+    ("response", "reason"),
+    [
+        (httpx.Response(400, content=b"not json"), "HTTP400"),
+        (httpx.Response(400, json={"reason": "x" * 129}), "HTTP400"),
+        (httpx.Response(400, json=["BadDeviceToken"]), "HTTP400"),
+    ],
+    ids=["not-json", "overlong-reason", "not-an-object"],
+)
+async def test_apns_reports_only_a_bounded_provider_reason(
+    tmp_path: Path, response: httpx.Response, reason: str
+) -> None:
+    key_path, _key = _private_key_file(tmp_path)
+    transport = _sandbox_transport(key_path, httpx.MockTransport(lambda _request: response))
+    outcome = await transport.deliver(push_target(), push_message())
+    assert outcome.outcome is DeliveryOutcome.REJECTED
+    assert outcome.provider_reason == reason
+    await transport.aclose()
+
+
+def _write_private(path: Path, payload: bytes) -> Path:
+    path.write_bytes(payload)
+    os.chmod(path, 0o600)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("key_file", "message"),
+    [
+        (lambda tmp: tmp / "absent.p8", "unavailable"),
+        (lambda tmp: _write_private(tmp / "garbage.p8", b"not a key"), "not a valid private key"),
+        (
+            lambda tmp: _write_private(
+                tmp / "p384.p8",
+                ec.generate_private_key(ec.SECP384R1()).private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption(),
+                ),
+            ),
+            "P-256",
+        ),
+        (lambda tmp: tmp, "regular file"),
+    ],
+    ids=["missing", "not-a-key", "wrong-curve", "directory"],
+)
+def test_apns_refuses_an_unusable_key_file(
+    tmp_path: Path, key_file: Callable[[Path], Path], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _sandbox_transport(key_file(tmp_path))
+
+
+def test_apns_refuses_a_symlinked_key_file(tmp_path: Path) -> None:
+    key_path, _key = _private_key_file(tmp_path)
+    link = tmp_path / "linked.p8"
+    link.symlink_to(key_path)
+    with pytest.raises(ValueError, match="regular file"):
+        _sandbox_transport(link)

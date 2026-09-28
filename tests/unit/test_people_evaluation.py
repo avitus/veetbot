@@ -485,3 +485,56 @@ def test_commitment_scoring_requires_the_labeled_state_and_due_date() -> None:
             )["direct_fact_recall"]
             == 0
         )
+
+
+@pytest.mark.parametrize(
+    ("live", "repeats", "case", "message"),
+    [
+        (None, 3, None, "RUN_LIVE_MODEL_TESTS=1"),
+        ("true", 3, None, "RUN_LIVE_MODEL_TESTS=1"),
+        ("1", 2, None, "three to ten repeats"),
+        ("1", 11, None, "three to ten repeats"),
+        ("1", 3, "no-such-development-case", "exact development case"),
+    ],
+)
+async def test_live_people_comparison_refuses_before_any_provider_or_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    live: str | None,
+    repeats: int,
+    case: str | None,
+    message: str,
+) -> None:
+    """A paid comparison needs the explicit opt-in, a bounded repeat count, and a real case."""
+
+    from decimal import Decimal
+
+    from agent_core.evals import people_comparison
+
+    if live is None:
+        monkeypatch.delenv("RUN_LIVE_MODEL_TESTS", raising=False)
+    else:
+        monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", live)
+    checked: list[str] = []
+    monkeypatch.setattr(
+        people_comparison, "require_committed_tree", lambda _root, ref: checked.append(ref)
+    )
+
+    def no_settings() -> object:
+        raise AssertionError("a refused comparison loaded provider settings")
+
+    monkeypatch.setattr(people_comparison, "load_settings", no_settings)
+
+    with pytest.raises(ValueError, match=message):
+        await people_comparison.run_comparison(
+            Path.cwd(),
+            output=tmp_path / "run",
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="b" * 40,
+            maximum_cost=Decimal("1"),
+            repeats=repeats,
+            development_case=case,
+        )
+    assert not (tmp_path / "run").exists()
+    assert checked == (["b" * 40] if case is not None else [])

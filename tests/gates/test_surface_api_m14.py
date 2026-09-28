@@ -161,3 +161,81 @@ async def test_pairing_code_is_single_presentation_and_lifecycle_is_scoped(
 
             deleted = await client.delete(f"/v1/surfaces/pairings/{pairing['id']}")
             assert deleted.status_code == 204
+
+
+async def test_surface_routes_hold_exact_scopes_absence_and_the_scope_ceiling(
+    tmp_path: Path,
+) -> None:
+    """Reads need surface.read, writes surface.write; unknown ids are 404, never 500."""
+    from uuid import UUID
+
+    from agent_core.domain.agents import Principal
+
+    settings = _settings(tmp_path, enabled=True)
+    async with build(settings=settings, sequential_ids=True) as composition:
+        registered = await composition.services.devices.register(
+            composition.principal,
+            DeviceRegistration(
+                client_device_id="whatsapp:15551234567",
+                name="Veetbot WhatsApp",
+                kind=DeviceKind.SURFACE,
+                platform="whatsapp",
+                push_provider=PushProvider.WHATSAPP,
+                push_token=SecretStr("15551234567"),
+            ),
+        )
+        surface_id = registered.device.id
+        unknown = UUID(int=404)
+
+        def client_for(scopes: set[str]) -> httpx.AsyncClient:
+            principal = Principal(
+                tenant_id=composition.principal.tenant_id,
+                principal_id=composition.principal.principal_id,
+                roles=set(composition.principal.roles),
+                scopes=scopes,
+            )
+            app = create_app(
+                composition.services,
+                settings,
+                principal,
+                composition.new_request_id,
+                composition.readiness_probe,
+            )
+            return httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://agent.test",
+            )
+
+        mint = {"granted_scopes": ["run.write"], "label": "Owner"}
+        async with client_for({"surface.read"}) as reader:
+            assert (await reader.get("/v1/surfaces")).status_code == 200
+            assert (await reader.get(f"/v1/surfaces/{surface_id}")).status_code == 200
+            assert (await reader.get(f"/v1/surfaces/{unknown}")).status_code == 404
+            assert (await reader.get(f"/v1/surfaces/{unknown}/pairings")).status_code == 404
+            refused = await reader.post(
+                f"/v1/surfaces/{surface_id}/pairing-codes",
+                headers={"Idempotency-Key": "reader"},
+                json=mint,
+            )
+            assert refused.status_code == 403
+            assert (await reader.post(f"/v1/surfaces/pairings/{unknown}/revoke")).status_code == 403
+            assert (await reader.delete(f"/v1/surfaces/pairings/{unknown}")).status_code == 403
+        async with client_for({"surface.write", "run.write"}) as writer:
+            assert (await writer.get("/v1/surfaces")).status_code == 403
+            assert (await writer.get(f"/v1/surfaces/{surface_id}/pairings")).status_code == 403
+            assert (await writer.post(f"/v1/surfaces/pairings/{unknown}/revoke")).status_code == 404
+            assert (await writer.delete(f"/v1/surfaces/pairings/{unknown}")).status_code == 404
+            missing_surface = await writer.post(
+                f"/v1/surfaces/{unknown}/pairing-codes",
+                headers={"Idempotency-Key": "unknown-surface"},
+                json=mint,
+            )
+            assert missing_surface.status_code == 404
+            # A code can grant only scopes its minter holds now (inbound-surfaces.md).
+            widened = await writer.post(
+                f"/v1/surfaces/{surface_id}/pairing-codes",
+                headers={"Idempotency-Key": "widened"},
+                json={**mint, "granted_scopes": ["run.write", "session.read"]},
+            )
+            assert widened.status_code == 409
+            assert "code" not in widened.json()

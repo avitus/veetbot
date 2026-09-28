@@ -175,3 +175,49 @@ def test_publication_verifies_provider_journal(tmp_path: Any, failure: str | Non
             verify_cost_journal(tmp_path, metadata)
     else:
         verify_cost_journal(tmp_path, metadata)
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("omitted_repeat", "cannot omit, duplicate, or pool"),
+        ("duplicated_repeat", "cannot omit, duplicate, or pool"),
+        ("omitted_ordinary", "cannot omit, duplicate, or pool"),
+        ("pooled_repeat", "cannot omit, duplicate, or pool"),
+        ("formation_fallback", "formation fallback or call mismatch"),
+        ("candidate_call_mismatch", "formation fallback or call mismatch"),
+        ("ordinary_call_mismatch", "formation fallback or call mismatch"),
+        ("incomplete_run", "complete, reviewed, settled comparison"),
+        ("repeat_count", "complete, reviewed, settled comparison"),
+    ],
+)
+def test_publication_refuses_a_missing_duplicated_or_fallback_repeat(
+    failure: str, message: str
+) -> None:
+    """Each repeat publishes on its own numbers; none may be dropped, doubled, or rescued."""
+
+    from agent_core.evals.people_release import assemble_evidence
+
+    metadata, scores, ordinary, acceptance = deepcopy(passing_inputs())
+    summaries = scores["summaries"]
+    if failure == "omitted_repeat":
+        summaries.pop()
+    elif failure == "duplicated_repeat":
+        summaries.append(deepcopy(summaries[0]))
+    elif failure == "omitted_ordinary":
+        ordinary["reports"].pop()
+    elif failure == "pooled_repeat":
+        summaries[-1]["repeat"] = summaries[-2]["repeat"]
+    elif failure == "formation_fallback":
+        summaries[2]["formation_failures"] = 1
+    elif failure == "candidate_call_mismatch":
+        summaries[4]["formation_call_mismatches"] = 1
+    elif failure == "ordinary_call_mismatch":
+        ordinary["reports"][5]["formation_call_mismatches"] = 1
+    elif failure == "incomplete_run":
+        metadata["state"] = "running"
+    else:
+        scores["repeats"] = 2
+
+    with pytest.raises(ValueError, match=message):
+        assemble_evidence(metadata, scores, ordinary, acceptance, labeled_mentions=1800)

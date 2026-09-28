@@ -570,3 +570,141 @@ class TestCommittedTreeBinding:
                 build_ref="abc123",
                 output=tmp_path / "never-written.json",
             )
+
+
+def test_a_protected_case_cannot_also_expect_beliefs() -> None:
+    expected = ExpectedBelief(belief_type="preference", subjects=["tea"], statements=["tea"])
+
+    with pytest.raises(ValidationError, match="cannot expect beliefs"):
+        MemoryFormationCase(
+            id="protected-001", episodes=["Hello"], expected=[expected], must_remain_empty=True
+        )
+
+
+def test_corpus_case_ids_are_unique() -> None:
+    corpus, _digest = load_corpus(Path(__file__).resolve().parents[2])
+    duplicated = [*corpus.cases[:-1], corpus.cases[0]]
+
+    with pytest.raises(ValidationError, match="case ids must be unique"):
+        MemoryFormationCorpus.model_validate(
+            corpus.model_dump() | {"cases": [case.model_dump() for case in duplicated]}
+        )
+
+
+@pytest.mark.parametrize(
+    ("passed", "summary", "with_evidence", "message"),
+    [
+        (True, None, False, "only a passing memory evaluation may carry activation evidence"),
+        (False, "lift missing", True, "only a passing memory evaluation may carry"),
+        (True, "but also failed", True, "must not carry a failure summary"),
+        (False, None, False, "requires a failure summary"),
+        (False, "", False, "requires a failure summary"),
+    ],
+)
+def test_evaluation_outcome_and_evidence_cannot_disagree(
+    passed: bool, summary: str | None, with_evidence: bool, message: str
+) -> None:
+    from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
+    from agent_core.evals.memory_formation import MemoryFormationEvaluationResult
+
+    evidence = ProviderExtractionEvaluationEvidence(
+        extractor_version="provider-assisted-v2",
+        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
+        model_policy="fake",
+        provider="fake",
+        model="scripted",
+        policy_profile="default",
+        policy_version="default@test",
+        build_ref="a" * 40,
+        corpus_sha256="a" * 64,
+        sample_count=20,
+        positive_case_count=20,
+        minimum_supported_case_count=16,
+        deterministic_supported_case_count=10,
+        provider_supported_case_count=16,
+        deterministic_supported_candidates=10,
+        provider_supported_candidates=16,
+        deterministic_fabricated_candidates=0,
+        provider_fabricated_candidates=0,
+        deterministic_policy_failures=0,
+        provider_policy_failures=0,
+        evaluated_at=datetime(2026, 8, 19, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValidationError, match=message):
+        MemoryFormationEvaluationResult(
+            passed=passed,
+            failure_summary=summary,
+            cases=[],
+            evidence=evidence if with_evidence else None,
+        )
+
+
+class TestLiveEvaluationRefusesBeforeProviderWork:
+    """Nothing costly or durable happens until every precondition holds."""
+
+    async def test_without_the_live_opt_in_nothing_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.delenv("RUN_LIVE_MODEL_TESTS", raising=False)
+
+        def unexpected() -> Settings:
+            raise AssertionError("an opted-out evaluation loaded settings")
+
+        monkeypatch.setattr(memory_eval, "load_settings", unexpected)
+
+        assert (
+            await memory_eval.run_live_evaluation(
+                Path(__file__).resolve().parents[2],
+                model_policy="balanced",
+                policy_profile="default",
+                build_ref="a" * 40,
+                output=tmp_path / "never-written.json",
+            )
+            is None
+        )
+        assert not (tmp_path / "never-written.json").exists()
+
+    @pytest.mark.parametrize(
+        ("overrides", "message"),
+        [
+            ({"model_policy": " "}, "must be non-empty"),
+            ({"policy_profile": ""}, "must be non-empty"),
+            ({"formation_policy_version": "formation@99"}, "unknown provider-assisted formation"),
+            ({"existing_output": True}, "refusing to overwrite existing evaluation evidence"),
+        ],
+    )
+    async def test_invalid_inputs_or_an_existing_artifact_are_refused(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        overrides: dict[str, object],
+        message: str,
+    ) -> None:
+        monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+        monkeypatch.setattr(memory_eval, "require_committed_tree", lambda _root, _ref: None)
+
+        def unexpected() -> Settings:
+            raise AssertionError("a refused evaluation loaded settings")
+
+        monkeypatch.setattr(memory_eval, "load_settings", unexpected)
+        output = tmp_path / "evidence.json"
+        if overrides.pop("existing_output", False):
+            output.write_text("{}\n", encoding="utf-8")
+        arguments: dict[str, object] = {
+            "model_policy": "balanced",
+            "policy_profile": "default",
+            "build_ref": "a" * 40,
+            "output": output,
+        } | overrides
+
+        with pytest.raises(ValueError, match=message):
+            await memory_eval.run_live_evaluation(
+                Path(__file__).resolve().parents[2],
+                **arguments,  # type: ignore[arg-type]
+            )
+        assert [path.name for path in tmp_path.iterdir()] == (
+            ["evidence.json"] if output.exists() else []
+        )
+        if output.exists():
+            assert output.read_text(encoding="utf-8") == "{}\n"

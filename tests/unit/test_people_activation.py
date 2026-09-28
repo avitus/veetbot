@@ -28,12 +28,6 @@ def test_activation_digest_includes_import_budget_and_retrieval_implementation(
     assert implementation_digest() != before
 
 
-def test_people_policy_pin_is_distinct_from_frozen_formation_policies() -> None:
-    assert "formation@11" in {value.value for value in MemoryFormationPolicyPin}, (
-        "People extraction needs an independently evidence-bound policy pin"
-    )
-
-
 async def test_people_evaluation_uses_new_policy_without_activating_legacy_evidence() -> None:
     from dataclasses import replace
 

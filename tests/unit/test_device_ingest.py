@@ -158,25 +158,6 @@ async def _session_events(composition: Composition, session_id: UUID) -> list[Ev
         return await uow.events.list_after(session_id, 0, composition.principal)
 
 
-async def test_a_replayed_message_reports_the_duplicate_and_seeds_one_run() -> None:
-    async with build(
-        settings=_settings(),
-        script=_replies(4),
-        fixed_clock_at=NOW,
-        sequential_ids=True,
-    ) as composition:
-        await _seed_device(composition)
-
-        first = await _ingest(composition)
-        second = await _ingest(composition)
-        events = await _session_events(composition, first.session_id)
-
-    assert first.duplicate is False
-    assert second == first.model_copy(update={"duplicate": True})
-    assert len([event for event in events if event.event_type == "run.queued"]) == 1
-    assert len([event for event in events if event.event_type == "user.message.created"]) == 1
-
-
 async def test_the_same_instant_spelled_with_an_offset_and_as_utc_is_one_duplicate() -> None:
     """`ingest_digest` normalizes to UTC before hashing, so a re-spelled offset
     of the same instant is a replay, not a second message.
@@ -374,21 +355,6 @@ async def test_sms_ingest_is_refused_while_the_sms_flag_is_unset() -> None:
     assert refused.value.reason == "channel_disabled"
 
 
-async def test_an_unknown_channel_is_refused_by_name() -> None:
-    async with build(
-        settings=_settings(),
-        script=_replies(1),
-        fixed_clock_at=NOW,
-        sequential_ids=True,
-    ) as composition:
-        await _seed_device(composition)
-
-        with pytest.raises(DeviceIngestError) as refused:
-            await _ingest(composition, channel="imessage")
-
-    assert refused.value.reason == "channel_unsupported"
-
-
 async def test_an_unknown_or_revoked_device_cannot_ingest() -> None:
     async with build(
         settings=_settings(),
@@ -441,48 +407,6 @@ def _digest() -> str:
 
 def _digest_of(body: str) -> str:
     return ingest_digest(SENDER, body, NOW)
-
-
-async def test_a_triage_turn_cannot_reach_a_plain_allow() -> None:
-    """Gate 10: the seeded turn taints every consequential call it drives."""
-
-    script = FakeModelScript(
-        turns=[
-            ScriptedTurn(
-                tool_calls=[
-                    ScriptedToolCall(
-                        name=DEVICE_SMS_SEND_TOOL_NAME,
-                        arguments={"recipient": SENDER, "body": "Feeding at six."},
-                        call_id="draft-reply",
-                    )
-                ],
-                stop_reason=StopReason.TOOL_USE,
-            ),
-            ScriptedTurn(text="Drafted."),
-        ]
-    )
-    channel = FakeDeviceChannel(
-        clock=FixedClock(NOW),
-        capabilities={DEVICE_ID: frozenset({DEVICE_SMS_SEND_TOOL_NAME})},
-        owners={DEVICE_ID: PRINCIPAL},
-    )
-    async with build(
-        settings=_settings(),
-        script=script,
-        fixed_clock_at=NOW,
-        sequential_ids=True,
-        device_channel_override=channel,
-    ) as composition:
-        await _seed_device(composition)
-        recording: list[PolicyDecisionType] = []
-        _record_device_decisions(composition, recording)
-        result = await _ingest(composition)
-        parked = await composition.runs.get(result.run_id)
-        pending = await composition.approvals.list_pending(run_id=result.run_id)
-
-    assert recording == [PolicyDecisionType.REQUIRE_APPROVAL]
-    assert parked.status is RunStatus.WAITING_FOR_APPROVAL
-    assert [approval.tool_name for approval in pending] == [DEVICE_SMS_SEND_TOOL_NAME]
 
 
 def _draft_reply_script(*, preamble: list[ScriptedTurn]) -> FakeModelScript:

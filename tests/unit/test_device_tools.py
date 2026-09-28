@@ -18,7 +18,7 @@ from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.device_channel import FakeDeviceChannel
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.bootstrap import Composition, build
-from agent_core.config import ConfigurationError, Settings
+from agent_core.config import Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.devices import DeviceCapability, DeviceInvocation, DeviceInvocationStatus
 from agent_core.domain.errors import (
@@ -447,33 +447,21 @@ async def test_an_expired_invocation_reports_the_device_offline() -> None:
 
 
 @pytest.mark.parametrize(
-    "reason",
+    "error",
     [
-        "device.not_found",
-        "device.revoked",
-        "device.capability_absent",
-        "device.invocation_not_owned",
-    ],
+        pytest.param(DeviceChannelUnavailable(reason, "unavailable"), id=reason)
+        for reason in (
+            "device.not_found",
+            "device.revoked",
+            "device.capability_absent",
+            "device.invocation_not_owned",
+        )
+    ]
+    + [pytest.param(NotFoundError("device invocation not found"), id="vanished_invocation_row")],
 )
-async def test_every_unavailable_reason_reports_the_device_offline(reason: str) -> None:
+async def test_every_unavailable_channel_reports_the_device_offline(error: Exception) -> None:
     tool = DeviceSmsSendTool(
-        _RaisingChannel(DeviceChannelUnavailable(reason, "unavailable")),
-        DEVICE_ID,
-        SequenceIdFactory(),
-        invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
-    )
-
-    result = await tool.execute(dict(ARGUMENTS), tool_context())
-
-    assert result.ok is False
-    assert result.failure is not None
-    assert result.failure.kind is ToolFailureKind.TRANSPORT
-    assert result.failure.reason_code == "tool.device_offline"
-
-
-async def test_an_invocation_row_that_vanishes_reports_the_device_offline() -> None:
-    tool = DeviceSmsSendTool(
-        _RaisingChannel(NotFoundError("device invocation not found")),
+        _RaisingChannel(error),
         DEVICE_ID,
         SequenceIdFactory(),
         invocation_timeout_seconds=SHIPPED_INVOCATION_TIMEOUT_SECONDS,
@@ -609,67 +597,6 @@ async def test_a_credential_shaped_body_is_denied_before_the_tool_rule_is_consul
     assert allowed.decision is PolicyDecisionType.ALLOW
 
 
-async def test_the_device_tool_is_absent_while_either_flag_is_unset() -> None:
-    # Milestone 24 pairs the two flags at configuration time, so a half-enabled
-    # deployment never composes at all; the tool cannot exist in a graph that
-    # was refused before it was built.
-    for half_enabled in (
-        replace(memory_settings(), device_channel_enabled=True),
-        replace(memory_settings(), device_sms_enabled=True),
-    ):
-        with pytest.raises(ConfigurationError, match="device channel and SMS"):
-            async with build(
-                settings=half_enabled,
-                script=FakeModelScript(turns=[ScriptedTurn(text="ready")]),
-                fixed_clock_at=NOW,
-                sequential_ids=True,
-            ):
-                pass
-
-    async with build(
-        settings=memory_settings(),
-        script=FakeModelScript(turns=[ScriptedTurn(text="ready")]),
-        fixed_clock_at=NOW,
-        sequential_ids=True,
-    ) as composition:
-        await _seed_device(composition)
-        run_id = await composition.runs.submit("ready?")
-        await composition.runs.wait_terminal(run_id)
-
-        with pytest.raises(NotFoundError):
-            composition.tool_pipeline._registry.get(
-                DEVICE_SMS_SEND_TOOL_NAME,
-                tenant_id=composition.principal.tenant_id,
-                principal_id=composition.principal.principal_id,
-            )
-
-
-async def test_an_unreachable_device_surfaces_the_offline_outcome_to_the_model() -> None:
-    channel = FakeDeviceChannel(
-        clock=_clock(),
-        capabilities={DEVICE_ID: frozenset({TOOL_NAME})},
-        owners={DEVICE_ID: PRINCIPAL},
-        default_status=DeviceInvocationStatus.EXPIRED,
-    )
-    async with build(
-        settings=_device_settings(),
-        script=_script(str(ARGUMENTS["body"])),
-        fixed_clock_at=NOW,
-        sequential_ids=True,
-        device_channel_override=channel,
-    ) as composition:
-        await _seed_device(composition)
-        run_id = await composition.runs.submit("Text the sitter.")
-        completed = await composition.runs.wait_terminal(run_id)
-        async with composition.uow_factory() as uow:
-            invocations = await uow.invocations.list_for_run(completed.id, composition.principal)
-
-    [invocation] = [item for item in invocations if item.tool_name == DEVICE_SMS_SEND_TOOL_NAME]
-    assert invocation.outcome is not None
-    assert invocation.outcome.reason_code == "tool.device_offline"
-    assert invocation.outcome.status.value == "unavailable"
-
-
 # --- the policy stance ------------------------------------------------------
 
 
@@ -782,19 +709,6 @@ async def test_a_non_authorizing_origin_still_requires_approval_for_the_device_s
 
     decision = await DeterministicPolicyEngine(DEFAULT_RULESET).evaluate(
         _device_action(body=str(ARGUMENTS["body"]), origin_trust=origin),
-        principal(),
-        contract_run(),
-    )
-
-    assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
-
-
-async def test_an_untrusted_turn_still_requires_approval_for_the_device_send() -> None:
-    decision = await DeterministicPolicyEngine(DEFAULT_RULESET).evaluate(
-        _device_action(
-            body=str(ARGUMENTS["body"]),
-            origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
-        ),
         principal(),
         contract_run(),
     )

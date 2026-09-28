@@ -1,6 +1,7 @@
 """The deferred tool index renders names, parameters and one sentence (ADR-0123)."""
 
 from agent_core.adapters.determinism import FixedClock
+from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.rendering import (
     DEFERRED_INDEX_DISCOVERED_HEADING,
     DEFERRED_INDEX_NOTE,
@@ -43,6 +44,14 @@ def test_an_empty_index_changes_no_prefix_byte() -> None:
     assert prefix_bytes(build_prefix(agent(), []), []) == prefix_bytes(
         build_prefix(agent(), [], deferred_tools=()), [], ()
     )
+    # The identity a plan without deferred tools had before ADR-0123 existed.
+    prefix = build_prefix(agent(), [], deferred_tools=())
+    assert prefix == build_prefix(agent(), [])
+    assert prefix_bytes(prefix, [], ()) == canonical_json_bytes(
+        {"conversation": [item.model_dump(mode="json") for item in prefix], "tools": []}
+    )
+    tool = CurrentTimeTool(FixedClock(NOW)).spec
+    assert prefix_bytes(prefix, [], [tool]) != prefix_bytes(prefix, [], ())
 
 
 def test_builtin_entries_are_trusted_and_discovered_entries_are_data() -> None:

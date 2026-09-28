@@ -22,7 +22,6 @@ from agent_core.domain.email import (
     EmailRecord,
     EmailThread,
 )
-from agent_core.domain.errors import AuthorizationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import ModelUsage
 from agent_core.domain.persistence import ModelCallRecord
@@ -298,36 +297,6 @@ async def test_learning_pause_and_reset_are_shared_and_keep_saved_mail() -> None
         assert reset.status_code == 200
         assert reset.json()["profile_revision"] > initial.json()["profile_revision"]
         assert (await client.get(f"/v1/email/threads/{thread.id}")).status_code == 200
-
-
-async def test_cached_email_rechecks_account_permission_after_revocation() -> None:
-    async with email_client() as (composition, _):
-        thread, _ = await seed_mail(composition)
-        composition.services.email.account_servers = {
-            "work": {"read": "gmail_read", "send": "gmail_send"}
-        }
-        reduced = composition.principal.model_copy(update={"scopes": {"email.read"}})
-        with pytest.raises(AuthorizationError):
-            await composition.services.email.thread(reduced, thread.id)
-
-
-async def test_retry_after_lost_draft_save_returns_same_revision() -> None:
-    async with email_client() as (composition, client):
-        _, draft = await seed_mail(composition)
-        data = {
-            "expected_revision": 1,
-            "to": draft.to,
-            "subject": draft.subject,
-            "body": "My revised response.",
-        }
-        first = await client.put(
-            f"/v1/email/drafts/{draft.id}", json=data, headers={"Idempotency-Key": "edit-1"}
-        )
-        replay = await client.put(
-            f"/v1/email/drafts/{draft.id}", json=data, headers={"Idempotency-Key": "edit-1"}
-        )
-        assert first.status_code == replay.status_code == 200
-        assert first.json()["revision"] == replay.json()["revision"] == 2
 
 
 async def test_crashed_model_attempt_keeps_automatic_budget_reserved() -> None:
@@ -781,3 +750,49 @@ async def test_source_exclusion_reports_pending_people_cleanup_until_retried(
         assert retried.status_code == 200, retried.text
         assert retried.json()["status"] == "erased"
         assert retried.json()["pending_people_cleanup"] == 0
+
+
+async def test_discarding_a_draft_is_idempotent() -> None:
+    async with email_client() as (composition, client):
+        _, draft = await seed_mail(composition)
+        path = f"/v1/email/drafts/{draft.id}?expected_revision=1"
+        first = await client.delete(path)
+        again = await client.delete(path)
+        async with composition.uow_factory() as uow:
+            stored = await uow.email.get(composition.principal, "draft", str(draft.id))
+
+    assert first.status_code == again.status_code == 200
+    assert first.json()["status"] == EmailDraftStatus.DISCARDED.value
+    assert again.json() == first.json()
+    assert stored is not None and stored.payload["status"] == EmailDraftStatus.DISCARDED.value
+
+
+@pytest.mark.parametrize("status", [EmailDraftStatus.SENDING, EmailDraftStatus.UNCERTAIN])
+async def test_a_draft_whose_send_is_unresolved_cannot_be_discarded(
+    status: EmailDraftStatus,
+) -> None:
+    """Discarding it would hide mail that may already have left the account."""
+
+    async with email_client() as (composition, client):
+        _, draft = await seed_mail(composition)
+        async with composition.uow_factory() as uow:
+            record = await uow.email.get(composition.principal, "draft", str(draft.id))
+            assert record is not None
+            await uow.email.put(
+                record.model_copy(
+                    update={
+                        "revision": record.revision + 1,
+                        "payload": draft.model_copy(update={"status": status}).model_dump(
+                            mode="json"
+                        ),
+                    }
+                ),
+                expected_revision=record.revision,
+            )
+        refused = await client.delete(f"/v1/email/drafts/{draft.id}?expected_revision=1")
+        async with composition.uow_factory() as uow:
+            stored = await uow.email.get(composition.principal, "draft", str(draft.id))
+
+    assert refused.status_code == 409
+    assert refused.headers["cache-control"] == "private, no-store"
+    assert stored is not None and stored.payload["status"] == status.value

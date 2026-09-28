@@ -10,6 +10,7 @@ from pydantic import SecretStr
 
 from agent_core.api import create_app
 from agent_core.bootstrap import build
+from agent_core.config import Settings
 from agent_core.domain.agents import Principal
 from tests.gates.test_call_m27 import call_configuration
 from tests.integration.m2_support import memory_settings
@@ -131,3 +132,97 @@ async def test_ingress_logs_rejections_it_answers_itself(
         )
         assert response.status_code == 429
         assert caplog.messages == ["calling.callback_rejected reason=queue_full"]
+
+
+def _enabled_call_settings() -> Settings:
+    return replace(
+        memory_settings(),
+        call_enabled=True,
+        call_configuration=call_configuration(),
+        credentials={
+            name: SecretStr(
+                json.dumps(
+                    {
+                        "api_key": "fixture-key-12345",
+                        "configuration": call_configuration().model_dump(),
+                    }
+                )
+            )
+            for name in ("bland_read", "bland_call")
+        },
+    )
+
+
+async def test_call_record_routes_map_scope_absence_and_active_erasure() -> None:
+    """Exact scopes per route; absence is 404; an active call's content cannot be erased."""
+    from uuid import UUID
+
+    from agent_core.domain.calls import CallRecord
+
+    active_id, ended_id, missing_id = (str(UUID(int=n)) for n in (271, 272, 273))
+    settings = _enabled_call_settings()
+    owner = Principal(
+        tenant_id="local",
+        principal_id="owner",
+        scopes={"call.read", "call.cancel", "call.delete"},
+    )
+    async with build(settings=settings, storage="memory", principal=owner) as composition:
+        now = composition.clock.now()
+        async with composition.uow_factory() as uow:
+            for key, status in ((active_id, "active"), (ended_id, "completed")):
+                await uow.calls.put(
+                    CallRecord(
+                        tenant_id=owner.tenant_id,
+                        principal_id=owner.principal_id,
+                        kind="call",
+                        key=key,
+                        revision=1,
+                        payload={
+                            "call_id": key,
+                            "status": status,
+                            "created_at": now.isoformat(),
+                            "summary": "Asked for a callback.",
+                        },
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    expected_revision=0,
+                )
+
+        def client_for(principal: Principal) -> httpx.AsyncClient:
+            app = create_app(
+                composition.services,
+                composition.settings,
+                principal,
+                composition.new_request_id,
+                composition.readiness_probe,
+            )
+            return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+        async with client_for(owner) as client:
+            fetched = await client.get(f"/v1/calls/{active_id}")
+            assert fetched.status_code == 200
+            assert fetched.headers["cache-control"] == "private, no-store"
+            assert fetched.json()["status"] == "active"
+            assert (await client.get(f"/v1/calls/{missing_id}")).status_code == 404
+            assert (await client.get("/v1/calls/not-a-call")).status_code == 400
+            assert (await client.post(f"/v1/calls/{missing_id}/stop")).status_code == 404
+
+            refused = await client.delete(f"/v1/calls/{active_id}")
+            assert refused.status_code == 409
+            assert (await client.get(f"/v1/calls/{active_id}")).json()["summary"]
+
+            erased = await client.delete(f"/v1/calls/{ended_id}")
+            assert erased.status_code == 200
+            assert erased.json() == {"call_id": ended_id, "erased": True, "provider_deleted": False}
+            after = await client.get(f"/v1/calls/{ended_id}")
+            assert after.json() == {"call_id": ended_id, "erased": True, "provider_deleted": False}
+            assert (await client.delete(f"/v1/calls/{missing_id}")).status_code == 404
+
+        reader = owner.model_copy(update={"scopes": {"call.read"}})
+        async with client_for(reader) as client:
+            assert (await client.delete(f"/v1/calls/{active_id}")).status_code == 403
+            assert (await client.post(f"/v1/calls/{active_id}/stop")).status_code == 403
+        writer = owner.model_copy(update={"scopes": {"call.cancel", "call.delete"}})
+        async with client_for(writer) as client:
+            assert (await client.get(f"/v1/calls/{active_id}")).status_code == 403

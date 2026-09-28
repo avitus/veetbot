@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+import pytest
 from pydantic import SecretStr
 
 from agent_core.adapters.whatsapp import (
@@ -24,6 +25,7 @@ from agent_core.domain.devices import DeviceKind, PushProvider, device_routing_i
 from agent_core.domain.security import SECRET_RULES
 from agent_core.domain.surfaces import (
     SurfaceInboundMessage,
+    SurfaceMessageKind,
     SurfaceTransportOutcome,
     SurfaceTransportResult,
 )
@@ -458,3 +460,104 @@ async def test_transport_errors_are_closed_and_never_echo_response_or_token() ->
     }
     assert "access-token-value" not in repr(result)
     assert provider_body not in repr(result)
+
+
+def _change(
+    phone_number_id: str, messages: list[dict[str, object]], field: str = "messages"
+) -> dict[str, object]:
+    return {
+        "field": field,
+        "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {"phone_number_id": phone_number_id},
+            "messages": messages,
+        },
+    }
+
+
+def _message(message_id: str, **content: object) -> dict[str, object]:
+    return {"from": "15550002222", "id": message_id, "timestamp": "1789077600", **content}
+
+
+async def _post_signed(document: object) -> tuple[int, list[SurfaceInboundMessage]]:
+    received: list[SurfaceInboundMessage] = []
+    app = create_whatsapp_webhook_app(
+        surface_id=SURFACE_ID,
+        phone_number_id="phone-1",
+        app_secret=SecretStr(APP_SIGNATURE_KEY),
+        verify_token=SecretStr(VERIFICATION_CHALLENGE),
+        ingest=received.append,
+    )
+    body = json.dumps(document).encode()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://surface.test"
+    ) as client:
+        response = await client.post(
+            "/webhooks/whatsapp",
+            content=body,
+            headers={"X-Hub-Signature-256": _signature(body)},
+        )
+    return response.status_code, received
+
+
+async def test_signed_webhook_ingests_only_the_configured_number_and_marks_media() -> None:
+    text = _message("wamid.own", type="text", text={"body": "Hello Veetbot"})
+    status, received = await _post_signed(
+        {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "changes": [
+                        _change(
+                            "phone-2", [_message("wamid.other", type="text", text={"body": "x"})]
+                        ),
+                        _change("phone-1", [text], field="statuses"),
+                        _change(
+                            "phone-1",
+                            [text, _message("wamid.photo", type="image", image={"id": "media-1"})],
+                        ),
+                    ]
+                }
+            ],
+        }
+    )
+
+    assert status == 200
+    assert [update.external_update_id for update in received] == ["wamid.own", "wamid.photo"]
+    own, photo = received
+    assert (own.message_kind, own.text) == (SurfaceMessageKind.TEXT, "Hello Veetbot")
+    assert (photo.message_kind, photo.text) == (SurfaceMessageKind.MEDIA, None)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"object": "page", "entry": []},
+        {"object": "whatsapp_business_account", "entry": "not a list"},
+        {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "changes": [
+                        _change("phone-1", [_message("wamid.1", type="text", text={"body": " "})])
+                    ]
+                }
+            ],
+        },
+        {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "changes": [
+                        _change("phone-1", [_message("wamid.1", timestamp="soon", type="text")])
+                    ]
+                }
+            ],
+        },
+    ],
+    ids=["other-object", "entries-not-a-list", "blank-text", "bad-timestamp"],
+)
+async def test_signed_but_malformed_webhook_is_refused_without_ingest(document: object) -> None:
+    status, received = await _post_signed(document)
+    assert status == 400
+    assert received == []

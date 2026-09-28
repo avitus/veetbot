@@ -20,4 +20,5 @@ def test_people_has_thirty_six_registered_milestone_28_requirements() -> None:
     state = yaml.safe_load((ROOT / "docs/status/project-state.yaml").read_text())
     assert 28 in state["project"]["authorized_milestones"]
     assert state["milestones"]["28"]["status"] == "in_progress"
-    assert state["project"]["current_milestone"] == 12
+    # A parallel workstream never lifts the verified ceiling past the sequential 13-15.
+    assert state["project"]["current_milestone"] <= 15

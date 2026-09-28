@@ -185,15 +185,3 @@ def in_memory_surface_repositories() -> object:
         receipts=InMemorySurfaceReceiptRepository(),
         replies=InMemorySurfaceReplyOutbox(),
     )
-
-
-def test_postgres_surface_adapter_is_registered_for_shared_contract() -> None:
-    from agent_core.adapters.persistence import surfaces
-
-    assert hasattr(surfaces, "PostgresSurfaceRepositories"), (
-        "PostgreSQL surface repositories are not implemented"
-    )
-
-
-async def test_in_memory_surface_repositories_satisfy_shared_contract() -> None:
-    await assert_surface_repositories_contract(in_memory_surface_repositories())

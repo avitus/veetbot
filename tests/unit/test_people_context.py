@@ -574,3 +574,53 @@ async def test_pronoun_named_person_is_never_selected_for_context() -> None:
         owner, recall_query(text="I need to prepare for the board meeting"), session_id=SESSION_ID
     )
     assert all(pronoun.id not in item.person_ids for item in result.people)
+
+
+@pytest.mark.parametrize("count", [0, 4, "duplicate"])
+async def test_people_context_takes_one_to_three_distinct_identities(count: int | str) -> None:
+    from agent_core.domain.errors import ToolValidationError
+
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    person_ids = [uuid4()] * 2 if count == "duplicate" else [uuid4() for _ in range(int(count))]
+    service = PeopleContextService(factory, HybridMemoryRetriever(factory, clock, ids(), owner))
+
+    with pytest.raises(ToolValidationError, match="one to three distinct identities"):
+        await service.recall(owner, person_ids, recall_query(text="Maya"), session_id=SESSION_ID)
+
+
+@pytest.mark.parametrize(
+    ("scopes", "query_identity", "error"),
+    [
+        ({"memory.read"}, {}, "AuthorizationError"),
+        ({"people.read"}, {"principal_id": "principal-b"}, "NotFoundError"),
+        ({"people.read"}, {"tenant_id": "tenant-b"}, "NotFoundError"),
+    ],
+)
+async def test_people_context_is_owner_bound_and_scope_gated(
+    scopes: set[str], query_identity: dict[str, str], error: str
+) -> None:
+    """Another principal's query never reads this owner's people, even by exact id."""
+
+    from agent_core.domain import errors
+
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": scopes})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Maya", **common)
+    async with factory() as uow:
+        await uow.people.put(person, expected_revision=0)
+    service = PeopleContextService(factory, HybridMemoryRetriever(factory, clock, ids(), owner))
+
+    with pytest.raises(getattr(errors, error)):
+        await service.recall(
+            owner,
+            [person.id],
+            recall_query(text="Maya").model_copy(update=query_identity),
+            session_id=SESSION_ID,
+        )

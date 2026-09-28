@@ -19,6 +19,7 @@ import pytest
 from client.veetbot_client import __main__ as client_main
 from client.veetbot_client import __version__
 from client.veetbot_client.api import (
+    MAX_SSE_FRAME_BYTES,
     ApiClient,
     ApiError,
     ClientError,
@@ -200,6 +201,34 @@ def test_sse_parser_keeps_transient_frames_unidentified() -> None:
     assert [(event.event, event.event_id) for event in events] == [
         ("message.delta", None),
         ("assistant.message.completed", 42),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("lines", "message"),
+    [
+        ([b"data: not json\n", b"\n"], "not valid JSON"),
+        ([b"data: [1, 2]\n", b"\n"], "not a JSON object"),
+        ([b"id: seven\n", b"data: {}\n", b"\n"], "not an integer"),
+        ([b"id: -1\n", b"data: {}\n", b"\n"], "negative"),
+        ([b'data: {"text": "\xff"}\n', b"\n"], "not valid UTF-8"),
+        ([b"data: " + b"x" * MAX_SSE_FRAME_BYTES + b"\n"], "safety limit"),
+    ],
+    ids=["not-json", "not-an-object", "non-integer-id", "negative-id", "not-utf8", "oversized"],
+)
+def test_sse_parser_refuses_a_malformed_stream(lines: list[bytes], message: str) -> None:
+    with pytest.raises(ProtocolError, match=message):
+        list(parse_sse(lines))
+
+
+def test_sse_parser_joins_data_lines_and_flushes_an_unterminated_final_frame() -> None:
+    events = list(
+        parse_sse([b'data: {"text":\n', b'data: "two lines"}\n', b"\n", b'data: {"n": 1}'])
+    )
+
+    assert [(event.event, event.data) for event in events] == [
+        ("message", {"text": "two lines"}),
+        ("message", {"n": 1}),
     ]
 
 
@@ -647,6 +676,37 @@ def test_api_client_discards_a_download_longer_than_its_metadata(tmp_path: Path)
         client.download_artifact("artifact-1", tmp_path)
 
     assert not (tmp_path / "report.txt").exists()
+
+
+def test_api_client_discards_a_download_shorter_than_its_metadata(tmp_path: Path) -> None:
+    opener = FakeOpener([_artifact_metadata("report.txt", 9), FakeResponse(b"short")])
+    client = ApiClient("https://agent.example", opener=opener)
+
+    with pytest.raises(ProtocolError, match="shorter than"):
+        client.download_artifact("artifact-1", tmp_path)
+
+    assert not (tmp_path / "report.txt").exists()
+
+
+@pytest.mark.parametrize("size", [None, -1, "5", True])
+def test_api_client_refuses_metadata_without_a_size_before_downloading(
+    tmp_path: Path, size: object
+) -> None:
+    opener = FakeOpener(
+        [
+            FakeResponse(
+                json.dumps({"id": "artifact-1", "name": "r.txt", "size_bytes": size}).encode()
+            ),
+            FakeResponse(b"never read"),
+        ]
+    )
+    client = ApiClient("https://agent.example", opener=opener)
+
+    with pytest.raises(ProtocolError, match="omitted its size"):
+        client.download_artifact("artifact-1", tmp_path)
+
+    assert len(opener.requests) == 1
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_interactive_download_command_saves_the_named_artifact(tmp_path: Path) -> None:
