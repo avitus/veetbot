@@ -22,6 +22,7 @@ from agent_core.domain.email import (
     EmailRecord,
     EmailThread,
 )
+from agent_core.domain.errors import AuthorizationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import ModelUsage
 from agent_core.domain.persistence import ModelCallRecord
@@ -796,3 +797,33 @@ async def test_a_draft_whose_send_is_unresolved_cannot_be_discarded(
     assert refused.status_code == 409
     assert refused.headers["cache-control"] == "private, no-store"
     assert stored is not None and stored.payload["status"] == status.value
+
+
+async def test_cached_email_rechecks_account_permission_after_revocation() -> None:
+    async with email_client() as (composition, _):
+        thread, _ = await seed_mail(composition)
+        composition.services.email.account_servers = {
+            "work": {"read": "gmail_read", "send": "gmail_send"}
+        }
+        reduced = composition.principal.model_copy(update={"scopes": {"email.read"}})
+        with pytest.raises(AuthorizationError):
+            await composition.services.email.thread(reduced, thread.id)
+
+
+async def test_retry_after_lost_draft_save_returns_same_revision() -> None:
+    async with email_client() as (composition, client):
+        _, draft = await seed_mail(composition)
+        data = {
+            "expected_revision": 1,
+            "to": draft.to,
+            "subject": draft.subject,
+            "body": "My revised response.",
+        }
+        first = await client.put(
+            f"/v1/email/drafts/{draft.id}", json=data, headers={"Idempotency-Key": "edit-1"}
+        )
+        replay = await client.put(
+            f"/v1/email/drafts/{draft.id}", json=data, headers={"Idempotency-Key": "edit-1"}
+        )
+        assert first.status_code == replay.status_code == 200
+        assert first.json()["revision"] == replay.json()["revision"] == 2

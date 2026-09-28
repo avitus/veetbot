@@ -1446,7 +1446,7 @@ class PostgresKnowledgeStore:
                             _allowed_sensitivities(query.sensitivity_ceiling)
                         ),
                         visibility,
-                        or_(*[vector.op("@@")(term_query) for term_query in term_queries]),
+                        vector.op("@@")(any_term),
                     )
                     .order_by(rank.desc(), KnowledgeChunkRow.chunk_id)
                     .limit(max(query.max_passages * 8, 64))

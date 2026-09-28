@@ -336,7 +336,7 @@ positive integer percentages summing to 100. The legacy singular selectors
 remain valid for one-provider deployments, and both capabilities stay disabled
 when neither form enables them.
 
-To enable image and video generation (ADR-0141), provision `TENSORSCALE_API_KEY`
+To enable image and video generation (ADR-0140), provision `TENSORSCALE_API_KEY`
 in the API and worker environment and grant `media.generate` plus
 `artifact.write` in the owner's `AUTH_SCOPES`. Doppler's development key cache
 does not update the production root-owned environment file. Permit SenseNova

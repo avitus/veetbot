@@ -7040,7 +7040,8 @@ already passed both on the dev to main pull request that carried it: pull
 request 72 for Milestone 13, 64 and 66 for 19, 74 for 20, 82 for 22, 89 and 98
 for 23, and 118 and 127 for 29. On every final head all hosted lanes passed,
 CodeRabbit completed its review, and every conversation is resolved; you merged
-each one and its deploy jobs succeeded. The evidence moved to
+each one. Pull request 64's merge static job failed; pull request 65 first
+deployed its changes. The other listed merges' deploy jobs succeeded. The evidence moved to
 `verification-history.yaml`. Completing Milestone 13 advances the verified
 ceiling to Milestone 13 and 268 gates; `agent eval gates --milestone 13` passes
 every gate except the seven sandbox gates, which need Docker and pass in the

@@ -108,9 +108,9 @@ under a trust label — and reads no metadata key at all.
 
 **The persona nomination lifecycle.** Milestone 22 defined the shape of an
 assistant proposal the owner resolves: closed eligibility
-(persona-surface.md:174-181), a bounded open set (persona-surface.md:183-185),
+(persona-surface.md:173-180), a bounded open set (persona-surface.md:182-184),
 a decline that is durable and content-keyed, and withdrawal when the source
-dies before review (persona-surface.md:201-211). Proposals here take that
+dies before review (persona-surface.md:200-210). Proposals here take that
 lifecycle unchanged and add a second withdrawal cause, so a reason field
 exists where the persona design deliberately omitted one.
 

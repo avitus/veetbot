@@ -1653,12 +1653,10 @@ verification:
           PostgreSQL integration lane
           (tests/integration/test_delegation_materializer_m13.py and
           tests/integration/test_migrations.py) — and all pass when
-          executed by node identifier. The harness cannot execute them
-          through agent eval gates yet for the reason Milestones 16 and 17
-          recorded: --milestone 13 would also activate the still-pending
-          Milestone 14 and 15 gates and the registry validator correctly
-          refuses. They become executable through the harness when
-          project.current_milestone advances past them.
+          executed by node identifier. The later cumulative registry run recorded
+          below confirms agent eval gates --milestone 13 executes all
+          twenty-one successfully while reporting Milestones 14 and 15
+          pending; those milestones do not prevent the harness from running.
       - check: build sequence steps 1 through 5 and the deterministic half of 6
         outcome: passed_locally
         detail: >-

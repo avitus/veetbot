@@ -379,3 +379,39 @@ async def test_each_route_refuses_a_principal_without_its_scope_before_any_chang
     assert BODY not in ingested.text
     assert untouched.status is DeviceInvocationStatus.PENDING
     assert sessions.items == []
+
+
+async def test_an_unknown_foreign_or_revoked_device_can_neither_fetch_nor_answer() -> None:
+    async with _composition() as composition:
+        await _seed_devices(composition)
+        async with composition.uow_factory() as uow:
+            await uow.device_invocations.create(
+                _pending(INVOCATION_ID, tenant_id=composition.principal.tenant_id)
+            )
+        async with _client(composition) as client:
+            unknown = await client.get(f"/v1/devices/{UUID(int=404)}/invocations")
+            foreign = await client.get(f"/v1/devices/{FOREIGN_DEVICE_ID}/invocations")
+            revoked = await client.get(f"/v1/devices/{REVOKED_DEVICE_ID}/invocations")
+            answered_by_unknown = await client.post(
+                f"/v1/devices/{UUID(int=404)}/invocations/{INVOCATION_ID}/result",
+                json={"status": "sent"},
+            )
+            stolen = await client.post(
+                f"/v1/devices/{FOREIGN_DEVICE_ID}/invocations/{INVOCATION_ID}/result",
+                json={"status": "sent"},
+            )
+            answered_by_revoked = await client.post(
+                f"/v1/devices/{REVOKED_DEVICE_ID}/invocations/{INVOCATION_ID}/result",
+                json={"status": "sent"},
+            )
+        async with composition.uow_factory() as uow:
+            untouched = await uow.device_invocations.get(INVOCATION_ID)
+
+    assert unknown.status_code == 404
+    assert foreign.status_code == 404
+    assert revoked.status_code == 409
+    assert revoked.json()["error"]["details"]["reason"] == "device_revoked"
+    assert answered_by_unknown.status_code == 404
+    assert stolen.status_code == 404
+    assert answered_by_revoked.status_code == 409
+    assert untouched.status is DeviceInvocationStatus.PENDING

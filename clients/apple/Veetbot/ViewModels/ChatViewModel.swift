@@ -1484,8 +1484,11 @@ public final class ChatViewModel: ObservableObject {
                 }
                 guard generation == connectionGeneration else { return false }
                 taskScopeError = "The website list changed on another device. Review it and try again."
-            } else {
+            } else if let status = apiError(from: error)?.statusCode, status == 400 || status == 422 {
                 taskScopeError = "Couldn't save the website list. Use a public HTTPS address with one safe path, such as https://www.duolingo.com/lesson, then try again."
+            } else {
+                taskScopeError = "Couldn't save the website list. Try again."
+                present(error)
             }
             return false
         }

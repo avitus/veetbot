@@ -1758,8 +1758,8 @@ readiness:
     design document and the census reports no zero row. Milestone 16 memory
     evaluation and lifecycle completed on 2026-08-23 as a parallel
     workstream: all twenty registered gates pass and hosted review on the
-    dev to main pull request finished clean; the verified gate ceiling
-    stays at Milestone 12. Milestone 17, the memory read API and the native
+    dev to main pull request finished clean. This parallel work did not
+    advance the verified gate ceiling, which is now Milestone 13. Milestone 17, the memory read API and the native
     memory browser, completed on 2026-08-24 as a second parallel workstream:
     all ten registered gates, the Python, PostgreSQL, Apple package and
     simulator lanes, hosted CI, GitGuardian, and the final CodeRabbit review

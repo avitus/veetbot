@@ -366,7 +366,7 @@ forty-two strings.
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
 joined by dots, of which the last is the action. The four `browser.` scopes
-have three; the other thirty-seven have exactly two.
+have three; the other thirty-eight have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
 contributor the list cannot enumerate. `tool-system.md:1382` takes an MCP
