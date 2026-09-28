@@ -513,7 +513,7 @@ model identifier.
 [sandbox-isolation.md](sandbox-isolation.md) as a production adapter in the
 sense the plan uses for the in-memory repositories, a real implementation of
 the port that runs the contract suite unchanged
-(`sandbox-isolation.md:1268`), and it is what lets the whole system be
+(`sandbox-isolation.md:1269`), and it is what lets the whole system be
 exercised without a hypervisor. Startup check 4 below refuses it in
 production beside `docker`.
 
@@ -604,7 +604,7 @@ checks run there, before any adapter exists:
 4.  `deployment_mode == "production"` implies `sandbox` is neither `docker`
     nor `fake`. ADR-0008: "Production startup must refuse to run untrusted
     code under the development fallback." `fake` is behind the same check
-    because it executes nothing (`sandbox-isolation.md:1621`), and a
+    because it executes nothing (`sandbox-isolation.md:1622`), and a
     mechanism that executes nothing isolates less than the fallback this
     rule was written for.
 5.  `config_dir`, if set, exists and contains only files that mirror a shipped
@@ -1579,8 +1579,12 @@ places a task-grant authorizer after the pinned standing-grant authorizer in
 one composite, hands the resolution service a task-grant resolver, mounts the
 task-grant routes, and registers the task-grant expiry sweep on the
 maintenance worker. The `browser.act` approval presenter is composed either
-way and makes no offer while the flag is off. Both settings are deployment
-controls in the environment layer; no versioned knob is added, and the
-durations and caps are constants in `agent_core.domain.browser_task_grants`.
+way and makes no offer while the flag is off. The flag remains a deployment
+control. ADR-0141 makes scopes owner-managed server state: startup inserts the
+configured seed only when the owner has no persisted policy; later starts
+never overwrite edits, including an empty list. API and worker components
+read the repository for offers, resolutions and use consumption, without a
+process cache. Durations and caps remain constants in
+`agent_core.domain.browser_task_grants`.
 The detailed contract is [browser-automation.md](browser-automation.md) and
 [ADR-0129](../adr/0129-time-boxed-task-grant-from-the-approval-card.md).

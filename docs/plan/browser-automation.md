@@ -955,13 +955,28 @@ action, not the next scheduled run.
 
 ### Task grants from the approval card
 
-Task grants are offered only inside site scopes the owner configures.
-`BROWSER_TASK_GRANT_SCOPES` lists exact scopes, each an exact public-HTTPS
-origin and one path segment, such as `https://www.example.com/lesson`; it is
-empty by default, and configuration refuses a scope whose segment is
-sensitive. Adding a scope is an owner configuration change that widens
-authority; removing one ends its active grants at their next authorization.
-The code names no site.
+Task grants are offered only inside site scopes the owner configures. The
+server persists the list per tenant and principal; Website Access settings
+on Mac, iPhone and iPad read and edit it through `/v1/browser-task-scopes`
+(ADR-0141). Each of at most sixteen unique entries is an exact public-HTTPS
+origin and one nonsensitive path segment, such as
+`https://www.example.com/lesson`. Adding or removing an entry takes effect
+without a restart. No model tool edits the list; adding a scope does not
+create a grant or replace the owner's approval of each task.
+
+GET requires `browser.grant.read`; PUT requires `browser.grant.write` and
+carries the observed revision and replacement list. Stale edits conflict;
+an exact immediate replay returns the saved result without a duplicate audit.
+Successful changes append `browser.task_scopes.updated` in the same transaction.
+The policy row lock serializes edits with grant creation and use consumption.
+Removal ends unended grants outside the new list with `scope_removed` and
+an ended audit; re-adding cannot revive them. Actions authorized before removal
+may finish in flight. Offers and authorization read persisted scopes, without
+process caches.
+
+`BROWSER_TASK_GRANT_SCOPES` is a one-time bootstrap seed for the configured
+owner when no persisted policy exists. It never overwrites client edits or
+a saved empty list. Other principals start empty. The code names no site.
 
 A `browser.act` approval may carry a server-authored task-grant offer: the
 configured scope whose origin and path prefix contain the page the pending

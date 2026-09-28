@@ -258,6 +258,25 @@ The backward-compatible singular selectors may instead name `firecrawl`,
 `tavily`, `keenable`, or `disabled`. Provider keys are resolved by the
 credential broker at call time and are never exposed to the model.
 
+For image and video generation, add `TENSORSCALE_API_KEY` to Doppler and run
+`make env-pull`, then restart the API and workers. New chats offer
+`image.generate` (SenseNova U1.5, PNG) and `video.generate` (LTX-2.5 Fast,
+5- or 10-second MP4 with audio). Both take a text prompt, require approval,
+and attach the generated file to the reply. Token-authenticated owners need
+`media.generate` and `artifact.write` in `AUTH_SCOPES`; the TensorScale key
+must permit both models, including the `ltx2-5-fast` scope. Existing chats keep
+their tool roster. To prompt with pictures, enable the existing attachment
+uploads (`AGENT_ATTACHMENT_UPLOADS_ENABLED=1`) and grant `artifact.read`.
+Attach PNG/JPEG/WebP images and ask for an edit, combination, or animation.
+`image.generate` accepts up to eight ordered references (20 MiB each, 64 MiB
+total); `video.generate` takes a first frame and optionally a last frame
+(10 MiB each). Both use `reference_image_ids` from the chat's attachments or
+previously generated images; omit them for text-only generation. For example:
+"Put the subject from image 1 in the scene from image 2" or "Animate this
+photo for five seconds." Provider charges are separate from model-token accounting;
+a failed or timed-out request is never retried automatically. See
+[ADR-0140](docs/adr/0140-tensorscale-media-generation.md).
+
 Before changing the codebase, read [AGENTS.md](AGENTS.md). It explains the
 authorized milestone, required reading lane, test-driven workflow, and
 completion-report requirements. The main technical references are:

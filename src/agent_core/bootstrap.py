@@ -77,6 +77,7 @@ from agent_core.adapters.mcp.calls import BlandCallProvider
 from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
 from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
+from agent_core.adapters.media.tensorscale import TensorScaleMediaProvider
 from agent_core.adapters.memory.in_memory import (
     InMemoryIntegratedEpisodeStore,
     InMemoryKnowledgeStore,
@@ -272,6 +273,7 @@ from agent_core.application.device_management import (
 )
 from agent_core.application.email import EmailExperienceService
 from agent_core.application.folder_service import PublicFolderService
+from agent_core.application.media_inputs import StoredMediaInputResolver
 from agent_core.application.model_settings import PublicModelSettingsService
 from agent_core.application.notification_dispatcher import (
     NotificationDispatcher,
@@ -552,6 +554,7 @@ from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
+from agent_core.ports.media import MediaGenerationProvider
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.notifications import PushTransport
@@ -595,6 +598,12 @@ from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsu
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
+from agent_core.tools.media_generation import (
+    ImageGenerationTool,
+    LegacyImageGenerationTool,
+    LegacyVideoGenerationTool,
+    VideoGenerationTool,
+)
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
 from agent_core.tools.memory_remember import (
     LegacyMemoryRememberTool,
@@ -783,9 +792,11 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "system.current_time, or web.search when available. Do not use sandbox.run_command "
     "for those requests; use it only when arbitrary code execution is necessary. If no "
     "read-only tool can answer, explain the limitation or ask before proposing sandboxed "
-    "code execution. To give the user a file, call artifact.export with the text as content "
-    "or a workspace path; the file is attached to your reply. Never say a file is attached "
-    "unless artifact.export succeeded."
+    "code execution. To give the user a text or workspace file, call artifact.export with "
+    "the text as content or a workspace path. For generated images or videos, use "
+    "image.generate or video.generate when available. These tools attach the file to "
+    "your reply automatically. Never say a file is attached unless its export or "
+    "generation tool succeeded."
 )
 _BROWSER_TOOL_NAMES = frozenset({"browser.navigate", "browser.observe", "browser.act"})
 
@@ -2359,6 +2370,7 @@ async def _compose(
     mcp_server_configs: tuple[MCPServerConfig, ...],
     web_search_provider: WebProvider | WebProviderRouter | None,
     web_fetch_provider: WebProvider | WebProviderRouter | None,
+    media_provider: MediaGenerationProvider | None,
     one_click_transport: OneClickTransport | None,
     judgment_provider: JudgmentProvider | None,
     memory_provider_evaluation_mode: bool,
@@ -2377,6 +2389,14 @@ async def _compose(
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
+    if settings.browser_task_grants_enabled:
+        async with (
+            uow_factory() as uow,
+            uow.browser_task_grants.locked_scopes(
+                principal, defaults=settings.browser_task_grant_scopes
+            ),
+        ):
+            pass
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
     sandbox_limits = ResourceLimits(
@@ -2531,6 +2551,14 @@ async def _compose(
     # treats the last registration as latest: 1.0.0 stays for pinned sessions.
     registry.register(LegacyArtifactExportTool())
     registry.register(ArtifactExportTool())
+    if media_provider is not None:
+        media_inputs = StoredMediaInputResolver(
+            uow_factory=uow_factory, store=FilesystemArtifactStore(artifact_root), clock=clock
+        )
+        registry.register(LegacyImageGenerationTool(media_provider))
+        registry.register(LegacyVideoGenerationTool(media_provider))
+        registry.register(ImageGenerationTool(media_provider, image_resolver=media_inputs))
+        registry.register(VideoGenerationTool(media_provider, image_resolver=media_inputs))
     if web_search_provider is not None:
         registry.register(WebSearchTool(web_search_provider))
     if web_fetch_provider is not None:
@@ -2546,7 +2574,6 @@ async def _compose(
                 presenter=BrowserActApprovalPresenter(
                     browser_provider,
                     context_reader=_task_grant_context_reader(uow_factory, clock),
-                    scopes=settings.browser_task_grant_scopes,
                     enabled=_task_grants_composed(settings, browser_provider),
                     now=clock.now,
                 ),
@@ -3453,7 +3480,6 @@ async def _compose(
                     provider=browser_provider,
                     uow_factory=uow_factory,
                     policy=deterministic_engine,
-                    scopes=settings.browser_task_grant_scopes,
                     now=clock.now,
                 )
             )
@@ -4115,11 +4141,7 @@ async def _compose(
             dispatcher=dispatcher,
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
-            task_grants=(
-                TaskGrantResolution(scopes=settings.browser_task_grant_scopes, clock=clock)
-                if task_grants_enabled
-                else None
-            ),
+            task_grants=(TaskGrantResolution(clock=clock) if task_grants_enabled else None),
         )
         folder_proposal_pass: FolderProposalPass | None = None
         if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:
@@ -4749,6 +4771,7 @@ async def build(
     model_provider_overrides: Mapping[str, ModelProvider] | None = None,
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
+    media_provider_override: MediaGenerationProvider | None = None,
     one_click_transport_override: OneClickTransport | None = None,
     judgment_provider_override: JudgmentProvider | None = None,
     browser_provider_override: BrowserProvider | None = None,
@@ -4998,6 +5021,9 @@ async def build(
         browser_provider_override is not None
         or effective_settings.browser_provider is not BrowserProviderKind.DISABLED
     )
+    media_enabled = (
+        media_provider_override is not None or "tensorscale" in effective_settings.credentials
+    )
     default_enabled_tools = [
         "math.calculate",
         "conversation.ask_user",
@@ -5013,6 +5039,7 @@ async def build(
         ),
         "sandbox.run_command",
         "artifact.export",
+        *(["image.generate", "video.generate"] if media_enabled else []),
         WORKING_STATE_TOOL_NAME,
         SKILL_LOAD_TOOL_NAME,
         TOOL_CALL_TOOL_NAME,
@@ -5105,6 +5132,7 @@ async def build(
     engine = None
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
+    media_provider: MediaGenerationProvider | None = None
     web_provider_cache: dict[WebProviderKind, WebProvider] = {}
     one_click_transport: OneClickTransport | None = None
     unsubscribe_proxy: WorkerEgressProxy | None = None
@@ -5230,6 +5258,10 @@ async def build(
             )
             browser_authentications = hosted_browser_sessions
             browser_sessions = hosted_browser_sessions
+        if media_enabled:
+            media_provider = media_provider_override or TensorScaleMediaProvider(
+                credentials=effective_credential_resolver
+            )
         web_search_provider = (
             web_search_provider_override
             if web_search_provider_override is not None
@@ -5375,6 +5407,7 @@ async def build(
             mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
+            media_provider=media_provider,
             one_click_transport=one_click_transport,
             judgment_provider=judgment_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
@@ -5446,6 +5479,13 @@ async def build(
                         "unsubscribe_transport_close_failed",
                         extra={"error_class": type(exc).__name__},
                     )
+        if media_provider is not None:
+            try:
+                await media_provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "media_provider_close_failed", extra={"error_class": type(exc).__name__}
+                )
         for web_provider in web_providers:
             try:
                 await web_provider.close()

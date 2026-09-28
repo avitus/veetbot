@@ -1266,7 +1266,9 @@ async def test_task_grants_flag_on_composes_every_part() -> None:
         isinstance(authorizer, BrowserTaskGrantAuthorizer) for authorizer in standing._authorizers
     )
     assert act._presenter._enabled is True
-    assert act._presenter._scopes == settings.browser_task_grant_scopes
+    async with composition.uow_factory() as uow:
+        policy = await uow.browser_task_grants.get_scopes(composition.principal)
+    assert policy.scopes == settings.browser_task_grant_scopes
     assert composition.services.browser_task_grants is not None
     assert composition.services.approvals._task_grants is not None  # type: ignore[attr-defined]
     assert paths == {

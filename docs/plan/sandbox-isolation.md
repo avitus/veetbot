@@ -1087,7 +1087,8 @@ properties and an operator asking "what did this run produce" wants
 them separated. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
 `artifact.export` of a workspace path; `MODEL_OUTPUT` is
-`artifact.export` of text the model wrote, produced since ADR-0122;
+`artifact.export` of text the model wrote, produced since ADR-0122, and
+images and videos from the approved media-generation tools (ADR-0140);
 `UPLOAD` is a client-supplied file, produced since
 ADR-0120 by the chat attachment route with no run until a sent message
 claims it;

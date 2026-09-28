@@ -410,6 +410,112 @@ import Testing
         #expect(activity.contains("activity.taskGrantSummary"))
     }
 
+    @Test
+    func taskApprovalWebsitesRoundTripThroughTheServer() async throws {
+        let reads = Counter()
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/browser-task-scopes":
+                    return (200, reads.next() == 1 ? #"{"revision":3,"scopes":[]}"# : #"{"revision":5,"scopes":[]}"#)
+                case "PUT veetbot.test /v1/browser-task-scopes":
+                    return (200, #"{"revision":4,"scopes":[{"origin":"https://www.duolingo.com","path_prefix":"/lesson"}]}"#)
+                case "GET veetbot.test /v1/browser-task-grants":
+                    return (200, Self.page([]))
+                default: return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        await model.refreshTaskScopes()
+        #expect(model.taskScopePolicy?.revision == 3)
+        let scope = try #require(TaskGrantEcho.website("https://www.duolingo.com/lesson"))
+        #expect(await model.addTaskScope(scope))
+        #expect(model.taskScopePolicy?.scopes == [scope])
+        let body = try #require(server.json(of: "PUT veetbot.test /v1/browser-task-scopes"))
+        #expect(body["revision"] as? Int == 3)
+        #expect(body["scopes"] as? [[String: String]] == [["origin": scope.origin, "path_prefix": scope.pathPrefix]])
+        #expect(model.taskScopeError == nil)
+        await model.refreshTaskScopes()
+        #expect(model.taskScopePolicy?.revision == 5)
+        #expect(model.taskScopePolicy?.scopes == [])
+    }
+
+    @Test(arguments: [400, 403, 500])
+    func failedWebsiteEditsRetainTheSavedList(status: Int) async throws {
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/browser-task-grants":
+                    return (200, Self.page([]))
+                case "GET veetbot.test /v1/browser-task-scopes":
+                    return (200, #"{"revision":2,"scopes":[{"origin":"https://www.duolingo.com","path_prefix":"/lesson"}]}"#)
+                case "PUT veetbot.test /v1/browser-task-scopes":
+                    return (status, #"{"error":{"code":"malformed_request","message":"unavailable","details":{},"request_id":"r"}}"#)
+                default: return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        await model.refreshTaskScopes()
+        let scope = try #require(model.taskScopePolicy?.scopes.first)
+        #expect(!(await model.removeTaskScope(scope)))
+        #expect(model.taskScopePolicy?.scopes == [scope])
+        #expect(model.taskScopePolicy?.revision == 2)
+        #expect(model.taskScopeError != nil)
+        #expect(!model.isSavingTaskScopes)
+    }
+
+    @Test
+    func aWebsiteConflictReloadsTheOtherDevicesListWithoutRetryingTheEdit() async throws {
+        let reads = Counter()
+        let writes = Counter()
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/browser-task-grants":
+                    return (200, Self.page([]))
+                case "GET veetbot.test /v1/browser-task-scopes":
+                    return (200, reads.next() == 1 ? #"{"revision":0,"scopes":[]}"# : #"{"revision":1,"scopes":[{"origin":"https://www.example.org","path_prefix":"/practice"}]}"#)
+                case "PUT veetbot.test /v1/browser-task-scopes":
+                    _ = writes.next()
+                    return (409, #"{"error":{"code":"conflict","message":"changed","details":{},"request_id":"r"}}"#)
+                default: return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        await model.refreshTaskScopes()
+        #expect(!(await model.addTaskScope(TaskGrantEcho(origin: "https://www.duolingo.com", pathPrefix: "/lesson"))))
+        #expect(model.taskScopePolicy?.revision == 1)
+        #expect(model.taskScopePolicy?.scopes.first?.origin == "https://www.example.org")
+        #expect(model.taskScopeError?.contains("another device") == true)
+        #expect(writes.next() == 2)
+    }
+
+    @Test
+    func websiteSettingsHandleOldServers() async throws {
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                if Self.route(request) == "GET veetbot.test /v1/browser-task-grants" { return (200, Self.page([])) }
+                if Self.route(request) == "GET veetbot.test /v1/browser-task-scopes" {
+                    return (404, #"{"detail":"Not Found"}"#)
+                }
+                return nil
+            }()
+        }
+        let model = try await openedModel(server)
+        await model.refreshTaskScopes()
+        #expect(model.taskScopePolicy == nil)
+        #expect(model.taskScopeError != nil)
+        #expect(!(await model.addTaskScope(TaskGrantEcho(origin: "https://www.duolingo.com", pathPrefix: "/lesson"))))
+    }
+
+    @Test(arguments: ["https://www.duolingo.com", "https://www.duolingo.com/", "https://www.duolingo.com/lesson/next", "http://example.com/lesson", "https://user:pass@example.com/lesson", "https://example.com/lesson?token=x", "https://example.com/lesson#x", "https://example.com:444/lesson", "https://example.com/%6cesson"])
+    func websiteEntryDoesNotSilentlyBroadenURLs(input: String) {
+        #expect(TaskGrantEcho.website(input) == nil)
+    }
+
     // MARK: - Helpers
 
     private func openedModel(_ server: DeviceFlowServer) async throws -> ChatViewModel {

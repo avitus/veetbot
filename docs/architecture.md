@@ -4,6 +4,15 @@ title: Architecture
 
 # Architecture
 
+Image and video generation use the provider-neutral `MediaGenerationProvider`
+port. `image.generate` and `video.generate` initially use TensorScale and write
+external-untrusted PNG/MP4 streams through the existing run-bound artifact
+writer. The ordinary approval, scope, non-idempotent recovery and reply-file
+retention boundaries apply ([ADR-0140](adr/0140-tensorscale-media-generation.md)).
+`MediaInputResolver` releases checksum-verified, bounded PNG/JPEG/WebP images
+from the caller's own conversation after approval, under `artifact.read`.
+The provider adapter alone encodes input bytes; tool arguments carry IDs only.
+
 The platform is an explicitly bounded modular monolith. The normative module
 layout and dependency rules are defined by the
 [engineering plan](plan/engineering-plan.md#4-repository-structure), expanded

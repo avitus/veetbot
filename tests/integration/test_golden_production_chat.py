@@ -98,9 +98,12 @@ def _production_settings(tmp_path: Path) -> Settings:
             "AGENT_EMAIL_ENABLED": "1",
             "AGENT_EMAIL_MODE_ENABLED": "1",
             "GMAIL_ACCOUNTS_FILE": str(_accounts_manifest(tmp_path)),
+            # ADR-0140: the TensorScale key adds image.generate and video.generate.
+            "TENSORSCALE_API_KEY": "synthetic-media-credential",
         }
     )
     assert loaded.people_enabled
+    assert "tensorscale" in loaded.credentials
     return replace(
         loaded,
         database_url=disposable_database_url(),

@@ -1373,7 +1373,7 @@ async def test_prompt_not_authz() -> None:
 
 
 def test_scope_grammar() -> None:
-    assert len(PLATFORM_SCOPES) == 41  # settings.read and settings.write joined under ADR-0119
+    assert len(PLATFORM_SCOPES) == 42  # media.generate joined under ADR-0140
     assert {
         "schedule.read",
         "schedule.write",
@@ -1387,6 +1387,7 @@ def test_scope_grammar() -> None:
         "run.delegate",
         "email.read",
         "email.write",
+        "media.generate",
     } <= PLATFORM_SCOPES
     bad_mcp = ToolSpec(
         name="mcp.files.write",

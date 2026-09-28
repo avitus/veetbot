@@ -358,8 +358,9 @@ and `persona.write`; Milestone 26 adds `email.read` and `email.write`, which
 made thirty-three strings. Milestone 27 adds `call.read`, `call.cancel`, and
 `call.delete` for the call routes in [bland-calling.md](bland-calling.md);
 Milestone 28 adds `people.read` and `people.write`; ADR-0117 adds
-`memory.write`; ADR-0119 adds `settings.read` and `settings.write`. The
-implemented platform vocabulary therefore contains forty-one strings.
+`memory.write`; ADR-0119 adds `settings.read` and `settings.write`; ADR-0140
+adds `media.generate`. The implemented platform vocabulary therefore contains
+forty-two strings.
 
 ### The grammar, and the contributor a closed list cannot hold
 
@@ -368,11 +369,11 @@ joined by dots, of which the last is the action. The four `browser.` scopes
 have three; the other thirty-seven have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1381` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1382` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
-when it is one of the forty-one, or when its first segment is `mcp` and its
+when it is one of the forty-two, or when its first segment is `mcp` and its
 second is the server id. `mcp.files.write` is legal on a tool from the
 `files` server. `run.cancel` on that tool is not.
 
@@ -477,7 +478,7 @@ now so that it does not have to be added later, and the resolution step
 arrives with the second principal.
 
 `AUTH_MODE=dev` binds the full scope set, and this section is what "full"
-means: all forty-one, and no `mcp.` scope. Those exist only once a server
+means: all forty-two, and no `mcp.` scope. Those exist only once a server
 is configured, and a development principal that silently held every scope
 an operator could declare would make the misdeclaration above the one
 class of mistake development cannot surface.
@@ -1312,7 +1313,7 @@ warning.
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
     an approval request in every case and an execution in none. **M4.**
-11. **Scope grammar.** Every entry in the forty-one-string vocabulary and
+11. **Scope grammar.** Every entry in the forty-two-string vocabulary and
     every `required_scopes` entry on a registered `ToolSpec` matches the
     grammar, and registration rejects an MCP tool declaring a scope that is
     neither in the vocabulary nor prefixed `mcp.{server_id}.`. **M4.**
@@ -1478,11 +1479,11 @@ those routes already says.
     `TRUSTED_CONFIGURATION`, and `USER` can authorize anything.
 30. `GET /v1/approvals` and `GET /v1/approvals/{id}` are added so
     `agent approval list` has an endpoint.
-31. The scope vocabulary is one closed set of forty-one dotted strings,
+31. The scope vocabulary is one closed set of forty-two dotted strings,
     shared by the API's route checks and by this pipeline's tool check.
     Authorized milestones and ADRs add exact schedule, device, notification,
-    memory, delegation, surface, persona, email, call, People, and settings
-    scopes without changing exact matching or the Milestone 4 policy baseline.
+    memory, delegation, surface, persona, email, call, People, settings, and
+    media scopes without changing exact matching or the Milestone 4 policy baseline.
 32. An MCP tool may require only scopes whose first segment is `mcp` and
     whose second is the server id, so an operator configuring a server
     cannot borrow a platform scope for a remote capability.
@@ -1553,7 +1554,7 @@ policy remain enforced. An uncertain write is not automatically repeated.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
 arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
 and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
-matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:612);
+matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:613);
 the arm holds that decision under every profile, so no profile can turn an
 unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent

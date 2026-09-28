@@ -164,8 +164,9 @@ people.context                capability  people-and-relationships
 people.history                capability  people-and-relationships
 ```
 
-Thirty-seven model-callable builtin tools in total, and this document's roster
-is eight of them. Tools a paired device contributes are not builtins: they
+Thirty-nine model-callable builtin tools in total: the original roster of
+eight, the twenty-nine above, and the two media-generation tools in ADR-0140.
+Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
 [knowledge-documents.md](knowledge-documents.md)'s, and it is repeated
@@ -203,16 +204,17 @@ that is a function of the deployment. Seventeen identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the three `memory.*` tools,
-`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other twenty register only
+`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other twenty-two register only
 with their flag or provider: `skill.manage` with skill authoring, the two
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
 and worker, the three `people.*` tools with People, `email.context` and
 `email.feedback` with Email mode, and `email.subscriptions` and
-`email.unsubscribe` with email unsubscribe. Historical versions of
-`memory.remember`, `skill.load`, `artifact.export`, `schedule.list`,
-`delegate.run`, and `people.history` (ADR-0126) register beside their current
-versions, and step 6 validates every registered version.
+`email.unsubscribe` with email unsubscribe, and `image.generate` and
+`video.generate` with the TensorScale credential. Historical versions of
+`memory.remember`, `skill.load`, `artifact.export`, `schedule.list`, `image.generate`,
+`video.generate`, `delegate.run`, and `people.history` (ADR-0126) register
+beside their current versions, and step 6 validates every registered version.
 [tool-system.md](tool-system.md) deferred `delegate.run` with the
 general-purpose-subagent extension, and Milestone 13 supplied it:
 [subagents-and-delegation.md](subagents-and-delegation.md) is its checked-in
@@ -1660,7 +1662,7 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is what this document designs; thirty-seven model-callable builtin tools
+    is the original roster; thirty-nine model-callable builtin tools
     are declared at build time across the corpus, and twenty-nine of them
     belong to other specifications. Resolved by naming those twenty-nine here,
     together with the rule that keeps the roster's count correct —
@@ -1904,3 +1906,71 @@ evidence digests only, its destination is server-derived, its result is closed
 outcome codes with no remote content, and it always requires approval. It is
 `IDEMPOTENT` because the request is a constant whose repetition changes
 nothing, which is what lets recovery re-execute a call that has no read-back.
+
+## Image and video generation (ADR-0140)
+
+The owner authorized `image.generate@1.0.0` and `video.generate@1.0.0` on
+2026-09-28. Each takes a nonblank `prompt` (at most 8,000 characters), an
+optional `seed` (integer from zero through 2,147,483,647), and `size`.
+Image size defaults to `1024x1024`; the supported sizes are `1024x1024`,
+`2048x1152`, `1152x2048`, `2496x1664`, `1664x2496`, `1504x2720`,
+`2720x1504`, `1824x2272`, `2272x1824`, `2048x2048`, `1312x3136`, and
+`3136x1312`. Video size defaults to `1280x768`; alternatives are `768x1280`,
+`1920x1088`, `1088x1920`, and `576x1024`. Video `duration_seconds` is 5
+(default) or 10. Each invocation produces exactly one PNG or MP4.
+
+The owner's follow-up adds optional `reference_image_ids` in version `1.1.0`;
+`1.0.0` remains registered for pinned chats. These are ordered artifact UUIDs
+from this conversation, never URLs, paths, or inline bytes. Image generation
+accepts up to eight references (20 MiB each, 64 MiB total) and uses SenseNova's
+`/v2/sensenova-u1.5/edit` endpoint when any are supplied. Video generation accepts
+one first frame or two references ordered first then last (10 MiB each), sent
+to LTX-2.5 as frame zero and frame `duration_seconds * 24`, with strength 1.
+Empty or omitted reference lists retain text-only generation. PNG, JPEG and
+WebP are supported; other media, mismatched signatures, oversized inputs and
+unknown arguments fail before the provider is called.
+
+Reference reads additionally require `artifact.read`. A dedicated resolver
+checks the calling principal, run, session, expiry and origin before opening
+checksum-verified bytes. Only claimed uploads and generated/exported files in
+that conversation are eligible; unsent uploads, foreign or expired artifacts,
+knowledge sources and tool-output captures are unavailable. Reads and the
+aggregate are bounded, and failures send no request. Bytes are encoded as data
+URIs only inside the adapter, never included in tool arguments, events or
+results. Existing approval covers the prompt and ordered reference IDs; input
+resolution runs after approval and is subject to the same cancellation and
+deadline as generation. Uploading images uses ADR-0120's existing route/flag.
+
+Both are builtin in-process capabilities classified `EXTERNAL_WRITE`,
+`HIGH`, `NON_IDEMPOTENT`, `EXTERNAL_UNTRUSTED`, requiring `media.generate`
+and `artifact.write`, with parallel execution disabled. The existing policy
+requires approval, and the effective deadline remains bounded by the run.
+Declared timeouts are 1,800 seconds for images and 7,200 for videos; result
+metadata is capped at 4,096 bytes. Generated streams are capped at 32 MiB
+and 256 MiB respectively, below the artifact store's own ceiling. These are
+versioned capability bounds, not runtime tuning knobs.
+
+`MediaGenerationProvider` streams bytes for typed image/video requests and
+owns a `close` lifecycle. TensorScale is the first adapter: fixed HTTPS
+endpoints `/v2/sensenova-u1.5/t2i` and `/v2/ltx-2.5/fast`, Bearer authentication
+from credential reference `tensorscale`, no redirects, no proxy-environment
+inheritance, and no automatic retries. It validates response status, type,
+nonempty content and PNG/MP4 signatures and enforces limits while streaming.
+Failures expose stable reason codes, never raw provider responses or secrets.
+A timeout may have incurred a charge; the caller must not blindly retry.
+
+The tool writes the stream through its run-bound artifact writer as
+`MODEL_OUTPUT`, using a platform-selected filename and external-untrusted
+provenance. Its result contains only the artifact reference and an attachment
+confirmation; the final reply attaches the file and retains it with the
+conversation under ADR-0122. Failed or interrupted streams publish no artifact.
+Run cancellation closes an in-flight response. An executor deadline is also
+non-retryable and warns of a possible charge, as does a provider timeout.
+
+The existing `*_API_KEY` loader resolves `TENSORSCALE_API_KEY`. Its presence
+registers and enables both tools for new chats. Its absence advertises neither.
+The default agent version records the roster, and the deferred index admits
+overflow under ADR-0123. Owner tokens need the two scopes above. Provider
+charges are not part of language-model token accounting; approval authorizes
+one bounded generation and any selected image inputs. Audio/video references
+and URL inputs remain outside these two tools.

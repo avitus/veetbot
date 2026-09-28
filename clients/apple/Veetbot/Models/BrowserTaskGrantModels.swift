@@ -53,6 +53,34 @@ public struct TaskGrantEcho: Codable, Equatable, Sendable {
     }
 }
 
+/// Shared server policy. The revision guards edits from concurrent clients.
+public struct BrowserTaskScopePolicy: Codable, Equatable, Sendable {
+    public let revision: Int
+    public let scopes: [TaskGrantEcho]
+
+    public init(revision: Int, scopes: [TaskGrantEcho]) {
+        self.revision = revision
+        self.scopes = scopes
+    }
+}
+
+extension TaskGrantEcho: Identifiable {
+    public var id: String { origin + pathPrefix }
+
+    /// Basic input parsing; the server validates public origins and safe paths.
+    public static func website(_ input: String) -> TaskGrantEcho? {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parts = URLComponents(string: value), parts.scheme == "https",
+            let host = parts.host, !host.isEmpty,
+            parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+            parts.port == nil || parts.port == 443,
+            parts.path.split(separator: "/", omittingEmptySubsequences: false).count == 2,
+            parts.path.count > 1, parts.percentEncodedPath == parts.path
+        else { return nil }
+        return TaskGrantEcho(origin: "https://\(host.lowercased())", pathPrefix: parts.path)
+    }
+}
+
 /// Which grants `GET /v1/browser-task-grants` lists.
 public enum BrowserTaskGrantListStatus: String, Sendable {
     case active

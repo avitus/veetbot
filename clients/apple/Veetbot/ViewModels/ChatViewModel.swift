@@ -148,6 +148,10 @@ public final class ChatViewModel: ObservableObject {
     /// Only a conversation bound to a website profile can hold one.
     private var selectedSessionUsesWebsiteProfile = false
     /// Every active task permission, for Settings > Website Access.
+    @Published public private(set) var taskScopePolicy: BrowserTaskScopePolicy?
+    @Published public private(set) var taskScopeError: String?
+    @Published public private(set) var isSavingTaskScopes = false
+
     @Published public private(set) var activeTaskGrants: [BrowserTaskGrantView] = []
     /// The `device.sms.send` invocation whose compose sheet the owner should
     /// see now, if any. Its recipient and body live only here and in the sheet.
@@ -327,6 +331,9 @@ public final class ChatViewModel: ObservableObject {
         await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
         activeTaskGrants = []
+        taskScopePolicy = nil
+        taskScopeError = nil
+        isSavingTaskScopes = false
         activeTaskGrant = nil
         isConfigured = false
         requiresReauthentication = true
@@ -1427,6 +1434,63 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Website Access always reads the server's shared list.
+    public func refreshTaskScopes() async {
+        guard let api, !isSavingTaskScopes else { return }
+        let generation = connectionGeneration
+        do {
+            let current = try await api.getBrowserTaskScopes()
+            guard generation == connectionGeneration, !isSavingTaskScopes else { return }
+            // A refresh started before an edit cannot roll a newer revision back.
+            if current.revision >= (taskScopePolicy?.revision ?? -1) { taskScopePolicy = current }
+            taskScopeError = nil
+        } catch {
+            guard generation == connectionGeneration else { return }
+            taskScopeError = error is VeetbotAPIClientError
+                ? "Task approval websites are unavailable on this server."
+                : "Couldn't load task approval websites. Try again."
+        }
+    }
+
+    public func addTaskScope(_ scope: TaskGrantEcho) async -> Bool {
+        guard let policy = taskScopePolicy else { return false }
+        if policy.scopes.contains(scope) { return true }
+        return await saveTaskScopes(policy.scopes + [scope], revision: policy.revision)
+    }
+
+    public func removeTaskScope(_ scope: TaskGrantEcho) async -> Bool {
+        guard let policy = taskScopePolicy else { return false }
+        return await saveTaskScopes(policy.scopes.filter { $0 != scope }, revision: policy.revision)
+    }
+
+    private func saveTaskScopes(_ scopes: [TaskGrantEcho], revision: Int) async -> Bool {
+        guard let api, !isSavingTaskScopes else { return false }
+        let generation = connectionGeneration
+        isSavingTaskScopes = true
+        taskScopeError = nil
+        defer { if generation == connectionGeneration { isSavingTaskScopes = false } }
+        do {
+            let saved = try await api.updateBrowserTaskScopes(BrowserTaskScopePolicy(revision: revision, scopes: scopes))
+            guard generation == connectionGeneration else { return false }
+            taskScopePolicy = saved
+            await refreshTaskPermissions()
+            await reconcileTaskGrant()
+            return true
+        } catch {
+            guard generation == connectionGeneration else { return false }
+            if apiError(from: error)?.code == .conflict {
+                if let current = try? await api.getBrowserTaskScopes(), generation == connectionGeneration {
+                    taskScopePolicy = current
+                }
+                guard generation == connectionGeneration else { return false }
+                taskScopeError = "The website list changed on another device. Review it and try again."
+            } else {
+                taskScopeError = "Couldn't save the website list. Use a public HTTPS address with one safe path, such as https://www.duolingo.com/lesson, then try again."
+            }
+            return false
+        }
+    }
+
     // MARK: - Task permissions (ADR-0129)
 
     /// Re-reads the open conversation's active task permission. The chat view
@@ -2336,6 +2400,9 @@ public final class ChatViewModel: ObservableObject {
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
         activeTaskGrants = []
+        taskScopePolicy = nil
+        taskScopeError = nil
+        isSavingTaskScopes = false
         await artifactCache.removeAll()
         pendingSubmission = nil
         clearAttachments()
@@ -2364,6 +2431,9 @@ public final class ChatViewModel: ObservableObject {
         dismissCallResult()
         resetFolderState()
         activeTaskGrants = []
+        taskScopePolicy = nil
+        taskScopeError = nil
+        isSavingTaskScopes = false
         api = nil
         eventStream = nil
         baseURL = nil

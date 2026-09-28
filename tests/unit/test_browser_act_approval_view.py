@@ -9,7 +9,7 @@ grant only when every section 6.4 rule holds.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import UUID
 
@@ -167,9 +167,10 @@ async def present(
     presenter = BrowserActApprovalPresenter(
         provider,
         context_reader=reader(
-            context or TaskGrantSessionContext(session=bound_session(), profile=profile())
+            replace(context, scopes=SCOPES)
+            if context
+            else TaskGrantSessionContext(session=bound_session(), profile=profile(), scopes=SCOPES)
         ),
-        scopes=SCOPES,
         enabled=enabled,
         now=lambda: NOW,
     )

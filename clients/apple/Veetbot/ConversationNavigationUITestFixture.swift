@@ -209,6 +209,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         }
     }
     private static let taskGrantLock = NSLock()
+    private static var taskScopeRevision = 0
+    private static var taskScopes: [[String: String]] = []
     private static var taskGrantResolved = false
     private static var taskGrantRevoked = false
     private static var taskGrantJourney: Bool {
@@ -217,6 +219,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     /// Starts the task-grant journey with the approval pending and no grant.
     static func resetTaskGrant() {
         taskGrantLock.withLock {
+            taskScopeRevision = 0
+            taskScopes = []
             taskGrantResolved = false
             taskGrantRevoked = false
         }
@@ -797,6 +801,26 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             Self.taskGrantLock.withLock { Self.taskGrantRevoked = true }
             statusCode = 200
             body = Self.taskGrantJSON(status: "revoked")
+        case ("GET", "/v1/browser-task-scopes"):
+            statusCode = 200
+            body = Self.taskGrantLock.withLock {
+                let data = try! JSONSerialization.data(withJSONObject: ["revision": Self.taskScopeRevision, "scopes": Self.taskScopes])
+                return String(decoding: data, as: UTF8.self)
+            }
+        case ("PUT", "/v1/browser-task-scopes"):
+            let payload = requestJSON()
+            let response: (Int, String) = Self.taskGrantLock.withLock {
+                guard let revision = payload["revision"] as? Int, revision == Self.taskScopeRevision,
+                    let scopes = payload["scopes"] as? [[String: String]] else {
+                    return (409, #"{"error":{"code":"conflict","message":"changed","details":{},"request_id":"ui"}}"#)
+                }
+                Self.taskScopeRevision += 1
+                Self.taskScopes = scopes
+                let data = try! JSONSerialization.data(withJSONObject: ["revision": Self.taskScopeRevision, "scopes": scopes])
+                return (200, String(decoding: data, as: UTF8.self))
+            }
+            statusCode = response.0
+            body = response.1
         case ("GET", "/v1/browser-profiles"):
             statusCode = 200
             body = #"{"items":[],"next_cursor":null}"#

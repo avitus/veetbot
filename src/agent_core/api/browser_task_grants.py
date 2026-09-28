@@ -14,14 +14,18 @@ from fastapi import APIRouter, Query
 from agent_core.api.boundary import MalformedRequestError
 from agent_core.application.services import BrowserTaskGrantService
 from agent_core.domain.agents import Principal
-from agent_core.domain.browser_task_grants import BrowserTaskGrantView
+from agent_core.domain.browser_task_grants import (
+    BrowserTaskGrantView,
+    BrowserTaskScopePolicy,
+    BrowserTaskScopeUpdate,
+)
 from agent_core.domain.views import Page
 
 
 def browser_task_grants_router(
     service: BrowserTaskGrantService, secured: Callable[[str], object]
 ) -> APIRouter:
-    """Expose the three task-grant routes under the existing grant scopes."""
+    """Expose task grants and owner-managed scopes under existing permissions."""
     router = APIRouter()
 
     @router.get(
@@ -64,5 +68,18 @@ def browser_task_grants_router(
     ) -> BrowserTaskGrantView:
         """End an active task grant now; an ended grant returns unchanged."""
         return await service.revoke(authenticated, grant_id)
+
+    @router.get("/v1/browser-task-scopes", openapi_extra={"required_scope": "browser.grant.read"})
+    async def get_task_scopes(
+        authenticated: Annotated[Principal, secured("browser.grant.read")],
+    ) -> BrowserTaskScopePolicy:
+        return await service.get_scopes(authenticated)
+
+    @router.put("/v1/browser-task-scopes", openapi_extra={"required_scope": "browser.grant.write"})
+    async def update_task_scopes(
+        requested: BrowserTaskScopeUpdate,
+        authenticated: Annotated[Principal, secured("browser.grant.write")],
+    ) -> BrowserTaskScopePolicy:
+        return await service.update_scopes(authenticated, requested)
 
     return router

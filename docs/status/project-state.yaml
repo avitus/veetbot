@@ -10,12 +10,19 @@ project:
   # ceiling's advance to Milestone 13 (268 gates) were recorded on 2026-09-28.
   current_milestone: 13
   active_milestone: 14
+  # ADR-0140 records the owner's non-milestone extension on 2026-09-28:
+  # image.generate and video.generate use TensorScale behind a media port;
+  # generated files reach Chat through the existing artifact attachment path;
+  # its follow-up adds ordered image references for edits and first/last frames.
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
   # Milestones 16 through 31 are independently authorized parallel
   # workstreams under ADRs 0069, 0070, 0071, 0072, 0073, 0077, 0079,
   # 0080, 0081, 0082, 0092, 0097, 0100, 0102, 0111, and 0112; their gates do not
   # advance the verified ceiling past the sequential work through 15.
+  # ADR-0141 records the owner-authorized extension on 2026-09-28: task
+  # approval website scopes are persisted on the server and managed from
+  # native Website Access settings, without per-site deployment changes.
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
   # retention, and conditional native time-zone presentation.
@@ -133,6 +140,9 @@ project:
   # ADR-0138 (Proposed, 2026-09-28) records the browser repair that denies
   # web-created windows before creation and ends the browser session when a
   # popup cannot be confirmed closed.
+  # ADR-0139 (Proposed, 2026-09-28) records the owner-requested cache repair:
+  # completed active-run history precedes the fresh per-step context, so
+  # recomputed recall no longer invalidates the cached tool history.
   authorized_milestones:
     - 0
     - 1
