@@ -334,6 +334,22 @@ positive integer percentages summing to 100. The legacy singular selectors
 remain valid for one-provider deployments, and both capabilities stay disabled
 when neither form enables them.
 
+To enable image and video generation (ADR-0140), provision `TENSORSCALE_API_KEY`
+in the API and worker environment and grant `media.generate` plus
+`artifact.write` in the owner's `AUTH_SCOPES`. Doppler's development key cache
+does not update the production root-owned environment file. Permit SenseNova
+U1.5 and LTX-2.5 Fast (`ltx2-5-fast`) on the key, restart the API and workers,
+and open a new Chat: old sessions retain their pinned tool roster. No additional
+feature flag is needed for generation. To upload reference pictures, enable
+`AGENT_ATTACHMENT_UPLOADS_ENABLED=1` and grant `artifact.read` for input reads.
+Version 1.1.0 accepts PNG/JPEG/WebP references from the same chat: up to eight
+for image edits (20 MiB each, 64 MiB total), or first/last frames for video
+(10 MiB each). Each approved call creates one PNG or MP4 attachment;
+video duration is bounded to 5 or 10 seconds. External provider charges are
+separate from language-model usage accounting. There are no automatic retries
+for failures or timeouts, since the provider may already have charged. Keep
+the credential out of sandbox and scheduler-only environments.
+
 To enable the typed-judgment provider (ADR-0110), add its selector and key to
 that same root-owned file:
 

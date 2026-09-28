@@ -73,7 +73,7 @@ _DESCRIPTION = (
     "Give the user a file; it is attached to your reply automatically. Pass `content` "
     "to create a text file (text/plain, text/markdown, text/csv, or application/json) "
     "from text you write, or `path` to export a file this run created in its workspace. "
-    "This is the only way a file reaches the user: the workspace is discarded when the "
+    "Export workspace files before the workspace is discarded when the "
     "run finishes or pauses. Never say a file is attached unless this call succeeded."
 )
 

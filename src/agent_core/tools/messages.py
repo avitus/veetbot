@@ -57,6 +57,42 @@ TOOL_MESSAGES: dict[str, str] = {
     ),
     "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
     "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",
+    "tool.media.permission": (
+        "The media provider rejected its credential or model access. "
+        "Check the configured key and model scopes."
+    ),
+    "tool.media.rejected": "The media provider rejected the generation request.",
+    "tool.media.reference_unavailable": (
+        "A reference image is unavailable. Use a sent attachment or generated image "
+        "from this chat. No generation request was sent."
+    ),
+    "tool.media.reference_invalid": (
+        "Reference images must contain PNG, JPEG or WebP bytes matching their recorded type. "
+        "No generation request was sent."
+    ),
+    "tool.media.reference_too_large": (
+        "Reference images exceed the count or byte limits in the tool definition. "
+        "No generation request was sent."
+    ),
+    "tool.media.timeout": (
+        "Media generation timed out and may have incurred a charge. "
+        "Ask the user before trying again."
+    ),
+    "tool.media.transport": (
+        "The media connection failed and may have incurred a charge. "
+        "Ask the user before trying again."
+    ),
+    "tool.media.upstream": (
+        "The media provider is unavailable or out of quota. Ask the user before trying again."
+    ),
+    "tool.media.invalid": (
+        "The media provider returned invalid or incomplete media. "
+        "A charge may have occurred; ask the user before trying again."
+    ),
+    "tool.media.too_large": (
+        "Generated media exceeded the file size limit. "
+        "A charge may have occurred; ask the user before trying again."
+    ),
     # ADR-0129: names no grant, so the model cannot learn that one exists.
     "tool.browser.grant_not_applicable": (
         "Not performed. The page changed since it was observed; observe it again."

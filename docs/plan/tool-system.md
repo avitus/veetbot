@@ -357,6 +357,7 @@ The first segment is the **domain**, and domains are partitioned:
 | `browser` | builtin, external data | build time, browser provider |
 | `email` | builtin, cached Email experience | build time, Email mode or unsubscribe flag |
 | `people` | builtin, People memory | build time, People flag |
+| `image` `video` | builtin, generated media | build time, TensorScale credential (ADR-0140) |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
 

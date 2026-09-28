@@ -7,6 +7,10 @@ project:
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 12
   active_milestone: 12
+  # ADR-0140 records the owner's non-milestone extension on 2026-09-28:
+  # image.generate and video.generate use TensorScale behind a media port;
+  # generated files reach Chat through the existing artifact attachment path;
+  # its follow-up adds ordered image references for edits and first/last frames.
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
   # Milestones 16 through 31 are independently authorized parallel

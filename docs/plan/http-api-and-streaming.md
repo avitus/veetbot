@@ -347,6 +347,7 @@ session.read      session.write
 run.read          run.write        run.cancel
 approval.read     approval.resolve
 artifact.read     artifact.write
+media.generate
 skill.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
