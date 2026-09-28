@@ -174,9 +174,11 @@ import Testing
         #expect(cardSource.contains("Text(verbatim: offer.summary)"))
         #expect(!cardSource.contains("AttributedString(markdown"))
         #expect(!cardSource.contains("MarkdownContentView"))
-        for label in ["\"Allow once\"", "\"Allow for this task\"", "\"Deny\"", "\"Allow\"", "\"Cancel\""] {
+        for label in ["\"Allow once\"", "\"Allow all actions for this task\"", "\"Deny\"", "\"Allow\"", "\"Cancel\""] {
             #expect(cardSource.contains(label))
         }
+        #expect(cardSource.contains("Text(\"Allow all actions for this task?\")"))
+        #expect(cardSource.contains(".accessibilityIdentifier(\"approval.task-scope\")"))
         let activity = try source("Veetbot/Views/ActivityViews.swift")
         #expect(activity.contains("BrowserActionApprovalPresentation(approval: approval"))
         #expect(activity.contains("BrowserActionApprovalCard("))

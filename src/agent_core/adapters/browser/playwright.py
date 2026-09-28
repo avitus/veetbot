@@ -399,8 +399,24 @@ class PythonPlaywrightRuntime:
         await download.cancel()
 
     async def _close_popup(self, page: Page) -> None:
-        if page is not self._page:
-            await page.close()
+        if page is self._page or page.is_closed():
+            return
+        # Page.close marks the page as closing before Chromium closes it. That
+        # makes Playwright skip our context route, which can release a popup's
+        # pending form submission. Close the target directly so interception
+        # stays active until Chromium has destroyed the popup.
+        session: CDPSession | None = None
+        try:
+            session = await page.context.new_cdp_session(page)
+            target = await session.send("Target.getTargetInfo")
+            await session.send("Target.closeTarget", {"targetId": target["targetInfo"]["targetId"]})
+        except PlaywrightError:
+            if not page.is_closed():
+                raise
+        finally:
+            if session is not None:
+                with suppress(PlaywrightError):
+                    await session.detach()
 
     def _current_page(self) -> Page:
         if self._page is None:

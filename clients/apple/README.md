@@ -118,12 +118,13 @@ shown under Data & Privacy; this recovery release is 0.1.1 (2).
 
 A `browser.act` approval card names the action, the element and the page,
 and shows the website's own text in quotes, labelled as coming from the
-website. When the server offers it, Allow for this task lets Veetbot act
+website. When the server offers it, Allow all actions for this task lets Veetbot act
 inside that site scope without asking again, for up to thirty minutes and
 two hundred actions. A banner above the composer counts them, and Stop ends
 the permission at once; Website Access lists active permissions in a compact
 Task permissions row whose menu stops each one. Passwords, payments,
-purchases, account changes and messages still ask every time.
+purchases, account changes and messages still ask every time. The card shows the
+site scope, limits and exceptions before the task permission is selected.
 
 In Email feedback, **This kind of content** offers the topics identified on the
 selected thread. Choose a topic before marking it Important or Less important;

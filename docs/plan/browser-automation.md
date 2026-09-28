@@ -528,7 +528,10 @@ prefix with no sensitive segment, whatever the page hid from the facts, such
 as a closed shadow root. When it refuses the page's own document, the page is
 left on the browser's error page and the act's outcome is
 `tool.browser.outcome_unknown`. A new window never loads, including its first
-navigation, which it issues before its frame exists. Page script is outside
+navigation, which it issues before its frame exists. Popup closure uses the
+Chromium target protocol so context interception remains active until the
+target is destroyed; marking a Playwright page as closing first can bypass
+interception of a form submitted from its initial blank document. Page script is outside
 these checks, an accepted limit of ADR-0129: it can change the page's own
 controls, as `element.click()` from the element's own handler does on a
 check box, and send its own requests on the allowed origins, and a document it

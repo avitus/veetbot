@@ -76,7 +76,8 @@ Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
 A `browser.act` card instead names the action, the element and the page, marks
 website text as such, and offers Allow once, Deny, and, when the server offers
-it, Allow for this task after a confirmation. An active task permission shows
+it, Allow all actions for this task after a confirmation. The card displays the
+server's site scope, limits and exceptions beside that choice. An active task permission shows
 above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 

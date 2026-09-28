@@ -11,7 +11,7 @@ import Testing
     nonisolated private static let grantID = UUID(uuidString: "ecb511f1-2976-5326-9f73-9748dc26211f")!
     nonisolated private static let approvalID = UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-0000000000a1")!
     nonisolated private static let withdrawn =
-        "Allow for this task is no longer available. Allow once or Deny."
+        "Task permission is no longer available. Allow once or Deny."
 
     @Test
     func theActivePermissionLoadsWhenAConversationOpens() async throws {

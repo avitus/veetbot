@@ -3,7 +3,7 @@ import SwiftUI
 /// The `browser.act` approval card (ADR-0129, 0129-design §14 item 3). It
 /// names the action, the element and the page in Veetbot's words, quotes the
 /// website's own text as such, and offers Allow once, Deny, and, when the
-/// server offers it, Allow for this task after a confirmation. Website text
+/// server offers it, Allow all actions for this task after a confirmation. Website text
 /// is always verbatim, never Markdown.
 struct BrowserActionApprovalCard: View {
     let approval: ApprovalView
@@ -107,8 +107,13 @@ struct BrowserActionApprovalCard: View {
             }
             if approval.status.isPending {
                 TextField("Reason for denial (optional)", text: $denialReason)
-                if presentation.offersTaskGrant, approval.taskGrantOffer != nil {
-                    Button("Allow for this task") {
+                if presentation.offersTaskGrant, let offer = approval.taskGrantOffer {
+                    Text(verbatim: offer.summary)
+                        .appFont(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("approval.task-scope")
+                    Button("Allow all actions for this task") {
                         confirmingTask = true
                     }
                     .buttonStyle(.bordered)
@@ -227,7 +232,7 @@ struct WebsiteQuote: View {
     }
 }
 
-/// Allow for this task, confirmed: the server's offer text, verbatim.
+/// Allow all actions for this task, confirmed: the server's offer text, verbatim.
 private struct TaskGrantConfirmation: View {
     let offer: TaskGrantOfferView
     let allow: () -> Void
@@ -235,7 +240,7 @@ private struct TaskGrantConfirmation: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Allow for this task?")
+            Text("Allow all actions for this task?")
                 .appFont(.title3, weight: .semibold)
             Text(verbatim: offer.summary)
                 .appFont(.body)
