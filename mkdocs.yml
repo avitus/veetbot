@@ -263,4 +263,5 @@ nav:
       - ADR-0136 Synthesize before the identical-tool-call limit: adr/0136-synthesize-before-the-tool-loop-limit.md
       - ADR-0137 Stable tool-output admission: adr/0137-stable-tool-output-admission.md
       - ADR-0138 Deny browser popups before creation: adr/0138-browser-popup-denial-before-creation.md
+      - ADR-0139 Active history before fresh context: adr/0139-active-history-before-fresh-context.md
   - Changelog: changelog.md

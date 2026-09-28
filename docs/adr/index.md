@@ -147,3 +147,4 @@ implementation without one.
 - [ADR-0136 — Synthesize before the identical-tool-call limit (Accepted)](0136-synthesize-before-the-tool-loop-limit.md)
 - [ADR-0137 — Stable tool-output admission before context pressure (Proposed)](0137-stable-tool-output-admission.md)
 - [ADR-0138 — Deny browser popups before creation (Proposed)](0138-browser-popup-denial-before-creation.md)
+- [ADR-0139 — Completed active history precedes fresh step context (Proposed)](0139-active-history-before-fresh-context.md)
