@@ -195,7 +195,8 @@ def main(argv: list[str] | None = None) -> None:
         if arguments.client_file is None:
             raise SystemExit("bootstrap requires GMAIL_OAUTH_CLIENT_FILE or --client-file")
         try:
-            client_id, client_secret = _oauth_client(arguments.client_file.resolve())
+            # absolute(), not resolve(): resolving would hide the symlink _oauth_client refuses.
+            client_id, client_secret = _oauth_client(arguments.client_file.expanduser().absolute())
             asyncio.run(
                 bootstrap_credentials(
                     client_id=client_id,

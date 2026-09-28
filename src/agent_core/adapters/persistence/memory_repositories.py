@@ -1401,11 +1401,20 @@ class PostgresKnowledgeStore:
 
     async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]:
         as_of = query.as_of or self._clock.now()
+        terms = lexical_query_terms(query.text)
+        if not terms:
+            return []
         vector = func.to_tsvector(
             "simple",
             func.concat(KnowledgeChunkRow.heading_path.cast(Text), " ", KnowledgeChunkRow.text),
         )
-        rank = func.ts_rank_cd(vector, func.plainto_tsquery("simple", query.text))
+        # Any-term semantics, as `lexical_query_terms` documents and the in-memory
+        # store answers: a question rarely shares every word with its passage.
+        term_queries = [func.plainto_tsquery("simple", term) for term in terms]
+        any_term: Any = term_queries[0]
+        for term_query in term_queries[1:]:
+            any_term = any_term.op("||")(term_query)
+        rank = func.ts_rank_cd(vector, any_term)
         visibility = or_(
             KnowledgeDocumentRow.visibility == KnowledgeVisibility.TENANT.value,
             (
@@ -1437,7 +1446,7 @@ class PostgresKnowledgeStore:
                             _allowed_sensitivities(query.sensitivity_ceiling)
                         ),
                         visibility,
-                        vector.op("@@")(func.plainto_tsquery("simple", query.text)),
+                        or_(*[vector.op("@@")(term_query) for term_query in term_queries]),
                     )
                     .order_by(rank.desc(), KnowledgeChunkRow.chunk_id)
                     .limit(max(query.max_passages * 8, 64))

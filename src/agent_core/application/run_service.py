@@ -197,7 +197,11 @@ class RunService:
             run = await uow.runs.get(run_id, self._principal)
             if run.status in TERMINAL_RUN_STATUSES:
                 return run
-            if run.status in {RunStatus.QUEUED, RunStatus.WAITING_FOR_APPROVAL}:
+            if run.status in {
+                RunStatus.QUEUED,
+                RunStatus.WAITING_FOR_APPROVAL,
+                RunStatus.WAITING_FOR_USER,
+            }:
                 cancelled_parked = await self._cancel_parked_run(
                     uow, run, self._principal.principal_id
                 )
