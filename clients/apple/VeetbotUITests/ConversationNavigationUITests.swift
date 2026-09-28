@@ -950,6 +950,63 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
     }
 
+    func testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings() {
+        app.launch()
+        #if os(macOS)
+        let settings = app.buttons["sidebar.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.click()
+        #else
+        openSidebarDestination(identifier: "sidebar.settings")
+        #endif
+        func reveal(_ element: XCUIElement) {
+            #if os(macOS)
+            let scroll = app.scrollViews.firstMatch
+            XCTAssertTrue(scroll.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<12 {
+                let viewport = scroll.frame.insetBy(dx: 0, dy: 20)
+                if element.exists && element.isHittable && viewport.contains(element.frame) { return }
+                let delta: CGFloat = element.exists && element.frame.minY < viewport.minY ? 180 : -180
+                scroll.scroll(byDeltaX: 0, deltaY: delta)
+            }
+            #else
+            scrollUntilVisible(element)
+            #endif
+        }
+        let disclosure = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Task approval websites")).firstMatch
+        reveal(disclosure)
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        #if os(macOS)
+        disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0.13, dy: 0.5)).click()
+        #else
+        activate(disclosure)
+        #endif
+        let field = app.textFields["task-scopes.url"]
+        reveal(field)
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        activate(field)
+        field.typeText("https://www.duolingo.com/lesson")
+        if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
+        let add = app.buttons["task-scopes.add"]
+        reveal(add)
+        XCTAssertTrue(add.isEnabled)
+        activate(add)
+        #if os(macOS)
+        let confirm = app.sheets.buttons["Add website"].firstMatch
+        #else
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Add website", "task-scopes.add")).firstMatch
+        #endif
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        activate(confirm)
+        let remove = app.buttons["task-scopes.remove.https://www.duolingo.com/lesson"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        reveal(remove)
+        activate(remove)
+        XCTAssertTrue(app.staticTexts["No websites added."].waitForExistence(timeout: 5))
+        activate(app.buttons["task-scopes.refresh"])
+        XCTAssertTrue(app.staticTexts["No websites added."].exists)
+    }
+
     /// ADR-0129: a `browser.act` card offers Allow all actions for this task; the owner
     /// confirms the server's offer text, the resolve repeats the offer's scope
     /// (the fixture refuses anything else), the banner counts the permission,

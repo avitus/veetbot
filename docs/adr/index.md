@@ -149,3 +149,4 @@ implementation without one.
 - [ADR-0138 — Deny browser popups before creation (Proposed)](0138-browser-popup-denial-before-creation.md)
 - [ADR-0139 — Completed active history precedes fresh step context (Proposed)](0139-active-history-before-fresh-context.md)
 - [ADR-0140 — Image and video tools with TensorScale as the first provider (Accepted)](0140-tensorscale-media-generation.md)
+- [ADR-0141 — Client-managed task approval websites (Accepted; amends ADR-0129)](0141-client-managed-task-approval-websites.md)

@@ -2389,6 +2389,14 @@ async def _compose(
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
+    if settings.browser_task_grants_enabled:
+        async with (
+            uow_factory() as uow,
+            uow.browser_task_grants.locked_scopes(
+                principal, defaults=settings.browser_task_grant_scopes
+            ),
+        ):
+            pass
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
     sandbox_limits = ResourceLimits(
@@ -2566,7 +2574,6 @@ async def _compose(
                 presenter=BrowserActApprovalPresenter(
                     browser_provider,
                     context_reader=_task_grant_context_reader(uow_factory, clock),
-                    scopes=settings.browser_task_grant_scopes,
                     enabled=_task_grants_composed(settings, browser_provider),
                     now=clock.now,
                 ),
@@ -3473,7 +3480,6 @@ async def _compose(
                     provider=browser_provider,
                     uow_factory=uow_factory,
                     policy=deterministic_engine,
-                    scopes=settings.browser_task_grant_scopes,
                     now=clock.now,
                 )
             )
@@ -4135,11 +4141,7 @@ async def _compose(
             dispatcher=dispatcher,
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
-            task_grants=(
-                TaskGrantResolution(scopes=settings.browser_task_grant_scopes, clock=clock)
-                if task_grants_enabled
-                else None
-            ),
+            task_grants=(TaskGrantResolution(clock=clock) if task_grants_enabled else None),
         )
         folder_proposal_pass: FolderProposalPass | None = None
         if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:

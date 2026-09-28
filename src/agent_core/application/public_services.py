@@ -1474,7 +1474,10 @@ class PublicApprovalService:
         in one unit of work; any refusal leaves the approval pending."""
 
         dispatch_run: UUID | None = None
-        async with self._uow_factory() as uow:
+        async with (
+            self._uow_factory() as uow,
+            uow.browser_task_grants.locked_scopes(principal) as scope_policy,
+        ):
             visible = await uow.approvals.get(approval_id, principal)
             if visible.principal_id != principal.principal_id:
                 # The grant belongs to the owner of the chat: another principal
@@ -1507,7 +1510,7 @@ class PublicApprovalService:
                 or session is None
                 or not any(
                     (scope.origin, scope.path_prefix) == (offer.origin, offer.path_prefix)
-                    for scope in resolution.scopes
+                    for scope in scope_policy.scopes
                 )
                 or run.status is not RunStatus.WAITING_FOR_APPROVAL
                 or not session_allows_task_grant(

@@ -228,6 +228,11 @@ async def harness(
                     expires_at=NOW + TASK_GRANT_DURATION,
                 ).model_copy(update=grant_update or {})
             )
+    async with (
+        uow_factory() as uow,
+        uow.browser_task_grants.locked_scopes(owner(), defaults=scopes),
+    ):
+        pass
     provider = SnapshotProvider(allowed_origins=(ORIGIN,))
     provider.snapshots[SESSION] = page or snapshot()
     policy = FakePolicy()
@@ -237,7 +242,6 @@ async def harness(
             provider=provider,
             uow_factory=uow_factory,
             policy=policy,
-            scopes=scopes,
             now=lambda: clock[0],
         ),
         uow_factory=uow_factory,
@@ -503,3 +507,41 @@ async def test_the_composite_asks_the_standing_grant_first_and_keeps_the_specifi
     assert allowed == standing_allow and second.calls == 0
     assert specific == task_deny
     assert general == standing_deny
+
+
+async def test_existing_authorizer_reads_policy_edits_without_restart() -> None:
+    from agent_core.domain.browser_task_grants import BrowserTaskScopePolicy
+
+    subject = await harness()
+    assert (await subject.authorize()).allowed
+    async with subject.uow_factory() as uow, uow.browser_task_grants.locked_scopes(owner()):
+        await uow.browser_task_grants.replace_scopes(owner(), BrowserTaskScopePolicy(revision=1))
+    denied = await subject.authorize()
+    assert not denied.allowed
+    assert denied.reason_code == "browser.task_grant.scope_removed"
+    assert (await subject.grant()).actions_used == 1
+    async with subject.uow_factory() as uow, uow.browser_task_grants.locked_scopes(owner()):
+        await uow.browser_task_grants.replace_scopes(
+            owner(), BrowserTaskScopePolicy(revision=2, scopes=SCOPES)
+        )
+    assert not (await subject.authorize()).allowed
+
+
+async def test_scope_removed_during_snapshot_is_rechecked_before_consumption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.domain.browser_task_grants import BrowserTaskScopePolicy
+
+    subject = await harness()
+    original = subject.provider.snapshot_in_session
+
+    async def remove_while_reading(session_id: UUID) -> BrowserSnapshot | None:
+        async with subject.uow_factory() as uow, uow.browser_task_grants.locked_scopes(owner()):
+            await uow.browser_task_grants.replace_scopes(
+                owner(), BrowserTaskScopePolicy(revision=1)
+            )
+        return await original(session_id)
+
+    monkeypatch.setattr(subject.provider, "snapshot_in_session", remove_while_reading)
+    assert not (await subject.authorize()).allowed
+    assert (await subject.grant()).actions_used == 0

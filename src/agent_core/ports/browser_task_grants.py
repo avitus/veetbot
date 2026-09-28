@@ -3,15 +3,39 @@
 from __future__ import annotations
 
 import builtins
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.browser_task_grants import BrowserTaskGrant, BrowserTaskGrantEndReason
+from agent_core.domain.browser_task_grants import (
+    BrowserTaskGrant,
+    BrowserTaskGrantEndReason,
+    BrowserTaskGrantScope,
+    BrowserTaskScopePolicy,
+)
 
 
 class BrowserTaskGrantRepository(Protocol):
+    async def get_scopes(self, principal: Principal) -> BrowserTaskScopePolicy:
+        """Read the latest policy; an uninitialized principal has no scopes."""
+        ...
+
+    def locked_scopes(
+        self, principal: Principal, *, defaults: tuple[BrowserTaskGrantScope, ...] = ()
+    ) -> AbstractAsyncContextManager[BrowserTaskScopePolicy]:
+        """Initialize once and lock the owner's policy through the operation.
+
+        PostgreSQL holds the row lock through the enclosing transaction;
+        memory holds its mutex through the context. Defaults never overwrite.
+        """
+        ...
+
+    async def replace_scopes(self, principal: Principal, policy: BrowserTaskScopePolicy) -> None:
+        """Replace under locked_scopes; require the preceding revision."""
+        ...
+
     async def create(self, grant: BrowserTaskGrant) -> BrowserTaskGrant:
         """Store a new grant. ``ConflictError`` on a reused id or while the
         session already has an unended grant."""

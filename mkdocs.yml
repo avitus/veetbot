@@ -265,4 +265,5 @@ nav:
       - ADR-0138 Deny browser popups before creation: adr/0138-browser-popup-denial-before-creation.md
       - ADR-0139 Active history before fresh context: adr/0139-active-history-before-fresh-context.md
       - ADR-0140 TensorScale image and video generation: adr/0140-tensorscale-media-generation.md
+      - ADR-0141 Client-managed task approval websites: adr/0141-client-managed-task-approval-websites.md
   - Changelog: changelog.md

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import UUID
 
@@ -12,6 +14,8 @@ from agent_core.domain.browser_task_grants import (
     TASK_GRANT_MAX_TYPED_CHARACTERS,
     BrowserTaskGrant,
     BrowserTaskGrantEndReason,
+    BrowserTaskGrantScope,
+    BrowserTaskScopePolicy,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 
@@ -22,6 +26,28 @@ class InMemoryBrowserTaskGrantRepository:
     def __init__(self) -> None:
         self._grants: dict[UUID, BrowserTaskGrant] = {}
         self._lock = asyncio.Lock()
+        self._scope_lock = asyncio.Lock()
+        self._scope_policies: dict[tuple[str, str], BrowserTaskScopePolicy] = {}
+
+    async def get_scopes(self, principal: Principal) -> BrowserTaskScopePolicy:
+        return self._scope_policies.get(
+            (principal.tenant_id, principal.principal_id), BrowserTaskScopePolicy()
+        )
+
+    @asynccontextmanager
+    async def locked_scopes(
+        self, principal: Principal, *, defaults: tuple[BrowserTaskGrantScope, ...] = ()
+    ) -> AsyncIterator[BrowserTaskScopePolicy]:
+        async with self._scope_lock:
+            key = (principal.tenant_id, principal.principal_id)
+            policy = self._scope_policies.setdefault(key, BrowserTaskScopePolicy(scopes=defaults))
+            yield policy
+
+    async def replace_scopes(self, principal: Principal, policy: BrowserTaskScopePolicy) -> None:
+        key = (principal.tenant_id, principal.principal_id)
+        if self._scope_policies[key].revision != policy.revision - 1:
+            raise ConflictError("task approval websites changed; refresh and try again")
+        self._scope_policies[key] = policy
 
     async def create(self, grant: BrowserTaskGrant) -> BrowserTaskGrant:
         async with self._lock:

@@ -2260,3 +2260,22 @@ content-free session event, `artifact.uploaded`, keyed by the idempotency key.
 An unclaimed upload expires after 24 hours; sending it in a message claims it
 for that run and keeps it for the life of the conversation, as step 5 of the
 submit handler describes.
+
+### Task approval website settings (ADR-0141)
+
+When `BROWSER_TASK_GRANTS_ENABLED` is enabled, `GET /v1/browser-task-scopes`
+under `browser.grant.read` returns `{ "revision": 0, "scopes": [] }` for an
+unconfigured principal. `PUT /v1/browser-task-scopes` under
+`browser.grant.write` requires both fields and returns the saved revision
+and canonical list. Each scope contains only `origin` and `path_prefix`.
+No tenant or principal field is accepted; the authenticated owner selects
+the record. No model tool exposes these operations.
+
+The maximum is sixteen unique exact public HTTPS origins with one safe path
+segment each. Unknown fields, malformed scopes and absent fields receive
+`400 malformed_request`. Stale edits receive `409 conflict` and leave the
+list unchanged. An identical immediate replay returns the already-saved
+revision; an unchanged list does not advance its revision. Disabled routes
+return 404. The server stores even an empty list, and removing scopes ends
+their unended task grants in the same transaction. See
+[browser-automation.md](browser-automation.md) for the retained task limits.
