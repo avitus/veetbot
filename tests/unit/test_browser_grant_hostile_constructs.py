@@ -873,6 +873,65 @@ async def test_no_new_window_loads_anything() -> None:
     assert left == []
 
 
+@pytest.mark.parametrize("method", ["get", "post"])
+@pytest.mark.parametrize("task_grant", [False, True])
+async def test_closing_a_blank_popup_does_not_release_its_form_submission(
+    method: str, task_grant: bool
+) -> None:
+    """A popup's initial blank document can submit while its closure is pending.
+
+    Interception must remain active through closure, with or without a grant.
+    Check the server's requests, not just the popup disappearing.
+    """
+    html = f"""<!doctype html><title>Lesson</title>
+    <button type="button" onclick="const w = window.open('about:blank');
+    w.document.write('<form method={method} action=/courses/remove-course></form>');
+    w.document.forms[0].submit()">Continue</button>"""
+    async with lesson_pages({"/lesson/1": html}) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        await runtime.act(
+            _click_named(page, "Continue"),
+            constraint=lesson_constraint() if task_grant else None,
+            now=GRANT_NOW,
+        )
+        await _pause(runtime)
+        assert _windows(runtime) == 1
+        assert left == []
+
+
+@pytest.mark.parametrize("task_grant", [False, True])
+@pytest.mark.parametrize("interactive", [False, True])
+async def test_concurrent_popup_attempts_are_denied_before_creation(
+    task_grant: bool, interactive: bool
+) -> None:
+    """The browser denies every attempted popup before any form can be submitted."""
+    html = """<!doctype html><title>Lesson</title>
+    <button type="button" onclick="window.created = 0; window.attempts = 0;
+    for (let i = 0; i < 5; i++) {
+        window.attempts++;
+        const w = window.open('about:blank');
+        if (!w) continue;
+        window.created++;
+        try {
+            w.document.write('<form method=' + (i % 2 ? 'get' : 'post') +
+                             ' action=/courses/remove-course></form>');
+            w.document.forms[0].submit();
+        } catch (error) { /* The popup may already have been destroyed. */ }
+    }">Continue</button>"""
+    async with lesson_pages({"/lesson/1": html}, interactive=interactive) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        await runtime.act(
+            _click_named(page, "Continue"),
+            constraint=lesson_constraint() if task_grant else None,
+            now=GRANT_NOW,
+        )
+        await _pause(runtime)
+        assert await _page_value(runtime, "window.attempts") == 5
+        assert await _page_value(runtime, "window.created") == 0
+        assert _windows(runtime) == 1
+        assert left == []
+
+
 # ---------------------------------------------------------------------------
 # Excluded words in disguise.
 

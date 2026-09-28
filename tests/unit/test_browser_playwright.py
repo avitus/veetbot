@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
+import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -16,7 +18,7 @@ from playwright.async_api import ElementHandle, Locator, Page
 from playwright.async_api import Error as PlaywrightError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, Response
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from agent_core.adapters.browser import playwright as playwright_adapter
@@ -39,6 +41,237 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
 from tests.real_browser_support import RealBrowserRuntime, local_https_site, require_real_browser
+
+
+@pytest.mark.parametrize("stage", ["attach", "identify", "destroy", "confirm"])
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_popup_close_failure_ends_the_browser_session(stage: str, cancelled: bool) -> None:
+    """An interrupted popup close cannot leave a usable browser context behind."""
+    error = asyncio.CancelledError() if cancelled else PlaywrightError("target unavailable")
+    session = Mock()
+    session.detach = AsyncMock()
+    session.send = AsyncMock(
+        side_effect=[
+            error if stage == "identify" else {"targetInfo": {"targetId": "popup"}},
+            error if stage == "destroy" else {},
+        ]
+    )
+    context = Mock()
+    context.new_cdp_session = AsyncMock(return_value=session)
+    if stage == "attach":
+        context.new_cdp_session.side_effect = error
+    context.close = AsyncMock()
+    browser = Mock()
+    browser.close = AsyncMock()
+    popup = Mock()
+    popup.context = context
+    popup.is_closed.return_value = False
+    popup.wait_for_event = AsyncMock(side_effect=error if stage == "confirm" else None)
+    runtime = PythonPlaywrightRuntime()
+    runtime._context = context
+    runtime._browser = browser
+    runtime._page = Mock()
+
+    with pytest.raises(type(error)):
+        await runtime._close_popup(popup)
+
+    context.close.assert_awaited_once()
+    browser.close.assert_awaited_once()
+    with pytest.raises(BrowserProviderError) as unavailable:
+        await runtime.observe()
+    assert unavailable.value.reason_code == "tool.browser.profile_unavailable"
+
+
+@pytest.mark.parametrize("cookie", [None, "synthetic_session=existing"])
+async def test_popup_response_policy_preserves_cookies_and_existing_csp(cookie: str | None) -> None:
+    """Popup denial must add to the site's policy without replacing response headers."""
+    response = Mock()
+    response.headers = {
+        "content-type": "text/html",
+        "set-cookie": "synthetic_session=ready; Secure; HttpOnly",
+        "content-security-policy": "default-src 'self'",
+    }
+    response.dispose = AsyncMock()
+    route = Mock()
+    browser_headers = {"accept": "text/html"}
+    if cookie is not None:
+        browser_headers["cookie"] = cookie
+    route.request.all_headers = AsyncMock(return_value=browser_headers)
+    route.fetch = AsyncMock(return_value=response)
+    route.fulfill = AsyncMock()
+    runtime = PythonPlaywrightRuntime()
+
+    await runtime._route_headed_document(route)
+
+    route.fetch.assert_awaited_once_with(
+        headers={"accept": "text/html", "cookie": cookie or ""},
+        max_redirects=0,
+        max_retries=0,
+    )
+    parameters = route.fulfill.call_args.kwargs
+    assert parameters["response"] is response
+    assert parameters["headers"]["set-cookie"] == "synthetic_session=ready; Secure; HttpOnly"
+    assert parameters["headers"]["content-type"] == "text/html"
+    policy = parameters["headers"]["content-security-policy"]
+    assert policy.startswith("default-src 'self', sandbox ")
+    directives = policy.split()
+    assert "allow-scripts" in directives
+    assert "allow-same-origin" in directives
+    assert "allow-forms" in directives
+    assert "allow-popups" not in directives
+    assert "allow-popups-to-escape-sandbox" not in directives
+    response.dispose.assert_awaited_once()
+
+
+async def test_headed_document_failure_aborts_without_retrying() -> None:
+    """A failed document exchange must not replay a potentially mutating form."""
+    route = Mock()
+    route.request.all_headers = AsyncMock(return_value={})
+    route.fetch = AsyncMock(side_effect=PlaywrightError("connection reset"))
+    route.abort = AsyncMock()
+    route.fulfill = AsyncMock()
+
+    await PythonPlaywrightRuntime()._route_headed_document(route)
+
+    route.fetch.assert_awaited_once_with(headers={"cookie": ""}, max_redirects=0, max_retries=0)
+    route.abort.assert_awaited_once_with("failed")
+    route.fulfill.assert_not_awaited()
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "br"])
+async def test_headed_document_renders_compressed_responses(encoding: str) -> None:
+    """The fulfillment path renders wire encodings without decoding the body twice."""
+    require_real_browser()
+    html = b"<!doctype html><title>Compressed sign-in</title><p>Ready</p>"
+    # The Brotli fixture encodes the same HTML without adding a test dependency.
+    encoded = {
+        "gzip": gzip.compress(html),
+        "deflate": zlib.compress(html),
+        "br": bytes.fromhex(
+            "1b3b0000c4032e4bac7125001c72c0feed40712609051eb2123e41516c2c50ae966e"
+            "85e5c1fd11e4dc3a914c"
+        ),
+    }[encoding]
+
+    async def document(request: Request) -> Response:
+        """Serve an encoded document with its original wire content length."""
+        del request
+        return Response(encoded, media_type="text/html", headers={"content-encoding": encoding})
+
+    async with local_https_site(Starlette(routes=[Route("/login", document)])) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,), interactive=True)
+        try:
+            page = await runtime.navigate(site.url("/login"))
+            assert page.title == "Compressed sign-in"
+            assert page.text == "Ready"
+        finally:
+            await runtime.close()
+
+
+async def test_headed_popup_policy_preserves_sign_in_and_redirect_boundaries() -> None:
+    """Real sign-in keeps cookies, storage, CSP and a single POST through the proxy."""
+    require_real_browser()
+    submissions: list[tuple[bytes, dict[str, str]]] = []
+    blocked_images: list[str] = []
+
+    async def login(request: Request) -> Response:
+        """Issue separate cookies and a policy that must survive fulfillment."""
+        del request
+        response = HTMLResponse(
+            """<!doctype html><title>Sign in</title>
+            <script>localStorage.setItem('login_started', 'yes')</script>
+            <img src="/blocked.png">
+            <form action="/submit" method="post">
+              <input name="answer" value="salve"><button>Sign in</button>
+            </form>""",
+            headers={"content-security-policy": "img-src 'none'"},
+        )
+        response.set_cookie("first", "one", secure=True, httponly=True)
+        response.set_cookie("second", "two", secure=True, httponly=True)
+        return response
+
+    async def submit(request: Request) -> Response:
+        """Record the mutation and set authentication state on its redirect."""
+        submissions.append((await request.body(), request.cookies))
+        response = RedirectResponse("/ready", status_code=303)
+        response.set_cookie("signed_in", "yes", secure=True, httponly=True)
+        return response
+
+    async def ready(request: Request) -> Response:
+        """Require the redirected browser to arrive authenticated with GET."""
+        assert request.method == "GET"
+        assert request.cookies["signed_in"] == "yes"
+        return HTMLResponse('<title>Ready</title><a href="/leave">Leave</a>')
+
+    async def leave(request: Request) -> Response:
+        """Attempt an off-origin redirect that the HTTP client must not follow."""
+        del request
+        return RedirectResponse("https://outside.test/forbidden", status_code=302)
+
+    async def image(request: Request) -> Response:
+        """Record any resource request that the site's original CSP should block."""
+        blocked_images.append(request.url.path)
+        return Response(b"image")
+
+    app = Starlette(
+        routes=[
+            Route("/login", login),
+            Route("/submit", submit, methods=["POST"]),
+            Route("/ready", ready),
+            Route("/leave", leave),
+            Route("/blocked.png", image),
+        ]
+    )
+    async with local_https_site(app) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,), interactive=True)
+        try:
+            await runtime.navigate(site.url("/login"))
+            page = runtime._current_page()
+            async with page.expect_navigation(wait_until="domcontentloaded"):
+                await page.get_by_role("button", name="Sign in").click()
+            assert await page.title() == "Ready"
+            assert await page.evaluate("localStorage.getItem('login_started')") == "yes"
+            assert await page.evaluate("document.cookie") == ""
+            assert submissions == [(b"answer=salve", {"first": "one", "second": "two"})]
+            assert blocked_images == []
+            with pytest.raises(BrowserProviderError) as refused:
+                await runtime.navigate(site.url("/leave"))
+            assert refused.value.reason_code == "tool.browser.url_disallowed"
+            assert "outside.test:443" not in site.relay.refused
+        finally:
+            await runtime.close()
+
+
+async def test_headed_transport_does_not_add_cookies_to_cross_site_post() -> None:
+    """The HTTP client's jar must not undo Chromium's SameSite cookie exclusion."""
+    require_real_browser()
+    received: list[dict[str, str]] = []
+
+    async def submit(request: Request) -> Response:
+        """Record the cookies on a POST initiated from an opaque origin."""
+        received.append(request.cookies)
+        return HTMLResponse("<title>Received</title>")
+
+    app = Starlette(routes=[Route("/submit", submit, methods=["POST"])])
+    async with local_https_site(app) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,), interactive=True)
+        try:
+            page = runtime._current_page()
+            await page.context.add_cookies(
+                [{"name": "strict", "value": "private", "url": site.origin, "sameSite": "Strict"}]
+            )
+            await page.set_content(
+                f'<form action="{site.url("/submit")}" method="post"><button>Send</button></form>'
+            )
+            async with page.expect_navigation(wait_until="domcontentloaded"):
+                await page.get_by_role("button", name="Send").click()
+            assert await page.title() == "Received"
+            assert received == [{}]
+        finally:
+            await runtime.close()
 
 
 async def test_observation_pipelines_slow_controls_with_bounded_concurrency() -> None:
@@ -579,6 +812,7 @@ async def test_interactive_ceremony_launches_headed_chromium_on_its_own_display(
 async def test_run_attempt_lease_stays_headless_without_a_display(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Agent leases deny web-created windows in headless shell without a display."""
     chromium = FakeChromiumLaunches()
     chromium.install(monkeypatch)
     display = FakeVirtualDisplay()
@@ -587,6 +821,7 @@ async def test_run_attempt_lease_stays_headless_without_a_display(
     await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=False)
 
     assert chromium.launches[0]["headless"] is True
+    assert "--block-new-web-contents" in chromium.launches[0]["args"]
     assert "DISPLAY" not in chromium.launches[0]["env"]
     assert not display.started
 
@@ -1380,6 +1615,8 @@ async def test_refusal_forgets_the_revision() -> None:
 @asynccontextmanager
 async def lesson_pages(
     pages: dict[str, str],
+    *,
+    interactive: bool = False,
 ) -> AsyncIterator[
     tuple[RealBrowserRuntime, Callable[[str], Awaitable[BrowserObservation]], list[str]]
 ]:
@@ -1404,7 +1641,7 @@ async def lesson_pages(
     routes.append(Route("/{rest:path}", elsewhere, methods=["GET", "POST"]))
     async with local_https_site(Starlette(routes=routes)) as site:
         runtime = RealBrowserRuntime()
-        await runtime.start(site.proxy_url, (site.origin,))
+        await runtime.start(site.proxy_url, (site.origin,), interactive=interactive)
         try:
             yield runtime, lambda path: runtime.navigate(site.url(path)), left
         finally:

@@ -1378,6 +1378,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Resolve the owner's decision and refresh an offer that the server withdrew.
     public func resolveApproval(
         _ approval: ApprovalView,
         decision: ApprovalDecision,
@@ -1405,7 +1406,7 @@ public final class ChatViewModel: ObservableObject {
                 // The offer is gone or changed: show the card as it is now.
                 do {
                     runState.mergeApproval(try await api.getApproval(approval.id))
-                    errorMessage = "Allow for this task is no longer available. Allow once or Deny."
+                    errorMessage = "Task permission is no longer available. Allow once or Deny."
                 } catch {
                     present(error)
                 }

@@ -97,6 +97,7 @@ class PostgresMCPServerRepository:
         catalog_hash: str,
         records: tuple[MCPToolCatalogRecord, ...],
     ) -> None:
+        """Validate and record an immutable generation with one bulk tool insertion."""
         normalized: dict[str, MCPToolCatalogRecord] = {}
         for record in records:
             if (
@@ -137,10 +138,11 @@ class PostgresMCPServerRepository:
             )
             .values(withdrawn_at=self._clock.now())
         )
-        for record in normalized.values():
+        if normalized:
+            # One statement for the whole generation rather than one per tool.
             await self._session.execute(
                 pg_insert(MCPToolCatalogRow)
-                .values(**record.model_dump(mode="python"))
+                .values([record.model_dump(mode="python") for record in normalized.values()])
                 .on_conflict_do_nothing(constraint="uq_mcp_catalog_generation_tool")
             )
         if normalized:

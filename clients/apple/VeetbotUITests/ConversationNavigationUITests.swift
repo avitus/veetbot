@@ -950,7 +950,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
     }
 
-    /// ADR-0129: a `browser.act` card offers Allow for this task; the owner
+    /// ADR-0129: a `browser.act` card offers Allow all actions for this task; the owner
     /// confirms the server's offer text, the resolve repeats the offer's scope
     /// (the fixture refuses anything else), the banner counts the permission,
     /// and Stop ends it without a confirmation.
@@ -968,6 +968,11 @@ final class ConversationNavigationUITests: XCTestCase {
 
         let allowForTask = app.buttons["approval.allow-for-task"]
         XCTAssertTrue(allowForTask.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(allowForTask.label, "Allow all actions for this task")
+        let scope = app.staticTexts["approval.task-scope"]
+        XCTAssertTrue(scope.exists)
+        XCTAssertTrue(scope.label.contains("www.duolingo.com/lesson"))
+        XCTAssertTrue(scope.label.contains("asks again"))
         XCTAssertTrue(app.buttons["approval.allow-once"].exists)
         XCTAssertTrue(app.staticTexts["Text from the website"].exists)
         activate(allowForTask)

@@ -73,6 +73,13 @@ DOM_QUIET_MILLISECONDS = 300
 # How long Playwright waits for an element to become actionable, such as for
 # its click point to reach the element itself, before an act fails.
 ACTION_TIMEOUT_MILLISECONDS = 30_000
+# Headed Chromium lacks headless shell's new-window switch. A response policy
+# denies auxiliary browsing contexts while retaining normal sign-in capabilities.
+_POPUP_DENIAL_POLICY = (
+    "sandbox allow-downloads allow-forms allow-modals allow-orientation-lock "
+    "allow-pointer-lock allow-presentation allow-same-origin allow-scripts "
+    "allow-storage-access-by-user-activation allow-top-navigation"
+)
 _QUIET_SCRIPT = """([quietMs, timeoutMs]) => new Promise(resolve => {
     let quiet = 0;
     let limit = 0;
@@ -198,6 +205,7 @@ class PythonPlaywrightRuntime:
         self._page: Page | None = None
         self._temporary_home: tempfile.TemporaryDirectory[str] | None = None
         self._allowed_origins: tuple[str, ...] = ()
+        self._headed_popup_policy = False
         self._revision: str | None = None
         self._elements: dict[str, ElementHandle] = {}
         self._facts: BrowserObservationFacts | None = None
@@ -224,6 +232,7 @@ class PythonPlaywrightRuntime:
         if self._browser is not None:
             return
         self._allowed_origins = allowed_origins
+        self._headed_popup_policy = interactive
         self._temporary_home = tempfile.TemporaryDirectory(prefix="veetbot-browser-")
         temporary_home = self._temporary_home.name
         environment: dict[str, str | float | bool] = {
@@ -245,6 +254,9 @@ class PythonPlaywrightRuntime:
                 "--proxy-bypass-list=<-loopback>",
                 "--disable-quic",
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                # Headless shell can deny web-created windows before they exist.
+                # Closing them later can release a pending navigation request.
+                *([] if interactive else ["--block-new-web-contents"]),
             ],
             env=environment,
         )
@@ -348,6 +360,7 @@ class PythonPlaywrightRuntime:
             self._disallowed_navigation = True
 
     async def _route(self, route: Route) -> None:
+        """Enforce navigation boundaries before dispatch and sandbox headed documents."""
         request = route.request
         allowed = is_public_https_url(request.url)
         navigation = request.is_navigation_request()
@@ -369,10 +382,34 @@ class PythonPlaywrightRuntime:
             allowed = False
             if own_page:
                 self._fence_refused_page = True
-        if allowed:
+        if allowed and navigation and self._headed_popup_policy:
+            await self._route_headed_document(route)
+        elif allowed:
             await route.continue_()
         else:
             await route.abort("blockedbyclient")
+
+    async def _route_headed_document(self, route: Route) -> None:
+        """Preserve one document response through the same proxy, adding popup denial."""
+        try:
+            request_headers = await route.request.all_headers()
+            # Keep Chromium's cookie decision, including an intentionally empty
+            # selection. The API request jar otherwise adds same-site cookies.
+            request_headers.setdefault("cookie", "")
+            response = await route.fetch(headers=request_headers, max_redirects=0, max_retries=0)
+        except PlaywrightError:
+            await route.abort("failed")
+            return
+        try:
+            headers = response.headers
+            existing = headers.get("content-security-policy")
+            headers["content-security-policy"] = (
+                f"{existing}, {_POPUP_DENIAL_POLICY}" if existing else _POPUP_DENIAL_POLICY
+            )
+            await route.fulfill(response=response, headers=headers)
+        finally:
+            with suppress(PlaywrightError):
+                await response.dispose()
 
     def _inside_document_fence(self, url: str) -> bool:
         """Whether a document or ping may be requested at ``url`` now (ADR-0129).
@@ -399,8 +436,32 @@ class PythonPlaywrightRuntime:
         await download.cancel()
 
     async def _close_popup(self, page: Page) -> None:
-        if page is not self._page:
-            await page.close()
+        """Destroy a popup with interception intact, or end its browser session."""
+        if page is self._page or page.is_closed():
+            return
+        # Page.close marks the page as closing before Chromium closes it. That
+        # makes Playwright skip our context route, which can release a popup's
+        # pending form submission. Close the target directly so interception
+        # stays active until Chromium has destroyed the popup.
+        session: CDPSession | None = None
+        try:
+            session = await page.context.new_cdp_session(page)
+            target = await session.send("Target.getTargetInfo")
+            await session.send("Target.closeTarget", {"targetId": target["targetInfo"]["targetId"]})
+            if not page.is_closed():
+                await page.wait_for_event("close", timeout=5_000)
+        except asyncio.CancelledError:
+            if not page.is_closed():
+                await self.close()
+            raise
+        except Exception:
+            if not page.is_closed():
+                await self.close()
+                raise
+        finally:
+            if session is not None:
+                with suppress(PlaywrightError):
+                    await session.detach()
 
     def _current_page(self) -> Page:
         if self._page is None:
@@ -966,6 +1027,7 @@ class PythonPlaywrightRuntime:
             self._elements = {}
             self._facts = None
             self._disallowed_navigation = False
+            self._headed_popup_policy = False
             self._document_session = None
             self._main_frame_id = None
             self._sign_in_entered = False

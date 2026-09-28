@@ -1330,8 +1330,21 @@ share two process-startup slots: simultaneous Python imports must not exhaust
 the handshake deadline on a small worker. A stdio startup acquires its process
 slot before a general slot, so queued subprocesses do not crowd out HTTP
 discovery. Capacity waiting precedes the unchanged connection timeout. Catalog
-persistence, registry mutation, and connection or rejection events still commit
-in configured-server order, keeping pins and event order deterministic.
+persistence, registry mutation, and connection or rejection events still happen
+in configured-server order, keeping pins and event order deterministic. One
+preparation writes its catalog generations and events in a single transaction,
+so a failure commits none of them, and a session created by that preparation
+writes its held events in one transaction when it is activated. Activation
+keeps its pending batch and deferred marker until commit succeeds;
+failure or cancellation leaves them available for retry. Concurrent activations
+serialize on the session lock, and only the committed batch is removed.
+Each held event receives a distinct, stable derivation key when queued. Retrying
+after an uncertain commit acknowledgment or interrupted transaction cleanup
+uses that same key, so the event store returns the committed event rather than
+appending a duplicate. Separate events with identical contents retain separate
+identities.
+The catalog table is a history, so a generation this process has already
+written is not written again (ADR-0131).
 The SDK adapter owns each transport's complete lifetime in one persistent task;
 connection, authentication renewal and closure may be requested from different
 tasks without transferring SDK cancellation scopes. Caller cancellation requests

@@ -528,7 +528,28 @@ prefix with no sensitive segment, whatever the page hid from the facts, such
 as a closed shadow root. When it refuses the page's own document, the page is
 left on the browser's error page and the act's outcome is
 `tool.browser.outcome_unknown`. A new window never loads, including its first
-navigation, which it issues before its frame exists. Page script is outside
+navigation, which it issues before its frame exists. Headless agent browsers
+deny web-created windows inside Chromium before creation, so a popup cannot
+submit while an asynchronous close is pending. In a headed user-controlled
+sign-in ceremony, document responses gain an additional CSP sandbox policy
+that permits scripts, forms, same-origin access and navigation, but never
+popups. The runtime fetches each headed document through the browser context's
+request transport and the same audited proxy, with automatic retries and
+redirect following disabled and Chromium's cookie selection preserved, then
+fulfills the browser request with that response (ADR-0138). Chromium handles
+each redirect through the existing origin guard;
+a failed form exchange is never replayed. Existing headers, including cookies
+and the site's own CSP, remain intact; body bytes are forwarded unchanged.
+This transport uses Playwright's HTTP client, so a site that requires the
+browser's TLS fingerprint may reject the remote ceremony. The device sign-in
+ceremony is unaffected. The policy also prevents legacy `document.domain`
+relaxation. Unexpected pages retain a closure guard. Popup closure uses the
+Chromium target protocol so context interception remains active until the
+target is destroyed; marking a Playwright page as closing first can bypass
+interception of a form submitted from its initial blank document. The guard
+waits for the close event before detaching its protocol session. If closure
+fails or is cancelled while the popup is still open, the runtime ends the
+whole browser session. Page script is outside
 these checks, an accepted limit of ADR-0129: it can change the page's own
 controls, as `element.click()` from the element's own handler does on a
 check box, and send its own requests on the allowed origins, and a document it

@@ -262,4 +262,5 @@ nav:
       - ADR-0135 OpenAI Chat cache identity and history: adr/0135-openai-chat-cache-identity-and-history.md
       - ADR-0136 Synthesize before the identical-tool-call limit: adr/0136-synthesize-before-the-tool-loop-limit.md
       - ADR-0137 Stable tool-output admission: adr/0137-stable-tool-output-admission.md
+      - ADR-0138 Deny browser popups before creation: adr/0138-browser-popup-denial-before-creation.md
   - Changelog: changelog.md

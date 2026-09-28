@@ -104,7 +104,8 @@ project:
   # `agent run latency` reports Chat latency from the event log. Amended
   # 2026-09-26: the warm-up starts one server at a time, waits longer than a
   # chat would, and retries, because every production warm-up had timed out;
-  # the API starts it only once its socket is bound.
+  # the API starts it only once its socket is bound. Amended 2026-09-28: a
+  # preparation writes its pins in one transaction.
   # ADR-0132 records the owner's non-milestone repair on 2026-09-25: scheduled
   # occurrences cache their context prefix with the one-hour TTL, other sessions
   # keep the default, the Anthropic adapter sends and orders the TTL, and

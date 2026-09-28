@@ -203,3 +203,25 @@ the socket was bound. The API now starts the warm-up only once uvicorn reports
 the socket bound. Readiness never waits on an MCP server, and no server startup
 competes with the bind. The interactive worker has no port and still starts its
 warm-up after `build`.
+
+## Amendment, 2026-09-28: a preparation commits once
+
+The first chat after the patient warm-up (2026-09-27 04:47 UTC) pinned all
+eight servers from memory, and its setup fell from 12.1 s to 2.0 s. About 1.1 s
+of what remained was the pins themselves. Each server took about 0.1 s, in two
+transactions of its own: one rewrote a catalog generation the table already
+held, one tool row at a time, and one appended the pin event.
+
+- **One transaction per preparation.** Its new catalog generations and its
+  events are written together in configured-server order. A failure commits
+  none of them, where a server's pin could previously outlive the failure of
+  the next. A session created by the preparation writes the events it held in
+  one transaction when it is activated.
+- **A generation is written once per process.** The catalog table is a
+  history, not a cache, and re-writing a generation it holds changes nothing.
+  The first writing of a generation inserts its tools in one statement.
+- **The latency report counts every Chat.** Chats now carry the bound browser
+  profile in their metadata. `agent run latency` treats a session whose
+  metadata holds only keys a Chat may carry as a Chat, and omits those keys
+  from its session-kind labels; before this change it counted none of them.
+
