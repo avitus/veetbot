@@ -532,6 +532,7 @@ class _TaskIO:
                 update={
                     "inbox_complete": False,
                     "inbox_cursor": None,
+                    "inbox_reached_at": None,
                     "history_complete": False,
                     "history_cursor": None,
                     "history_window": 0,
@@ -558,6 +559,10 @@ class _TaskIO:
                 sync.inbox_next = sync.history_next = None
                 # Completed discovery already covers this narrower window. New
                 # mail arrives through history deltas; do not rescan every poll.
+        if sync.history_since is not None:
+            since = datetime.fromtimestamp(sync.history_since, tz=UTC)
+            if account.catch_up_since != since:
+                account = account.model_copy(update={"catch_up_since": since})
         return account, sync
 
     def _recent(self, message: dict[str, Any]) -> bool:
@@ -784,15 +789,24 @@ class _TaskIO:
                     c.principal, "thread_progress", key, expected_revision=old.revision
                 )
 
-    async def _import(self, account_id: str, provider_id: str, *, historical: bool = False) -> bool:
+    async def _import(
+        self,
+        account_id: str,
+        provider_id: str,
+        *,
+        historical: bool = False,
+        read_limit: int | None = None,
+    ) -> tuple[bool, EmailThread | None]:
+        """Import one provider thread; report completion and the thread it produced."""
         key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
         async with self.context.uow_factory() as uow:
             if await uow.email.get(self.context.principal, "excluded_source", key) is not None:
-                return True
-        read_limit = 10 if historical else 8
+                return True, None
+        read_limit = read_limit or (10 if historical else 8)
         if self.full_reads.get(account_id, 0) >= read_limit:
-            return False
+            return False, None
         value, pending = await self.read_thread(account_id, provider_id, read_limit=read_limit)
+        thread = None
         if value is not None:
             thread = await self.service.import_thread(
                 self.context.principal,
@@ -803,7 +817,7 @@ class _TaskIO:
                 lease=self.context.lease,
             )
             self.imported[thread.id] = thread
-        return not pending
+        return not pending, thread
 
     async def refresh(self) -> None:
         """Advance bounded discovery, assessment, and eligible automatic drafts."""
@@ -827,6 +841,14 @@ class _TaskIO:
                     }
                 )
                 await self._save_sync(account, sync)
+                # New mail first; an unfinished catch-up keeps the rest of the read budget.
+                account, sync = await self._changes(
+                    account, sync, read_limit=8 if account.inbox_complete else 4
+                )
+                if account.history_id is None:
+                    # A resync re-lists the inbox below; resume changes from before that listing.
+                    account = account.model_copy(update={"history_id": profile["history_id"]})
+                    await self._save_sync(account, sync)
                 if not account.inbox_complete and not sync.inbox_page_open:
                     page = await self.call(
                         account_id,
@@ -850,8 +872,14 @@ class _TaskIO:
                 for provider_id in list(sync.inbox_pending):
                     if self.full_reads.get(account_id, 0) >= 8:
                         break
-                    if not await self._import(account_id, provider_id):
+                    completed, thread = await self._import(account_id, provider_id)
+                    if not completed:
                         continue
+                    if thread is not None and (
+                        account.inbox_reached_at is None
+                        or thread.updated_at < account.inbox_reached_at
+                    ):
+                        account = account.model_copy(update={"inbox_reached_at": thread.updated_at})
                     sync.inbox_pending.remove(provider_id)
                     await self._save_sync(account, sync)
                 if sync.inbox_page_open and not sync.inbox_pending:
@@ -863,11 +891,9 @@ class _TaskIO:
                     )
                     sync.inbox_page_open = False
                     await self._save_sync(account, sync)
-                if account.inbox_complete:
-                    account, sync = await self._changes(account, sync)
                 expired = await self._expired_inbox(account_id)
                 for thread in sorted(expired, key=lambda item: -item.priority):
-                    if not await self._import(account_id, thread.provider_thread_id):
+                    if not (await self._import(account_id, thread.provider_thread_id))[0]:
                         break
                 learning = await self.service.learning_context(c.principal, None)
                 if not learning.get("paused", False) and not account.history_complete:
@@ -1088,7 +1114,7 @@ class _TaskIO:
                     )
 
     async def _changes(
-        self, account: EmailAccount, sync: EmailSyncState
+        self, account: EmailAccount, sync: EmailSyncState, *, read_limit: int = 8
     ) -> tuple[EmailAccount, EmailSyncState]:
         if not sync.change_page_open:
             sync.change_start = sync.change_start or sync.change_history or account.history_id
@@ -1111,7 +1137,12 @@ class _TaskIO:
                 len(discovered | sync.change_events.keys()) > EMAIL_CHANGE_EVENT_LIMIT
             ):
                 account = account.model_copy(
-                    update={"inbox_complete": False, "inbox_cursor": None, "history_id": None}
+                    update={
+                        "inbox_complete": False,
+                        "inbox_cursor": None,
+                        "inbox_reached_at": None,
+                        "history_id": None,
+                    }
                 )
                 sync.inbox_pending = []
                 sync.inbox_next = None
@@ -1176,10 +1207,10 @@ class _TaskIO:
                 # before reading live threads. Keep the admitted history watermark.
                 return account, sync
         for provider_id in list(sync.change_pending[:50]):
-            if self.full_reads.get(account.id, 0) >= 8:
+            if self.full_reads.get(account.id, 0) >= read_limit:
                 break
             try:
-                completed = await self._import(account.id, provider_id)
+                completed, _ = await self._import(account.id, provider_id, read_limit=read_limit)
             except EmailToolError:
                 # A deletion may also arrive after the captured tail. Retain live
                 # work and admit its later delta on the next slice; a generic
@@ -1300,7 +1331,7 @@ class _TaskIO:
         for provider_id in list(sync.history_pending):
             if self.full_reads.get(account.id, 0) >= min(10, starting_reads + 2):
                 break
-            if not await self._import(account.id, provider_id, historical=True):
+            if not (await self._import(account.id, provider_id, historical=True))[0]:
                 continue
             sync.history_pending.remove(provider_id)
             account = account.model_copy(

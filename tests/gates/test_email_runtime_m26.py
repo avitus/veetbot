@@ -81,7 +81,7 @@ async def test_refresh_uses_governed_mailbox_reads_without_owner_prompt_or_model
                             "threads_total": 0,
                         },
                     ),
-                    response("search_threads", {"threads": []}),
+                    # New mail is checked before inbox catch-up and history pages.
                     response(
                         "sync_changes",
                         {
@@ -92,6 +92,7 @@ async def test_refresh_uses_governed_mailbox_reads_without_owner_prompt_or_model
                             "resync_required": False,
                         },
                     ),
+                    response("search_threads", {"threads": []}),
                     response("search_threads", {"threads": []}),
                 ),
             ),
@@ -492,10 +493,13 @@ async def test_refresh_reserves_history_progress_and_bounds_full_reads_per_accou
         assert len(full_reads) <= 10
         assert all(args["max_results"] <= 50 for name, args in calls if name == "sync_changes")
         assert {"history-0", "history-1"} <= set(full_reads)
+        # New mail is read first, within its share of an unfinished catch-up.
+        assert full_reads[:3] == ["change-0", "change-1", "change-2"]
+        assert any(item.startswith("inbox-") for item in full_reads)
         async with app.uow_factory() as uow:
             sync = await uow.email.get(app.principal, "sync", "default")
         assert sync is not None
-        assert sync.payload["change_pending"] == ["change-0", "change-1", "change-2"]
+        assert sync.payload["change_pending"] == []
 
 
 async def test_changed_mail_is_assessed_and_drafted_once_through_metered_model() -> None:

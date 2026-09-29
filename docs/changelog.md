@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-29 — New mail arrives during the email catch-up
+
+- Email mode reads the last ninety days of inbox mail newest to oldest, a page
+  per refresh. Until that reached the cutoff, new mail was not read at all, so
+  older July mail kept surfacing while fresh mail waited. New mail is now read
+  first on every refresh, and the catch-up keeps its own share of the reads.
+- Mailbox status in Email mode shows how far back the catch-up has reached,
+  for example "Checking inbox mail back to Jul 1 — reached Jul 14".
+
 ## 2026-09-28 — Telegram messages are admitted, with their own budget
 
 - A paired Telegram or WhatsApp message was refused on PostgreSQL because the

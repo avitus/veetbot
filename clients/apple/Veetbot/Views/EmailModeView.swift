@@ -224,6 +224,9 @@ public struct EmailModeView: View {
                                 } else {
                                     Text("Not yet synchronized.").foregroundColor(.secondary)
                                 }
+                                if let coverage = account.coverageMessage() {
+                                    Text(coverage).foregroundColor(.secondary)
+                                }
                             }.appFont(.caption)
                         }
                     }.padding(.top, 10).frame(maxWidth: .infinity, alignment: .leading)
