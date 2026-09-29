@@ -24,6 +24,12 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let writeServerID: String?
     /// Absent support on an older server shows no Subscriptions surface at all.
     public let unsubscribeSupported: Bool?
+    /// Whether the inbox catch-up has reached its floor; absent on an older server.
+    public let inboxComplete: Bool?
+    /// The oldest date the automatic catch-up covers.
+    public let catchUpSince: Date?
+    /// The oldest inbox mail the current catch-up pass has read so far.
+    public let inboxReachedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, label, status, error
@@ -36,6 +42,9 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
         case archiveSupported = "archive_supported"
         case writeServerID = "write_server_id"
         case unsubscribeSupported = "unsubscribe_supported"
+        case inboxComplete = "inbox_complete"
+        case catchUpSince = "catch_up_since"
+        case inboxReachedAt = "inbox_reached_at"
     }
 
     /// Distinguishes a failed attempt from an account still waiting for its initial synchronization.
@@ -47,6 +56,21 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
         if status == "unavailable" { return "Waiting for an email update." }
         if status == "syncing" { return "Updating — results may be incomplete." }
         return nil
+    }
+
+    /// Explains how far back the automatic catch-up has read, so older mail surfacing makes sense.
+    public func coverageMessage(locale: Locale = .current, timeZone: TimeZone = .current) -> String? {
+        guard let inboxComplete else { return nil }
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day().locale(locale)
+        style.timeZone = timeZone
+        guard let since = catchUpSince?.formatted(style) else {
+            return inboxComplete ? nil : "Checking recent inbox mail. New mail still arrives first."
+        }
+        if inboxComplete { return "Inbox mail back to \(since) has been checked." }
+        if let reached = inboxReachedAt?.formatted(style) {
+            return "Checking inbox mail back to \(since) — reached \(reached). New mail still arrives first."
+        }
+        return "Checking inbox mail back to \(since). New mail still arrives first."
     }
 }
 

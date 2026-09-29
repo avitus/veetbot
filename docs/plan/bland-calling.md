@@ -224,7 +224,8 @@ the result worker; `AGENT_CALL_INGRESS_ENABLED` separately enables signed intake
 requires the existing notification API. `BLAND_CONFIGURATION_FILE` names the
 bounded, reviewed public JSON configuration; `BLAND_API_KEY_FILE` is loaded only
 by credential-bearing roles and `BLAND_WEBHOOK_SECRET_FILE` only by ingress.
-The [setup guide](../bland-setup.md) defines number review, profile generation,
+Both calling roles refuse to start with a model or browser credential variable,
+and ingress also with `BLAND_API_KEY_FILE`. The [setup guide](../bland-setup.md) defines number review, profile generation,
 role grants, signature verification, activation and rollback.
 
 `agent call-worker` polls durable receipts every ten seconds and scans one

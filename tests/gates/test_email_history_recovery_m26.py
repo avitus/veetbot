@@ -143,7 +143,10 @@ async def test_history_lookahead_ceiling_restarts_sync_without_discarding_cached
             [sync] = await uow.email.list(app.principal, "sync")
             [thread] = await uow.email.list(app.principal, "thread")
         account = EmailAccount.model_validate(row.payload)
-        assert account.inbox_complete is False and account.history_id is None
+        # The resync re-lists the (empty) inbox in the same slice and resumes changes
+        # from the watermark read before that listing, not from the overflowed cursor.
+        assert account.inbox_complete is True and account.history_id == "100"
+        assert account.inbox_reached_at is None
         assert sync.payload["change_events"] == {}
         assert sync.payload["change_pending"] == []
         messages = thread.payload["messages"]

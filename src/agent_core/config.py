@@ -1561,8 +1561,8 @@ def _load_settings(
     raw_dir = values.get("AGENT_CONFIG_DIR", "").strip()
     config_dir = Path(raw_dir).expanduser().resolve() if raw_dir else None
     if refuse_provider_credentials:
-        # The surface role refuses to start with a provider credential in its
-        # environment, rather than leaving it there unread (inbound-surfaces.md).
+        # The surface and call roles refuse to start with a provider credential
+        # they do not load, rather than leaving it there unread (inbound-surfaces.md).
         misplaced = sorted(
             name
             for name, value in values.items()
@@ -1571,10 +1571,11 @@ def _load_settings(
                 (name.endswith("_API_KEY") and name != "BLAND_API_KEY")
                 or name in _PROVIDER_CREDENTIAL_VARIABLES
             )
+            and not (load_call_credentials and name == "BLAND_API_KEY_FILE")
         )
         if misplaced:
             raise ConfigurationError(
-                "this role loads no provider credentials; remove " + ", ".join(misplaced)
+                "this role does not load these provider credentials; remove " + ", ".join(misplaced)
             )
     credentials = (
         {
@@ -1999,4 +2000,5 @@ def load_call_worker_settings(
         load_call_credentials=not ingress,
         load_call_webhook_secret=ingress,
         require_owner_scopes=False,
+        refuse_provider_credentials=True,
     )

@@ -940,6 +940,37 @@ import SwiftUI
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
     }
 
+    /// A terminal generation failure must be visible even before the first draft exists.
+    @Test(arguments: ["FAILED", "CANCELLED"], [false, true])
+    func testDraftGenerationReportsTerminalFailure(status: String, existingDraft: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "POST" {
+                return (202, "{\"run_id\":\"\(self.runID)\",\"draft\":null,\"status\":\"QUEUED\"}")
+            }
+            if request.url!.path.contains("/runs/") {
+                return (200, """
+                {"id":"\(self.runID)","session_id":"\(self.threadID)","status":"\(status)","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
+                """)
+            }
+            let thread = self.threadJSON(draft: existingDraft ? self.draftJSON() : "null")
+            return (200, existingDraft ? thread : thread.replacingOccurrences(
+                of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.generateDraft()
+        #expect(model.draftActionMessage == (status == "FAILED"
+            ? "The email operation failed. Try again."
+            : "The email operation was cancelled."))
+        #expect(model.threadReadMessage == nil)
+        #expect(!model.isPerformingAction)
+        #expect((model.draft != nil) == existingDraft)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+    }
+
     /// A failed owner action is reported separately from a failed thread read, so the
     /// composer can show a refusal beside the button that caused it instead of only at
     /// the top of the reading pane, far above the action.

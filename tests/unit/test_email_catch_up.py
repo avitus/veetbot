@@ -452,3 +452,148 @@ async def test_active_discovery_keeps_query_bound_cutoff_until_pagination_finish
             row = await uow.email.get(app.principal, "sync", "default")
         assert row is not None
         assert row.payload["history_since"] == int((NOW - timedelta(days=90)).timestamp())
+
+
+async def _catching_up_mailbox(
+    inbox: dict[str, datetime], changes: list[str], *, resync: bool = False
+) -> tuple[Any, list[str]]:
+    """Serve an unfinished inbox catch-up page alongside new Gmail changes."""
+    base = await _current_mail_factory()
+    reads: list[str] = []
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        """Answer discovery, change, and thread reads while recording full reads in order."""
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Return older pages for every search so catch-up stays unfinished."""
+            value: dict[str, Any]
+            if name == "search_threads":
+                ids = (
+                    list(inbox) if "in:inbox" in arguments["query"] else ["history-0", "history-1"]
+                )
+                value = {
+                    "threads": [{"thread_id": item} for item in ids],
+                    "next_page_token": "older-page",
+                }
+            elif name == "sync_changes":
+                value = {
+                    "schema_version": 1,
+                    "history_id": "101",
+                    "changes": [
+                        {
+                            "kind": "message_added",
+                            "thread_id": item,
+                            "message_id": f"{item}-m",
+                            "label_ids": ["INBOX"],
+                        }
+                        for item in changes
+                    ],
+                    "next_page_token": None,
+                    "resync_required": resync,
+                }
+            elif name == "get_thread_page":
+                thread_id = arguments["thread_id"]
+                reads.append(thread_id)
+                value = _page()
+                value["thread_id"] = thread_id
+                value["messages"][0].update(
+                    thread_id=thread_id,
+                    id=f"{thread_id}-m",
+                    internal_date=int(inbox.get(thread_id, NOW).timestamp() * 1000),
+                )
+            else:
+                return await original(name, arguments)
+            return MCPCallResult(content=(json.dumps(value),), structured=value)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    return factory, reads
+
+
+async def test_new_mail_is_read_while_inbox_catch_up_continues() -> None:
+    """New Gmail changes are read first, and catch-up and history still keep their shares."""
+    inbox = {f"inbox-{index}": NOW - timedelta(days=10 + index) for index in range(8)}
+    changes = [f"change-{index}" for index in range(6)]
+    factory, reads = await _catching_up_mailbox(inbox, changes)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=FixedClock(NOW),
+        mcp_client_factory=factory,
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            account = await uow.email.get(app.principal, "account", "default")
+            sync = await uow.email.get(app.principal, "sync", "default")
+    assert account is not None and sync is not None
+    assert reads[:4] == changes[:4]
+    assert len([item for item in reads if item.startswith("inbox-")]) >= 4
+    assert {"history-0", "history-1"} <= set(reads)
+    assert len(reads) <= 10
+    assert sync.payload["change_pending"] == ["change-4", "change-5"]
+    assert account.payload["inbox_complete"] is False
+
+
+@pytest.mark.parametrize("restart", ["none", "resync", "policy"])
+async def test_catch_up_progress_reports_cutoff_and_oldest_inbox_mail_reached(
+    restart: str,
+) -> None:
+    """Expose the ninety-day floor and how far back the current inbox pass has reached."""
+    inbox = {
+        "inbox-0": NOW - timedelta(days=3),
+        "inbox-1": NOW - timedelta(days=40),
+        "inbox-2": NOW - timedelta(days=20),
+    }
+    factory, _ = await _catching_up_mailbox(inbox, [], resync=restart == "resync")
+    earlier = NOW - timedelta(days=75)
+    cutoff = NOW - timedelta(days=90)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=FixedClock(NOW),
+        mcp_client_factory=factory,
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+    ) as app:
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email,
+                app.principal,
+                "account",
+                "default",
+                EmailAccount(
+                    id="default",
+                    label="Mail",
+                    history_id="101",
+                    inbox_cursor="older-page",
+                    inbox_reached_at=earlier,
+                ),
+                NOW,
+            )
+            await save_value(
+                uow.email,
+                app.principal,
+                "sync",
+                "default",
+                EmailSyncState(anchor="2026-01-01")
+                if restart == "policy"
+                else EmailSyncState(
+                    history_policy="email-history@2:90d",
+                    history_since=int(cutoff.timestamp()),
+                ),
+                NOW,
+            )
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        body = await app.services.email.accounts(app.principal)
+    items = body["items"]
+    assert isinstance(items, list)
+    item = items[0]
+    assert item["inbox_complete"] is False
+    assert datetime.fromisoformat(item["catch_up_since"]) == cutoff
+    reached = datetime.fromisoformat(item["inbox_reached_at"])
+    assert reached == (earlier if restart == "none" else NOW - timedelta(days=40))

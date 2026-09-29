@@ -32,3 +32,15 @@ The existing dollar ceilings, provider selection, finite slices, source
 provenance and send approvals remain in force. Older historical learning needs
 fresh owner authorization. This amendment changes the authorized scope of
 Milestone 26 without completing a gate or authorizing production deployment.
+
+## Amendment — 2026-09-29: new mail during catch-up
+
+The owner found July mail surfacing while fresh mail waited: new Gmail changes
+were read only after the inbox catch-up reached the ninety-day cutoff, and
+nothing showed how far back it had reached. Every refresh now reads new
+changes first. While catch-up is unfinished they take at most four of the
+slice's full-thread reads, catch-up keeps the rest of eight, and history keeps
+its reserved two, all inside the approved ten. A resynchronization resumes
+changes from a watermark read before its inbox re-listing. Each account reports
+its cutoff and the oldest inbox mail the current pass has read, and Email mode
+shows both. The ninety-day bound itself is unchanged.

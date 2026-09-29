@@ -115,6 +115,9 @@ test-apple-ui-macos:
 		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalCollapsesAfterApproval \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalLoadedApprovedStartsCollapsed \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testBrowserChatApprovalCollapsesAfterTaskApproval \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleAccessibilityAtLargeText \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleEvidencePreservesTheOpenConversation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMemoryPeopleShowsEachChosenPerson \

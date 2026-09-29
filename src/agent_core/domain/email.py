@@ -64,6 +64,8 @@ class EmailAccount(EmailValue):
     inbox_cursor: str | None = None
     history_cursor: str | None = None
     history_window: int = 0
+    catch_up_since: datetime | None = None
+    inbox_reached_at: datetime | None = None
     error: str | None = None
 
 

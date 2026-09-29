@@ -2535,7 +2535,9 @@ class EmailExperienceService:
                 thread.revision != source_revision
                 or not thread.complete
                 or not thread.messages
-                or thread.reply_blocked_reason
+                # Only automatic proposals obey the assessment's reply abstention.
+                # An owner-requested task supplies an instruction, including "".
+                or (thread.reply_blocked_reason and instruction is None)
             ):
                 raise ConflictError(
                     "a draft requires a complete, current thread and the missing decision"

@@ -224,6 +224,9 @@ public struct EmailModeView: View {
                                 } else {
                                     Text("Not yet synchronized.").foregroundColor(.secondary)
                                 }
+                                if let coverage = account.coverageMessage() {
+                                    Text(coverage).foregroundColor(.secondary)
+                                }
                             }.appFont(.caption)
                         }
                     }.padding(.top, 10).frame(maxWidth: .infinity, alignment: .leading)
@@ -823,6 +826,10 @@ private struct EmailThreadScreen: View {
                         Label("Draft reply", systemImage: "square.and.pencil")
                     }
                 }.buttonStyle(.borderedProminent).tint(AppTheme.turquoise).disabled(model.isPerformingAction)
+                if let error = model.draftActionMessage {
+                    Label(error, systemImage: "exclamationmark.circle").foregroundColor(.red)
+                        .appFont(.callout).accessibilityIdentifier("email.action-error")
+                }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(20).emailCard(accent: true)
         }
     }

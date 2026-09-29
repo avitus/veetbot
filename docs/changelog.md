@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-29 — A denied approval no longer breaks the chat
+
+- After you denied an approval, the next message in that chat failed with an
+  internal error, and so did every later one, including Telegram messages.
+  The denial now keeps the result the assistant was shown, and chats that
+  already hold an old denial accept messages again once this release is
+  deployed. ADR-0142 records the change.
+
+## 2026-09-29 — New mail arrives during the email catch-up
+
+- Email mode reads the last ninety days of inbox mail newest to oldest, a page
+  per refresh. Until that reached the cutoff, new mail was not read at all, so
+  older July mail kept surfacing while fresh mail waited. New mail is now read
+  first on every refresh, and the catch-up keeps its own share of the reads.
+- Mailbox status in Email mode shows how far back the catch-up has reached,
+  for example "Checking inbox mail back to Jul 1 — reached Jul 14".
+
 ## 2026-09-28 — Telegram messages are admitted, with their own budget
 
 - A paired Telegram or WhatsApp message was refused on PostgreSQL because the

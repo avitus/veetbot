@@ -23,6 +23,10 @@ project:
   # ADR-0141 records the owner-authorized extension on 2026-09-28: task
   # approval website scopes are persisted on the server and managed from
   # native Website Access settings, without per-site deployment changes.
+  # ADR-0142 records the owner-requested runtime repair on 2026-09-29: a
+  # tool.call.denied payload (version 2) carries the result item the model was
+  # given, and a version 1 denial without one projects from its recorded status,
+  # tool name and reason code, labelled untrusted, so its session works again.
   # ADR-0089 authorizes a non-milestone extension to the existing schedule
   # control plane: current/recent-history browsing, thirty-day terminal
   # retention, and conditional native time-zone presentation.

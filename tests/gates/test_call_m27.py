@@ -337,8 +337,18 @@ def test_call_cannot_be_autoapproved_by_a_permissive_policy_profile() -> None:
     assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
 
 
-def test_call_roles_confine_provider_and_signing_credentials(tmp_path: Any) -> None:
-    from agent_core.config import load_call_worker_settings
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("OPENAI_API_KEY", "unrelated-model-secret"),
+        ("VEETBOT_OPENAI_KEY", "unrelated-model-secret"),
+        ("BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE", "/etc/veetbot/secrets/browser"),
+    ],
+)
+def test_call_roles_confine_provider_and_signing_credentials(
+    tmp_path: Any, variable: str, value: str
+) -> None:
+    from agent_core.config import ConfigurationError, load_call_worker_settings
     from tests.unit.test_config import base_environment
 
     configuration = tmp_path / "calls.json"
@@ -349,21 +359,27 @@ def test_call_roles_confine_provider_and_signing_credentials(tmp_path: Any) -> N
     signing = tmp_path / "signing-key"
     signing.write_text("fixture-signing-secret")
     signing.chmod(0o600)
-    environment = {
+    ingress_environment = {
         **base_environment(),
         "AGENT_CALL_ENABLED": "1",
         "AGENT_CALL_INGRESS_ENABLED": "1",
         "BLAND_CONFIGURATION_FILE": str(configuration),
-        "BLAND_API_KEY_FILE": str(key),
         "BLAND_WEBHOOK_SECRET_FILE": str(signing),
-        "OPENAI_API_KEY": "unrelated-model-secret",
     }
-    ingress = load_call_worker_settings(environment, ingress=True)
-    worker = load_call_worker_settings(environment)
+    worker_environment = {**ingress_environment, "BLAND_API_KEY_FILE": str(key)}
+    ingress = load_call_worker_settings(ingress_environment, ingress=True)
+    worker = load_call_worker_settings(worker_environment)
     assert ingress.credentials == {} and ingress.call_webhook_secret is not None
     assert set(worker.credentials) == {"bland_read", "bland_call"}
     assert worker.call_webhook_secret is None
     assert ingress.auth_token is None and worker.auth_token is None
+    # A stray provider credential fails startup instead of sitting unread.
+    for environment, is_ingress in ((ingress_environment, True), (worker_environment, False)):
+        with pytest.raises(ConfigurationError, match=variable):
+            load_call_worker_settings({**environment, variable: value}, ingress=is_ingress)
+    # Only the worker holds the Bland key; release preflight refuses it for ingress too.
+    with pytest.raises(ConfigurationError, match="BLAND_API_KEY_FILE"):
+        load_call_worker_settings(worker_environment, ingress=True)
 
 
 class _DatabaseReachedError(Exception):

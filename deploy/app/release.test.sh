@@ -266,6 +266,8 @@ make_stage() {
     "$stage/deploy/veetbot-call-ingress.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_schedule_database_permissions.py" \
+    "$stage/scripts/check_surface_database_permissions.py" \
+    "$stage/scripts/database_role_permissions.py" \
     "$stage/scripts/check_provider_pins.py" \
     "$stage/scripts/check_production_deployment.py"
   for unit in \
@@ -299,10 +301,16 @@ make_stage() {
     >"$stage/deploy/systemd/veetbot-surface.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
-  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "${1:-}" == scripts/check_schedule_database_permissions.py ]]; then exit 1; fi\n' \
+  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "$*" == "-m scripts.check_schedule_database_permissions" ]]; then exit 1; fi\n' \
     >"$stage/.venv/bin/python"
   chmod +x "$stage/.venv/bin/alembic" "$stage/.venv/bin/python"
   cat >>"$stage/.venv/bin/python" <<'PYTHON_STUB'
+if [[ "$*" == "-m scripts.check_surface_database_permissions" ]]; then
+  database_login="${DATABASE_URL:-}"
+  database_login="${database_login#*://}"
+  printf 'surface permission check as %s\n' "${database_login%%:*}" >>"$VEETBOT_TEST_LOG"
+  if [[ "${VEETBOT_TEST_FAIL_SURFACE_PERMISSION:-0}" == 1 ]]; then exit 1; fi
+fi
 if [[ "${1:-}" == scripts/check_provider_pins.py ]]; then
   if [[ "${VEETBOT_TEST_PIN_FAILURE:-}" == early ]] || \
     { [[ "${VEETBOT_TEST_PIN_FAILURE:-}" == final ]] && \
@@ -647,7 +655,7 @@ grep -Fxq "EnvironmentFile=$schedule_worker_env" \
 grep -Fq \
   'systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
-grep -Fq 'python scripts/check_schedule_database_permissions.py' "$LOG_FILE"
+grep -Fq 'python -m scripts.check_schedule_database_permissions' "$LOG_FILE"
 
 schedule_notification_mismatch_env="$TEST_ROOT/schedule-notification-mismatch.env"
 schedule_notification_mismatch_worker_env="$TEST_ROOT/schedule-notification-mismatch-worker.env"
@@ -679,8 +687,10 @@ printf '%s\n' \
   'AGENT_SURFACE_API_ENABLED=1' \
   'AGENT_SURFACE_WORKER_ENABLED=1' \
   'AGENT_SURFACE_WHATSAPP_ENABLED=1' >>"$surface_env"
+surface_database_url='postgresql+asyncpg://veetbot_surface:'
+surface_database_url+='test@127.0.0.1:5432/agent'
 printf '%s\n' \
-  "DATABASE_URL=$test_database_url" \
+  "DATABASE_URL=$surface_database_url" \
   'DEPLOYMENT_MODE=production' \
   'AUTH_MODE=token' \
   'AUTH_TENANT_ID=test' \
@@ -696,6 +706,20 @@ printf '%s\n' \
   "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE=$SURFACE_WA_HOOK_FILE" \
   'AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID=1234567890' \
   'AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION=v23.0' >"$surface_worker_env"
+surface_permission_id="20260810-152257-000000f"
+make_stage "$surface_permission_id"
+if VEETBOT_TEST_FAIL_SURFACE_PERMISSION=1 \
+  VEETBOT_TEST_ENV_FILE="$surface_env" \
+  VEETBOT_TEST_SURFACE_ENV_FILE="$surface_worker_env" \
+  run_release "$surface_permission_id" \
+  >"$TEST_ROOT/surface-permission.out" 2>&1; then
+  printf 'release with an over- or under-privileged surface role unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ ! -e "$DEPLOY_ROOT/releases/$surface_permission_id" ]]
+grep -Fq \
+  'surface database role does not satisfy its least-privilege allowlist' \
+  "$TEST_ROOT/surface-permission.out"
 surface_id="20260810-152257-0000003"
 make_stage "$surface_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
@@ -710,6 +734,8 @@ grep -Fq \
   "$LOG_FILE"
 grep -Fxq 'AGENT_SURFACE_WHATSAPP_ENABLED=1' \
   "$DEPLOY_ROOT/releases/$surface_id/.release.env"
+grep -Fq 'python -m scripts.check_surface_database_permissions' "$LOG_FILE"
+grep -Fxq 'surface permission check as veetbot_surface' "$LOG_FILE"
 
 notify_env="$TEST_ROOT/notify.env"
 notify_worker_env="$TEST_ROOT/veetbot-notify.env"

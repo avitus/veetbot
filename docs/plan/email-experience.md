@@ -213,6 +213,10 @@ for new work while retaining the immutable binding on old history. It must not
 reinterpret existing source receipts or send through another Google identity.
 
 Refresh current inbox threads within the latest ninety days first (ADR-0096).
+Every refresh reads new Gmail changes before continuing that catch-up. While
+catch-up is unfinished, new mail takes at most four of the slice's full-thread
+reads and catch-up the rest of eight, so neither waits for the other. A
+resynchronization resumes changes from a watermark read before its inbox re-listing.
 The first display may be partial while pagination completes; report that state
 and keep useful results visible. Invalidate assessments when the source or a
 relevant feedback/profile/model revision changes. Rerank affected existing mail
@@ -241,7 +245,8 @@ Older context may remain readable but must not enter automatic model assessment
 or drafting; a partial recent view cannot authorize a complete-context draft.
 Spam and Trash remain excluded from automatic learning. Include a clear coverage view
 showing processed date ranges, discovered/processed counts, exclusions, and
-whether further history remains.
+whether further history remains. Each account reports the cutoff (`catch_up_since`)
+and the oldest inbox mail the current pass has read (`inbox_reached_at`).
 
 Use cheap structured metadata first to discover interaction patterns and select
 useful source messages. Read relevant current threads and diverse historical
@@ -424,6 +429,13 @@ thread. Determine whether a reply is still needed using the complete available
 thread, including replies made in Gmail or another client. Abstain when the
 request is unclear, an attachment is essential, or a consequential decision is
 missing. A draft can request the missing decision; it must not invent one.
+
+An explicit Draft reply or refinement request takes precedence over the earlier
+automatic reply-need assessment, without changing that assessment. Its draft
+still requires complete, current source content and verified reply recipients;
+the same limits on missing decisions and invented commitments apply. Failed or
+cancelled generation runs show an error beside the draft action, including when
+no draft exists yet, and preserve any existing draft and edits.
 
 Use relevant shared memory, thread facts, the learned style profile, and a small
 set of appropriate examples. Broad memory sharing permits relevant context; it
@@ -678,7 +690,7 @@ normal contract naming review:
 
 | Route family | Operation |
 | --- | --- |
-| `/v1/email/accounts` | Read configured account availability, verified display identity, freshness and learning coverage. |
+| `/v1/email/accounts` | Read configured account availability, verified display identity, freshness, learning and catch-up coverage. |
 | `/v1/email/threads` and thread detail | Cursor-paginated priority/all-mail views, account filters, safe search, normalized thread and assessment. |
 | `/v1/email/refresh` and operation status | Coalesced foreground refresh/history admission with stable idempotency. |
 | `/v1/email/feedback` | Create, inspect, correct, undo scoped owner feedback and attention judgments. |

@@ -29,7 +29,8 @@ Activation is complete only when:
   with a surface secret-file variable in its environment.
 - The surface environment holds no API bearer and no model, web, browser, or
   sandbox credential; the surface role refuses to start with a provider key,
-  including `BLAND_API_KEY_FILE` even when calling is configured.
+  including `BLAND_API_KEY_FILE` even when calling is configured. Its database
+  login, `veetbot_surface`, reaches only the tables the surface uses.
 - A pairing code is shown once, expires in ten minutes, and is single use.
   Five wrong codes lock that sender for an hour.
 - Every production command below runs as `root` or `veetbot` by SSH key. None
@@ -71,19 +72,68 @@ It must print `600 veetbot:veetbot`, a size of about 46 bytes, and
 
 ## Phase 3 — Configure both environments
 
-The surface role reads its own environment, `/etc/veetbot/veetbot-surface.env`.
-This command creates it from the application environment's database and
-identity lines, which it never prints, and refuses to overwrite an existing
-file. It connects with the application's database login, as the notify role
-does:
+The surface role reads its own environment, `/etc/veetbot/veetbot-surface.env`,
+and connects to the database as its own login, `veetbot_surface`, which holds
+only the grants the [deployment guide](deployment.md) lists; the release
+refuses any other login once the channel is on. This command creates or repairs
+that login with a generated password and exactly those grants, checks that it
+connects, and writes it into the surface environment. A missing environment is
+created from the application environment's identity lines; an existing one has
+only its `DATABASE_URL` line replaced, with a backup beside it. It prints no
+secret, restarts the role if it is running, and rotates the password when run
+again:
 
 ```bash
-ssh root@api.veetbot.com 'set -e; src=/etc/veetbot/veetbot.env; dst=/etc/veetbot/veetbot-surface.env; test ! -e "$dst" || { echo "$dst exists; left unchanged"; exit 1; }; umask 027; grep -E "^(DATABASE_URL|PGSSLMODE|AUTH_TENANT_ID|AUTH_PRINCIPAL_ID|AGENT_CONFIG_DIR)=" "$src" > "$dst"; grep -q "^PGSSLMODE=" "$dst" || echo PGSSLMODE=disable >> "$dst"; grep -q "^AGENT_CONFIG_DIR=" "$dst" || echo AGENT_CONFIG_DIR= >> "$dst"; printf "%s\n" DEPLOYMENT_MODE=production AUTH_MODE=token AUTH_ROLES=surface AUTH_SCOPES=run.read,run.write,run.cancel,surface.read,surface.write,approval.read,approval.resolve,schedule.read,schedule.write AGENT_SURFACE_API_ENABLED=1 AGENT_SURFACE_WORKER_ENABLED=1 AGENT_SURFACE_WHATSAPP_ENABLED=0 AGENT_SURFACE_TELEGRAM_TOKEN_FILE=/etc/veetbot/secrets/telegram-bot-token >> "$dst"; chown root:veetbot "$dst"; chmod 0640 "$dst"; cut -d= -f1 "$dst" | tr "\n" " "; echo'
+ssh root@api.veetbot.com 'bash -s' <<'EOF'
+set -euo pipefail
+app=/etc/veetbot/veetbot.env
+dst=/etc/veetbot/veetbot-surface.env
+url=$(sed -n 's/^DATABASE_URL=//p' "$app" | tail -n 1)
+case "$url" in postgresql*://*@*) ;; *) echo "no DATABASE_URL in $app"; exit 1 ;; esac
+pw=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+surface_url="${url%%://*}://veetbot_surface:$pw@${url#*@}"
+docker exec -i veetbot-postgres-1 psql -q -v ON_ERROR_STOP=1 -U agent -d agent <<SQL
+SELECT 'CREATE ROLE veetbot_surface' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'veetbot_surface')\gexec
+ALTER ROLE veetbot_surface LOGIN PASSWORD '$pw' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+GRANT CONNECT ON DATABASE agent TO veetbot_surface;
+GRANT USAGE ON SCHEMA public TO veetbot_surface;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM veetbot_surface;
+GRANT SELECT ON agents, alembic_version, approvals, checkpoints, delegations, derived_event_keys, devices, events, export_consent, notification_deliveries, notification_outbox, process_events, projection_watermarks, runs, session_history_items, sessions, surface_inbound_receipts, surface_pairing_codes, surface_pairings, surface_replies, surface_sender_lockouts, surface_sessions, tool_invocations TO veetbot_surface;
+GRANT INSERT ON checkpoints, derived_event_keys, devices, events, notification_deliveries, process_events, projection_watermarks, runs, session_history_items, sessions, surface_inbound_receipts, surface_pairings, surface_sender_lockouts, surface_sessions TO veetbot_surface;
+GRANT UPDATE ON approvals, delegations, devices, events, notification_outbox, projection_watermarks, runs, sessions, surface_inbound_receipts, surface_pairing_codes, surface_pairings, surface_replies, surface_sender_lockouts, surface_sessions, tool_invocations TO veetbot_surface;
+GRANT DELETE ON surface_sender_lockouts TO veetbot_surface;
+SQL
+SURFACE_URL=$surface_url /opt/veetbot/current/.venv/bin/python -B -c 'import asyncio, os, asyncpg
+async def check():
+    connection = await asyncpg.connect(os.environ["SURFACE_URL"].replace("+asyncpg", "", 1))
+    await connection.fetchval("SELECT count(*) FROM surface_pairings")
+    await connection.close()
+asyncio.run(check())' </dev/null
+echo "veetbot_surface connects"
+umask 027
+if [ -e "$dst" ]; then
+  cp -p "$dst" "$dst.bak-surface-login"
+  SURFACE_URL=$surface_url awk '/^DATABASE_URL=/ { print "DATABASE_URL=" ENVIRON["SURFACE_URL"]; next } { print }' "$dst.bak-surface-login" > "$dst.new"
+else
+  { echo "DATABASE_URL=$surface_url"; grep -E '^(PGSSLMODE|AUTH_TENANT_ID|AUTH_PRINCIPAL_ID|AGENT_CONFIG_DIR)=' "$app" || true; } > "$dst.new"
+  grep -q '^PGSSLMODE=' "$dst.new" || echo PGSSLMODE=disable >> "$dst.new"
+  grep -q '^AGENT_CONFIG_DIR=' "$dst.new" || echo AGENT_CONFIG_DIR= >> "$dst.new"
+  printf '%s\n' DEPLOYMENT_MODE=production AUTH_MODE=token AUTH_ROLES=surface AUTH_SCOPES=run.read,run.write,run.cancel,surface.read,surface.write,approval.read,approval.resolve,schedule.read,schedule.write AGENT_SURFACE_API_ENABLED=1 AGENT_SURFACE_WORKER_ENABLED=1 AGENT_SURFACE_WHATSAPP_ENABLED=0 AGENT_SURFACE_TELEGRAM_TOKEN_FILE=/etc/veetbot/secrets/telegram-bot-token >> "$dst.new"
+fi
+chown root:veetbot "$dst.new"
+chmod 0640 "$dst.new"
+mv -f "$dst.new" "$dst"
+grep -q '^DATABASE_URL=postgresql[^:]*://veetbot_surface:' "$dst" && echo "$dst uses veetbot_surface"
+cut -d= -f1 "$dst" | tr '\n' ' '; echo
+if systemctl is-active --quiet veetbot-surface; then systemctl restart veetbot-surface; systemctl is-active veetbot-surface; fi
+EOF
 ```
 
-`AUTH_SCOPES` here is the paired principal's scope ceiling on this channel: a
-pairing's grant is intersected with it on every message. The schedule scopes
-let the smoke create a reminder, which needs approval.
+It must print `veetbot_surface connects` and that the file uses
+`veetbot_surface`, followed by the variable names. `AUTH_SCOPES` here is the
+paired principal's scope ceiling on this channel: a pairing's grant is
+intersected with it on every message. The schedule scopes let the smoke create
+a reminder, which needs approval.
 
 Then turn on the surface flags and add the two surface scopes in the
 application environment. The command is idempotent, keeps a backup, and prints
@@ -102,7 +152,8 @@ pairing will grant, because a code can grant only scopes its minter holds.
 
 Complete Phases 2 and 3 before the deployment that should activate the
 channel: the release preflight refuses a missing surface environment, a missing
-token file, or flags that disagree, and it then changes nothing. The release
+token file, flags that disagree, or a surface database login holding anything
+other than its grants, and it then changes nothing. The release
 installs, enables, and restarts `veetbot-surface.service` with the other units.
 Deploy through the reviewed `main` pipeline, or rerun the latest `main`
 deployment in CircleCI if the code is already live. Then check the role:
@@ -112,6 +163,14 @@ ssh root@api.veetbot.com 'systemctl is-active veetbot-surface; journalctl -u vee
 ```
 
 It must print `active`, and the journal must show no `ConfigurationError`.
+The release has already validated the login; to check it again at any time:
+
+```bash
+ssh veetbot@api.veetbot.com 'cd /opt/veetbot/current && set -a && . /etc/veetbot/veetbot-surface.env && set +a && .venv/bin/python -m scripts.check_surface_database_permissions'
+```
+
+It prints `OK: surface database role 'veetbot_surface' has the required least
+privileges`, or one `FAIL:` line per difference.
 
 ## Phase 5 — Pair the owner
 
@@ -206,6 +265,15 @@ Use harmless text and record only timestamps, results, and identifiers:
 - **"The agent has a question" or "Approval needed" without detail.** The
   pairing lacks `run.read` or `approval.read`; pair again with them.
 - **No approval prompt at all.** Check both notification flags in Phase 3.
+- **`release failed: surface database role does not satisfy its least-privilege
+  allowlist`.** The deployment log's `FAIL:` lines name each missing or surplus
+  privilege. Rerun the Phase 3 command, which reapplies the grants, then the
+  deployment. A surplus the command does not remove comes from another source
+  (a role membership, ownership, or a grant to `PUBLIC`); the
+  [deployment guide](deployment.md) explains how to remove it.
+- **`permission denied for table` in the surface journal.** A release changed
+  what the surface reads or writes without updating its grants; rerun the
+  Phase 3 command from that release's runbook.
 - **The unit is not active.** Read
   `ssh root@api.veetbot.com 'journalctl -u veetbot-surface -n 50 -o cat --no-pager'`.
   A `ConfigurationError` names the variable or file to fix.

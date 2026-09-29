@@ -27,9 +27,9 @@ public enum AttachmentStagingError: Error, LocalizedError, Equatable, Sendable {
 
 /// Reads a dropped or picked file and prepares it for the upload route.
 ///
-/// Images other than small PNG, GIF, and WebP files are re-encoded as JPEG with
+/// Raster images other than small PNG, GIF, and WebP files are re-encoded as JPEG with
 /// a 2000-pixel long edge, which keeps them within what models read and drops
-/// their metadata, including location.
+/// their metadata, including location. SVGs keep their source bytes as files.
 public enum AttachmentStaging {
     public static let maximumBytes = 32 * 1024 * 1024
     public static let imageLongEdge = 2000
@@ -48,6 +48,7 @@ public enum AttachmentStaging {
         "yaml": "application/yaml",
         "yml": "application/yaml",
         "pdf": "application/pdf",
+        "svg": "image/svg+xml",
     ]
 
     public static func stage(fileURL: URL) throws -> StagedAttachment {
@@ -63,7 +64,8 @@ public enum AttachmentStaging {
             throw AttachmentStagingError.unreadable(filename: name)
         }
         let type = values?.contentType ?? UTType(filenameExtension: fileURL.pathExtension)
-        let isImage = type?.conforms(to: .image) ?? false
+        let isImage = type?.conforms(to: .image) == true
+            && mediaType(for: type, filename: name) != "image/svg+xml"
         if let size = values?.fileSize,
             size > (isImage ? readableImageSourceBytes : maximumBytes)
         {
@@ -83,7 +85,11 @@ public enum AttachmentStaging {
         var mediaType = mediaType(for: type, filename: name)
         var bytes = data
         guard !bytes.isEmpty else { throw AttachmentStagingError.unreadable(filename: name) }
-        if type?.conforms(to: .image) == true || mediaType.hasPrefix("image/") {
+        // SVG is a vector document; ImageIO's raster decoder cannot normalize it.
+        // Keep it for the server's file-reference path, with the same upload limit.
+        if mediaType != "image/svg+xml",
+            type?.conforms(to: .image) == true || mediaType.hasPrefix("image/")
+        {
             if needsNormalization(data: bytes, mediaType: mediaType) {
                 guard let jpeg = normalizedJPEG(bytes) else {
                     throw AttachmentStagingError.unreadable(filename: name)

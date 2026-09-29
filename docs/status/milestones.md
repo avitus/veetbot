@@ -97,9 +97,11 @@ reached `main` in pull request 104, which merged with sixteen CodeRabbit
 findings on the surface code unresolved. On 2026-09-28 a paired message's run
 gained its own USD 10 budget, which admits it on PostgreSQL (ADR-0064
 amendment), and the findings were resolved on `dev`: fifteen fixed test-first,
-one answered as inapplicable. The
+one answered as inapplicable. On 2026-09-29 the surface role gained its own
+least-privilege database login, `veetbot_surface`, whose exact grants the
+release validates. The
 [Telegram surface runbook](../telegram-surface-runbook.md) owns the owner's
-setup and smoke. Remaining:
+setup, including that login, and smoke. Remaining:
 
 - [ ] Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke, following docs/telegram-surface-runbook.md
 - [ ] Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
