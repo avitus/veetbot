@@ -545,6 +545,100 @@ unit loads after the shared environment. This release-local wiring lets an
 existing host adopt the execution service without rewriting the protected
 shared environment before the first compatible release.
 
+When the Telegram surface is enabled, the surface role connects as its own
+`veetbot_surface` login, never as the application login. The
+[Telegram surface runbook](telegram-surface-runbook.md) gives the one command
+that creates the login with a generated password, applies the allowlist below,
+and writes it into `/etc/veetbot/veetbot-surface.env`; rerunning it rotates the
+password. Whenever `AGENT_SURFACE_WORKER_ENABLED=1`, the release runs
+`scripts/check_surface_database_permissions.py` through that environment before
+promotion and applies the same exact-allowlist rules as the schedule login
+above: no administrative attribute, no inherited or settable role, and no
+effective table or column privilege in `public` beyond this list.
+
+```sql
+ALTER ROLE veetbot_surface
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+-- Do not grant veetbot_surface membership in any other role.
+GRANT CONNECT ON DATABASE agent TO veetbot_surface;
+GRANT USAGE ON SCHEMA public TO veetbot_surface;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM veetbot_surface;
+GRANT SELECT ON
+  agents,
+  alembic_version,
+  approvals,
+  checkpoints,
+  delegations,
+  derived_event_keys,
+  devices,
+  events,
+  export_consent,
+  notification_deliveries,
+  notification_outbox,
+  process_events,
+  projection_watermarks,
+  runs,
+  session_history_items,
+  sessions,
+  surface_inbound_receipts,
+  surface_pairing_codes,
+  surface_pairings,
+  surface_replies,
+  surface_sender_lockouts,
+  surface_sessions,
+  tool_invocations
+TO veetbot_surface;
+GRANT INSERT ON
+  checkpoints,
+  derived_event_keys,
+  devices,
+  events,
+  notification_deliveries,
+  process_events,
+  projection_watermarks,
+  runs,
+  session_history_items,
+  sessions,
+  surface_inbound_receipts,
+  surface_pairings,
+  surface_sender_lockouts,
+  surface_sessions
+TO veetbot_surface;
+GRANT UPDATE ON
+  approvals,
+  delegations,
+  devices,
+  events,
+  notification_outbox,
+  projection_watermarks,
+  runs,
+  sessions,
+  surface_inbound_receipts,
+  surface_pairing_codes,
+  surface_pairings,
+  surface_replies,
+  surface_sender_lockouts,
+  surface_sessions,
+  tool_invocations
+TO veetbot_surface;
+GRANT DELETE ON
+  surface_sender_lockouts
+TO veetbot_surface;
+```
+
+The list was derived by running every surface path under a login holding only
+these grants and then removing each grant in turn; every one is needed. The
+surface integration test runs the same paths under it. Several UPDATE grants
+are row locks rather than rewrites: `SELECT ... FOR UPDATE` on `events` and
+`runs` serializes a message's history and run writes with People erasure, and
+on `approvals`, `surface_pairing_codes`, `surface_replies`,
+`notification_outbox`, and `tool_invocations` it takes the row being resolved or
+claimed. The history projection grants are part of submitting a message to an
+existing conversation, as they are for the scheduler. The role reads no memory,
+People, email, knowledge, browser, or schedule table. Repair it as the schedule
+login above: revoke, reapply, and remove any surplus the validator still
+reports at its source.
+
 ### Browser profile service host prerequisites
 
 The browser service mounts `/tmp` as a 512 MiB, memory-backed filesystem with

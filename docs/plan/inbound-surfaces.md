@@ -153,6 +153,19 @@ outbox below — so the token lives in exactly one process. The `notify` role
 claims only rows with an APNs target, the `surface` role only rows with a
 Telegram target, and neither loads the other's secret.
 
+Its database credential is its own login, not the application's. Release
+validation connects through that login whenever the surface worker is enabled
+and verifies the exact table privileges the role's paths use — registration and
+the schema-head check, receipts and the poll offset, pairing and lockout,
+submission with its session-history projection and checkpoint, input,
+approval, and stop, and both outbound drains — and rejects superuser,
+`BYPASSRLS`, inherited, or settable-role authority and any other privilege, as
+it does for the schedule worker. Unlike the schedule worker, the surface role
+submits to conversations that already exist, so it holds `UPDATE` on `events`
+for the row lock that serializes session-history projection with People
+erasure. An integration test runs every surface path through a login holding
+exactly the release allowlist.
+
 ## Domain model
 
 ### Surface

@@ -706,6 +706,14 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
     assert "scripts/check_schedule_database_permissions.py" in release
+    assert "-m scripts.check_schedule_database_permissions" in release
+    assert "scripts/check_surface_database_permissions.py" in release
+    assert "scripts/database_role_permissions.py" in release
+    surface_check = release.split("-m scripts.check_surface_database_permissions", 1)[0]
+    assert '. "$SURFACE_ENV_FILE"' in surface_check.rsplit("AGENT_SURFACE_WORKER_ENABLED", 1)[1]
+    assert release.index("-m scripts.check_surface_database_permissions") < release.index(
+        'mv -Tf "$NEXT_CURRENT" "$CURRENT"'
+    )
     assert "veetbot-async-worker" in release
     assert "veetbot-schedule" in release
     assert "veetbot-notify" in release

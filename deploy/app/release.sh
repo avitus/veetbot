@@ -200,6 +200,8 @@ for required in \
   deploy/systemd/veetbot-call-ingress.service \
   execution/sandbox.Dockerfile \
   scripts/check_schedule_database_permissions.py \
+  scripts/check_surface_database_permissions.py \
+  scripts/database_role_permissions.py \
   scripts/check_provider_pins.py \
   scripts/check_production_deployment.py; do
   [[ -f "$STAGE/$required" ]] || fail "staged release is missing $required"
@@ -423,9 +425,20 @@ if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
     # shellcheck disable=SC1090
     . "$SCHEDULE_ENV_FILE"
     set +a
-    "$STAGE/.venv/bin/python" scripts/check_schedule_database_permissions.py
+    "$STAGE/.venv/bin/python" -m scripts.check_schedule_database_permissions
   ); then
     fail "schedule database role does not satisfy the materialization contract"
+  fi
+fi
+if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "1" ]]; then
+  if ! (
+    set -a
+    # shellcheck disable=SC1090
+    . "$SURFACE_ENV_FILE"
+    set +a
+    "$STAGE/.venv/bin/python" -m scripts.check_surface_database_permissions
+  ); then
+    fail "surface database role does not satisfy its least-privilege allowlist"
   fi
 fi
 
