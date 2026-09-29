@@ -545,7 +545,8 @@ Unsubscribe assistance (Milestone 31, `plan/email-unsubscribe.md`) adds a
 Subscriptions surface to Email mode, in its own `EmailSubscriptionsViewModel`.
 The entry appears in the Email toolbar — the shared Mac window toolbar, and the
 iPhone and iPad navigation bar — only while an account's projection reports
-`unsubscribe_supported`. A server or account that advertises nothing shows no
+`unsubscribe_supported`. The open Mac window updates that entry when accounts
+finish loading or the connection is cleared. A server or account that advertises nothing shows no
 entry and no thread action, and the client never substitutes another command
 for the missing one. Rows come from `GET /v1/email/subscriptions` in the order
 the server returns them, filtered by account and state and paged by cursor;

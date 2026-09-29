@@ -857,6 +857,25 @@ final class ConversationNavigationUITests: XCTestCase {
         element("email.subscription.row.\(id)")
     }
 
+    /// macOS combines a navigation row into its button label; iOS also exposes its text children.
+    private func subscriptionRowContains(_ id: String, _ content: String) -> Bool {
+        let row = subscriptionRow(id)
+        return row.exists && (row.label.contains(content)
+            || row.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", content, content)).count > 0)
+    }
+
+    private func subscriptionStateCount(_ state: String) -> Int {
+        [Self.newsSubscriptionID, Self.dealsSubscriptionID, Self.clubSubscriptionID, Self.promoSubscriptionID]
+            .filter { subscriptionRowContains($0, state) }.count
+    }
+
+    private func waitForSubscriptionState(_ state: String, count: Int) {
+        let settled = expectation(for: NSPredicate { _, _ in
+            self.subscriptionStateCount(state) == count
+        }, evaluatedWith: nil)
+        wait(for: [settled], timeout: Self.subscriptionSettleTimeout)
+    }
+
     private func subscriptionAction(_ action: String) -> XCUIElement {
         app.buttons["email.subscription.action.\(action)"]
     }
@@ -900,12 +919,10 @@ final class ConversationNavigationUITests: XCTestCase {
         app.activate()
         openEmailMode()
         openSubscriptions()
-        XCTAssertTrue(texts("One-click request to daily.example.test").firstMatch.exists)
-        XCTAssertTrue(texts("Sends an email to unsubscribe@shop.example.test").firstMatch.exists)
-        let unverified = element("email.subscription.status.\(Self.promoSubscriptionID)")
-        XCTAssertTrue(unverified.exists)
-        XCTAssertEqual(text(of: unverified), "Checking…")
-        XCTAssertEqual(texts("Unsubscribed").count, 0)
+        XCTAssertTrue(subscriptionRowContains(Self.newsSubscriptionID, "One-click request to daily.example.test"))
+        XCTAssertTrue(subscriptionRowContains(Self.dealsSubscriptionID, "Sends an email to unsubscribe@shop.example.test"))
+        XCTAssertTrue(subscriptionRowContains(Self.promoSubscriptionID, "Checking…"))
+        XCTAssertEqual(subscriptionStateCount("Unsubscribed"), 0)
 
         activate(subscriptionRow(Self.newsSubscriptionID))
         let unsubscribe = subscriptionAction("unsubscribe")
@@ -918,8 +935,13 @@ final class ConversationNavigationUITests: XCTestCase {
             naming: [("Daily Brief", "One-click request to daily.example.test")])
         activate(app.buttons["email.unsubscribe.confirm"])
 
+        #if os(macOS)
+        waitForSubscriptionState("Unsubscribed", count: 1)
+        #else
+        // iPhone replaces the census with the detail page; iPad may keep both visible.
         XCTAssertTrue(texts("Unsubscribed").firstMatch.waitForExistence(timeout: Self.subscriptionSettleTimeout),
                       app.debugDescription)
+        #endif
         // Success is quiet, and an unsubscribed sender offers nothing more.
         XCTAssertFalse(element("email.subscription.detail.status").exists)
         for action in ["unsubscribe", "tryAgain", "reportSpam", "keep"] {
@@ -941,7 +963,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5))
         activate(selectAll)
         let selected = app.buttons["email.subscriptions.unsubscribe-selected"]
-        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        XCTAssertTrue(selected.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(selected.label, "Unsubscribe 2")
         func choice(_ id: String) -> XCUIElement { element("email.subscription.select.\(id)") }
         XCTAssertEqual(choice(Self.newsSubscriptionID).value as? String, "Selected")
@@ -972,11 +994,9 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(isOn(archive))
         activate(app.buttons["email.unsubscribe.confirm"])
 
-        let settled = expectation(
-            for: NSPredicate(format: "count == 3"), evaluatedWith: texts("Unsubscribed"))
-        wait(for: [settled], timeout: Self.subscriptionSettleTimeout)
+        waitForSubscriptionState("Unsubscribed", count: 3)
         XCTAssertFalse(app.buttons["email.subscriptions.select-all"].exists, "Confirming ends selection")
-        XCTAssertEqual(text(of: element("email.subscription.status.\(Self.promoSubscriptionID)")), "Checking…")
+        XCTAssertTrue(subscriptionRowContains(Self.promoSubscriptionID, "Checking…"))
     }
 
     /// A request the sender did not accept restores the row with an
@@ -1049,9 +1069,8 @@ final class ConversationNavigationUITests: XCTestCase {
         openSubscriptions()
         let settled = subscriptionRow(Self.dealsSubscriptionID)
         XCTAssertTrue(settled.exists)
-        XCTAssertTrue(texts("Unsubscribed").firstMatch.waitForExistence(timeout: Self.subscriptionSettleTimeout),
-                      app.debugDescription)
-        XCTAssertEqual(texts("Unsubscribed").count, 1, "Only the conversation's own sender was consented")
+        waitForSubscriptionState("Unsubscribed", count: 1)
+        XCTAssertEqual(subscriptionStateCount("Unsubscribed"), 1, "Only the conversation's own sender was consented")
     }
 
     /// An account that advertises nothing offers no entry and no thread

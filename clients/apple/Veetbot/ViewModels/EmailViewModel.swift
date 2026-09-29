@@ -8,11 +8,16 @@ public final class AppCoordinator: ObservableObject {
     public let chat: ChatViewModel
     public let email: EmailViewModel
     private var connectionSubscription: AnyCancellable?
+    private var emailAccountsSubscription: AnyCancellable?
 
     public init(chat: ChatViewModel) {
         self.chat = chat
         email = EmailViewModel(makeAPIClient: { [weak chat] in chat?.currentAPIClient })
         email.authenticationFailure = { [weak chat] error in chat?.reportConnectionError(error) }
+        // Window-level controls read account capabilities through this coordinator.
+        emailAccountsSubscription = email.$accounts.dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
         connectionSubscription = chat.$connectionGeneration.dropFirst().sink { [weak self] _ in
             self?.email.resetConnection()
         }

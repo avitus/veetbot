@@ -89,18 +89,28 @@ struct EmailSubscriptionsScreen: View {
         .task(id: model.filterKey) { await model.reload() }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
-            ToolbarItemGroup(placement: .primaryAction) {
-                if model.isSelecting {
-                    Button("Select all") { model.selectAll() }
-                        .accessibilityIdentifier("email.subscriptions.select-all")
-                    Button("Unsubscribe \(model.selection.count)") { model.beginUnsubscribe() }
-                        .disabled(model.selection.isEmpty)
-                        .accessibilityIdentifier("email.subscriptions.unsubscribe-selected")
-                }
-                Button(model.isSelecting ? "Done" : "Select") { model.setSelecting(!model.isSelecting) }
-                    .accessibilityIdentifier("email.subscriptions.select")
+            #if os(macOS)
+            ToolbarItem(placement: .primaryAction) {
+                // A macOS sheet renders one primary item; keep every batch action inside it.
+                HStack(spacing: 8) { selectionActions }
             }
+            #else
+            ToolbarItemGroup(placement: .primaryAction) { selectionActions }
+            #endif
         }
+    }
+
+    @ViewBuilder
+    private var selectionActions: some View {
+        if model.isSelecting {
+            Button("Select all") { model.selectAll() }
+                .accessibilityIdentifier("email.subscriptions.select-all")
+            Button("Unsubscribe \(model.selection.count)") { model.beginUnsubscribe() }
+                .disabled(model.selection.isEmpty)
+                .accessibilityIdentifier("email.subscriptions.unsubscribe-selected")
+        }
+        Button(model.isSelecting ? "Done" : "Select") { model.setSelecting(!model.isSelecting) }
+            .accessibilityIdentifier("email.subscriptions.select")
     }
 
     /// Account and state are the two filters the route accepts; nothing is filtered locally.
