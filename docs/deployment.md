@@ -466,7 +466,8 @@ use. The release runs `scripts/check_schedule_database_permissions.py` through
 the protected schedule environment before promotion and refuses a role that is
 administrative, inherits authority, can replicate or bypass row-level security,
 can switch to any other role, is missing any privilege below, or has any other
-effective table or column-level privilege in the `public` schema. The check is
+effective table or column-level privilege on a table, view, materialized view or
+foreign table in the `public` schema. The check is
 an exact allowlist, including grants inherited from another role or `PUBLIC`,
 rather than a presence-only checklist. Its privilege vocabulary intentionally
 matches the deployed PostgreSQL 16 release; PostgreSQL 17's `MAINTAIN`

@@ -734,3 +734,32 @@ async def test_the_surface_role_cannot_read_what_it_does_not_need() -> None:
                         await connection.execute(text(f"SELECT 1 FROM {table} LIMIT 1"))
         finally:
             await engine.dispose()
+
+
+async def test_the_release_check_reports_privileges_on_views() -> None:
+    suffix = uuid4().hex[:12]
+    view, materialized = f"probe_view_{suffix}", f"probe_matview_{suffix}"
+    admin = create_engine(
+        make_url(database_settings().database_url).render_as_string(hide_password=False)
+    )
+    try:
+        async with admin.begin() as connection:
+            await connection.execute(text(f"CREATE VIEW {view} AS SELECT id FROM memories"))
+            await connection.execute(
+                text(f"CREATE MATERIALIZED VIEW {materialized} AS SELECT id FROM memories")
+            )
+        async with release_surface_role() as role_url:
+            async with admin.begin() as connection:
+                role = make_url(role_url).username
+                await connection.execute(text(f"GRANT SELECT ON {view} TO {role}"))
+                await connection.execute(text(f"GRANT UPDATE (id) ON {materialized} TO {role}"))
+            inspected = await inspect_database_role(role_url)
+
+        failures = permission_failures(inspected)
+        assert f"has unexpected SELECT on public.{view}" in "\n".join(failures)
+        assert f"has unexpected column-level UPDATE on public.{materialized}" in "\n".join(failures)
+    finally:
+        async with admin.begin() as connection:
+            await connection.execute(text(f"DROP VIEW IF EXISTS {view}"))
+            await connection.execute(text(f"DROP MATERIALIZED VIEW IF EXISTS {materialized}"))
+        await admin.dispose()

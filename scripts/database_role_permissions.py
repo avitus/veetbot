@@ -87,7 +87,11 @@ def permission_failures(
 
 
 async def inspect_database_role(database_url: str) -> DatabaseRole:
-    """Read the connected login's attributes and every effective public privilege."""
+    """Read the connected login's attributes and every effective public privilege.
+
+    Tables, views, materialized views and foreign tables are all probed, so a
+    grant on any readable relation counts against the allowlist.
+    """
 
     engine = create_async_engine(database_url, poolclass=NullPool)
     try:
@@ -141,7 +145,7 @@ async def inspect_database_role(database_url: str) -> DatabaseRole:
                         )
                         + "]) AS privileges(privilege) "
                         "WHERE schemas.nspname = 'public' "
-                        "AND tables.relkind IN ('r', 'p') "
+                        "AND tables.relkind IN ('r', 'p', 'v', 'm', 'f') "
                         "AND has_table_privilege(current_user, tables.oid, privileges.privilege) "
                         "ORDER BY tables.relname, privileges.privilege"
                     )
@@ -157,7 +161,7 @@ async def inspect_database_role(database_url: str) -> DatabaseRole:
                         + ", ".join(f"'{privilege}'" for privilege in COLUMN_PRIVILEGES)
                         + "]) AS privileges(privilege) "
                         "WHERE schemas.nspname = 'public' "
-                        "AND tables.relkind IN ('r', 'p') "
+                        "AND tables.relkind IN ('r', 'p', 'v', 'm', 'f') "
                         "AND has_any_column_privilege("
                         "current_user, tables.oid, privileges.privilege"
                         ") "
