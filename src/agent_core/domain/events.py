@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
@@ -18,12 +19,17 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.tools import ToolOutcomeStatus
 
 CONVERSATION_ADAPTER: TypeAdapter[ConversationItem] = TypeAdapter(ConversationItem)
 CONTENT_ADAPTER: TypeAdapter[list[ContentPart]] = TypeAdapter(list[ContentPart])
 TOOL_RESULT_EVENTS = frozenset(
     {"tool.call.completed", "tool.call.failed", "tool.call.denied", "tool.call.uncertain"}
 )
+# Version 2 requires the result item every denial feeds the model. Version 1
+# carried it only on refusals: an approval or policy denial stored the call's
+# name, id and reason code alone, and its upcast result item is None (ADR-0142).
+TOOL_CALL_DENIED_PAYLOAD_VERSION = 2
 CONVERSATION_MESSAGE_EVENTS = frozenset({"user.message.created", "assistant.message.completed"})
 SCHEDULE_INSTRUCTION_EVENT_TYPE = "user.message.created"
 SCHEDULE_INSTRUCTION_ACTOR_TYPE = "scheduler"
@@ -148,6 +154,12 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
         ]
     if event.event_type in TOOL_RESULT_EVENTS:
         raw_result = payload.get("result_item")
+        if (
+            event.event_type == "tool.call.denied"
+            and "result_item" in payload
+            and raw_result is None
+        ):
+            return [_unrecorded_denial_result(event)]
         if not isinstance(raw_result, dict):
             raise ValueError(f"{event.event_type} has no result item: {event.id}")
         return [
@@ -156,3 +168,37 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
             )
         ]
     return []
+
+
+def _unrecorded_denial_result(event: EventEnvelope) -> ToolResultItem:
+    """Project an upcast version-1 denial that recorded no result item (ADR-0142).
+
+    The provider needs a result for every call it replays, so the denial is
+    rendered from what the event recorded and nothing else: its status, the
+    tool's name and the reason code. The narration and the tool's output trust
+    were never stored, so the item carries no message and the least-trusted
+    label instead of a guessed one.
+    """
+
+    call_id, name, reason_code = (
+        _recorded_text(event, key) for key in ("call_id", "name", "reason_code")
+    )
+    outcome = {
+        "status": ToolOutcomeStatus.DENIED.value,
+        "action": name,
+        "reason_code": reason_code,
+    }
+    return ToolResultItem(
+        call_id=call_id,
+        content=[TextPart(text=json.dumps(outcome, ensure_ascii=False, separators=(",", ":")))],
+        is_error=True,
+        trust=TrustLevel.EXTERNAL_UNTRUSTED,
+        source_event_sequence=event.sequence,
+    )
+
+
+def _recorded_text(event: EventEnvelope, key: str) -> str:
+    value = event.payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"tool.call.denied has no result item: {event.id}")
+    return value

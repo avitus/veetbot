@@ -17,8 +17,13 @@ back together. Concurrent append and injected-rollback cases assert uniqueness
 without requiring sequences to be gapless.
 
 Payloads carry a schema version. Pure chained upcasters decode historical
-`session.created` version 1 into the current version 2 shape and reject unknown
-higher versions. Watermarked session-history projection can catch up or rebuild
+`session.created` and `tool.call.denied` version 1 payloads into their current
+version 2 shapes and reject unknown higher versions. A version 2 denial carries
+the result item the model was given. A version 1 approval or policy denial
+recorded none, so its upcast item is an explicit `None`, and session history
+renders it from the recorded status, tool name and reason code alone, labelled
+untrusted ([ADR-0142](adr/0142-denials-record-their-result-item.md)).
+Watermarked session-history projection can catch up or rebuild
 from zero deterministically; the trajectory projection does the same for each
 run. Both advance in bounded batches, carry a builder version, and use
 monotonic conflict guards so a concurrent older apply cannot regress a

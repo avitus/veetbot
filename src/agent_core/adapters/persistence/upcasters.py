@@ -20,11 +20,31 @@ class SessionCreatedV1ToV2:
         return {**payload, "title": None}
 
 
+@dataclass(frozen=True, slots=True)
+class ToolCallDeniedV1ToV2:
+    """Make a version-1 denial's missing result item an explicit None (ADR-0142).
+
+    A refusal recorded its result item and keeps it. An approval or policy
+    denial recorded none, and neither its narration nor the tool's output trust
+    can be recovered from the payload, so none is invented here.
+    """
+
+    event_type: str = "tool.call.denied"
+    from_version: int = 1
+    to_version: int = 2
+
+    def upcast(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {**payload, "result_item": payload.get("result_item")}
+
+
 class EventUpcasterRegistry:
     """Chain immutable payload copies to each event type's current version."""
 
     def __init__(self) -> None:
-        authored = [SessionCreatedV1ToV2()]
+        authored: list[SessionCreatedV1ToV2 | ToolCallDeniedV1ToV2] = [
+            SessionCreatedV1ToV2(),
+            ToolCallDeniedV1ToV2(),
+        ]
         self._upcasters = {(item.event_type, item.from_version): item for item in authored}
         self._current_versions = {
             event_type: max(item.to_version for item in authored if item.event_type == event_type)

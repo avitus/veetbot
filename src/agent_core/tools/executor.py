@@ -41,7 +41,7 @@ from agent_core.domain.errors import (
     UserInputRequiredError,
     WorkspaceEscape,
 )
-from agent_core.domain.events import NewEvent
+from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, NewEvent
 from agent_core.domain.messages import (
     ContentPart,
     FileReferencePart,
@@ -1999,6 +1999,7 @@ class ToolPipeline:
                     "name": call.name,
                     "call_id": call.call_id,
                     "reason_code": reason_code,
+                    "result_item": result_item.model_dump(mode="json"),
                 },
                 lease,
             )
@@ -2256,8 +2257,15 @@ class ToolPipeline:
         payload: dict[str, Any],
         lease: WorkerLease | None,
     ) -> None:
+        payload_schema_version = 1
+        if event_type == "tool.call.denied":
+            # Session history replays this item to the model with its call.
+            if not isinstance(payload.get("result_item"), dict):
+                raise AssertionError("a tool.call.denied payload must carry its result item")
+            payload_schema_version = TOOL_CALL_DENIED_PAYLOAD_VERSION
         await uow.events.append(
             NewEvent(
+                payload_schema_version=payload_schema_version,
                 session_id=run.session_id,
                 run_id=run.id,
                 event_type=event_type,

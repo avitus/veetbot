@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-29 — A denied approval no longer breaks the chat
+
+- After you denied an approval, the next message in that chat failed with an
+  internal error, and so did every later one, including Telegram messages.
+  The denial now keeps the result the assistant was shown, and chats that
+  already hold an old denial accept messages again once this release is
+  deployed. ADR-0142 records the change.
+
 ## 2026-09-29 — New mail arrives during the email catch-up
 
 - Email mode reads the last ninety days of inbox mail newest to oldest, a page
