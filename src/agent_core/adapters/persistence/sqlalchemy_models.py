@@ -1675,7 +1675,7 @@ class SurfaceInboundReceiptRow(Base):
             "disposition IN ('submitted','input_delivered','command_handled',"
             "'rejected_unpaired','rejected_locked','rejected_rate',"
             "'rejected_active_run','rejected_admission','ignored_media',"
-            "'ignored_chat_kind')",
+            "'ignored_chat_kind','ignored_unreadable')",
             name="surface_receipt_disposition_closed",
         ),
     )

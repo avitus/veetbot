@@ -54,7 +54,11 @@ verify-token match — and on POST validates
 `X-Hub-Signature-256` (HMAC over the raw body with the app secret,
 constant-time) before any parse. A missing or wrong signature is a
 content-free reject that stores nothing but a content-free receipt.
-Bodies are bounded; anything over the limit is rejected unread.
+Bodies are bounded; anything over the limit is rejected unread. Because
+the listener reads a body before it can check the signature, the Nginx
+location admits at most ten requests a second per client address with a
+burst of fifty, far above Meta's delivery rate for one business number, and
+answers anything beyond that with 429.
 
 ## Credentials
 

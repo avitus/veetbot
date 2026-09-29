@@ -327,6 +327,12 @@ class InMemorySurfaceReplyOutbox:
         self._replies[reply.id] = reply.model_copy(deep=True)
         return True
 
+    async def for_run(self, run_id: UUID) -> SurfaceReply | None:
+        for reply in self._replies.values():
+            if reply.run_id == run_id:
+                return reply.model_copy(deep=True)
+        return None
+
     async def claim_due(
         self,
         now: datetime,
@@ -946,6 +952,12 @@ class PostgresSurfaceReplyOutbox:
             .on_conflict_do_nothing()
         )
         return bool(_rowcount(await self._session.execute(statement)))
+
+    async def for_run(self, run_id: UUID) -> SurfaceReply | None:
+        row = await self._session.scalar(
+            select(SurfaceReplyRow).where(SurfaceReplyRow.run_id == run_id)
+        )
+        return None if row is None else _reply_to_domain(row)
 
     async def claim_due(
         self,

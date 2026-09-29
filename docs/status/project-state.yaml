@@ -518,9 +518,8 @@ milestones:
       - Slack and email adapters, group and thread chats, webhook delivery
       - device-scoped tools, presence routing, hand-off, media intake
     open_items:
-      - Fix surface admission on PostgreSQL, where the shipped default agent sets no limits.max_cost, so every paired Telegram or WhatsApp message ends REJECTED_ADMISSION (surface.cost_reservation_missing); choose a surface per-run cost cap or a default-agent max_cost, then remove the strict xfail on tests/integration/test_golden_surface_chat.py::test_the_shipped_default_agent_admits_a_paired_telegram_message
-      - Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke
-      - Resolve the sixteen CodeRabbit findings pull request 104 left open on the surface code, then pass hosted CI and the CodeRabbit review loop on a dev to main pull request
+      - Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke, following docs/telegram-surface-runbook.md
+      - Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
     evidence:
       - check: twenty-one Milestone 14 gate.surface gates
         outcome: passed_locally
@@ -562,6 +561,38 @@ milestones:
           commit's static job failed, so the next merge, pull request 105
           (7aedbdf7), was the first to deploy the code. The review loop is not
           complete; verified from GitHub on 2026-09-28.
+      - check: surface run budget on PostgreSQL (ADR-0064 amendment)
+        outcome: passed_locally
+        detail: >-
+          The owner chose on 2026-09-28 a surface budget over a default-agent
+          cost limit: runtime/limits.yaml gives a run a paired message starts
+          USD 10 with a USD 2 synthesis reserve, admission reserves it, and the
+          run carries it. The formerly strict-xfail
+          test_the_shipped_default_agent_admits_a_paired_telegram_message passes
+          on an isolated PostgreSQL 16 database without its marker and proves an
+          Apple-client run stays uncapped; the Telegram approval journey passes
+          on the shipped limits without its USD 2 agent workaround. Its red
+          phase failed at REJECTED_ADMISSION with
+          surface.cost_reservation_missing.
+      - check: pull request 104 review findings resolved on dev
+        outcome: passed_locally
+        detail: >-
+          Fifteen of the sixteen findings were valid and each is fixed with a
+          regression test first: the authorization bypass (the API composition
+          omitted self_approval_enabled; the ingress now requires it), the bare
+          /approve crash (an empty identifier also matched a lone pending
+          approval), no-store surface responses with an allow-listed pairing
+          view, per-role credential refusal, the poller's logging path,
+          repeated pairing keys as a non-retryable conflict naming the code,
+          unreadable Telegram updates receipted instead of stalling polling, a
+          terminal reply attempt limit, bounded per-sender windows, notices for
+          every sender-facing reason code, revoked surfaces refusing pairing and
+          routes, the chunk bound at its boundary, the WhatsApp webhook rate
+          limit, Nginx-only deployment before the first release, and complete
+          WhatsApp gate bindings. The migration-name finding is inapplicable:
+          SQLAlchemy shortens the migration's and the model's names alike, and a
+          PostgreSQL check now pins the stored surface constraint names to the
+          model's.
   "15":
     title: Operational hardening
     status: authorized
@@ -1263,10 +1294,9 @@ milestones:
       - group and thread session keys and inline-keyboard approvals (B3)
       - a second business number or multi-tenant pairing UI
     open_items:
-      - Fix surface admission on PostgreSQL, where the shipped default agent sets no limits.max_cost, so every paired Telegram or WhatsApp message ends REJECTED_ADMISSION (surface.cost_reservation_missing); choose a surface per-run cost cap or a default-agent max_cost, then remove the strict xfail on tests/integration/test_golden_surface_chat.py::test_the_shipped_default_agent_admits_a_paired_telegram_message
       - Complete the owner Meta ceremony and obtain approval for the content-free utility template
       - Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
-      - Resolve the sixteen CodeRabbit findings pull request 104 left open on the surface code, then pass hosted CI and the CodeRabbit review loop on a dev to main pull request
+      - Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
     evidence:
       - check: Milestone 25 gate-area red phase
         outcome: observed_expected_failure
@@ -1297,6 +1327,14 @@ milestones:
           evidence entry lists them. Every hosted lane passed on the final head
           a624ba69; the code was first deployed by the next merge, 7aedbdf7.
           Verified from GitHub on 2026-09-28.
+      - check: surface admission and review findings shared with Milestone 14
+        outcome: passed_locally
+        detail: >-
+          The surface run budget admits paired WhatsApp messages on PostgreSQL
+          as it does Telegram's, the webhook location is rate limited per client,
+          and gate.whatsapp.receipt_idempotent now replays a signed webhook's own
+          normalized message through ingress. Milestone 14's evidence lists the
+          resolved findings.
 
   "26":
     title: Client modes and adaptive email experience

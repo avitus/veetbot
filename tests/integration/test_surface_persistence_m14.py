@@ -311,9 +311,9 @@ async def test_postgres_ingress_crash_rolls_back_and_redelivers_once() -> None:
             await uow.sessions.create(created)
             return created
 
-        async def submit(uow, principal, mapped_session, text_value, origin, version):  # type: ignore[no-untyped-def]
+        async def submit(uow, principal, mapped_session, text_value, origin, version, budget):  # type: ignore[no-untyped-def]
             nonlocal crash
-            del text_value, origin, version
+            del text_value, origin, version, budget
             created = run().model_copy(
                 update={
                     "id": run_id,
@@ -340,7 +340,8 @@ async def test_postgres_ingress_crash_rolls_back_and_redelivers_once() -> None:
             uow_factory=composition.uow_factory,
             principals=ConfiguredSchedulePrincipalDirectory(bound_owner),
             admission=AllowSurfaceAdmissionController(),
-            max_cost_reservation=Decimal("1"),
+            run_budget=_SURFACE_LIMITS.run_budget,
+            self_approval_enabled=True,
             clock=FixedClock(NOW),
             ids=SequenceIdFactory(),
             create_session=create_surface_session,
@@ -381,3 +382,44 @@ async def test_postgres_ingress_crash_rolls_back_and_redelivers_once() -> None:
             assert await uow.surfaces.receipts.get(surface_id, update_id) is not None
             assert await uow.surfaces.sessions.live(surface_id, "dm:sender-atomic") is not None
             assert (await uow.runs.get(run_id, bound_owner)).id == run_id
+
+
+async def test_postgres_surface_constraint_names_are_the_models_own() -> None:
+    """Two surface check names exceed PostgreSQL's 63-byte identifier limit.
+    SQLAlchemy shortens the migration's names and the model's the same way, so
+    the stored constraints carry exactly the names the model compiles to."""
+
+    from sqlalchemy.dialects import postgresql
+
+    from agent_core.adapters.persistence.sqlalchemy_models import Base
+
+    preparer = postgresql.dialect().identifier_preparer  # type: ignore[no-untyped-call]
+    tables = sorted(name for name in Base.metadata.tables if name.startswith("surface_"))
+    expected = {
+        (table, preparer.format_constraint(constraint))
+        for table in tables
+        for constraint in Base.metadata.tables[table].constraints
+        if constraint.name is not None
+    }
+    async with (
+        build(settings=database_settings(), storage="postgres") as composition,
+        composition.uow_factory() as uow,
+    ):
+        assert isinstance(uow, PostgresUnitOfWork)
+        stored = {
+            (row.relname, row.conname)
+            for row in (
+                await uow.session.execute(
+                    text(
+                        "SELECT c.relname, k.conname FROM pg_constraint k "
+                        "JOIN pg_class c ON c.oid = k.conrelid "
+                        "WHERE c.relname = ANY(:tables)"
+                    ),
+                    {"tables": tables},
+                )
+            ).all()
+        }
+
+    assert len(tables) == 6
+    assert stored == expected
+    assert all(len(name.encode()) <= 63 for _, name in stored)

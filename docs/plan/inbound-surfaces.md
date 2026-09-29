@@ -207,7 +207,9 @@ The sender presents it as `/pair <code>`; a match consumes the code, creates
 the pairing bound to `(surface, sender)`, and appends `surface.pairing.completed`.
 A mismatch increments attempts, appends `surface.pairing.failed`, and after the
 per-sender threshold locks the sender for one hour with
-`surface.pairing.locked`; locked attempts are not verified. Revocation appends
+`surface.pairing.locked`; locked attempts are not verified. A surface whose
+device is revoked pairs no one: `/pair` is rejected as `surface.unavailable`
+without touching the code, and a revoked device never acquires a route. Revocation appends
 `surface.pairing.revoked`, rotates the sender's session keys, and takes effect
 before the sender's next message. A revoked pairing row remains as audit; a
 sender may pair again with a new code.
@@ -252,6 +254,7 @@ class InboundDisposition(StrEnum):
     REJECTED_ADMISSION = "rejected_admission"
     IGNORED_MEDIA = "ignored_media"
     IGNORED_CHAT_KIND = "ignored_chat_kind"
+    IGNORED_UNREADABLE = "ignored_unreadable"
 
 
 class InboundReceipt(BaseModel):
@@ -266,7 +269,11 @@ class InboundReceipt(BaseModel):
 
 The receipt is keyed by `(surface_id, external_update_id)`; for Telegram the
 value is the decimal `update_id`, and a webhook channel keys its provider's
-message identifier (ADR-0082). The receipt carries no content and is the
+message identifier (ADR-0082). An update the channel identifies but cannot
+read — a message with no sender, or anything that is not a message — is
+receipted `IGNORED_UNREADABLE` with `surface.update_unreadable` by its
+identifier alone and receives no notice, so the poll offset moves past it
+instead of re-fetching it; only an update with no identifier fails its batch. The receipt carries no content and is the
 idempotency boundary for inbound delivery and the reverse map from a run to
 the chat that asked for it.
 
@@ -287,12 +294,15 @@ For each update the surface role opens one short transaction and:
    window tells them to pair. This is Section 22's default-deny before any run
    is created; the receipt is the permitted content-free first write.
 5. Handles commands deterministically, never through the model: `/pair`,
-   `/new`, `/stop`, `/status`, `/approve`, `/deny`, `/help`.
+   `/new`, `/stop`, `/status`, `/approve`, `/deny`, `/help`. `/approve` or
+   `/deny` without an identifier matches no approval, however many are
+   pending.
 6. Resolves fresh authority for the pairing's principal through the principal
    directory, records the authority version, and computes
    `scopes = pairing.granted_scopes ∩ principal.scopes`.
 7. Checks admission: per-tenant active surface runs and daily and monthly cost
-   ceilings, in the scheduling admission pattern; a denial is recorded.
+   ceilings, in the scheduling admission pattern, reserving the surface run
+   budget below; a denial is recorded.
 8. Resolves the session through the session-key mapping, rotating where the
    rules above require.
 9. Calls the shared submission function with the paired principal, the
@@ -310,6 +320,17 @@ the update and the receipt insert makes the retry idempotent.
 
 Surface runs are interactive priority 0 — a human is typing — and use
 interactive reserved capacity.
+
+A new run a paired message starts carries the surface run budget: a cost
+limit of `max_cost_per_run` (USD 10) and a final-synthesis reserve of
+`synthesis_reserve_cost` (USD 2, ADR-0078), unless its pinned agent's own cost
+limit is lower, which then stands. Admission reserves `max_cost_per_run`
+against the daily and monthly ceilings, so a reservation is never smaller than
+what the run can spend; with the default USD 25 daily ceiling two surface runs
+can be in flight at once. Input delivered to a run waiting for the user creates
+no run and reserves nothing. Runs started from any other client keep the
+ordinary limits. The owner chose this budget on 2026-09-28 (ADR-0064
+amendment).
 
 ## The shared submission path
 
@@ -372,7 +393,8 @@ export and the scanner use, split at paragraph and line boundaries into chunks
 of at most 4096 characters, and sent in order with a per-chunk delivery receipt
 so a retry resumes without re-sending. A failed or cancelled run sends a reason
 code only, never provider text. Artifacts are referenced by name and
-identifier.
+identifier. A reply still undelivered after `reply_max_attempts` claims settles
+as failed; the answer remains in the session.
 
 Milestone 12's notifications still travel the Milestone 12 outbox and are
 drained by the surface role for the surface device. The payload is
@@ -422,6 +444,9 @@ resolution entry point.
 - Abuse controls: per-sender messages per minute, per-tenant active surface
   runs and cost ceilings, an inbound text cap, throttled unpaired notices,
   ignored media.
+- Credentials stay with their role: the surface loader refuses to start with a
+  provider credential variable in its environment, and every other role refuses
+  a surface secret-file variable, instead of leaving it unread.
 - The surface role holds no model, tool, sandbox, browser, or API credential
   and needs outbound HTTPS to Telegram only; this is the one role besides the
   browser control plane that needs any egress, and the deployment page says so.
@@ -531,15 +556,22 @@ DELETE /v1/surfaces/pairings/{pairing_id}            surface.write
 ```
 
 `POST .../pairing-codes` requires `Idempotency-Key` and returns the code
-exactly once. Two exact scopes, `surface.read` and `surface.write`, extend the
+exactly once. Because the code is never stored in plaintext, a repeated key
+cannot replay it: it is a non-retryable conflict,
+`surface.pairing_code_already_issued`, whose details name the issued code's
+identifier and expiry; a client that lost the response mints another code with
+a new key. Every surface response carries `Cache-Control: private, no-store`,
+and a pairing is returned as an allow-listed view without the tenant,
+principal, or revoker identity. Two exact scopes, `surface.read` and `surface.write`, extend the
 closed vocabulary in the form [http-api-and-streaming.md](http-api-and-streaming.md#the-scope-vocabulary-is-closed-and-matched-exactly)
 states. The CLI gains `agent surface list | pair | pairings | revoke`. Two
 flags, `AGENT_SURFACE_API_ENABLED` and `AGENT_SURFACE_WORKER_ENABLED`, default
 off; production release validation requires them to change together, and the
 surface unit joins the release's unit list. A `surfaces:` block in the
 versioned limits file declares poll timeout, session idle period, code expiry
-and attempts, lockout, per-sender rate, tenant ceilings, chunk size, and the
-inbound text cap.
+and attempts, lockout, per-sender rate, tenant ceilings, the surface run budget
+and its synthesis reserve, chunk size, the reply attempt limit, and the inbound
+text cap.
 
 ## Events and audit
 

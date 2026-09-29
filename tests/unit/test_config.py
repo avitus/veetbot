@@ -405,10 +405,11 @@ def test_surface_worker_loads_dedicated_private_secrets_without_api_credentials(
         "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE": str(verify_token),
         "AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID": "15551234567",
         "AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION": "v23.0",
-        "OPENAI_API_KEY": "must-not-enter-the-surface-worker",
     }
 
     settings = config_module.load_surface_worker_settings(values)
+    # A provider key in this environment refuses startup; see
+    # test_a_role_refuses_credentials_that_belong_to_another_role.
 
     assert settings.auth_token is None
     assert settings.credentials == {}
@@ -477,6 +478,49 @@ def test_surface_worker_secret_files_must_be_absolute_regular_and_private(
                 "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(configured),
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("loader", "variable", "value"),
+    [
+        ("load_surface_worker_settings", "OPENAI_API_KEY", "placeholder-value"),
+        ("load_surface_worker_settings", "VEETBOT_OPENAI_KEY", "placeholder-value"),
+        (
+            "load_surface_worker_settings",
+            "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+            "/etc/veetbot/secrets/browser-control-plane",
+        ),
+        ("load_settings", "AGENT_SURFACE_TELEGRAM_TOKEN_FILE", "/etc/veetbot/secrets/telegram"),
+        (
+            "load_schedule_worker_settings",
+            "AGENT_SURFACE_WHATSAPP_TOKEN_FILE",
+            "/etc/veetbot/secrets/whatsapp",
+        ),
+        (
+            "load_notification_worker_settings",
+            "AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE",
+            "/etc/veetbot/secrets/whatsapp-app",
+        ),
+    ],
+)
+def test_a_role_refuses_credentials_that_belong_to_another_role(
+    tmp_path: Path, loader: str, variable: str, value: str
+) -> None:
+    """A misplaced credential fails startup instead of sitting unread in the environment."""
+
+    telegram = tmp_path / "telegram-token"
+    telegram.write_text("123456789:" + "telegram-test-token-value", encoding="ascii")
+    telegram.chmod(0o600)
+    values = {**base_environment(), variable: value}
+    if loader == "load_surface_worker_settings":
+        values |= {
+            "AGENT_SURFACE_API_ENABLED": "1",
+            "AGENT_SURFACE_WORKER_ENABLED": "1",
+            "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(telegram),
+        }
+
+    with pytest.raises(ConfigurationError, match=variable):
+        getattr(config_module, loader)(values)
 
 
 def test_device_channel_limits_are_versioned_knobs() -> None:

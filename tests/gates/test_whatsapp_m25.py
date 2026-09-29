@@ -561,3 +561,92 @@ async def test_signed_but_malformed_webhook_is_refused_without_ingest(document: 
     status, received = await _post_signed(document)
     assert status == 400
     assert received == []
+
+
+async def test_a_redelivered_meta_message_id_is_processed_once_through_ingress() -> None:
+    """The webhook's own normalization feeds the shared ingress; Meta's retry of
+    the same message id finds the receipt and submits nothing twice."""
+
+    from decimal import Decimal
+
+    from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+    from agent_core.adapters.identity import ConfiguredSchedulePrincipalDirectory
+    from agent_core.application.surfaces import PreparedSurfaceSubmission, SurfaceIngressService
+    from agent_core.domain.surfaces import InboundDisposition, Pairing, SurfaceRunBudget
+    from tests.contract.support import memory_uow_factory, principal, session
+
+    _, uow_factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"run.write"}})
+    async with uow_factory() as uow:
+        await uow.surfaces.pairings.create_pairing(
+            Pairing(
+                id=UUID("00000000-0000-4000-8000-000000002510"),
+                surface_id=SURFACE_ID,
+                tenant_id=owner.tenant_id,
+                principal_id=owner.principal_id,
+                sender_id="15550002222",
+                granted_scopes=frozenset({"run.write"}),
+                paired_at=NOW,
+            )
+        )
+    submitted: list[tuple[str, object]] = []
+
+    async def create_session(uow, bound_principal, update):  # type: ignore[no-untyped-def]
+        created = session().model_copy(
+            update={
+                "id": UUID("00000000-0000-4000-8000-000000002512"),
+                "principal_id": bound_principal.principal_id,
+                "created_at": NOW,
+            }
+        )
+        await uow.sessions.create(created)
+        return created
+
+    async def submit(uow, bound_principal, mapped, text, origin, version, budget):  # type: ignore[no-untyped-def]
+        del uow, bound_principal, mapped, version, budget
+        submitted.append((text, origin["external_update_id"]))
+        return PreparedSurfaceSubmission(
+            run_id=UUID("00000000-0000-4000-8000-000000002511"),
+            disposition=InboundDisposition.SUBMITTED,
+            dispatch_kind="dispatch",
+        )
+
+    async def notice(chat_ref: str, reason_code: str) -> None:
+        del chat_ref, reason_code
+
+    ingress = SurfaceIngressService(
+        uow_factory=uow_factory,
+        principals=ConfiguredSchedulePrincipalDirectory(owner),
+        run_budget=SurfaceRunBudget(max_cost=Decimal("10"), synthesis_reserve_cost=Decimal("2")),
+        self_approval_enabled=True,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+        create_session=create_session,
+        submit=submit,
+        dispatch=lambda prepared: None,
+        notice=notice,
+    )
+    app = create_whatsapp_webhook_app(
+        surface_id=SURFACE_ID,
+        phone_number_id="phone-1",
+        app_secret=SecretStr(APP_SIGNATURE_KEY),
+        verify_token=SecretStr(VERIFICATION_CHALLENGE),
+        ingest=ingress.ingest,
+    )
+    body = _webhook_payload(message_id="wamid.redelivered")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://surface.test"
+    ) as client:
+        for _ in range(2):
+            response = await client.post(
+                "/webhooks/whatsapp",
+                content=body,
+                headers={"X-Hub-Signature-256": _signature(body)},
+            )
+            assert response.status_code == 200
+
+    assert submitted == [("Hello Veetbot", "wamid.redelivered")]
+    async with uow_factory() as uow:
+        receipt = await uow.surfaces.receipts.get(SURFACE_ID, "wamid.redelivered")
+    assert receipt is not None
+    assert receipt.disposition is InboundDisposition.SUBMITTED

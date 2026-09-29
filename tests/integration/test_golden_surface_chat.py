@@ -21,7 +21,6 @@ from decimal import Decimal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
-import pytest
 
 from agent_core.adapters.determinism import FixedClock, SystemClock
 from agent_core.adapters.identity import ConfiguredSchedulePrincipalDirectory
@@ -32,7 +31,7 @@ from agent_core.application.surface_worker import (
     SurfaceReplyDispatcher,
 )
 from agent_core.application.trajectory_service import TrajectoryRedactor
-from agent_core.bootstrap import Composition, build, default_run_limits
+from agent_core.bootstrap import Composition, build
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.runs import RunStatus
@@ -173,9 +172,6 @@ async def test_a_paired_telegram_chat_asks_approves_and_receives_the_reply() -> 
             storage="postgres",
             script=script,
             clock=clock,
-            # Surface admission reserves the default agent's cost cap, which the
-            # shipped defaults lack; see the strict xfail below.
-            limits=default_run_limits(settings).model_copy(update={"max_cost": Decimal("2")}),
         ) as composition,
         _client(composition) as client,
     ):
@@ -239,6 +235,7 @@ async def test_a_paired_telegram_chat_asks_approves_and_receives_the_reply() -> 
             batch_size=10,
             lease_seconds=30,
             retry_delays=(30,),
+            max_attempts=3,
         )
         assert await prompts.run_once() == 1
         [prompt] = chat.sent
@@ -272,17 +269,11 @@ async def test_a_paired_telegram_chat_asks_approves_and_receives_the_reply() -> 
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Open defect: PostgreSQL surface admission reserves the default agent's "
-        "max_cost, and run_defaults in runtime/limits.yaml sets none, so every paired "
-        "message is REJECTED_ADMISSION with surface.cost_reservation_missing. The "
-        "in-memory controller allows everything, so no gate sees it. Remove this "
-        "marker when the reservation has a configured source."
-    ),
-)
 async def test_the_shipped_default_agent_admits_a_paired_telegram_message() -> None:
+    """The shipped limits give a surface run its own budget (ADR-0064 amendment):
+    PostgreSQL admission reserves it, the run carries it, and a run the owner
+    starts from the Apple client keeps the ordinary uncapped chat limits."""
+
     settings = replace(
         database_settings(),
         auth_tenant_id="local",
@@ -307,5 +298,21 @@ async def test_the_shipped_default_agent_admits_a_paired_telegram_message() -> N
         paired = await ingress.ingest(_update(surface_id, 1, f"/pair {issued.json()['code']}"))
         assert paired.reason_code == "surface.paired", paired
         asked = await ingress.ingest(_update(surface_id, 2, "What time is it?"))
+        assert asked.disposition is InboundDisposition.SUBMITTED, asked
+        assert asked.run_id is not None
+        created = await client.post("/v1/sessions", json={"agent_id": "general", "metadata": {}})
+        assert created.status_code == 201, created.text
+        posted = await client.post(
+            f"/v1/sessions/{created.json()['id']}/messages",
+            json={"content": [{"type": "text", "text": "What time is it?"}]},
+        )
+        assert posted.status_code == 202, posted.text
+        apple_view = await client.get(f"/v1/runs/{posted.json()['run_id']}")
+        surface_view = await client.get(f"/v1/runs/{asked.run_id}")
+        async with composition.uow_factory() as uow:
+            surface_run = await uow.runs.get(asked.run_id, composition.principal)
 
-    assert asked.disposition is InboundDisposition.SUBMITTED, asked
+    assert surface_run.limits.max_cost == Decimal("10")
+    assert surface_run.limits.synthesis_reserve_cost == Decimal("2")
+    assert surface_view.json()["limits"]["max_cost_usd"] == "10"
+    assert apple_view.json()["limits"]["max_cost_usd"] is None

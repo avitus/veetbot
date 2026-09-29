@@ -492,7 +492,10 @@ offline record of every enqueued notification and its delivery outcomes.
 and two exact scopes, `surface.read` and `surface.write`, mounted only when
 `AGENT_SURFACE_API_ENABLED` is set; a paired message itself enters through the
 same submission function `POST /v1/sessions/{id}/messages` uses, not through a
-new route.
+new route. Every surface response is `Cache-Control: private, no-store`; a
+pairing is an allow-listed view without tenant, principal, or revoker
+identity; and a repeated pairing-code `Idempotency-Key` is a non-retryable
+`409` naming the issued code's identifier and expiry, never the code.
 
 ```text
 GET    /v1/surfaces                                  surface.read

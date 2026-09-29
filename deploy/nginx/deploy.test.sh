@@ -179,6 +179,28 @@ cmp -s "$SOURCE_CONFIG" "$AVAILABLE"
 grep -Fq 'nginx -t' "$LOG_FILE"
 grep -Fq 'systemctl reload nginx' "$LOG_FILE"
 
+# Before the first application release there is no release identity: the
+# optional webhook routes are omitted rather than failing the deployment.
+printf '%s\n' \
+  'server {' \
+  '  # VEETBOT_WHATSAPP_ROUTE_BEGIN' \
+  '  location = /webhooks/whatsapp { proxy_pass http://127.0.0.1:8002; }' \
+  '  # VEETBOT_WHATSAPP_ROUTE_END' \
+  '  # VEETBOT_CALL_ROUTE_BEGIN' \
+  '  location = /webhooks/bland { proxy_pass http://127.0.0.1:8003; }' \
+  '  # VEETBOT_CALL_ROUTE_END' \
+  '}' >"$TEST_ROOT/first-host.conf"
+[[ ! -e "$DEPLOY_ROOT/current" ]]
+run_deploy "$TEST_ROOT/first-host.conf" >"$TEST_ROOT/first-host.out" 2>&1 || {
+  cat "$TEST_ROOT/first-host.out" >&2
+  printf 'Nginx deployment before the first application release failed\n' >&2
+  exit 1
+}
+if grep -Fq '/webhooks/' "$AVAILABLE"; then
+  printf 'Nginx deployment without a release retained a webhook route\n' >&2
+  exit 1
+fi
+
 mkdir -p "$DEPLOY_ROOT/releases/20260810-152233-abcdef0"
 printf '%s\n' \
   'VEETBOT_RELEASE_ID=20260810-152233-abcdef0' \

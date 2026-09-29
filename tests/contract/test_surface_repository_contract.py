@@ -130,6 +130,16 @@ async def assert_surface_repositories_contract(repositories: object) -> None:
     numeric_receipt = receipt.model_copy(update={"external_update_id": "42"})
     assert await receipts.create(numeric_receipt) is True
     assert await receipts.latest_numeric_update_id(SURFACE_ID) == 42
+    unreadable = receipt.model_copy(
+        update={
+            "external_update_id": "43",
+            "disposition": InboundDisposition.IGNORED_UNREADABLE,
+            "reason_code": "surface.update_unreadable",
+        }
+    )
+    assert await receipts.create(unreadable) is True
+    assert await receipts.get(SURFACE_ID, "43") == unreadable
+    assert await receipts.latest_numeric_update_id(SURFACE_ID) == 43
 
     reply = SurfaceReply(
         id=UUID("00000000-0000-4000-8000-000000001413"),
@@ -141,8 +151,10 @@ async def assert_surface_repositories_contract(repositories: object) -> None:
         next_attempt_at=NOW,
         created_at=NOW,
     )
+    assert await replies.for_run(RUN_ID) is None
     assert await replies.enqueue(reply) is True
     assert await replies.enqueue(reply) is False
+    assert await replies.for_run(RUN_ID) == reply
     assert await replies.claim_due(NOW, 10, "worker-1", 30) == [
         reply.model_copy(
             update={
@@ -160,6 +172,7 @@ async def assert_surface_repositories_contract(repositories: object) -> None:
     )
     assert progressed.chunks_sent == 1
     assert progressed.chunks_total == 2
+    assert await replies.for_run(RUN_ID) == progressed
 
     revoked = await pairings.revoke_pairing(pairing.id, owner(), NOW + timedelta(minutes=3))
     assert revoked.revoked_at == NOW + timedelta(minutes=3)

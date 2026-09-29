@@ -294,6 +294,9 @@ class Device(BaseModel):
 
         if self.kind is not DeviceKind.SURFACE:
             raise ValueError("only surface devices accept a surface delivery route")
+        # model_copy skips the validators, so the revoked-routing rule is checked here.
+        if self.status is not DeviceStatus.ACTIVE:
+            raise ValueError("only an active surface accepts a surface delivery route")
         if provider not in {PushProvider.TELEGRAM, PushProvider.WHATSAPP}:
             raise ValueError("surface delivery route requires a surface provider")
         instant = _aware_utc(at, "surface route update")

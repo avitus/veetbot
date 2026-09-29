@@ -26,12 +26,12 @@ are complete; ten are in progress and one is authorized but not started.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
-| 14 Inbound surfaces | In progress | Telegram smoke; 16 open review findings | Owner; engineering |
+| 14 Inbound surfaces | In progress | Telegram smoke; review loop on a main pull request | Owner; engineering |
 | 15 Operational hardening | Not started | All sixteen gates | Engineering, then owner |
 | 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
 | 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | Physical-iPhone verification | Owner |
-| 25 WhatsApp | In progress | Meta ceremony, live smoke; 16 open review findings | Owner; engineering |
+| 25 WhatsApp | In progress | Meta ceremony, live smoke; review loop on a main pull request | Owner; engineering |
 | 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance; expired-body drafting | Owner with engineering |
 | 27 Bland calling | In progress | Dashboard and live checks; final-head review | Owner; engineering |
 | 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
@@ -94,12 +94,15 @@ limits, and isolated surface role are implemented. All twenty-one
 `gate.surface.*` entries resolve to live checks and pass locally, including the
 PostgreSQL migration, RLS, admission, and crash/re-delivery lane. The code
 reached `main` in pull request 104, which merged with sixteen CodeRabbit
-findings on the surface code unresolved, among them an authorization-bypass
-finding and three sensitive-data-exposure findings. Remaining:
+findings on the surface code unresolved. On 2026-09-28 a paired message's run
+gained its own USD 10 budget, which admits it on PostgreSQL (ADR-0064
+amendment), and the findings were resolved on `dev`: fifteen fixed test-first,
+one answered as inapplicable. The
+[Telegram surface runbook](../telegram-surface-runbook.md) owns the owner's
+setup and smoke. Remaining:
 
-- [ ] Fix surface admission on PostgreSQL, where the shipped default agent sets no limits.max_cost, so every paired Telegram or WhatsApp message ends REJECTED_ADMISSION (surface.cost_reservation_missing); choose a surface per-run cost cap or a default-agent max_cost, then remove the strict xfail on tests/integration/test_golden_surface_chat.py::test_the_shipped_default_agent_admits_a_paired_telegram_message
-- [ ] Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke
-- [ ] Resolve the sixteen CodeRabbit findings pull request 104 left open on the surface code, then pass hosted CI and the CodeRabbit review loop on a dev to main pull request
+- [ ] Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke, following docs/telegram-surface-runbook.md
+- [ ] Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
 
 ### Milestone 25 — WhatsApp business surface
 
@@ -109,14 +112,13 @@ normalizes Meta message IDs into shared receipts, confines outbound calls to
 the Meta Graph origin, and enforces template-only delivery outside the
 twenty-four-hour window. All twelve `gate.whatsapp.*` entries resolve to live
 checks and pass locally. It shipped in pull request 104 with Milestone 14 and
-shares its unresolved review findings. The
+shares its review resolution and surface run budget. The
 [WhatsApp integration runbook](../whatsapp-integration-runbook.md) owns the
 remaining operator ceremony. Remaining:
 
-- [ ] Fix surface admission on PostgreSQL, where the shipped default agent sets no limits.max_cost, so every paired Telegram or WhatsApp message ends REJECTED_ADMISSION (surface.cost_reservation_missing); choose a surface per-run cost cap or a default-agent max_cost, then remove the strict xfail on tests/integration/test_golden_surface_chat.py::test_the_shipped_default_agent_admits_a_paired_telegram_message
 - [ ] Complete the owner Meta ceremony and obtain approval for the content-free utility template
 - [ ] Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
-- [ ] Resolve the sixteen CodeRabbit findings pull request 104 left open on the surface code, then pass hosted CI and the CodeRabbit review loop on a dev to main pull request
+- [ ] Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
 
 ### Milestone 18 — First-class email integration
 

@@ -2049,7 +2049,6 @@ async def build_surface_worker(
 
         now = effective_clock.now()
         async with factory() as uow:
-            default_agent = await uow.agents.latest_version(DEFAULT_AGENT_ID)
 
             async def register_surface(
                 *,
@@ -2151,7 +2150,8 @@ async def build_surface_worker(
         ingress = SurfaceIngressService(
             uow_factory=factory,
             principals=principal_directory,
-            max_cost_reservation=default_agent.limits.max_cost,
+            run_budget=limits.run_budget,
+            self_approval_enabled=surface_ruleset.self_approval_enabled,
             clock=effective_clock,
             ids=effective_ids,
             create_session=create_surface_session,
@@ -2173,7 +2173,6 @@ async def build_surface_worker(
             lockout_seconds=limits.lockout_seconds,
             per_sender_messages_per_minute=limits.per_sender_messages_per_minute,
             inbound_text_max_chars=limits.inbound_text_max_chars,
-            self_approval_enabled=surface_ruleset.self_approval_enabled,
         )
 
         async def deliver_telegram_reply(
@@ -2205,6 +2204,7 @@ async def build_surface_worker(
             batch_size=limits.claim_batch,
             lease_seconds=limits.lease_seconds,
             retry_delays=limits.retry_delays_seconds,
+            max_attempts=limits.reply_max_attempts,
             chunk_size=limits.chunk_size,
         )
         notification_transport = SurfaceNotificationTransport(
@@ -2276,6 +2276,7 @@ async def build_surface_worker(
             transport=telegram_transport,
             latest_committed_update_id=latest_telegram_update_id,
             ingest=ingress.ingest,
+            record_unreadable=ingress.record_unreadable,
             poll_lock=PostgresTelegramPollLock(
                 engine,
                 tenant_id=principal.tenant_id,
@@ -4083,7 +4084,8 @@ async def _compose(
         surface_ingress = SurfaceIngressService(
             uow_factory=uow_factory,
             principals=ConfiguredSchedulePrincipalDirectory(principal),
-            max_cost_reservation=agent.limits.max_cost,
+            run_budget=surface_limits.run_budget,
+            self_approval_enabled=ruleset.self_approval_enabled,
             clock=clock,
             ids=ids,
             create_session=create_surface_session,

@@ -161,9 +161,11 @@ bounded public-probe budget fails the CircleCI job after promotion; it is not a
 failure inside `deploy/app/release.sh`.
 
 The optional Telegram and WhatsApp channels run in the separate surface role.
-Use the [WhatsApp integration runbook](whatsapp-integration-runbook.md) for the
-Meta owner ceremony, secret-file installation, activation, pairing, live smoke,
-and rollback; do not place channel credentials in the application environment.
+Use the [Telegram surface runbook](telegram-surface-runbook.md) for the bot,
+token file, both environments, activation, pairing, live smoke, and rollback,
+and the [WhatsApp integration runbook](whatsapp-integration-runbook.md) for the
+Meta owner ceremony that adds the second channel; do not place channel
+credentials in the application environment, which refuses to start with one.
 
 A pre-promotion failure removes only its staged directory. A post-promotion
 failure remains visible for diagnosis and manual rollback. Database migrations

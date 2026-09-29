@@ -97,7 +97,6 @@ from agent_core.domain.schedules import (
     ScheduleRecord,
     ScheduleState,
 )
-from agent_core.domain.surfaces import Pairing
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -119,6 +118,7 @@ from agent_core.domain.views import (
     SessionView,
     StreamFrame,
     SubmitResult,
+    SurfacePairingView,
     TestNotificationResult,
 )
 
@@ -1318,9 +1318,11 @@ def create_app(
         openapi_extra={"required_scope": "surface.read"},
     )
     async def list_surfaces(
+        response: Response,
         authenticated: Annotated[Principal, secured("surface.read")],
     ) -> list[DeviceView]:
         """List inbound surfaces visible to the authenticated principal."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.surfaces.list(authenticated)
 
     @surface_router.get(
@@ -1329,9 +1331,11 @@ def create_app(
     )
     async def get_surface(
         surface_id: UUID,
+        response: Response,
         authenticated: Annotated[Principal, secured("surface.read")],
     ) -> DeviceView:
         """Read one inbound surface through principal-scoped access."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.surfaces.get(authenticated, surface_id)
 
     @surface_router.post(
@@ -1381,10 +1385,13 @@ def create_app(
     )
     async def list_surface_pairings(
         surface_id: UUID,
+        response: Response,
         authenticated: Annotated[Principal, secured("surface.read")],
-    ) -> list[Pairing]:
+    ) -> list[SurfacePairingView]:
         """List the principal's pairings for an inbound surface."""
-        return await services.surfaces.list_pairings(authenticated, surface_id)
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        pairings = await services.surfaces.list_pairings(authenticated, surface_id)
+        return [SurfacePairingView.of(pairing) for pairing in pairings]
 
     @surface_router.post(
         "/v1/surfaces/pairings/{pairing_id}/revoke",
@@ -1392,10 +1399,14 @@ def create_app(
     )
     async def revoke_surface_pairing(
         pairing_id: UUID,
+        response: Response,
         authenticated: Annotated[Principal, secured("surface.write")],
-    ) -> Pairing:
+    ) -> SurfacePairingView:
         """Revoke one owned inbound pairing and its granted authority."""
-        return await services.surfaces.revoke_pairing(authenticated, pairing_id)
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return SurfacePairingView.of(
+            await services.surfaces.revoke_pairing(authenticated, pairing_id)
+        )
 
     @surface_router.delete(
         "/v1/surfaces/pairings/{pairing_id}",

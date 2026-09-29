@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-28 — Telegram messages are admitted, with their own budget
+
+- A paired Telegram or WhatsApp message was refused on PostgreSQL because the
+  default agent has no cost cap to reserve. Each run a paired message starts
+  now has its own budget of USD 10, told to answer once USD 2 remains; chats
+  from the Apple client keep no cost cap.
+- The sixteen review findings left open on the surface code are resolved. With
+  self-approval turned off in the policy, `/approve` from a chat could still
+  approve your own request; it is refused now. `/approve` with no identifier
+  crashed, and would otherwise have approved the only pending request; it now
+  matches nothing.
+- A Telegram message without a readable sender, such as a channel post, no
+  longer stalls every later message. Replies stop retrying after about four
+  hours, surface API responses are never cached, and pairings no longer expose
+  internal identities.
+- The [Telegram surface runbook](telegram-surface-runbook.md) walks through
+  creating the bot, installing its token, pairing, and a live smoke.
+
 ## 2026-09-28 — Knowledge search answers questions, and a test-suite review
 
 - Searching your documents required every word of the question to appear in

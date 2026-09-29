@@ -244,6 +244,7 @@ async def test_poller_resumes_from_committed_receipt_and_dedupes_through_ingress
         transport=FakeTransport(),
         latest_committed_update_id=latest,
         ingest=ingest,
+        record_unreadable=ingest,
         poll_lock=telegram.InMemoryTelegramPollLock(),
         timeout_seconds=30,
         fallback_poll_seconds=1,
@@ -294,3 +295,142 @@ async def test_telegram_token_leak_corpus_is_closed_across_transport_and_redacti
 
     emitted = caplog.text
     assert all(token not in emitted for token in values)
+
+
+def _private_message(update_id: int, text: str) -> dict[str, object]:
+    return {
+        "update_id": update_id,
+        "message": {
+            "date": int(NOW.timestamp()),
+            "chat": {"id": 12345, "type": "private"},
+            "from": {"id": 12345, "first_name": "Owner"},
+            "text": text,
+        },
+    }
+
+
+async def test_an_unreadable_update_is_receipted_and_does_not_block_later_updates() -> None:
+    """A message Telegram sends without a sender (a channel post in a group) is
+    identified, so it gets a content-free receipt and the offset moves past it."""
+
+    telegram = _adapter()
+    from agent_core.domain.surfaces import SurfaceUnreadableUpdate
+
+    batches = [
+        [
+            {
+                "update_id": 50,
+                "message": {
+                    "date": int(NOW.timestamp()),
+                    "chat": {"id": -100123, "type": "supergroup"},
+                    "sender_chat": {"id": -100999, "type": "channel"},
+                    "text": "no from field",
+                },
+            },
+            _private_message(51, "after the unreadable one"),
+        ],
+        [{"update_id": 52, "edited_message": {"text": "not requested"}}],
+        [],
+    ]
+    offsets: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        if method == "deleteWebhook":
+            return httpx.Response(200, json={"ok": True, "result": True})
+        offsets.append(request.url.params["offset"])
+        return httpx.Response(200, json={"ok": True, "result": batches.pop(0)})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = telegram.TelegramBotTransport(
+        token=SecretStr("123456789:" + "telegram-test-token-value"),
+        client=client,
+    )
+    committed: int | None = 49
+    ingested: list[str] = []
+    unreadable: list[str] = []
+
+    async def latest() -> int | None:
+        return committed
+
+    async def ingest(update):  # type: ignore[no-untyped-def]
+        nonlocal committed
+        ingested.append(update.external_update_id)
+        committed = int(update.external_update_id)
+
+    async def record_unreadable(update: SurfaceUnreadableUpdate) -> None:
+        nonlocal committed
+        assert update.surface_id == SURFACE_ID
+        unreadable.append(update.external_update_id)
+        committed = int(update.external_update_id)
+
+    poller = telegram.TelegramPoller(
+        surface_id=SURFACE_ID,
+        transport=transport,
+        latest_committed_update_id=latest,
+        ingest=ingest,
+        record_unreadable=record_unreadable,
+        poll_lock=telegram.InMemoryTelegramPollLock(),
+        timeout_seconds=30,
+        fallback_poll_seconds=1,
+    )
+    try:
+        assert await poller.run_once() == 2
+        assert await poller.run_once() == 1
+        assert await poller.run_once() == 0
+    finally:
+        await poller.aclose()
+        await client.aclose()
+
+    assert unreadable == ["50", "52"]
+    assert ingested == ["51"]
+    assert offsets == ["50", "52", "53"]
+
+
+async def test_a_failing_poll_logs_a_closed_error_class_and_never_the_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Drive the poller's own logging path with a token-bearing failure."""
+
+    telegram = _adapter()
+    token = "123456789:" + "telegram-log-leak-probe-value"
+    poller: Any = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        if method == "deleteWebhook":
+            return httpx.Response(200, json={"ok": True, "result": True})
+        poller.stop()
+        raise httpx.ConnectError(f"cannot reach {request.url}", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = telegram.TelegramBotTransport(token=SecretStr(token), client=client)
+
+    async def unexpected(update: object) -> None:
+        raise AssertionError(f"nothing should be ingested: {update!r}")
+
+    async def latest() -> int | None:
+        return None
+
+    poller = telegram.TelegramPoller(
+        surface_id=SURFACE_ID,
+        transport=transport,
+        latest_committed_update_id=latest,
+        ingest=unexpected,
+        record_unreadable=unexpected,
+        poll_lock=telegram.InMemoryTelegramPollLock(),
+        timeout_seconds=30,
+        fallback_poll_seconds=0.01,
+    )
+    caplog.set_level("WARNING")
+    try:
+        await asyncio.wait_for(poller.run_forever(), timeout=5)
+    finally:
+        await poller.aclose()
+        await client.aclose()
+
+    [record] = [entry for entry in caplog.records if entry.msg == "surface_telegram_poll_failed"]
+    assert record.levelname == "WARNING"
+    assert record.error_class == "TelegramTransportError"  # type: ignore[attr-defined]
+    assert token not in caplog.text
+    assert token.split(":", 1)[1] not in caplog.text

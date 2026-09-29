@@ -16,7 +16,7 @@
   kind: case
   spec: docs/plan/whatsapp-surface.md#hard-gates
   statement: "**Receipt idempotency.** A replayed Meta message id processes once through the external_update_id receipt key."
-  check: tests/gates/test_surface_ingress_m14.py::test_pairing_then_submission_intersects_fresh_authority_and_dedupes
+  check: tests/gates/test_whatsapp_m25.py::test_a_redelivered_meta_message_id_is_processed_once_through_ingress
 - id: gate.whatsapp.unpaired_denied
   milestone: 25
   kind: case

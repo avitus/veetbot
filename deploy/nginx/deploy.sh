@@ -103,16 +103,20 @@ cleanup_rendered_config() {
   fi
 }
 trap cleanup_rendered_config EXIT
+# Before the first application release there is no release identity; the
+# optional webhook routes are then off. A release that exists must state them.
+ACTIVE_RELEASE_ENV="$DEPLOY_ROOT/current/.release.env"
 if grep -Fq '# VEETBOT_WHATSAPP_ROUTE_BEGIN' "$SOURCE_CONFIG"; then
-  ACTIVE_RELEASE_ENV="$DEPLOY_ROOT/current/.release.env"
-  [[ -f "$ACTIVE_RELEASE_ENV" ]] || fail \
-    "active release identity is missing: $ACTIVE_RELEASE_ENV"
-  WHATSAPP_ENABLED="$(
-    awk -F= '
-      $1 == "AGENT_SURFACE_WHATSAPP_ENABLED" { value = $2; found += 1 }
-      END { if (found == 1) print value; else exit 1 }
-    ' "$ACTIVE_RELEASE_ENV"
-  )" || fail "active release has no singular WhatsApp routing flag"
+  if [[ -f "$ACTIVE_RELEASE_ENV" ]]; then
+    WHATSAPP_ENABLED="$(
+      awk -F= '
+        $1 == "AGENT_SURFACE_WHATSAPP_ENABLED" { value = $2; found += 1 }
+        END { if (found == 1) print value; else exit 1 }
+      ' "$ACTIVE_RELEASE_ENV"
+    )" || fail "active release has no singular WhatsApp routing flag"
+  else
+    WHATSAPP_ENABLED=0
+  fi
   [[ "$WHATSAPP_ENABLED" =~ ^[01]$ ]] || fail \
     "active release WhatsApp routing flag must be 0 or 1"
   marker_counts="$(
@@ -134,12 +138,14 @@ if grep -Fq '# VEETBOT_WHATSAPP_ROUTE_BEGIN' "$SOURCE_CONFIG"; then
 fi
 
 if grep -Fq '# VEETBOT_CALL_ROUTE_BEGIN' "$CANDIDATE_CONFIG"; then
-  ACTIVE_RELEASE_ENV="$DEPLOY_ROOT/current/.release.env"
-  [[ -f "$ACTIVE_RELEASE_ENV" ]] || fail "active release identity is missing: $ACTIVE_RELEASE_ENV"
-  CALL_INGRESS_ENABLED="$(awk -F= '
-    $1 == "AGENT_CALL_INGRESS_ENABLED" { value = $2; found += 1 }
-    END { if (found == 1) print value; else exit 1 }
-  ' "$ACTIVE_RELEASE_ENV")" || fail "active release has no singular calling routing flag"
+  if [[ -f "$ACTIVE_RELEASE_ENV" ]]; then
+    CALL_INGRESS_ENABLED="$(awk -F= '
+      $1 == "AGENT_CALL_INGRESS_ENABLED" { value = $2; found += 1 }
+      END { if (found == 1) print value; else exit 1 }
+    ' "$ACTIVE_RELEASE_ENV")" || fail "active release has no singular calling routing flag"
+  else
+    CALL_INGRESS_ENABLED=0
+  fi
   [[ "$CALL_INGRESS_ENABLED" =~ ^[01]$ ]] || fail "active release calling routing flag must be 0 or 1"
   marker_counts="$(awk '
     /# VEETBOT_CALL_ROUTE_BEGIN/ { begin += 1 }

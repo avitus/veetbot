@@ -8,14 +8,23 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
-from agent_core.domain.approvals import ApprovalResolutionState, ApprovalResolutionType
-from agent_core.domain.devices import Device, DeviceKind, PushProvider, push_token_fingerprint
+from agent_core.domain.approvals import (
+    ApprovalRequest,
+    ApprovalResolutionState,
+    ApprovalResolutionType,
+)
+from agent_core.domain.devices import (
+    Device,
+    DeviceKind,
+    DeviceStatus,
+    PushProvider,
+    push_token_fingerprint,
+)
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.runs import Run, RunStatus
@@ -28,7 +37,9 @@ from agent_core.domain.surfaces import (
     SurfaceChatKind,
     SurfaceInboundMessage,
     SurfaceMessageKind,
+    SurfaceRunBudget,
     SurfaceSession,
+    SurfaceUnreadableUpdate,
     direct_message_key,
     issue_pairing_code,
     pairing_code_matches,
@@ -51,6 +62,7 @@ type SurfaceSubmitter = Callable[
         str,
         dict[str, object],
         str,
+        SurfaceRunBudget,
     ],
     Awaitable[PreparedSurfaceSubmission],
 ]
@@ -65,6 +77,7 @@ _NOTICE_TEXT: dict[str, str] = {
     "surface.approval_not_found": "That pending approval was not found.",
     "surface.approval_resolved": "Approval resolved.",
     "surface.chat_kind_unsupported": "Veetbot accepts direct messages only.",
+    "surface.concurrency_limit": "Too many requests are running; try again when one finishes.",
     "surface.daily_cost_limit": "The daily surface budget is exhausted.",
     "surface.help": (
         "Send a message, or use /new, /stop, /status, /approve ID, /deny ID, or /help."
@@ -79,11 +92,18 @@ _NOTICE_TEXT: dict[str, str] = {
     "surface.rate_limited": "Too many messages; wait before trying again.",
     "surface.run_stopped": "The active run was stopped.",
     "surface.scope_denied": "This pairing does not allow that action.",
+    "surface.self_approval_denied": (
+        "This approval needs someone other than its requester; resolve it from another account."
+    ),
     "surface.session_rotated": "A new chat session will start with your next message.",
     "surface.status": "Veetbot is connected and this pairing is active.",
     "surface.text_too_large": "That message is too large.",
+    "surface.unavailable": "This Veetbot surface is no longer active.",
     "surface.unpaired": "This sender is not paired. Send /pair followed by a code.",
 }
+
+# Per-sender rate and notice windows are one minute long.
+_SENDER_WINDOW = timedelta(minutes=1)
 
 
 def surface_notice_text(reason_code: str) -> str:
@@ -186,10 +206,19 @@ class SurfaceManagementService:
         now = self._clock.now()
         async with self._uow_factory() as uow:
             _require_surface(await uow.devices.get(surface_id, principal))
-            if await uow.process_events.get_by_derivation(derivation) is not None:
+            existing = await uow.process_events.get_by_derivation(derivation)
+            if existing is not None:
+                # A code is presented exactly once, so a repeated key cannot replay
+                # it: the conflict names the issued code and its expiry, and a
+                # client that lost the response mints another with a new key.
                 raise ConflictError(
                     "pairing code was already presented for this idempotency key",
                     reason="surface.pairing_code_already_issued",
+                    details={
+                        key: existing.payload[key]
+                        for key in ("pairing_code_id", "expires_at")
+                        if key in existing.payload
+                    },
                 )
             issued = issue_pairing_code(
                 pairing_id=self._ids.new_id(),
@@ -216,6 +245,7 @@ class SurfaceManagementService:
                         "surface_id": str(surface_id),
                         "pairing_code_id": str(issued.record.id),
                         "granted_scopes": sorted(granted_scopes),
+                        "expires_at": issued.record.expires_at.isoformat(),
                     },
                     derivation_key=derivation,
                     created_at=now,
@@ -321,7 +351,8 @@ class SurfaceIngressService:
         uow_factory: UnitOfWorkFactory,
         principals: SchedulePrincipalDirectory,
         admission: SurfaceAdmissionController | None = None,
-        max_cost_reservation: Decimal | None = None,
+        run_budget: SurfaceRunBudget,
+        self_approval_enabled: bool,
         clock: Clock,
         ids: IdFactory,
         create_session: SurfaceSessionCreator,
@@ -336,7 +367,6 @@ class SurfaceIngressService:
         lockout_seconds: int = 3_600,
         per_sender_messages_per_minute: int = 20,
         inbound_text_max_chars: int = 32_768,
-        self_approval_enabled: bool = True,
     ) -> None:
         if (
             min(
@@ -352,7 +382,7 @@ class SurfaceIngressService:
         self._uow_factory = uow_factory
         self._principals = principals
         self._admission = admission
-        self._max_cost_reservation = max_cost_reservation
+        self._run_budget = run_budget
         self._clock = clock
         self._ids = ids
         self._create_session = create_session
@@ -370,9 +400,51 @@ class SurfaceIngressService:
         self._self_approval_enabled = self_approval_enabled
         self._sender_windows: dict[tuple[UUID, str], deque[datetime]] = {}
         self._notice_windows: dict[tuple[UUID, str, str], datetime] = {}
+        self._windows_swept_at: datetime | None = None
+
+    async def record_unreadable(self, update: SurfaceUnreadableUpdate) -> SurfaceIngressResult:
+        """Receipt an update whose sender or chat could not be read, so polling
+        moves past it; it stores nothing but its identity and has no chat to notify."""
+
+        now = self._clock.now()
+        receipt = InboundReceipt(
+            surface_id=update.surface_id,
+            external_update_id=update.external_update_id,
+            received_at=now,
+            disposition=InboundDisposition.IGNORED_UNREADABLE,
+            reason_code="surface.update_unreadable",
+        )
+        async with self._uow_factory() as uow:
+            if not await uow.surfaces.receipts.create(receipt):
+                existing = await uow.surfaces.receipts.get(
+                    update.surface_id,
+                    update.external_update_id,
+                )
+                if existing is None:
+                    raise RuntimeError("surface receipt conflict has no stored row")
+                return _result(existing, replayed=True)
+            await uow.process_events.append(
+                ProcessEvent(
+                    id=self._ids.new_id(),
+                    event_type="surface.inbound.rejected",
+                    actor_type="surface",
+                    payload={
+                        "surface_id": str(update.surface_id),
+                        "external_update_id": update.external_update_id,
+                        "disposition": receipt.disposition.value,
+                        "reason_code": receipt.reason_code,
+                    },
+                    derivation_key=(
+                        f"surface.inbound.rejected:{update.surface_id}:{update.external_update_id}"
+                    ),
+                    created_at=now,
+                )
+            )
+        return _result(receipt)
 
     async def ingest(self, update: SurfaceInboundMessage) -> SurfaceIngressResult:
         now = self._clock.now()
+        self._forget_quiet_senders(now)
         prepared: PreparedSurfaceSubmission | None = None
         notice_reason: str | None = None
         async with self._uow_factory() as uow:
@@ -501,10 +573,27 @@ class SurfaceIngressService:
             await notice(update.chat_ref, notice_reason)
         return result
 
+    def _forget_quiet_senders(self, now: datetime) -> None:
+        """Drop per-sender windows with nothing left in them, at most once a window,
+        so every sender who ever wrote, paired or not, does not stay in memory."""
+
+        cutoff = now - _SENDER_WINDOW
+        if self._windows_swept_at is not None and self._windows_swept_at > cutoff:
+            return
+        self._windows_swept_at = now
+        for key, window in builtins.list(self._sender_windows.items()):
+            while window and window[0] <= cutoff:
+                window.popleft()
+            if not window:
+                del self._sender_windows[key]
+        self._notice_windows = {
+            key: seen for key, seen in self._notice_windows.items() if seen > cutoff
+        }
+
     def _rate_allowed(self, update: SurfaceInboundMessage, now: datetime) -> bool:
         key = (update.surface_id, update.sender_id)
         window = self._sender_windows.setdefault(key, deque())
-        cutoff = now - timedelta(minutes=1)
+        cutoff = now - _SENDER_WINDOW
         while window and window[0] <= cutoff:
             window.popleft()
         if len(window) >= self._per_sender_rate:
@@ -530,7 +619,7 @@ class SurfaceIngressService:
             return True
         key = (update.surface_id, update.sender_id, reason_code)
         previous = self._notice_windows.get(key)
-        if previous is not None and previous > now - timedelta(minutes=1):
+        if previous is not None and previous > now - _SENDER_WINDOW:
             return False
         self._notice_windows[key] = now
         return True
@@ -573,7 +662,7 @@ class SurfaceIngressService:
             return final, None, final.reason_code
         if update.text == "/stop":
             return await self._stop(uow, update, pairing, placeholder)
-        if update.text.startswith(("/approve ", "/deny ")):
+        if update.text.split(maxsplit=1)[0] in {"/approve", "/deny"}:
             return await self._resolve_approval(uow, update, pairing, placeholder)
         if update.text in {"/help", "/status"}:
             final = placeholder.model_copy(
@@ -638,7 +727,8 @@ class SurfaceIngressService:
         placeholder: InboundReceipt,
     ) -> tuple[InboundReceipt, PreparedSurfaceSubmission | None, str]:
         assert update.text is not None
-        command, candidate = update.text.split(maxsplit=1)
+        command, *argument = update.text.split(maxsplit=1)
+        candidate = argument[0].strip() if argument else ""
         principal = await self._bound_principal(pairing)
         prepared: PreparedSurfaceSubmission | None = None
         reason = "surface.principal_unavailable"
@@ -649,7 +739,11 @@ class SurfaceIngressService:
                 exact_id = UUID(candidate)
             except ValueError:
                 exact_id = None
-            if exact_id is not None:
+            matches: builtins.list[ApprovalRequest]
+            if not candidate:
+                # An empty prefix would match every pending approval.
+                matches = []
+            elif exact_id is not None:
                 try:
                     exact = await uow.approvals.get(exact_id, principal)
                 except NotFoundError:
@@ -760,16 +854,28 @@ class SurfaceIngressService:
             assert final.reason_code is not None
             return final, None, final.reason_code
         authority = await self._principals.current(matched.tenant_id, matched.principal_id)
-        if authority is None or not authority.enabled:
+        surface = (
+            None
+            if authority is None
+            else _require_surface(await uow.devices.get(update.surface_id, authority.principal))
+        )
+        if authority is None or not authority.enabled or surface is None:
+            reason = "surface.principal_unavailable"
+        elif surface.status is not DeviceStatus.ACTIVE:
+            # A revoked surface pairs no one and keeps no route; the code stays unused.
+            reason = "surface.unavailable"
+        else:
+            reason = None
+        if reason is not None:
             final = placeholder.model_copy(
                 update={
                     "disposition": InboundDisposition.REJECTED_ADMISSION,
-                    "reason_code": "surface.principal_unavailable",
+                    "reason_code": reason,
                 }
             )
             await uow.surfaces.receipts.replace(final)
-            assert final.reason_code is not None
-            return final, None, final.reason_code
+            return final, None, reason
+        assert authority is not None and surface is not None
         await uow.surfaces.pairings.record_code_attempt(matched.id, authority.principal)
         await uow.surfaces.pairings.consume_code(
             matched.id,
@@ -788,7 +894,6 @@ class SurfaceIngressService:
                 paired_at=self._clock.now(),
             )
         )
-        surface = _require_surface(await uow.devices.get(update.surface_id, authority.principal))
         await uow.devices.upsert(
             surface.with_surface_route(update.provider, update.chat_ref, self._clock.now()),
             authority.principal,
@@ -874,7 +979,7 @@ class SurfaceIngressService:
             admission = self._admission or uow.surfaces.admission
             decision = await admission.check(
                 bound_principal.tenant_id,
-                self._max_cost_reservation,
+                self._run_budget.max_cost,
                 self._clock.now(),
             )
             if not decision.allowed:
@@ -914,6 +1019,7 @@ class SurfaceIngressService:
             update.text,
             origin,
             authority.authority_version,
+            self._run_budget,
         )
         await uow.surfaces.sessions.touch_inbound(mapping.id, self._clock.now())
         await uow.surfaces.pairings.touch_pairing(pairing.id, self._clock.now())

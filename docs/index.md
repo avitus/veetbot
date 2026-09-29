@@ -71,7 +71,8 @@ as an archival record.
   Gmail, Email mode, and unsubscribe assistance.
 - [People memory operations](people-operations.md) — imports, directory
   repair, duplicates, erasure, and rollback.
-- [WhatsApp integration runbook](whatsapp-integration-runbook.md) and
+- [Telegram surface runbook](telegram-surface-runbook.md),
+  [WhatsApp integration runbook](whatsapp-integration-runbook.md), and
   [Bland calling setup](bland-setup.md) — the optional messaging and calling
   channels.
 

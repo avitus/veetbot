@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 from pydantic import SecretStr
@@ -239,3 +240,189 @@ async def test_surface_routes_hold_exact_scopes_absence_and_the_scope_ceiling(
             )
             assert widened.status_code == 409
             assert "code" not in widened.json()
+
+
+async def _whatsapp_surface(composition: Composition) -> UUID:
+    registered = await composition.services.devices.register(
+        composition.principal,
+        DeviceRegistration(
+            client_device_id="whatsapp:15551234567",
+            name="Veetbot WhatsApp",
+            kind=DeviceKind.SURFACE,
+            platform="whatsapp",
+            push_provider=PushProvider.WHATSAPP,
+            push_token=SecretStr("15551234567"),
+        ),
+    )
+    return registered.device.id
+
+
+def _inbound(surface_id: UUID, update_id: str, text: str) -> SurfaceInboundMessage:
+    return SurfaceInboundMessage(
+        surface_id=surface_id,
+        provider=PushProvider.WHATSAPP,
+        external_update_id=update_id,
+        sender_id="15550001111",
+        sender_label="Owner",
+        chat_ref="15550001111",
+        chat_kind=SurfaceChatKind.DIRECT,
+        message_kind=SurfaceMessageKind.TEXT,
+        text=text,
+        received_at=NOW,
+    )
+
+
+async def test_surface_responses_are_private_and_pairings_are_an_allow_listed_view(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path, enabled=True)
+    async with build(settings=settings, sequential_ids=True) as composition:
+        surface_id = await _whatsapp_surface(composition)
+        async with await _client(composition, settings) as client:
+            issued = await client.post(
+                f"/v1/surfaces/{surface_id}/pairing-codes",
+                headers={"Idempotency-Key": "private-view"},
+                json={"granted_scopes": ["run.write"], "label": "Owner"},
+            )
+            await composition.surface_ingress.ingest(
+                _inbound(surface_id, "wamid.private-view", f"/pair {issued.json()['code']}")
+            )
+            listed = await client.get("/v1/surfaces")
+            one = await client.get(f"/v1/surfaces/{surface_id}")
+            pairings = await client.get(f"/v1/surfaces/{surface_id}/pairings")
+            revoked = await client.post(f"/v1/surfaces/pairings/{pairings.json()[0]['id']}/revoke")
+
+    public_fields = {
+        "id",
+        "surface_id",
+        "sender_id",
+        "sender_label",
+        "granted_scopes",
+        "paired_at",
+        "revoked_at",
+        "last_message_at",
+    }
+    for response in (issued, listed, one, pairings, revoked):
+        assert response.status_code in {200, 201}, response.text
+        assert response.headers["Cache-Control"] == "private, no-store"
+    assert set(pairings.json()[0]) == public_fields
+    assert set(revoked.json()) == public_fields
+    assert composition.principal.tenant_id not in pairings.text
+
+
+async def test_a_repeated_pairing_key_is_a_non_retryable_conflict_naming_the_code(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path, enabled=True)
+    async with build(settings=settings, sequential_ids=True) as composition:
+        surface_id = await _whatsapp_surface(composition)
+        async with await _client(composition, settings) as client:
+            path = f"/v1/surfaces/{surface_id}/pairing-codes"
+            headers = {"Idempotency-Key": "lost-response"}
+            body = {"granted_scopes": ["run.write"], "label": "Owner"}
+            issued = await client.post(path, headers=headers, json=body)
+            replay = await client.post(path, headers=headers, json=body)
+
+    assert issued.status_code == 201
+    assert replay.status_code == 409
+    details = replay.json()["error"]["details"]
+    assert details == {
+        "reason": "surface.pairing_code_already_issued",
+        "pairing_code_id": issued.json()["id"],
+        "expires_at": issued.json()["expires_at"],
+    }
+    assert issued.json()["code"] not in replay.text
+
+
+async def test_composed_surface_ingress_refuses_self_approval_when_the_profile_does(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+    from uuid import UUID as _UUID
+
+    from agent_core.domain.approvals import ApprovalRequest, ApprovalStatus
+    from agent_core.domain.policies import (
+        ActionKind,
+        PolicyDecision,
+        PolicyDecisionType,
+        RiskLevel,
+    )
+    from agent_core.domain.runs import RunStatus
+    from agent_core.domain.surfaces import Pairing
+    from tests.contract.support import run, session
+
+    config_dir = tmp_path / "config"
+    overlay = config_dir / "policy" / "default.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("self_approval:\n  enabled: false\n", encoding="utf-8")
+    settings = replace(_settings(tmp_path, enabled=True), config_dir=config_dir)
+    approval_id = _UUID("00000000-0000-4000-8000-0000000014d0")
+    async with build(settings=settings, sequential_ids=True) as composition:
+        surface_id = await _whatsapp_surface(composition)
+        owner = composition.principal
+        waiting = run(status=RunStatus.WAITING_FOR_APPROVAL).model_copy(
+            update={
+                "id": _UUID("00000000-0000-4000-8000-0000000014d3"),
+                "session_id": _UUID("00000000-0000-4000-8000-0000000014d2"),
+                "tenant_id": owner.tenant_id,
+                "principal_scopes": {"approval.resolve"},
+            }
+        )
+        async with composition.uow_factory() as uow:
+            await uow.sessions.create(
+                session().model_copy(
+                    update={
+                        "id": waiting.session_id,
+                        "tenant_id": owner.tenant_id,
+                        "principal_id": owner.principal_id,
+                    }
+                )
+            )
+            await uow.runs.create(waiting)
+            await uow.surfaces.pairings.create_pairing(
+                Pairing(
+                    id=_UUID("00000000-0000-4000-8000-0000000014d1"),
+                    surface_id=surface_id,
+                    tenant_id=owner.tenant_id,
+                    principal_id=owner.principal_id,
+                    sender_id="15550001111",
+                    granted_scopes=frozenset({"approval.resolve"}),
+                    paired_at=NOW,
+                )
+            )
+            await uow.approvals.create(
+                ApprovalRequest(
+                    id=approval_id,
+                    tenant_id=owner.tenant_id,
+                    principal_id=owner.principal_id,
+                    session_id=_UUID("00000000-0000-4000-8000-0000000014d2"),
+                    run_id=_UUID("00000000-0000-4000-8000-0000000014d3"),
+                    action_kind=ActionKind.TOOL_CALL,
+                    action_id=_UUID("00000000-0000-4000-8000-0000000014d4"),
+                    status=ApprovalStatus.PENDING,
+                    action_summary="Send a message.",
+                    arguments={},
+                    normalized_arguments_hash="hash",
+                    required_scopes=set(),
+                    agent_version="1.0.0",
+                    risk=RiskLevel.HIGH,
+                    policy_reason="policy.test",
+                    policy_decision=PolicyDecision(
+                        decision=PolicyDecisionType.REQUIRE_APPROVAL,
+                        reason_code="policy.test",
+                        explanation="Test approval.",
+                        policy_version="test@1",
+                    ),
+                    policy_version="test@1",
+                    created_at=NOW,
+                )
+            )
+
+        refused = await composition.surface_ingress.ingest(
+            _inbound(surface_id, "wamid.self-approve", f"/approve {approval_id}")
+        )
+        async with composition.uow_factory() as uow:
+            approval = await uow.approvals.get(approval_id, owner)
+
+    assert refused.reason_code == "surface.self_approval_denied"
+    assert approval.status is ApprovalStatus.PENDING
