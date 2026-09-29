@@ -1116,3 +1116,28 @@ async def test_allowed_task_on_postgresql(tmp_path: Path) -> None:
 
     assert [payload["authorization_use"] for payload in authorizations] == [1, 2]
     assert grant.actions_used == 2
+
+
+async def test_saved_site_makes_an_offer_without_rebuilding_the_worker(tmp_path: Path) -> None:
+    from agent_core.domain.browser_task_grants import (
+        BrowserTaskScopePolicy,
+        parse_task_grant_scopes,
+    )
+
+    async with pipeline(
+        tmp_path, allow_turns(), settings=task_grant_settings(BROWSER_TASK_GRANT_SCOPES="")
+    ) as harness:
+        service = harness.composition.services.browser_task_grants
+        assert service is not None
+        assert (await service.get_scopes(harness.owner)).scopes == ()
+        await service.update_scopes(
+            harness.owner, BrowserTaskScopePolicy(revision=0, scopes=parse_task_grant_scopes(SCOPE))
+        )
+        run_id = await harness.submit("Do one lesson.")
+        approval = await harness.pending(run_id)
+        assert approval.task_grant_offer is not None
+        assert approval.task_grant_offer.origin == ORIGIN
+        await service.update_scopes(harness.owner, BrowserTaskScopePolicy(revision=1))
+        with pytest.raises(ConflictError):
+            await harness.allow_task(run_id)
+        assert not harness.runtimes[-1].performed

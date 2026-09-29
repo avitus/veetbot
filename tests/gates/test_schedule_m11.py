@@ -88,7 +88,7 @@ def test_once_cadence_requires_an_aware_instant_and_normalizes_to_utc() -> None:
         OnceCadence(at=datetime(2026, 8, 20, 16))
 
 
-def test_daily_spring_gap_advances_to_first_valid_local_instant() -> None:
+def _check_daily_spring_gap_advances_to_first_valid_local_instant() -> None:
     cadence = DailyCadence(local_time=time(2, 30), timezone="America/Los_Angeles")
 
     occurrence = RecurrenceCalculator.next_after(
@@ -99,7 +99,7 @@ def test_daily_spring_gap_advances_to_first_valid_local_instant() -> None:
     assert occurrence.astimezone(ZoneInfo(cadence.timezone)).time() == time(3)
 
 
-def test_daily_fall_fold_chooses_the_earlier_instant_once() -> None:
+def _check_daily_fall_fold_chooses_the_earlier_instant_once() -> None:
     cadence = DailyCadence(local_time=time(1, 30), timezone="America/Los_Angeles")
     earlier_fold = datetime(2026, 11, 1, 8, 30, tzinfo=UTC)
 
@@ -112,7 +112,7 @@ def test_daily_fall_fold_chooses_the_earlier_instant_once() -> None:
     )
 
 
-def test_daily_recurrence_uses_civil_time_instead_of_utc_duration() -> None:
+def _check_daily_recurrence_uses_civil_time_instead_of_utc_duration() -> None:
     cadence = DailyCadence(local_time=time(9), timezone="America/Los_Angeles")
 
     before_transition = RecurrenceCalculator.next_after(
@@ -126,7 +126,7 @@ def test_daily_recurrence_uses_civil_time_instead_of_utc_duration() -> None:
     assert after_transition - before_transition == timedelta(hours=23)
 
 
-def test_weekly_cadence_normalizes_weekdays_and_rejects_invalid_definitions() -> None:
+def _check_weekly_cadence_normalizes_weekdays_and_rejects_invalid_definitions() -> None:
     cadence = WeeklyCadence(
         local_time=time(9),
         weekdays=(5, 1, 3),
@@ -203,10 +203,10 @@ def _check_generated_civil_time_recurrence(
 def test_civil_time_recurrence_is_deterministic() -> None:
     """Run the complete example and generated contract behind the registered gate."""
 
-    test_daily_spring_gap_advances_to_first_valid_local_instant()
-    test_daily_fall_fold_chooses_the_earlier_instant_once()
-    test_daily_recurrence_uses_civil_time_instead_of_utc_duration()
-    test_weekly_cadence_normalizes_weekdays_and_rejects_invalid_definitions()
+    _check_daily_spring_gap_advances_to_first_valid_local_instant()
+    _check_daily_fall_fold_chooses_the_earlier_instant_once()
+    _check_daily_recurrence_uses_civil_time_instead_of_utc_duration()
+    _check_weekly_cadence_normalizes_weekdays_and_rejects_invalid_definitions()
     _check_generated_civil_time_recurrence()
 
 
@@ -263,7 +263,7 @@ def test_schedule_revision_requires_finite_positive_limits(limits: RunLimits) ->
         _revision(limits=limits)
 
 
-def test_schedule_revision_pins_cadence_timezone_and_bounds() -> None:
+def _check_schedule_revision_pins_cadence_timezone_and_bounds() -> None:
     assert _revision().requested_scopes == frozenset({"memory.read"})
 
     with pytest.raises(ValidationError, match="cadence timezone"):
@@ -278,7 +278,7 @@ def test_schedule_revision_pins_cadence_timezone_and_bounds() -> None:
             _revision(**{field: 0})
 
 
-def test_occurrence_disposition_controls_links_and_reason() -> None:
+def _check_occurrence_disposition_controls_links_and_reason() -> None:
     materialized = ScheduleOccurrence(
         id=UUID(int=1),
         schedule_id=SCHEDULE_ID,
@@ -364,5 +364,5 @@ def test_schedule_domain_validation_is_total() -> None:
     """Exercise generated state combinations and every cross-field contract."""
 
     _check_generated_schedule_state_is_total()
-    test_schedule_revision_pins_cadence_timezone_and_bounds()
-    test_occurrence_disposition_controls_links_and_reason()
+    _check_schedule_revision_pins_cadence_timezone_and_bounds()
+    _check_occurrence_disposition_controls_links_and_reason()

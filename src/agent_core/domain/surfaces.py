@@ -14,6 +14,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from agent_core.domain.devices import PushProvider
+from agent_core.domain.runs import RunLimits
 from agent_core.domain.sessions import SessionStatus
 
 PAIRING_CODE_BYTES = 8
@@ -49,6 +50,7 @@ class InboundDisposition(StrEnum):
     REJECTED_ADMISSION = "rejected_admission"
     IGNORED_MEDIA = "ignored_media"
     IGNORED_CHAT_KIND = "ignored_chat_kind"
+    IGNORED_UNREADABLE = "ignored_unreadable"
 
 
 class SessionRotationReason(StrEnum):
@@ -112,12 +114,15 @@ class SurfaceLimits(BaseModel):
     max_active_runs_per_tenant: int = Field(gt=0)
     daily_cost: Decimal = Field(gt=0)
     monthly_cost: Decimal = Field(gt=0)
+    max_cost_per_run: Decimal = Field(gt=0)
+    synthesis_reserve_cost: Decimal = Field(ge=0)
     inbound_text_max_chars: int = Field(gt=0, le=1_000_000)
     chunk_size: int = Field(gt=0, le=4096)
     claim_batch: int = Field(gt=0)
     lease_seconds: int = Field(gt=0)
     fallback_poll_seconds: float = Field(gt=0)
     retry_delays_seconds: tuple[float, ...] = Field(min_length=1)
+    reply_max_attempts: int = Field(gt=0)
 
     @field_validator("retry_delays_seconds")
     @classmethod
@@ -130,7 +135,51 @@ class SurfaceLimits(BaseModel):
     def cost_windows_are_ordered(self) -> Self:
         if self.monthly_cost < self.daily_cost:
             raise ValueError("surface monthly cost must cover the daily cost")
+        if self.max_cost_per_run > self.daily_cost:
+            raise ValueError("a surface run budget must fit within the daily cost")
+        if self.synthesis_reserve_cost >= self.max_cost_per_run:
+            raise ValueError("the surface synthesis cost reserve must be below the run budget")
         return self
+
+    @property
+    def run_budget(self) -> SurfaceRunBudget:
+        return SurfaceRunBudget(
+            max_cost=self.max_cost_per_run,
+            synthesis_reserve_cost=self.synthesis_reserve_cost,
+        )
+
+
+class SurfaceRunBudget(BaseModel):
+    """What one run a paired message starts may spend (ADR-0064 amendment).
+
+    Surface admission reserves `max_cost` against the tenant's daily and monthly
+    surface ceilings, and the run it admits carries that cap, so a reservation
+    can never be smaller than what the run is able to spend.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    max_cost: Decimal = Field(gt=0)
+    synthesis_reserve_cost: Decimal = Field(ge=0)
+
+    @model_validator(mode="after")
+    def reserve_fits_the_budget(self) -> Self:
+        if self.synthesis_reserve_cost >= self.max_cost:
+            raise ValueError("the surface synthesis cost reserve must be below the run budget")
+        return self
+
+    def applied_to(self, limits: RunLimits) -> RunLimits:
+        """The run's limits under this budget; an agent's lower cap stands unchanged."""
+
+        if limits.max_cost is not None and limits.max_cost <= self.max_cost:
+            return limits
+        return RunLimits.model_validate(
+            limits.model_dump()
+            | {
+                "max_cost": self.max_cost,
+                "synthesis_reserve_cost": self.synthesis_reserve_cost,
+            }
+        )
 
 
 class SurfaceInboundMessage(BaseModel):
@@ -162,6 +211,19 @@ class SurfaceInboundMessage(BaseModel):
         elif self.text is not None:
             raise ValueError("non-text surface update cannot carry text")
         return self
+
+
+class SurfaceUnreadableUpdate(BaseModel):
+    """An update the channel identified but whose sender or chat it could not read.
+
+    It carries only its identity, so ingress can receipt it and the poll offset
+    moves past it instead of re-fetching it forever.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    surface_id: UUID
+    external_update_id: str = Field(min_length=1, max_length=255)
 
 
 class SurfaceTransportResult(BaseModel):
@@ -464,11 +526,12 @@ def chunk_surface_text(text: str, *, limit: int = 4096) -> tuple[str, ...]:
     chunks: list[str] = []
     remainder = text
     while len(remainder) > limit:
-        cut = remainder.rfind("\n\n", 0, limit + 1)
+        # A separator is kept with the chunk it ends, so it must end by `limit`.
+        cut = remainder.rfind("\n\n", 0, limit)
         if cut >= 0:
             cut += 2
         else:
-            cut = remainder.rfind("\n", 0, limit + 1)
+            cut = remainder.rfind("\n", 0, limit)
             cut = cut + 1 if cut >= 0 else limit
         chunks.append(remainder[:cut])
         remainder = remainder[cut:]

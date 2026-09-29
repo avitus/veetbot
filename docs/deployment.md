@@ -5,11 +5,13 @@ title: Production Deployment
 # Atomic DigitalOcean deployment
 
 Veetbot deploys to one Ubuntu Droplet at `api.veetbot.com`. PostgreSQL, the API,
-the durable worker, the maintenance worker, Docker with gVisor, and Nginx share
-that host. CircleCI packages the tested `main` commit and promotes an immutable
-release below `/opt/veetbot/releases`. The same pipeline publishes the complete
-MkDocs site at `docs.veetbot.com` from a checksummed artifact tied to that
-release.
+the interactive and asynchronous run workers, the maintenance worker, the
+credential-free execution service, the browser-profile service, Docker with
+gVisor, and Nginx share that host, with the optional schedule, notification,
+surface, and calling roles when they are enabled. CircleCI packages the tested
+`main` commit and promotes an immutable release below `/opt/veetbot/releases`.
+The same pipeline publishes the complete MkDocs site at `docs.veetbot.com` from
+a checksummed artifact tied to that release.
 
 The production deployment scripts require the Ubuntu GNU userland: Bash, GNU
 coreutils (including `mv -T` and `sha256sum`), GNU tar and findutils, and
@@ -159,9 +161,11 @@ bounded public-probe budget fails the CircleCI job after promotion; it is not a
 failure inside `deploy/app/release.sh`.
 
 The optional Telegram and WhatsApp channels run in the separate surface role.
-Use the [WhatsApp integration runbook](whatsapp-integration-runbook.md) for the
-Meta owner ceremony, secret-file installation, activation, pairing, live smoke,
-and rollback; do not place channel credentials in the application environment.
+Use the [Telegram surface runbook](telegram-surface-runbook.md) for the bot,
+token file, both environments, activation, pairing, live smoke, and rollback,
+and the [WhatsApp integration runbook](whatsapp-integration-runbook.md) for the
+Meta owner ceremony that adds the second channel; do not place channel
+credentials in the application environment, which refuses to start with one.
 
 A pre-promotion failure removes only its staged directory. A post-promotion
 failure remains visible for diagnosis and manual rollback. Database migrations
@@ -334,6 +338,22 @@ positive integer percentages summing to 100. The legacy singular selectors
 remain valid for one-provider deployments, and both capabilities stay disabled
 when neither form enables them.
 
+To enable image and video generation (ADR-0140), provision `TENSORSCALE_API_KEY`
+in the API and worker environment and grant `media.generate` plus
+`artifact.write` in the owner's `AUTH_SCOPES`. Doppler's development key cache
+does not update the production root-owned environment file. Permit SenseNova
+U1.5 and LTX-2.5 Fast (`ltx2-5-fast`) on the key, restart the API and workers,
+and open a new Chat: old sessions retain their pinned tool roster. No additional
+feature flag is needed for generation. To upload reference pictures, enable
+`AGENT_ATTACHMENT_UPLOADS_ENABLED=1` and grant `artifact.read` for input reads.
+Version 1.1.0 accepts PNG/JPEG/WebP references from the same chat: up to eight
+for image edits (20 MiB each, 64 MiB total), or first/last frames for video
+(10 MiB each). Each approved call creates one PNG or MP4 attachment;
+video duration is bounded to 5 or 10 seconds. External provider charges are
+separate from language-model usage accounting. There are no automatic retries
+for failures or timeouts, since the provider may already have charged. Keep
+the credential out of sandbox and scheduler-only environments.
+
 To enable the typed-judgment provider (ADR-0110), add its selector and key to
 that same root-owned file:
 
@@ -373,6 +393,22 @@ reports the missing scopes and every model stays at the deployment default.
 The routes are always mounted. A saved chat model applies to new app chats;
 the chat effort applies to later agent runs except typed email tasks, which
 retain provider-default effort. The memory choice applies to later formation.
+
+The template's `AUTH_SCOPES` grants the owner chat, artifacts and attachments,
+Website Access and task grants, schedules, devices and notifications, memory
+review and deletion (`memory.write`, ADR-0117), People, and model settings. A
+scope grants nothing while its feature's flag is off. A host whose file
+predates a feature lacks that feature's scopes, so compare the line with the
+template after a release that adds one. Scopes are exact strings with no
+wildcard, and a name outside the platform's closed vocabulary stops the
+service at startup; MCP server scopes are derived from configuration and never
+listed here. Features the template leaves out need their own:
+`email.read,email.write` for Email mode (see the
+[Gmail runbook](gmail-integration-runbook.md)), `persona.read,persona.write`
+for the Persona screen, `call.read,call.cancel,call.delete` for calling (see
+[Bland calling setup](bland-setup.md)), and `run.delegate` for delegated child
+runs. The surface role's own environment carries `surface.read` and
+`surface.write`.
 
 The host exports no metrics, so the service log answers whether these consumers
 are running. Every long-running service writes JSON lines, one object per
@@ -671,14 +707,21 @@ only after every device the owner uses runs a client build that understands
 `approve_for_task`. Turning them on takes three changes together in
 `/etc/veetbot/veetbot.env`: add `browser.grant.read` and
 `browser.grant.write` to the owner principal's `AUTH_SCOPES`, set
-`BROWSER_TASK_GRANT_SCOPES` to the exact site scopes the owner allows (one
+`BROWSER_TASK_GRANT_SCOPES` optionally to initial exact site scopes (one
 public-HTTPS origin and one path segment each, comma-separated; production
-uses `https://www.duolingo.com/lesson`), and set
+initially used `https://www.duolingo.com/lesson`), and set
 `BROWSER_TASK_GRANTS_ENABLED=1`. Then restart the API and the workers. Both
-settings require `BROWSER_PROVIDER=hosted`. Adding a scope widens what the
-owner can allow from an approval card, and it is the owner's decision.
-Removing one ends its active grants at their next authorization. Unsetting
-the flag removes the task-grant routes and offers.
+settings require `BROWSER_PROVIDER=hosted`.
+
+After the ADR-0141 migration, the enabled server seeds the owner's persisted
+list only when no policy exists. Thereafter use **Settings → Website Access →
+Task approval websites** on any client to add or remove entries. Changes are
+shared across clients and workers immediately; no deployment, environment
+edit or restart is needed. Clearing the list persists an empty policy, so
+restarts never repopulate it from the seed. Removing an entry ends its active
+task permissions. Adding an entry enables a task offer; the owner still
+approves each task. Unsetting the feature flag removes both management
+routes and task-grant routes and offers.
 
 ## CircleCI setup
 

@@ -347,6 +347,7 @@ session.read      session.write
 run.read          run.write        run.cancel
 approval.read     approval.resolve
 artifact.read     artifact.write
+media.generate
 skill.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
@@ -491,7 +492,10 @@ offline record of every enqueued notification and its delivery outcomes.
 and two exact scopes, `surface.read` and `surface.write`, mounted only when
 `AGENT_SURFACE_API_ENABLED` is set; a paired message itself enters through the
 same submission function `POST /v1/sessions/{id}/messages` uses, not through a
-new route.
+new route. Every surface response is `Cache-Control: private, no-store`; a
+pairing is an allow-listed view without tenant, principal, or revoker
+identity; and a repeated pairing-code `Idempotency-Key` is a non-retryable
+`409` naming the issued code's identifier and expiry, never the code.
 
 ```text
 GET    /v1/surfaces                                  surface.read
@@ -1585,8 +1589,8 @@ HTTP specification permits for a server that does not implement ranges.
 ## Browser profiles, authentication, and grants
 
 Milestone 10 adds the fourteen scoped browser routes enumerated in the scope
-table, bringing the current public route surface to thirty-one without changing
-the completed fourteen-route Milestone 5 baseline. The canonical request,
+table, bringing the public route surface at that milestone to thirty-one without
+changing the completed fourteen-route Milestone 5 baseline. The canonical request,
 response, tenancy, secret-exclusion, lifecycle, and idempotency contracts are in
 [browser-automation.md](browser-automation.md#profile-api-contract). Public
 views never include provider references, key versions, lease references,
@@ -2259,3 +2263,22 @@ content-free session event, `artifact.uploaded`, keyed by the idempotency key.
 An unclaimed upload expires after 24 hours; sending it in a message claims it
 for that run and keeps it for the life of the conversation, as step 5 of the
 submit handler describes.
+
+### Task approval website settings (ADR-0141)
+
+When `BROWSER_TASK_GRANTS_ENABLED` is enabled, `GET /v1/browser-task-scopes`
+under `browser.grant.read` returns `{ "revision": 0, "scopes": [] }` for an
+unconfigured principal. `PUT /v1/browser-task-scopes` under
+`browser.grant.write` requires both fields and returns the saved revision
+and canonical list. Each scope contains only `origin` and `path_prefix`.
+No tenant or principal field is accepted; the authenticated owner selects
+the record. No model tool exposes these operations.
+
+The maximum is sixteen unique exact public HTTPS origins with one safe path
+segment each. Unknown fields, malformed scopes and absent fields receive
+`400 malformed_request`. Stale edits receive `409 conflict` and leave the
+list unchanged. An identical immediate replay returns the already-saved
+revision; an unchanged list does not advance its revision. Disabled routes
+return 404. The server stores even an empty list, and removing scopes ends
+their unended task grants in the same transaction. See
+[browser-automation.md](browser-automation.md) for the retained task limits.

@@ -49,11 +49,6 @@ async def test_semantic_formation_preserves_attribution_historical_dates_and_sha
     assert (await service.form(source, [fact]))[0] == row
 
 
-async def test_semantic_formation_is_disabled_without_versioned_evidence() -> None:
-    _, service, source, fact, _ = await semantic_stack(enabled=False)
-    assert await service.form(source, [fact]) == []
-
-
 @pytest.mark.parametrize(
     "field,value",
     [

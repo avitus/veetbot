@@ -23,6 +23,7 @@ from agent_core.domain.surfaces import (
     SurfaceMessageKind,
     SurfaceTransportOutcome,
     SurfaceTransportResult,
+    SurfaceUnreadableUpdate,
 )
 
 TELEGRAM_API_ORIGIN = "https://api.telegram.org"
@@ -30,6 +31,8 @@ _MAX_RESPONSE_BYTES = 65_536
 logger = logging.getLogger(__name__)
 
 type TelegramIngest = Callable[[SurfaceInboundMessage], Awaitable[object]]
+type TelegramRecordUnreadable = Callable[[SurfaceUnreadableUpdate], Awaitable[object]]
+type TelegramUpdate = SurfaceInboundMessage | SurfaceUnreadableUpdate
 type LatestCommittedUpdate = Callable[[], Awaitable[int | None]]
 type TelegramPollSucceeded = Callable[[int], Awaitable[None]]
 
@@ -57,7 +60,7 @@ class TelegramPollingTransport(Protocol):
         surface_id: UUID,
         offset: int,
         timeout_seconds: int,
-    ) -> tuple[SurfaceInboundMessage, ...]: ...
+    ) -> tuple[TelegramUpdate, ...]: ...
 
 
 class InMemoryTelegramPollLock:
@@ -262,7 +265,7 @@ class TelegramBotTransport:
         surface_id: UUID,
         offset: int,
         timeout_seconds: int,
-    ) -> tuple[SurfaceInboundMessage, ...]:
+    ) -> tuple[TelegramUpdate, ...]:
         if offset < 0 or timeout_seconds <= 0 or timeout_seconds > 50:
             raise ValueError("Telegram poll bounds are invalid")
         result = await self._request(
@@ -275,15 +278,24 @@ class TelegramBotTransport:
         )
         if not isinstance(result, list):
             raise TelegramTransportError("surface.transport_invalid_response")
-        messages: list[SurfaceInboundMessage] = []
+        updates: list[TelegramUpdate] = []
         for update in result:
-            if isinstance(update, dict) and "message" not in update:
-                continue
+            update_id = update.get("update_id") if isinstance(update, dict) else None
+            if not isinstance(update_id, int) or isinstance(update_id, bool) or update_id < 0:
+                # Without an identifier nothing can be receipted or skipped.
+                raise TelegramTransportError("surface.transport_invalid_response")
             try:
-                messages.append(normalized_telegram_update(update, surface_id=surface_id))
+                updates.append(normalized_telegram_update(update, surface_id=surface_id))
             except ValueError:
-                raise TelegramTransportError("surface.transport_invalid_response") from None
-        return tuple(messages)
+                # Identified but unreadable (no sender, not a message): it is
+                # receipted by identity so the offset moves past it.
+                updates.append(
+                    SurfaceUnreadableUpdate(
+                        surface_id=surface_id,
+                        external_update_id=str(update_id),
+                    )
+                )
+        return tuple(updates)
 
     async def send_text(self, chat_ref: str, text_value: str) -> SurfaceTransportResult:
         if not chat_ref or len(chat_ref) > 255 or not text_value:
@@ -333,6 +345,7 @@ class TelegramPoller:
         transport: TelegramPollingTransport,
         latest_committed_update_id: LatestCommittedUpdate,
         ingest: TelegramIngest,
+        record_unreadable: TelegramRecordUnreadable,
         poll_lock: TelegramPollLock,
         timeout_seconds: int,
         fallback_poll_seconds: float,
@@ -344,6 +357,7 @@ class TelegramPoller:
         self._transport = transport
         self._latest_committed_update_id = latest_committed_update_id
         self._ingest = ingest
+        self._record_unreadable = record_unreadable
         self._poll_lock = poll_lock
         self._timeout_seconds = timeout_seconds
         self._fallback_poll_seconds = fallback_poll_seconds
@@ -373,7 +387,10 @@ class TelegramPoller:
         for update in updates:
             if self._stopping:
                 break
-            await self._ingest(update)
+            if isinstance(update, SurfaceUnreadableUpdate):
+                await self._record_unreadable(update)
+            else:
+                await self._ingest(update)
         return len(updates)
 
     async def run_forever(self) -> None:

@@ -257,12 +257,14 @@ async def test_each_history_marker_closes_a_prefix_a_later_request_repeats() -> 
     # turn's reasoning, and the next run moves every row after its history.
     whole = len(step.conversation)
     assert _dumped(next_step.conversation[:whole]) != _dumped(step.conversation)
-    assert _dumped(next_run.conversation[: stable + 1]) != _dumped(step.conversation[: stable + 1])
+    # Completed active exchanges also become portable history on the next run;
+    # fresh context no longer sits in front of them.
+    assert _dumped(next_run.conversation[: stable + 1]) == _dumped(step.conversation[: stable + 1])
     assert _history_marks(next_step)[0] == carried
     assert _history_marks(next_run)[0] > carried
 
 
-async def test_a_first_run_marks_only_its_own_prefix() -> None:
+async def test_a_first_request_has_no_history_before_its_fresh_context() -> None:
     planner, builder = await _stack()
     await planner.plan(session(), agent(), principal(), _claude())
     first = run(status=RunStatus.RUNNING)
@@ -273,7 +275,8 @@ async def test_a_first_run_marks_only_its_own_prefix() -> None:
         principal(),
     )
 
-    assert _history_marks(request) == [len(request.conversation) - 1]
+    assert _history_marks(request) == []
+    assert isinstance(request.conversation[-1], UserMessage)
 
 
 async def test_the_milestone_1_builder_marks_the_prefix_before_its_runtime_row() -> None:

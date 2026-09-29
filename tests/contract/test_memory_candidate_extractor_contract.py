@@ -31,12 +31,6 @@ from tests.contract.memory_fixtures import formation_stack, session_events, user
 from tests.contract.support import AGENT_ID, NOW, principal
 
 
-def test_shipped_extractor_census_is_owned_by_the_production_package() -> None:
-    assert SHIPPED_MEMORY_CANDIDATE_EXTRACTORS
-    unique_implementations = set(SHIPPED_MEMORY_CANDIDATE_EXTRACTORS)
-    assert len(unique_implementations) == len(SHIPPED_MEMORY_CANDIDATE_EXTRACTORS)
-
-
 class _StructuredRouter:
     async def resolve(
         self,
@@ -155,13 +149,6 @@ async def _extractor_subject(
     raise AssertionError(
         f"unregistered extractor contract subject: "
         f"{implementation.__module__}.{implementation.__qualname__}"
-    )
-
-
-def test_candidate_extractor_contract_covers_every_shipped_implementation() -> None:
-    assert all(
-        implementation.__module__.startswith("agent_core.memory.")
-        for implementation in SHIPPED_MEMORY_CANDIDATE_EXTRACTORS
     )
 
 

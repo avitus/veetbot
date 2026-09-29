@@ -17,7 +17,11 @@ from agent_core.domain.browser import (
     BrowserGrantView,
     BrowserProfileView,
 )
-from agent_core.domain.browser_task_grants import BrowserTaskGrantView, TaskGrantEcho
+from agent_core.domain.browser_task_grants import (
+    BrowserTaskGrantView,
+    BrowserTaskScopePolicy,
+    TaskGrantEcho,
+)
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
@@ -164,6 +168,12 @@ class BrowserTaskGrantService(Protocol):
     async def get(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView: ...
 
     async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserTaskGrantView: ...
+
+    async def get_scopes(self, principal: Principal) -> BrowserTaskScopePolicy: ...
+
+    async def update_scopes(
+        self, principal: Principal, requested: BrowserTaskScopePolicy
+    ) -> BrowserTaskScopePolicy: ...
 
 
 class ApprovalService(Protocol):

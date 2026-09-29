@@ -81,20 +81,23 @@ def _current_user_text(items: list[ConversationItem]) -> str | None:
     return None
 
 
-def _insert_before_current_user(
+def _with_step_context(
     items: list[ConversationItem], additions: list[ConversationItem]
-) -> list[ConversationItem]:
-    if not additions:
-        return [item.model_copy(deep=True) for item in items]
-    for index in range(len(items) - 1, -1, -1):
-        item = items[index]
-        if isinstance(item, UserMessage) and item.trust is TrustLevel.USER:
-            return [
-                *[value.model_copy(deep=True) for value in items[:index]],
-                *[value.model_copy(deep=True) for value in additions],
-                *[value.model_copy(deep=True) for value in items[index:]],
-            ]
-    return [item.model_copy(deep=True) for item in items]
+) -> tuple[list[ConversationItem], int]:
+    """Keep completed exchanges before fresh context; a new user input stays last.
+
+    The returned index closes the portable prefix before the changing rows.
+    Never search backward for the run's original user message: after tool calls
+    it belongs to completed history, and inserting there invalidates every tool
+    exchange whenever recall, working state, skills or the date changes.
+    """
+    split = len(items)
+    if items and isinstance(items[-1], UserMessage) and items[-1].trust is TrustLevel.USER:
+        split -= 1
+    return (
+        [item.model_copy(deep=True) for item in [*items[:split], *additions, *items[split:]]],
+        split,
+    )
 
 
 def _canonical_json(value: object) -> bytes:
@@ -110,12 +113,12 @@ def _history_window(
 ) -> list[CacheBreakpoint]:
     """Place a plan's history window on one request's conversation (Section 10.1).
 
-    The window is two markers. One closes the history carried from earlier runs:
-    it is the only body prefix the next run repeats, since every row after it can
-    differ between runs. The other closes the longest prefix the next step of
-    this run repeats, which stops before a replayed provider continuation: the
-    next step no longer carries those reasoning items, and every envelope nonce
-    after them moves with their indices. A marker past either point would write a
+    The window is two markers. One closes the history carried from earlier runs,
+    protecting it even before this run completes an exchange. The other closes
+    the longest prefix the next step of
+    this run repeats, which stops before fresh step context or a replayed
+    provider continuation: the next step refreshes the context and no longer
+    carries those reasoning items. A marker past either point would write a
     cache entry that no later request reads.
     """
     placed: list[CacheBreakpoint] = []
@@ -466,14 +469,10 @@ class BudgetedContextBuilder:
                     principal_id=None,
                 )
             )
-        active_with_recall = _insert_before_current_user(active, [*recall_items, *correction_items])
-        fixed_body = [
-            *summary_items,
-            *skill_items,
-            *working_items,
-            runtime_item,
-            *active_with_recall,
-        ]
+        active_with_context, active_prefix = _with_step_context(
+            active, [*skill_items, *working_items, *recall_items, *correction_items, runtime_item]
+        )
+        fixed_body = [*summary_items, *active_with_context]
         fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
         fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
         recall_dropped = False
@@ -484,14 +483,10 @@ class BudgetedContextBuilder:
             # the context engine's "Yield order under pressure".
             recall_dropped = True
             recall_items = []
-            active_with_recall = _insert_before_current_user(active, correction_items)
-            fixed_body = [
-                *summary_items,
-                *skill_items,
-                *working_items,
-                runtime_item,
-                *active_with_recall,
-            ]
+            active_with_context, active_prefix = _with_step_context(
+                active, [*skill_items, *working_items, *correction_items, runtime_item]
+            )
+            fixed_body = [*summary_items, *active_with_context]
             fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
             fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
         available_history = (
@@ -506,7 +501,7 @@ class BudgetedContextBuilder:
             plan.model_id,
         )
         retained_history = [item.model_copy(deep=True) for item in history[cut:]]
-        retained_conversation = [*retained_history, *active_with_recall]
+        retained_conversation = [*retained_history, *active_with_context]
         validate_tool_pairs(retained_conversation)
 
         yield_steps: list[str] = ["legacy_tool_excerpts"] if legacy_excerpted else []
@@ -520,10 +515,7 @@ class BudgetedContextBuilder:
         body = [
             *summary_items,
             *retained_history,
-            *skill_items,
-            *working_items,
-            runtime_item,
-            *active_with_recall,
+            *active_with_context,
         ]
         rendered_body = envelope_items(body)
         body_tokens = self._estimator.estimate(rendered_body, plan.model_id)
@@ -588,13 +580,16 @@ class BudgetedContextBuilder:
             _canonical_json([item.model_dump(mode="json") for item in rendered_body])
         ).hexdigest()
         carried = len(summary_items) + len(retained_history)
-        stable = next(
-            (
-                index
-                for index, item in enumerate(rendered_body)
-                if isinstance(item, ProviderReasoningItem)
+        stable = min(
+            carried + active_prefix,
+            next(
+                (
+                    index
+                    for index, item in enumerate(rendered_body)
+                    if isinstance(item, ProviderReasoningItem)
+                ),
+                len(rendered_body),
             ),
-            len(rendered_body),
         )
         request = ModelRequest(
             model_policy=agent.model_policy,
@@ -628,7 +623,7 @@ class BudgetedContextBuilder:
                     plan.cache_breakpoints,
                     conversation=[*prefix, *rendered_body],
                     carried_through=len(prefix) + carried - 1 if carried else None,
-                    stable_through=len(prefix) + stable - 1,
+                    stable_through=len(prefix) + stable - 1 if stable else None,
                 ),
             ),
         )

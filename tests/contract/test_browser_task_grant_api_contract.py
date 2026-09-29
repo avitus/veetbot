@@ -334,6 +334,11 @@ async def stack(
                 ),
             )
         )
+    async with (
+        uow_factory() as uow,
+        uow.browser_task_grants.locked_scopes(principal(), defaults=scopes),
+    ):
+        pass
     dispatcher = Dispatcher()
 
     async def resume_waiting_run(uow: Any, run: Run) -> Run:
@@ -349,9 +354,7 @@ async def stack(
             dispatcher=dispatcher,
             resume_waiting_run=resume_waiting_run,
             self_approval_enabled=True,
-            task_grants=(
-                TaskGrantResolution(scopes=scopes, clock=clock) if task_grants_composed else None
-            ),
+            task_grants=(TaskGrantResolution(clock=clock) if task_grants_composed else None),
         ),
         task_grants=PublicBrowserTaskGrantService(uow_factory=uow_factory, clock=clock),
     )
@@ -673,6 +676,8 @@ async def test_task_grant_routes_exist_only_with_the_flag() -> None:
     assert [response.status_code for response in missing] == [404, 404, 404]
     assert added == {
         (("GET", GRANTS), "browser.grant.read"),
+        (("GET", "/v1/browser-task-scopes"), "browser.grant.read"),
+        (("PUT", "/v1/browser-task-scopes"), "browser.grant.write"),
         (("GET", f"{GRANTS}/{{grant_id}}"), "browser.grant.read"),
         (("POST", f"{GRANTS}/{{grant_id}}/revoke"), "browser.grant.write"),
     }

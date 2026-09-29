@@ -113,6 +113,32 @@ class BrowserTaskGrantScope(BaseModel):
         return origin == self.origin and path_is_within_prefix(urlsplit(url).path, self.path_prefix)
 
 
+class BrowserTaskScopePolicy(BaseModel):
+    """The owner's server-persisted, revisioned task approval website list."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    revision: int = Field(default=0, ge=0, strict=True)
+    scopes: tuple[BrowserTaskGrantScope, ...] = Field(
+        default=(), max_length=MAXIMUM_TASK_GRANT_SCOPES
+    )
+
+    @field_validator("scopes")
+    @classmethod
+    def unique_scopes(
+        cls, value: tuple[BrowserTaskGrantScope, ...]
+    ) -> tuple[BrowserTaskGrantScope, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate task approval scope")
+        return tuple(sorted(value, key=lambda scope: (scope.origin, scope.path_prefix)))
+
+
+class BrowserTaskScopeUpdate(BrowserTaskScopePolicy):
+    """Both the observed revision and replacement list are required on writes."""
+
+    revision: int = Field(ge=0, strict=True)
+    scopes: tuple[BrowserTaskGrantScope, ...] = Field(max_length=MAXIMUM_TASK_GRANT_SCOPES)
+
+
 def _parse_scope(entry: str) -> BrowserTaskGrantScope:
     if not entry:
         raise ValueError("is empty")

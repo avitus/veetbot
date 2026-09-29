@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -114,6 +115,76 @@ def test_sandbox_configuration_cannot_select_browser_resource_transport(
         proxy._policy()
 
 
+@pytest.mark.parametrize(
+    "serialized",
+    [
+        '{"mode":"allow","destinations":[]}',
+        '{"mode":"unsubscribe_https","destinations":[]}',
+        '["allowlist"]',
+        '{"mode":"allowlist","destinations":{"host":"pypi.org","ports":[443]}}',
+        '{"mode":"allowlist","destinations":[{"host":"10.0.0.1","ports":[443]}]}',
+        '{"mode":"allowlist","destinations":[{"host":"*.*.example.com","ports":[443]}]}',
+        '{"mode":"allowlist","destinations":[{"host":"pypi.org","ports":[]}]}',
+    ],
+    ids=[
+        "open_mode",
+        "unsubscribe_transport",
+        "not_a_mapping",
+        "destinations_not_a_list",
+        "address_destination",
+        "two_label_wildcard",
+        "no_ports",
+    ],
+)
+def test_serialized_sandbox_policy_is_validated_at_proxy_start(
+    monkeypatch: pytest.MonkeyPatch, serialized: str
+) -> None:
+    """The proxy re-validates the grammar it is handed rather than trusting its caller."""
+    monkeypatch.setenv("AGENT_EGRESS_POLICY", serialized)
+    with pytest.raises(ValueError):
+        proxy._policy()
+
+
+def test_serialized_sandbox_policy_defaults_to_deny(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_EGRESS_POLICY", "{}")
+    assert proxy._policy() == ("deny", ())
+    monkeypatch.setenv(
+        "AGENT_EGRESS_POLICY",
+        '{"mode":"allowlist","destinations":[{"host":"*.pythonhosted.org","ports":[443]}]}',
+    )
+    assert proxy._policy() == ("allowlist", (("*.pythonhosted.org", frozenset({443})),))
+
+
+async def test_deny_mode_refuses_and_audits_a_connect_without_dialing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    reader = asyncio.StreamReader()
+    reader.feed_data(b"CONNECT pypi.org:443 HTTP/1.1\r\nHost: pypi.org:443\r\n\r\n")
+    reader.feed_eof()
+    writer = _Writer()
+
+    async def resolved(_host: str, _port: int) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    async def open_connection(_host: str, _port: int) -> tuple[asyncio.StreamReader, Any]:
+        raise AssertionError("deny mode reached the dial boundary")
+
+    monkeypatch.setattr(proxy, "_resolved", resolved)
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    await proxy._handle(reader, writer, ("deny", ()), tenant_id="tenant-a", run_id="run-1")  # type: ignore[arg-type]
+
+    assert bytes(writer.data).startswith(b"HTTP/1.1 403 Forbidden")
+    audit = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert audit == {
+        "host": "pypi.org",
+        "port": 443,
+        "reason": "mode_deny",
+        "resolved_addresses": ["93.184.216.34"],
+        "run_id": "run-1",
+        "tenant_id": "tenant-a",
+    }
+
+
 class _Writer:
     def __init__(self) -> None:
         """Capture proxy output and connection closure without creating a socket."""
@@ -199,6 +270,43 @@ async def test_plaintext_proxy_closes_after_one_audited_request(
             b"Host: allowed.example:8080\r\n"
             b"Content-Length: 1\r\nContent-Length: 1\r\n\r\nx"
         ),
+        (
+            b"POST http://allowed.example:8080/ HTTP/1.1\r\n"
+            b"Host: allowed.example:8080\r\n"
+            b"Transfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n"
+        ),
+        (
+            b"POST http://allowed.example:8080/ HTTP/1.1\r\n"
+            b"Host: allowed.example:8080\r\n"
+            b"Content-Length: -1\r\n\r\n"
+        ),
+        # The Host header must name the request target, exactly once.
+        (b"GET http://allowed.example:8080/ HTTP/1.1\r\nHost: denied.example:8080\r\n\r\n"),
+        (b"GET http://allowed.example:8080/ HTTP/1.1\r\nHost: allowed.example:80\r\n\r\n"),
+        (b"GET http://allowed.example:8080/ HTTP/1.1\r\n\r\n"),
+        (
+            b"GET http://allowed.example:8080/ HTTP/1.1\r\n"
+            b"Host: allowed.example:8080\r\nHost: allowed.example:8080\r\n\r\n"
+        ),
+        (b"GET http://allowed.example:8080/ HTTP/1.1\r\nHost allowed.example\r\n\r\n"),
+        # Targets carry an explicit port; the grammar has no default.
+        (b"GET http://allowed.example/ HTTP/1.1\r\nHost: allowed.example\r\n\r\n"),
+        (b"GET /relative HTTP/1.1\r\nHost: allowed.example:8080\r\n\r\n"),
+        (b"CONNECT allowed.example HTTP/1.1\r\nHost: allowed.example\r\n\r\n"),
+    ],
+    ids=[
+        "https_absolute_uri",
+        "repeated_content_length",
+        "transfer_encoding",
+        "negative_content_length",
+        "host_mismatch",
+        "host_port_mismatch",
+        "missing_host",
+        "repeated_host",
+        "malformed_header",
+        "implicit_port",
+        "relative_target",
+        "connect_without_port",
     ],
 )
 async def test_plaintext_proxy_rejects_ambiguous_requests_before_dialing(
@@ -217,7 +325,11 @@ async def test_plaintext_proxy_rejects_ambiguous_requests_before_dialing(
         dialed = True
         raise AssertionError("invalid proxy request reached the dial boundary")
 
+    async def resolved(_host: str, _port: int) -> tuple[str, ...]:
+        raise AssertionError("invalid proxy request reached DNS")
+
     monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    monkeypatch.setattr(proxy, "_resolved", resolved)
 
     await proxy._handle(
         reader,
@@ -227,6 +339,7 @@ async def test_plaintext_proxy_rejects_ambiguous_requests_before_dialing(
 
     assert dialed is False
     assert bytes(writer.data).startswith(b"HTTP/1.1 502 Bad Gateway")
+    assert writer.closed is True
 
 
 async def test_https_redirect_connect_is_refused_before_upstream_dial(

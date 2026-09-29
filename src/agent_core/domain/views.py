@@ -53,6 +53,7 @@ from agent_core.domain.persona import (
 )
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, FailureReason, Run, RunStatus
 from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.surfaces import Pairing
 
 
 class TextContentBlock(BaseModel):
@@ -242,6 +243,33 @@ class DeviceView(BaseModel):
     last_seen_at: datetime
     created_at: datetime
     updated_at: datetime
+
+
+class SurfacePairingView(BaseModel):
+    """A surface pairing as the API returns it: an allow-list that leaves out the
+    tenant, principal, and revoker identities the stored pairing carries."""
+
+    id: UUID
+    surface_id: UUID
+    sender_id: str
+    sender_label: str | None
+    granted_scopes: list[str]
+    paired_at: datetime
+    revoked_at: datetime | None
+    last_message_at: datetime | None
+
+    @classmethod
+    def of(cls, pairing: Pairing) -> SurfacePairingView:
+        return cls(
+            id=pairing.id,
+            surface_id=pairing.surface_id,
+            sender_id=pairing.sender_id,
+            sender_label=pairing.sender_label,
+            granted_scopes=sorted(pairing.granted_scopes),
+            paired_at=pairing.paired_at,
+            revoked_at=pairing.revoked_at,
+            last_message_at=pairing.last_message_at,
+        )
 
 
 class DeviceRegistrationResult(BaseModel):

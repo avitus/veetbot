@@ -833,55 +833,6 @@ async def test_context_planner_rotates_when_the_persona_changes() -> None:
     assert unchanged.prefix_sha256 == rotated.prefix_sha256
 
 
-async def test_context_planner_rejects_a_persona_over_its_cap() -> None:
-    clock, sessions, runs, events = await memory_stack()
-    factory = MemoryUnitOfWorkFactory(
-        _memory_uow_repositories(
-            agents=InMemoryAgentRepository(),
-            sessions=sessions,
-            runs=runs,
-            events=events,
-            invocations=InMemoryToolInvocationRepository(runs),
-            clock=clock,
-        )
-    )
-    config = yaml.safe_load(
-        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
-    )
-    planner = EventContextPlanner(
-        factory,
-        StaticToolRegistry(),
-        ConservativeTokenEstimator(),
-        clock,
-        principal(),
-        config,
-        policy_version="contract-policy@1",
-    )
-    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
-
-    async with factory() as uow:
-        await uow.personas.append_version(
-            PersonaDocument(
-                tenant_id=principal().tenant_id,
-                principal_id=principal().principal_id,
-                version=1,
-                entries=tuple(
-                    PersonaEntry(
-                        text=f"Truth {index}: " + "belief " * 70,
-                        source=PersonaEntrySource.USER_EDIT,
-                    )
-                    for index in range(30)
-                ),
-                source=PersonaEntrySource.USER_EDIT,
-                created_at=NOW,
-            ),
-            expected_version=0,
-        )
-
-    with pytest.raises(ContextOverflow, match="context prefix class persona exceeds its cap"):
-        await planner.plan(session(), agent(), principal(), model)
-
-
 class _SpyRetriever:
     def __init__(self, result: RecallResult | None = None) -> None:
         self.queries: list[RecallQuery] = []

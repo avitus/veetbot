@@ -769,6 +769,43 @@ final class ConversationNavigationUITests: XCTestCase {
         waitForDisappearance(of: proposal)
     }
 
+    /// A conversation's move menu files it in a folder and takes it out again
+    /// with an explicit unfile; the server's answer places the row.
+    func testMovingAConversationIntoAFolderAndBackOut() {
+        addFolderFixture()
+        app.launch()
+        collapseRecentChats()
+        let travel = folderHeader(Self.folderID)
+        XCTAssertTrue(waitForFolder(travel, label: "Travel", expanded: false, timeout: 10))
+        let row = sessionRow(Self.firstSessionID)
+        let move = element("sidebar.session.move.\(Self.firstSessionID)")
+        XCTAssertTrue(reveal(move))
+        activate(move)
+        let intoTravel = element("sidebar.session.move.to.\(Self.folderID)")
+        XCTAssertTrue(intoTravel.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(element("sidebar.session.move.none").exists, "An unfiled conversation has no folder to leave")
+        activate(intoTravel)
+        // Filed in the collapsed Travel folder, the row leaves the history.
+        waitForDisappearance(of: row, timeout: 10)
+        XCTAssertTrue(reveal(travel))
+        activate(travel)
+        XCTAssertTrue(waitForFolder(travel, expanded: true))
+        XCTAssertTrue(reveal(row))
+        XCTAssertTrue(sessionRow(Self.secondSessionID).exists)
+
+        XCTAssertTrue(reveal(move))
+        activate(move)
+        let unfile = element("sidebar.session.move.none")
+        XCTAssertTrue(unfile.waitForExistence(timeout: 5))
+        activate(unfile)
+        // Back in the history, the row stays in view when Travel closes again.
+        XCTAssertTrue(reveal(travel))
+        activate(travel)
+        XCTAssertTrue(waitForFolder(travel, expanded: false))
+        waitForDisappearance(of: sessionRow(Self.secondSessionID))
+        XCTAssertTrue(reveal(row), "An unfiled conversation returns to the history")
+    }
+
     func testDecliningASuggestedFolderRemovesIt() {
         addFolderFixture()
         app.launch()
@@ -778,6 +815,277 @@ final class ConversationNavigationUITests: XCTestCase {
         waitForDisappearance(of: proposal)
         XCTAssertFalse(element("sidebar.folder.\(Self.proposedFolderID)").exists)
         XCTAssertTrue(reveal(sessionRow(Self.firstSessionID)))
+    }
+
+    // MARK: - Subscriptions (Milestone 31)
+
+    private static let newsSubscriptionID = "00000000-0000-0000-0000-000000000B01"
+    private static let dealsSubscriptionID = "00000000-0000-0000-0000-000000000B02"
+    private static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
+    private static let promoSubscriptionID = "00000000-0000-0000-0000-000000000B04"
+    private static let bulkThreadID = "00000000-0000-0000-0000-000000000897"
+    /// One status poll waits two seconds before the census is read back.
+    private static let subscriptionSettleTimeout: TimeInterval = 20
+
+    /// Adds the census fixture before the one launch. The census and its
+    /// confirmation are sheets, sized on the Mac for a larger window.
+    private func addSubscriptionsFixture(_ extra: [String] = []) {
+        app.launchArguments.append("--ui-testing-email-subscriptions")
+        app.launchArguments += extra
+        #if os(macOS)
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        #endif
+    }
+
+    private func openEmailMode() {
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        activate(mode)
+        XCTAssertTrue(app.buttons["email.thread.00000000-0000-0000-0000-000000000801"].waitForExistence(timeout: 10))
+    }
+
+    /// The census, where the server advertises it, opened from the Email toolbar.
+    private func openSubscriptions() {
+        let entry = app.buttons["email.subscriptions.open"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), "An advertising account must offer Subscriptions")
+        activate(entry)
+        XCTAssertTrue(subscriptionRow(Self.newsSubscriptionID).waitForExistence(timeout: 10), app.debugDescription)
+    }
+
+    private func subscriptionRow(_ id: String) -> XCUIElement {
+        element("email.subscription.row.\(id)")
+    }
+
+    /// macOS combines a navigation row into its button label; iOS also exposes its text children.
+    private func subscriptionRowContains(_ id: String, _ content: String) -> Bool {
+        let row = subscriptionRow(id)
+        return row.exists && (row.label.contains(content)
+            || row.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", content, content)).count > 0)
+    }
+
+    private func subscriptionStateCount(_ state: String) -> Int {
+        [Self.newsSubscriptionID, Self.dealsSubscriptionID, Self.clubSubscriptionID, Self.promoSubscriptionID]
+            .filter { subscriptionRowContains($0, state) }.count
+    }
+
+    private func waitForSubscriptionState(_ state: String, count: Int) {
+        let settled = expectation(for: NSPredicate { _, _ in
+            self.subscriptionStateCount(state) == count
+        }, evaluatedWith: nil)
+        wait(for: [settled], timeout: Self.subscriptionSettleTimeout)
+    }
+
+    private func subscriptionAction(_ action: String) -> XCUIElement {
+        app.buttons["email.subscription.action.\(action)"]
+    }
+
+    /// Text elements carry their string as the label on iOS and as the value on the Mac.
+    private func texts(_ string: String) -> XCUIElementQuery {
+        app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", string, string))
+    }
+
+    private func text(of element: XCUIElement) -> String {
+        element.label.isEmpty ? (element.value as? String ?? "") : element.label
+    }
+
+    private func isOn(_ toggle: XCUIElement) -> Bool {
+        (toggle.value as? String) == "1" || (toggle.value as? Int) == 1
+    }
+
+    /// Checks the one confirmation both surfaces present: each sender with its
+    /// mechanism in plain words, the warning, and the archive option left off.
+    private func checkConfirmation(title: String, naming senders: [(name: String, sentence: String)]) {
+        XCTAssertTrue(app.buttons["email.unsubscribe.confirm"].waitForExistence(timeout: 5))
+        XCTAssertTrue(texts(title).firstMatch.exists, app.debugDescription)
+        XCTAssertTrue(texts("An unsubscribe cannot be undone.").firstMatch.exists)
+        let targets = element("email.unsubscribe.targets")
+        XCTAssertTrue(targets.exists, app.debugDescription)
+        for sender in senders {
+            XCTAssertTrue(targets.staticTexts[sender.name].exists, "The confirmation must name \(sender.name)")
+            XCTAssertTrue(targets.staticTexts[sender.sentence].exists, "The confirmation must say \(sender.sentence)")
+        }
+        let archive = element("email.unsubscribe.archive")
+        XCTAssertTrue(archive.exists)
+        XCTAssertFalse(isOn(archive), "Archiving existing mail is off until the owner asks for it")
+    }
+
+    /// Opening one sender's detail, confirming its mechanism, and watching the
+    /// row settle from the durable operation. The fixture refuses a consent
+    /// that does not name the sender's identity, evidence and revision.
+    func testSubscriptionsCensusUnsubscribesOneSenderAfterConfirmation() {
+        addSubscriptionsFixture()
+        app.launch()
+        app.activate()
+        openEmailMode()
+        openSubscriptions()
+        XCTAssertTrue(subscriptionRowContains(Self.newsSubscriptionID, "One-click request to daily.example.test"))
+        XCTAssertTrue(subscriptionRowContains(Self.dealsSubscriptionID, "Sends an email to unsubscribe@shop.example.test"))
+        XCTAssertTrue(subscriptionRowContains(Self.promoSubscriptionID, "Checking…"))
+        XCTAssertEqual(subscriptionStateCount("Unsubscribed"), 0)
+
+        activate(subscriptionRow(Self.newsSubscriptionID))
+        let unsubscribe = subscriptionAction("unsubscribe")
+        XCTAssertTrue(unsubscribe.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(subscriptionAction("reportSpam").exists)
+        XCTAssertTrue(subscriptionAction("keep").exists)
+        activate(unsubscribe)
+        checkConfirmation(
+            title: "Unsubscribe from this sender?",
+            naming: [("Daily Brief", "One-click request to daily.example.test")])
+        activate(app.buttons["email.unsubscribe.confirm"])
+
+        #if os(macOS)
+        waitForSubscriptionState("Unsubscribed", count: 1)
+        #else
+        // iPhone replaces the census with the detail page; iPad may keep both visible.
+        XCTAssertTrue(texts("Unsubscribed").firstMatch.waitForExistence(timeout: Self.subscriptionSettleTimeout),
+                      app.debugDescription)
+        #endif
+        // Success is quiet, and an unsubscribed sender offers nothing more.
+        XCTAssertFalse(element("email.subscription.detail.status").exists)
+        for action in ["unsubscribe", "tryAgain", "reportSpam", "keep"] {
+            XCTAssertFalse(subscriptionAction(action).exists, "\(action) must not be offered after unsubscribing")
+        }
+    }
+
+    /// Select all skips the protected correspondent and the sender still being
+    /// checked; the protected one can still be chosen by hand, and one
+    /// confirmation names all three before one consent unsubscribes them.
+    func testSubscriptionsSelectAllSkipsProtectedAndUncheckedSenders() {
+        addSubscriptionsFixture()
+        app.launch()
+        app.activate()
+        openEmailMode()
+        openSubscriptions()
+        activate(app.buttons["email.subscriptions.select"])
+        let selectAll = app.buttons["email.subscriptions.select-all"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5))
+        activate(selectAll)
+        let selected = app.buttons["email.subscriptions.unsubscribe-selected"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(selected.label, "Unsubscribe 2")
+        func choice(_ id: String) -> XCUIElement { element("email.subscription.select.\(id)") }
+        XCTAssertEqual(choice(Self.newsSubscriptionID).value as? String, "Selected")
+        XCTAssertEqual(choice(Self.dealsSubscriptionID).value as? String, "Selected")
+        XCTAssertEqual(choice(Self.clubSubscriptionID).value as? String, "Not selected",
+                       "Select all must skip a protected sender")
+        XCTAssertFalse(choice(Self.promoSubscriptionID).isEnabled, "An unchecked sender cannot be selected")
+
+        activate(choice(Self.clubSubscriptionID))
+        XCTAssertEqual(choice(Self.clubSubscriptionID).value as? String, "Selected",
+                       "A protected sender stays individually selectable")
+        XCTAssertEqual(selected.label, "Unsubscribe 3")
+        activate(selected)
+        checkConfirmation(
+            title: "Unsubscribe from 3 senders?",
+            naming: [
+                ("Daily Brief", "One-click request to daily.example.test"),
+                ("Shop Deals", "Sends an email to unsubscribe@shop.example.test"),
+                ("Running Club", "One-click request to run.example.test"),
+            ])
+        let archive = element("email.unsubscribe.archive")
+        #if os(macOS)
+        activate(archive)
+        #else
+        // The row's trailing switch, not its label, changes the value.
+        archive.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        #endif
+        XCTAssertTrue(isOn(archive))
+        activate(app.buttons["email.unsubscribe.confirm"])
+
+        waitForSubscriptionState("Unsubscribed", count: 3)
+        XCTAssertFalse(app.buttons["email.subscriptions.select-all"].exists, "Confirming ends selection")
+        XCTAssertTrue(subscriptionRowContains(Self.promoSubscriptionID, "Checking…"))
+    }
+
+    /// A request the sender did not accept restores the row with an
+    /// actionable error and offers what remains; Keep is then reversible.
+    func testSubscriptionsFailedUnsubscribeRestoresTheRowWithWhatRemains() {
+        addSubscriptionsFixture(["--ui-testing-email-subscriptions-failure"])
+        app.launch()
+        app.activate()
+        openEmailMode()
+        openSubscriptions()
+        activate(subscriptionRow(Self.newsSubscriptionID))
+        let unsubscribe = subscriptionAction("unsubscribe")
+        XCTAssertTrue(unsubscribe.waitForExistence(timeout: 5))
+        activate(unsubscribe)
+        XCTAssertTrue(app.buttons["email.unsubscribe.confirm"].waitForExistence(timeout: 5))
+        activate(app.buttons["email.unsubscribe.confirm"])
+
+        let status = element("email.subscription.detail.status")
+        let restored = expectation(
+            for: NSPredicate(
+                format: "label == %@ OR value == %@",
+                "This request did not complete. Try again, report the sender as spam, or keep it.",
+                "This request did not complete. Try again, report the sender as spam, or keep it."),
+            evaluatedWith: status)
+        wait(for: [restored], timeout: Self.subscriptionSettleTimeout)
+        XCTAssertTrue(texts("Unsubscribe failed").firstMatch.exists)
+        XCTAssertFalse(texts("Unsubscribed").firstMatch.exists, "A refused request must never read as a success")
+        XCTAssertTrue(subscriptionAction("tryAgain").exists)
+        XCTAssertTrue(subscriptionAction("reportSpam").exists)
+        XCTAssertFalse(unsubscribe.exists)
+
+        activate(subscriptionAction("keep"))
+        let unkeep = subscriptionAction("unkeep")
+        XCTAssertTrue(unkeep.waitForExistence(timeout: 10))
+        XCTAssertTrue(texts("Kept").firstMatch.exists)
+        XCTAssertFalse(status.exists, "A settled decision clears the earlier error")
+        activate(unkeep)
+        XCTAssertTrue(unsubscribe.waitForExistence(timeout: 10), "Stopping keeping restores the sender's actions")
+        XCTAssertTrue(subscriptionAction("keep").exists)
+    }
+
+    /// A bulk conversation offers Unsubscribe beside its sender and opens the
+    /// same confirmation with that one sender; the census then settles it.
+    func testSubscriptionsThreadActionUnsubscribesTheConversationsSender() {
+        addSubscriptionsFixture(["--ui-testing-email-bulk-thread"])
+        app.launch()
+        app.activate()
+        openEmailMode()
+        let bulk = app.buttons["email.thread.\(Self.bulkThreadID)"]
+        XCTAssertTrue(bulk.waitForExistence(timeout: 10))
+        activate(bulk)
+        XCTAssertTrue(texts("Everything in the store is on sale this week.").firstMatch.waitForExistence(timeout: 5))
+        let action = app.buttons["email.unsubscribe.thread"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(action.label, "Unsubscribe from deals@shop.example.test")
+        activate(action)
+        checkConfirmation(
+            title: "Unsubscribe from this sender?",
+            naming: [("deals@shop.example.test", "Sends an email to unsubscribe@shop.example.test")])
+        activate(app.buttons["email.unsubscribe.confirm"])
+        XCTAssertTrue(app.buttons["email.unsubscribe.confirm"].waitForNonExistence(timeout: 5))
+
+        #if os(iOS)
+        // Compact navigation shows the Email toolbar again once back at the inbox.
+        let entry = app.buttons["email.subscriptions.open"]
+        if !(entry.exists && entry.isHittable) {
+            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        }
+        #endif
+        openSubscriptions()
+        let settled = subscriptionRow(Self.dealsSubscriptionID)
+        XCTAssertTrue(settled.exists)
+        waitForSubscriptionState("Unsubscribed", count: 1)
+        XCTAssertEqual(subscriptionStateCount("Unsubscribed"), 1, "Only the conversation's own sender was consented")
+    }
+
+    /// An account that advertises nothing offers no entry and no thread
+    /// action, even on a conversation whose projection names a sender.
+    func testSubscriptionsStayHiddenWhereNoAccountAdvertisesThem() {
+        app.launchArguments.append("--ui-testing-email-bulk-thread")
+        app.launch()
+        openEmailMode()
+        XCTAssertFalse(app.buttons["email.subscriptions.open"].exists)
+        let bulk = app.buttons["email.thread.\(Self.bulkThreadID)"]
+        XCTAssertTrue(bulk.waitForExistence(timeout: 10))
+        activate(bulk)
+        XCTAssertTrue(texts("Everything in the store is on sale this week.").firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["email.unsubscribe.thread"].exists)
+        XCTAssertFalse(app.buttons["email.subscriptions.open"].exists)
     }
 
     private func activate(_ element: XCUIElement) {
@@ -948,6 +1256,63 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(text.value as? String, "Historical answer loaded")
         activate(app.buttons["chat.message.selection.done"])
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings() {
+        app.launch()
+        #if os(macOS)
+        let settings = app.buttons["sidebar.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.click()
+        #else
+        openSidebarDestination(identifier: "sidebar.settings")
+        #endif
+        func reveal(_ element: XCUIElement) {
+            #if os(macOS)
+            let scroll = app.scrollViews.firstMatch
+            XCTAssertTrue(scroll.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<12 {
+                let viewport = scroll.frame.insetBy(dx: 0, dy: 20)
+                if element.exists && element.isHittable && viewport.contains(element.frame) { return }
+                let delta: CGFloat = element.exists && element.frame.minY < viewport.minY ? 180 : -180
+                scroll.scroll(byDeltaX: 0, deltaY: delta)
+            }
+            #else
+            scrollUntilVisible(element)
+            #endif
+        }
+        let disclosure = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Task approval websites")).firstMatch
+        reveal(disclosure)
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        #if os(macOS)
+        disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0.13, dy: 0.5)).click()
+        #else
+        activate(disclosure)
+        #endif
+        let field = app.textFields["task-scopes.url"]
+        reveal(field)
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        activate(field)
+        field.typeText("https://www.duolingo.com/lesson")
+        if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
+        let add = app.buttons["task-scopes.add"]
+        reveal(add)
+        XCTAssertTrue(add.isEnabled)
+        activate(add)
+        #if os(macOS)
+        let confirm = app.sheets.buttons["Add website"].firstMatch
+        #else
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Add website", "task-scopes.add")).firstMatch
+        #endif
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        activate(confirm)
+        let remove = app.buttons["task-scopes.remove.https://www.duolingo.com/lesson"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        reveal(remove)
+        activate(remove)
+        XCTAssertTrue(app.staticTexts["No websites added."].waitForExistence(timeout: 5))
+        activate(app.buttons["task-scopes.refresh"])
+        XCTAssertTrue(app.staticTexts["No websites added."].exists)
     }
 
     /// ADR-0129: a `browser.act` card offers Allow all actions for this task; the owner
@@ -1462,6 +1827,50 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["User"].exists)
     }
 
+    /// ADR-0117: the detail's review menu deletes a belief once its
+    /// confirmation says what is removed; the detail closes, the row leaves
+    /// the browser, and a later read of the server no longer returns it.
+    func testMemoryDeletionRemovesTheBeliefAfterConfirmation() {
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.memory")
+        let row = app.descendants(matching: .any)["memory.row.00000000-0000-0000-0000-000000000321"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let detail = app.descendants(matching: .any)["memory.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let review = app.buttons["memory.detail.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        review.tap()
+        let delete = app.buttons["memory.detail.delete"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        // An active, portable belief also offers both rejection outcomes.
+        XCTAssertTrue(app.buttons["memory.detail.review.untrue"].exists)
+        XCTAssertTrue(app.buttons["memory.detail.review.not_here"].exists)
+        XCTAssertFalse(app.buttons["memory.detail.review.dismiss"].exists, "Only a flagged belief can be marked reviewed")
+        delete.tap()
+        // A query identifier is limited to 128 characters, so match the explanation by predicate.
+        let explanation = app.staticTexts.matching(NSPredicate(
+            format: "label == %@",
+            "The memory and its generated copies are removed, and the same statement will not form again. Original messages remain at their source."
+        )).firstMatch
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5), app.debugDescription)
+        let confirm = app.buttons["Delete memory"].firstMatch
+        XCTAssertTrue(confirm.exists)
+        confirm.tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["memory.detail.review"].exists, "The deleted belief's detail must close")
+
+        // Reopening the browser reads the server again.
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5), app.debugDescription)
+        close.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["memory.browser"].waitForNonExistence(timeout: 5))
+        openSidebarDestination(identifier: "sidebar.memory")
+        XCTAssertTrue(app.descendants(matching: .any)["memory.browser"].waitForExistence(timeout: 5))
+        XCTAssertFalse(row.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["The user prefers dark mode."].exists)
+    }
+
     func testScheduleBrowserListsAndOpensPointReadDetail() {
         app.launch()
         openSidebarDestination(identifier: "sidebar.schedules")
@@ -1511,6 +1920,58 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["persona.editor"].waitForExistence(timeout: 5)
         )
+    }
+
+    /// ADR-0118: the Models card shows the server's choices, each picker change
+    /// saves the whole document under its version (the fixture refuses a stale
+    /// version or a tuple it did not offer), a memory model brings its one
+    /// evaluated effort, and Settings opened again reads the choices back.
+    func testModelSettingsSaveEachChoiceAndReadItBackFromTheServer() {
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.settings")
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        let chatModel = app.buttons["settings.models.chat.model"]
+        let memoryModel = app.buttons["settings.models.memory.model"]
+        let memoryEffort = app.buttons["settings.models.memory.effort"]
+        scrollUntilVisible(memoryEffort)
+        XCTAssertEqual(chatModel.label, "Chat model, GPT-6 Astra")
+        XCTAssertEqual(app.buttons["settings.models.chat.effort"].label, "Chat reasoning, High")
+        XCTAssertEqual(memoryModel.label, "Memory model, GPT-5.6 Sol")
+        XCTAssertFalse(memoryEffort.isEnabled, "A model with one evaluated effort offers no choice")
+
+        chooseMenuItem("Claude Fable 5.1", from: chatModel)
+        waitForSavedLabel("Chat model, Claude Fable 5.1", on: chatModel)
+        chooseMenuItem("GPT-6 Astra", from: memoryModel)
+        waitForSavedLabel("Memory model, GPT-6 Astra", on: memoryModel)
+        XCTAssertEqual(memoryEffort.label, "Memory reasoning, Medium",
+                       "Choosing a memory model applies the effort it was evaluated with")
+        XCTAssertFalse(app.staticTexts["settings.models.status"].exists, "A confirmed save reports nothing")
+
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.exists)
+        close.tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5))
+        openSidebarDestination(identifier: "sidebar.settings")
+        scrollUntilVisible(memoryEffort)
+        waitForSavedLabel("Chat model, Claude Fable 5.1", on: chatModel)
+        XCTAssertEqual(memoryModel.label, "Memory model, GPT-6 Astra")
+        XCTAssertEqual(memoryEffort.label, "Memory reasoning, Medium")
+    }
+
+    private func chooseMenuItem(_ title: String, from picker: XCUIElement) {
+        XCTAssertTrue(picker.isEnabled)
+        picker.tap()
+        let item = app.buttons[title].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+    }
+
+    /// Waits for the picker to report the server-confirmed choice and unlock.
+    private func waitForSavedLabel(_ label: String, on picker: XCUIElement) {
+        let saved = NSPredicate(format: "label == %@ AND enabled == true", label)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: saved, object: picker)], timeout: 10),
+            .completed, "\(picker.label) did not settle on \(label)")
     }
 
     func testWebsiteAccessCreatesARecoverableBrowserHandoff() {

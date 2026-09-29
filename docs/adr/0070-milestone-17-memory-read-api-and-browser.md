@@ -1,6 +1,6 @@
 # ADR-0070: Milestone 17 memory read API and native browser
 
-- Status: Proposed
+- Status: Proposed; decision 3 superseded by ADR-0117
 - Date: 2026-08-23
 - Related: Sections 16, 20, and 21 of the engineering plan; ADR-0014,
   ADR-0018, ADR-0019, ADR-0045, ADR-0049, ADR-0050, ADR-0069

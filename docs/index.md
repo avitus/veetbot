@@ -52,12 +52,29 @@ and must never be edited by hand.
 - [Current milestone](plan/current-milestone.md) — the work currently authorized.
 - [Project state](status/index.md) — machine-readable execution state.
 - [Architecture decisions](adr/index.md) — approved ADRs.
-- [Downloadable client](client.md) — build, connection, and security guidance.
-- [Changelog](changelog.md) — notable documentation changes.
+- [Changelog](changelog.md) — notable product and documentation changes, newest
+  first.
 
 Archive provenance: the plan was converted from an archived Word document at
 `archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx`, retained only
 as an archival record.
+
+## Guides
+
+- [Apple client](apple-client.md) — the Mac, iPhone, and iPad app: chat,
+  attachments, Website Access, Memory and People, Email mode, and settings.
+- [Downloadable client](client.md) — the terminal client's build, connection,
+  and security guidance.
+- [Production deployment](deployment.md) — host preparation, release,
+  feature flags and owner scopes, verification, and rollback.
+- [Gmail integration runbook](gmail-integration-runbook.md) — connecting
+  Gmail, Email mode, and unsubscribe assistance.
+- [People memory operations](people-operations.md) — imports, directory
+  repair, duplicates, erasure, and rollback.
+- [Telegram surface runbook](telegram-surface-runbook.md),
+  [WhatsApp integration runbook](whatsapp-integration-runbook.md), and
+  [Bland calling setup](bland-setup.md) — the optional messaging and calling
+  channels.
 
 ## Current status
 
@@ -82,7 +99,9 @@ version of the full documentation is produced by `make docs` and written to
 
 ## How the documentation is organized
 
-- `docs/plan/` — the canonical engineering plan and the current-milestone pointer.
+- `docs/plan/` — the canonical engineering plan, its detailed designs, and the
+  current-milestone pointer.
+- `docs/*.md` — the user and operator guides listed above.
 - `docs/architecture.md` — the implemented module boundaries and their canonical sources.
 - `docs/events.md` — the implementation status of the event surface.
 - `docs/status/` — machine-readable project state.

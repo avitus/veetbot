@@ -123,7 +123,7 @@ from agent_core.domain.sessions import (
     SessionStatus,
     conversation_title,
 )
-from agent_core.domain.surfaces import InboundDisposition
+from agent_core.domain.surfaces import InboundDisposition, SurfaceRunBudget
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.domain.views import (
@@ -809,6 +809,7 @@ class PublicRunService:
         payload_extra: dict[str, object] | None = None,
         derivation_namespace: str | None = None,
         derivation_suffix: str | None = None,
+        run_budget: SurfaceRunBudget | None = None,
     ) -> _PreparedRunSubmission:
         """Select new-run versus waiting-input behavior inside the caller's UoW."""
 
@@ -862,6 +863,8 @@ class PublicRunService:
         # ADR-0130: a chat bound to a website profile runs under its pinned
         # version's browser-task limits.
         limits = run_limits_for_session(agent, session)
+        if run_budget is not None:
+            limits = run_budget.applied_to(limits)
         consent = await uow.export_consent.get(principal.tenant_id, principal.principal_id)
         now = self._clock.now()
         run = Run(
@@ -940,8 +943,12 @@ class PublicRunService:
         text: str,
         origin: dict[str, object],
         authority_version: str,
+        run_budget: SurfaceRunBudget,
     ) -> PreparedSurfaceSubmission:
-        """Use the HTTP submission state machine for one paired surface message."""
+        """Use the HTTP submission state machine for one paired surface message.
+
+        A new run carries the surface run budget admission reserved for it.
+        """
 
         require_scope(principal, "run.write")
         external_update_id = origin.get("external_update_id")
@@ -961,6 +968,7 @@ class PublicRunService:
             payload_extra=payload_extra,
             derivation_namespace="surface.inbound",
             derivation_suffix=external_update_id,
+            run_budget=run_budget,
         )
         return PreparedSurfaceSubmission(
             run_id=prepared.run.id,
@@ -1474,7 +1482,10 @@ class PublicApprovalService:
         in one unit of work; any refusal leaves the approval pending."""
 
         dispatch_run: UUID | None = None
-        async with self._uow_factory() as uow:
+        async with (
+            self._uow_factory() as uow,
+            uow.browser_task_grants.locked_scopes(principal) as scope_policy,
+        ):
             visible = await uow.approvals.get(approval_id, principal)
             if visible.principal_id != principal.principal_id:
                 # The grant belongs to the owner of the chat: another principal
@@ -1507,7 +1518,7 @@ class PublicApprovalService:
                 or session is None
                 or not any(
                     (scope.origin, scope.path_prefix) == (offer.origin, offer.path_prefix)
-                    for scope in resolution.scopes
+                    for scope in scope_policy.scopes
                 )
                 or run.status is not RunStatus.WAITING_FOR_APPROVAL
                 or not session_allows_task_grant(

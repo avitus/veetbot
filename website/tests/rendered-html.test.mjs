@@ -9,6 +9,20 @@ async function htmlFor(pathname) {
   return readFile(new URL(`../out/${relativePath}`, import.meta.url), "utf8");
 }
 
+const origin = "https://www.veetbot.com";
+const publicPages = ["/", "/privacy", "/tos"];
+
+function attributeValues(html, name) {
+  return [...html.matchAll(new RegExp(`\\s${name}="([^"]*)"`, "g"))].map((match) => match[1]);
+}
+
+/** The exported file a same-origin path is served from, as `trailingSlash: false` writes it. */
+function exportedFile(pathname) {
+  if (pathname === "/") return "index.html";
+  const file = decodeURIComponent(pathname.slice(1));
+  return /\.[a-z0-9]+$/i.test(file) ? file : `${file}.html`;
+}
+
 test("homepage identifies Veetbot and links its public policies", async () => {
   const [html, css] = await Promise.all([
     htmlFor("/"),
@@ -100,4 +114,78 @@ test("finished site is a static DigitalOcean artifact with no Sites runtime", as
   await assert.rejects(access(new URL("../.openai/hosting.json", import.meta.url)));
   await assert.rejects(access(new URL("../worker/index.ts", import.meta.url)));
   await assert.rejects(access(new URL("../vite.config.ts", import.meta.url)));
+});
+
+/** A broken internal link or asset would ship as a 404 on the public site. */
+test("every same-origin link and asset on each public page resolves in the export", async () => {
+  for (const pathname of publicPages) {
+    const html = await htmlFor(pathname);
+    const targets = [...attributeValues(html, "href"), ...attributeValues(html, "src")];
+    const local = targets.filter((target) => target.startsWith("/") && !target.startsWith("//"));
+    assert.ok(local.length > 0, `${pathname} has no same-origin links or assets`);
+    for (const target of local) {
+      const file = exportedFile(new URL(target, origin).pathname);
+      await access(new URL(`../out/${file}`, import.meta.url)).catch(() =>
+        assert.fail(`${pathname} refers to ${target}, which the export does not contain`),
+      );
+    }
+    for (const fragment of targets.filter((target) => target.startsWith("#"))) {
+      assert.match(html, new RegExp(` id="${fragment.slice(1)}"`), `${pathname} links to a missing ${fragment}`);
+    }
+  }
+});
+
+test("each public page describes itself and names its own canonical address", async () => {
+  const descriptions = new Set();
+  for (const pathname of publicPages) {
+    const html = await htmlFor(pathname);
+    assert.match(html, /<html lang="en"/);
+    assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1"\/>/);
+    const description = html.match(/<meta name="description" content="([^"]+)"/)?.[1];
+    assert.ok(description && description.length >= 40, `${pathname} has no useful description`);
+    descriptions.add(description);
+    const canonical = new URL(html.match(/<link rel="canonical" href="([^"]+)"/)?.[1] ?? "about:blank");
+    assert.equal(canonical.origin, origin, `${pathname} has no canonical address on the public origin`);
+    assert.equal(canonical.pathname, pathname);
+    assert.match(html, /<meta property="og:image" content="https:\/\/www\.veetbot\.com\/og\.png"\/>/);
+    assert.match(html, /<meta name="twitter:card" content="summary_large_image"\/>/);
+    assert.match(html, /<link rel="icon" href="\/veetbot-icon\.svg"\/>/);
+  }
+  assert.equal(descriptions.size, publicPages.length, "each page needs its own description");
+  const preview = await readFile(new URL("../out/og.png", import.meta.url));
+  assert.equal(preview.subarray(1, 4).toString("ascii"), "PNG", "the shared preview must be a PNG");
+});
+
+/** The privacy policy says the site has no forms, analytics, or advertising. */
+test("public pages load only their own code and collect nothing, as the privacy policy states", async () => {
+  for (const pathname of publicPages) {
+    const html = await htmlFor(pathname);
+    const loaded = [
+      ...attributeValues(html, "src"),
+      ...[...html.matchAll(/<link rel="(?:stylesheet|preload|icon|shortcut icon|modulepreload)"[^>]*\shref="([^"]*)"/g)]
+        .map((match) => match[1]),
+    ];
+    assert.ok(loaded.length > 0);
+    for (const resource of loaded) {
+      assert.ok(resource.startsWith("/") && !resource.startsWith("//"), `${pathname} loads ${resource} from elsewhere`);
+    }
+    assert.doesNotMatch(html, /<form\b|<input\b|<iframe\b|<textarea\b/i);
+    assert.doesNotMatch(html, /googletagmanager|google-analytics|gtag\(|plausible\.io|segment\.(?:io|com)|document\.cookie/i);
+  }
+});
+
+test("each legal page is dated and reachable from every page's footer", async () => {
+  for (const [pathname, other] of [["/privacy", "/tos"], ["/tos", "/privacy"]]) {
+    const html = await htmlFor(pathname);
+    const effective = html.match(/<p class="effective-date">Effective ((?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})<\/p>/)?.[1];
+    assert.ok(effective && !Number.isNaN(Date.parse(effective)), `${pathname} states no effective date`);
+    assert.match(html, /<nav[^>]*aria-label="Primary navigation"[\s\S]*?href="\/privacy"[\s\S]*?href="\/tos"[\s\S]*?<\/nav>/);
+    assert.ok(attributeValues(html, "href").filter((href) => href === "/").length >= 2, `${pathname} must link home`);
+    assert.ok(html.includes(`href="${other}"`));
+  }
+  for (const pathname of publicPages) {
+    const footer = (await htmlFor(pathname)).match(/<footer[\s\S]*?<\/footer>/)?.[0] ?? "";
+    assert.match(footer, /href="\/privacy"/, `${pathname} footer omits the privacy policy`);
+    assert.match(footer, /href="\/tos"/, `${pathname} footer omits the terms`);
+  }
 });

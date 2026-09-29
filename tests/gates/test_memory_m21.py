@@ -559,28 +559,6 @@ def test_provider_candidates_carry_polarity_and_corrections_pass_only_as_retract
             MemoryClaimKind.RESOURCE,
             "The staging dashboard is used for deploy status.",
         ),
-    ],
-)
-async def test_high_recall_fallback_covers_durable_must_form_categories(
-    message: str,
-    claim_kind: MemoryClaimKind,
-    statement: str,
-) -> None:
-    event = _personal_agent_event().model_copy(update={"payload": {"content": message}})
-
-    candidates = await formation.HighRecallCandidateExtractor().extract(
-        [event], principal=principal(), scope="general"
-    )
-
-    assert any(
-        candidate.claim_kind is claim_kind and candidate.statement == statement
-        for candidate in candidates
-    )
-
-
-@pytest.mark.parametrize(
-    ("message", "claim_kind", "statement"),
-    [
         (
             "I want to choose a web-search provider this week.",
             MemoryClaimKind.GOAL,
@@ -643,7 +621,7 @@ async def test_high_recall_fallback_covers_durable_must_form_categories(
         ),
     ],
 )
-async def test_high_recall_fallback_covers_remaining_direct_must_form_cases(
+async def test_high_recall_fallback_covers_durable_must_form_categories(
     message: str,
     claim_kind: MemoryClaimKind,
     statement: str,

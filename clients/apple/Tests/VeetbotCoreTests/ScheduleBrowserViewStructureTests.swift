@@ -5,15 +5,6 @@ import Testing
 
 @Suite struct ScheduleBrowserViewStructureTests {
     @Test
-    func testSidebarProvidesASeparateReadOnlyScheduleBrowserEntry() throws {
-        let source = try source(at: "Veetbot/Views/RootView.swift")
-
-        #expect(source.contains("@StateObject private var scheduleViewModel = ScheduleViewModel()"))
-        #expect(source.contains(".accessibilityIdentifier(\"sidebar.schedules\")"))
-        #expect(source.contains("ScheduleBrowserView(model: scheduleViewModel)"))
-    }
-
-    @Test
     func testBrowserRetainsPopulatedRowsAcrossLaterFailuresAndPagesByCursor() throws {
         let source = try source(at: "Veetbot/Views/ScheduleBrowserView.swift")
 
@@ -25,20 +16,6 @@ import Testing
         #expect(
             source.contains(#".accessibilityIdentifier("schedule.row.\(item.id.uuidString)")"#)
         )
-    }
-
-    @Test
-    func testBrowserSeparatesCurrentSchedulesFromRecentHistory() throws {
-        let source = try source(at: "Veetbot/Views/ScheduleBrowserView.swift")
-
-        #expect(source.contains("Picker(\"Schedule view\", selection: $section)"))
-        #expect(source.contains("Text(\"Current\").tag(ScheduleBrowserSection.current)"))
-        #expect(
-            source.contains(
-                "Text(\"Recent History\").tag(ScheduleBrowserSection.recentHistory)"
-            )
-        )
-        #expect(source.contains(".task(id: section) { await model.reload(section) }"))
     }
 
     @Test

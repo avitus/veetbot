@@ -25,7 +25,7 @@ class SurfaceAdmissionController(Protocol):
     async def check(
         self,
         tenant_id: str,
-        reservation: Decimal | None,
+        reservation: Decimal,
         now: datetime,
     ) -> SurfaceAdmissionDecision: ...
 
@@ -106,6 +106,8 @@ class SurfaceReceiptRepository(Protocol):
 
 class SurfaceReplyOutbox(Protocol):
     async def enqueue(self, reply: SurfaceReply) -> bool: ...
+
+    async def for_run(self, run_id: UUID) -> SurfaceReply | None: ...
 
     async def claim_due(
         self,

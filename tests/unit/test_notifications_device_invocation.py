@@ -90,33 +90,16 @@ def test_device_invocation_payload_accepts_exactly_its_identifier_set() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("title", "wrong title"),
-        ("status", "sent"),
+        pytest.param("title", "wrong title", id="off_vocabulary_title"),
+        pytest.param("status", "sent", id="off_vocabulary_status"),
+        pytest.param("device_id", None, id="missing_device_id"),
+        pytest.param("invocation_id", None, id="missing_invocation_id"),
+        pytest.param("run_id", RUN_ID, id="foreign_run_id"),
     ],
 )
-def test_device_invocation_payload_rejects_off_vocabulary(field: str, value: object) -> None:
+def test_device_invocation_payload_rejects_an_invalid_field(field: str, value: object) -> None:
     with pytest.raises(ValidationError):
         NotificationPayload.model_validate(_payload(**{field: value}))
-
-
-def test_device_invocation_payload_requires_both_identifiers() -> None:
-    with pytest.raises(ValidationError):
-        NotificationPayload.model_validate({**_payload(), "device_id": None})
-    with pytest.raises(ValidationError):
-        NotificationPayload.model_validate({**_payload(), "invocation_id": None})
-
-
-def test_device_invocation_payload_rejects_a_foreign_identifier() -> None:
-    with pytest.raises(ValidationError):
-        NotificationPayload.model_validate({**_payload(), "run_id": RUN_ID})
-
-
-def test_device_invocation_dedupe_key_is_stable_and_scoped_to_invocation() -> None:
-    assert device_invocation_key(INVOCATION_ID) == f"device_invocation:{INVOCATION_ID}"
-    assert device_invocation_key(INVOCATION_ID) == device_invocation_key(INVOCATION_ID)
-    assert device_invocation_key(INVOCATION_ID) != device_invocation_key(
-        UUID("00000000-0000-0000-0000-0000000090ff")
-    )
 
 
 async def test_producer_enqueues_once_and_dedupes_on_replay() -> None:

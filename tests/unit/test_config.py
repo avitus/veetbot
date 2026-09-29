@@ -6,15 +6,18 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 import pytest
 import yaml
+from pydantic import SecretStr
 
 import agent_core.config as config_module
 from agent_core.config import (
     PACKAGE_ROOT,
     SHIPPED_KNOB_PATHS,
     AuthMode,
+    BrowserProviderKind,
     ConfigurationError,
     DeploymentMode,
     JudgmentProviderKind,
@@ -257,16 +260,21 @@ def test_schedule_roles_default_off() -> None:
     assert settings.schedule_worker_enabled is False
 
 
-def test_schedule_roles_require_independent_explicit_enablement() -> None:
+@pytest.mark.parametrize(
+    ("api", "worker"), [("1", "0"), ("0", "1"), ("1", "1")], ids=["api", "worker", "both"]
+)
+def test_schedule_roles_require_independent_explicit_enablement(api: str, worker: str) -> None:
+    """Each flag enables only its own role; release validation pairs them (scheduling.md)."""
+
     settings = load_settings(
         {
             **base_environment(),
-            "AGENT_SCHEDULE_API_ENABLED": "1",
-            "AGENT_SCHEDULE_WORKER_ENABLED": "1",
+            "AGENT_SCHEDULE_API_ENABLED": api,
+            "AGENT_SCHEDULE_WORKER_ENABLED": worker,
         }
     )
-    assert settings.schedule_api_enabled is True
-    assert settings.schedule_worker_enabled is True
+    assert settings.schedule_api_enabled is (api == "1")
+    assert settings.schedule_worker_enabled is (worker == "1")
 
 
 def test_notification_roles_and_provider_default_off() -> None:
@@ -397,10 +405,11 @@ def test_surface_worker_loads_dedicated_private_secrets_without_api_credentials(
         "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE": str(verify_token),
         "AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID": "15551234567",
         "AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION": "v23.0",
-        "OPENAI_API_KEY": "must-not-enter-the-surface-worker",
     }
 
     settings = config_module.load_surface_worker_settings(values)
+    # A provider key in this environment refuses startup; see
+    # test_a_role_refuses_credentials_that_belong_to_another_role.
 
     assert settings.auth_token is None
     assert settings.credentials == {}
@@ -469,6 +478,49 @@ def test_surface_worker_secret_files_must_be_absolute_regular_and_private(
                 "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(configured),
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("loader", "variable", "value"),
+    [
+        ("load_surface_worker_settings", "OPENAI_API_KEY", "placeholder-value"),
+        ("load_surface_worker_settings", "VEETBOT_OPENAI_KEY", "placeholder-value"),
+        (
+            "load_surface_worker_settings",
+            "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+            "/etc/veetbot/secrets/browser-control-plane",
+        ),
+        ("load_settings", "AGENT_SURFACE_TELEGRAM_TOKEN_FILE", "/etc/veetbot/secrets/telegram"),
+        (
+            "load_schedule_worker_settings",
+            "AGENT_SURFACE_WHATSAPP_TOKEN_FILE",
+            "/etc/veetbot/secrets/whatsapp",
+        ),
+        (
+            "load_notification_worker_settings",
+            "AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE",
+            "/etc/veetbot/secrets/whatsapp-app",
+        ),
+    ],
+)
+def test_a_role_refuses_credentials_that_belong_to_another_role(
+    tmp_path: Path, loader: str, variable: str, value: str
+) -> None:
+    """A misplaced credential fails startup instead of sitting unread in the environment."""
+
+    telegram = tmp_path / "telegram-token"
+    telegram.write_text("123456789:" + "telegram-test-token-value", encoding="ascii")
+    telegram.chmod(0o600)
+    values = {**base_environment(), variable: value}
+    if loader == "load_surface_worker_settings":
+        values |= {
+            "AGENT_SURFACE_API_ENABLED": "1",
+            "AGENT_SURFACE_WORKER_ENABLED": "1",
+            "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(telegram),
+        }
+
+    with pytest.raises(ConfigurationError, match=variable):
+        getattr(config_module, loader)(values)
 
 
 def test_device_channel_limits_are_versioned_knobs() -> None:
@@ -1157,27 +1209,6 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_browser_task_overlay_raises_only_bound_chat_limits() -> None:
-    """ADR-0130: bound chats get their own block; run_defaults stays as it was."""
-
-    loaded = yaml.safe_load((PACKAGE_ROOT / "runtime/limits.yaml").read_text(encoding="utf-8"))
-
-    assert loaded.get("browser_task") == {
-        "max_steps": 160,
-        "max_model_calls": 120,
-        "max_tool_calls": 160,
-        "max_cost": 30,
-        "synthesis_reserve_cost": 3,
-    }
-    assert loaded["run_defaults"] == {
-        "max_steps": 32,
-        "max_model_calls": 24,
-        "max_tool_calls": 64,
-        "synthesis_reserve_model_calls": 2,
-        "synthesis_reserve_tool_calls": 4,
-    }
-
-
 def test_all_194_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
@@ -1418,3 +1449,189 @@ def test_task_grant_scopes_parse_and_refuse() -> None:
     assert "entry 1" in messages["a sensitive segment"]
     assert "BROWSER_TASK_GRANTS_ENABLED" in messages["scopes without the flag"]
     assert "BROWSER_TASK_GRANTS_ENABLED" in messages["a word for the flag"]
+
+
+def _secret() -> SecretStr:
+    return SecretStr("fixture")
+
+
+def _call_enabled(**extra: object) -> dict[str, object]:
+    from tests.gates.test_call_m27 import call_configuration
+
+    return {"call_enabled": True, "call_configuration": call_configuration(), **extra}
+
+
+_WHATSAPP_WITHOUT_PHONE_NUMBER_ID: dict[str, object] = {
+    "surface_api_enabled": True,
+    "surface_worker_enabled": True,
+    "surface_whatsapp_enabled": True,
+    "surface_telegram_token": _secret(),
+    "surface_whatsapp_token": _secret(),
+    "surface_whatsapp_app_secret": _secret(),
+    "surface_whatsapp_verify_token": _secret(),
+    "surface_whatsapp_graph_api_version": "v21.0",
+}
+_HOSTED_BROWSER: dict[str, object] = {
+    "browser_provider": BrowserProviderKind.HOSTED,
+    "browser_profile_service_url": "https://profiles.example.test",
+}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "role", "message"),
+    [
+        (
+            {"surface_api_enabled": True, "surface_worker_enabled": True},
+            {"require_surface_credentials": True},
+            "surface worker enablement requires AGENT_SURFACE_TELEGRAM_TOKEN_FILE",
+        ),
+        (
+            _WHATSAPP_WITHOUT_PHONE_NUMBER_ID,
+            {"require_surface_credentials": True},
+            r"WhatsApp enablement requires AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID$",
+        ),
+        (
+            {"surface_telegram_token": _secret()},
+            {},
+            "surface secrets may be loaded only by the surface worker",
+        ),
+        (
+            {"email_enabled": True, "email_account_ids": ("Work",)},
+            {},
+            "Gmail account ids are invalid",
+        ),
+        (
+            {"email_enabled": True, "email_account_ids": ("work", "work")},
+            {},
+            "Gmail account ids are invalid",
+        ),
+        (
+            {"email_enabled": True, "email_account_ids": tuple(f"a{n}" for n in range(9))},
+            {},
+            "Gmail account ids are invalid",
+        ),
+        (
+            {"email_enabled": True, "credentials": {"gmail_read": _secret()}},
+            {},
+            "email enablement requires every configured Gmail credential",
+        ),
+        (
+            {"credentials": {"gmail_read": _secret()}},
+            {"require_email_credentials": False},
+            "Gmail credentials require AGENT_EMAIL_ENABLED=1",
+        ),
+        ({"email_account_ids": ("work",)}, {}, "Gmail accounts require AGENT_EMAIL_ENABLED=1"),
+        ({"call_enabled": True}, {}, "calling requires BLAND_CONFIGURATION_FILE"),
+        (
+            {"call_ingress_enabled": True},
+            {},
+            "calling ingress and notifications require AGENT_CALL_ENABLED=1",
+        ),
+        (
+            {"call_notifications_enabled": True},
+            {},
+            "calling ingress and notifications require AGENT_CALL_ENABLED=1",
+        ),
+        (
+            _call_enabled(credentials={"bland_read": _secret()}),
+            {},
+            "calling requires BLAND_API_KEY_FILE",
+        ),
+        (
+            {"credentials": {"bland_read": _secret(), "bland_call": _secret()}},
+            {},
+            "Bland credentials require AGENT_CALL_ENABLED=1",
+        ),
+        (
+            _call_enabled(
+                credentials={"bland_read": _secret(), "bland_call": _secret()},
+                call_notifications_enabled=True,
+            ),
+            {},
+            "call notifications require the notification service",
+        ),
+        (
+            {
+                "push_provider": PushProviderKind.APNS,
+                "apns_key_file": Path("/etc/veetbot/apns.p8"),
+                "apns_key_id": "KEYID12345",
+                "apns_team_id": "TEAMID1234",
+                "apns_topic": "com.example.veetbot",
+            },
+            {},
+            "PUSH_PROVIDER=apns requires notification dispatch to be enabled",
+        ),
+        (
+            {"auth_mode": AuthMode.TOKEN, "sandbox": SandboxMechanism.MICROVM},
+            {},
+            "AUTH_TOKEN is required when AUTH_MODE=token",
+        ),
+        (
+            {
+                "deployment_mode": DeploymentMode.PRODUCTION,
+                "sandbox": SandboxMechanism.MICROVM,
+                "execution_service_socket": Path("/run/veetbot/execution.sock"),
+            },
+            {},
+            "DEPLOYMENT_MODE=production refuses AUTH_MODE=dev",
+        ),
+        (
+            {**_HOSTED_BROWSER, "browser_profile_id": UUID(PROFILE_ID)},
+            {},
+            "BROWSER_ALLOWED_ORIGINS is required for a pinned hosted browser profile",
+        ),
+        (
+            _HOSTED_BROWSER,
+            {},
+            "a browser profile control-plane credential is required",
+        ),
+        (
+            {"browser_profile_id": UUID(PROFILE_ID)},
+            {},
+            "BROWSER_PROFILE_ID requires BROWSER_PROVIDER=hosted",
+        ),
+        (
+            {"browser_run_purpose": "lesson"},
+            {},
+            "BROWSER_RUN_PURPOSE requires BROWSER_GRANT_ID",
+        ),
+    ],
+    ids=[
+        "surface-worker-without-telegram-token",
+        "whatsapp-without-phone-number-id",
+        "surface-secret-outside-the-surface-worker",
+        "gmail-account-id-shape",
+        "gmail-account-id-duplicate",
+        "gmail-account-limit",
+        "email-without-every-gmail-credential",
+        "gmail-credential-without-email",
+        "gmail-accounts-without-email",
+        "calling-without-configuration",
+        "call-ingress-without-calling",
+        "call-notifications-without-calling",
+        "calling-without-both-bland-credentials",
+        "bland-credentials-without-calling",
+        "call-notifications-without-notification-service",
+        "apns-without-dispatch",
+        "token-auth-without-token",
+        "production-dev-auth",
+        "pinned-hosted-profile-without-origins",
+        "hosted-browser-without-control-plane-credential",
+        "profile-id-without-hosted-browser",
+        "run-purpose-without-grant",
+    ],
+)
+def test_prebuilt_settings_refuse_unsafe_combinations(
+    overrides: dict[str, object], role: dict[str, bool], message: str
+) -> None:
+    """The composition root re-validates settings a caller built without the loader.
+
+    ``build(settings=...)`` and every worker role run these refusals on
+    programmatic settings, so each is a boundary of its own and not only a
+    duplicate of the environment loader's.
+    """
+
+    base = load_settings(base_environment())
+    validate_settings(base, **role)
+    with pytest.raises(ConfigurationError, match=message):
+        validate_settings(replace(base, **overrides), **role)  # type: ignore[arg-type]

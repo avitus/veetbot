@@ -17,14 +17,19 @@ from uuid import UUID
 import httpx
 from openai import AsyncOpenAI
 
-from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.determinism import FixedClock, SystemClock
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
 from agent_core.adapters.push import FakePushTransport
-from agent_core.application.notification_dispatcher import NotificationDispatcher
-from agent_core.bootstrap import Composition, build
+from agent_core.bootstrap import Composition, build, build_notification_worker
+from agent_core.config import (
+    AuthMode,
+    DeploymentMode,
+    PushProviderKind,
+    SandboxMechanism,
+    Settings,
+)
 from agent_core.domain.agents import AgentSpec
 from agent_core.domain.approvals import ApprovalResolutionType
-from agent_core.domain.devices import PushProvider
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import BeliefType
 from agent_core.domain.messages import (
@@ -34,6 +39,7 @@ from agent_core.domain.messages import (
     StopReason,
 )
 from agent_core.domain.runs import RunLimits, RunStatus
+from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.scheduling.worker import ScheduleWorker
 from tests.contract.model_fixtures import openai_text_events
@@ -65,6 +71,22 @@ async def _run_worker(composition: Composition, worker_id: str) -> None:
         uow_factory=composition.uow_factory,
         executor=composition.executor,
         clock=composition.clock,
+        worker_id=worker_id,
+    )
+    assert await worker.run_once()
+
+
+async def _run_worker_on_wall_clock(composition: Composition, worker_id: str) -> None:
+    """Run one claim whose heartbeat waits use real time.
+
+    FixedClock.sleep returns at once, so heartbeats on the domain clock can
+    exhaust a tool's deadline during database I/O; domain time stays fixed.
+    """
+
+    worker = DurableWorker(
+        uow_factory=composition.uow_factory,
+        executor=composition.executor,
+        clock=SystemClock(),
         worker_id=worker_id,
     )
     assert await worker.run_once()
@@ -719,106 +741,6 @@ async def test_created_schedule_fires_and_its_run_executes_to_completion() -> No
     ]
 
 
-async def test_parked_approval_notifies_a_registered_device_through_the_outbox() -> None:
-    """The notification pipeline joined end to end.
-
-    A device registers over the API, a scripted external write parks the run,
-    the producer's outbox row is dispatched to the fake push transport with a
-    content-free payload, and the offline inbox reports the delivery.
-    """
-
-    script = FakeModelScript(
-        turns=[
-            ScriptedTurn(
-                tool_calls=[
-                    ScriptedToolCall(
-                        name="demo.external_write",
-                        arguments={"destination": "demo", "content": "sensitive-effect-body"},
-                        call_id="golden-notify",
-                    )
-                ],
-                stop_reason=StopReason.TOOL_USE,
-            )
-        ]
-    )
-    settings = dataclasses_replace(
-        database_settings(),
-        notification_api_enabled=True,
-        notification_dispatch_enabled=True,
-    )
-    async with (
-        build(settings=settings, storage="postgres", script=script) as composition,
-        _client(composition) as client,
-    ):
-        registered = await client.post(
-            "/v1/devices",
-            headers={"Idempotency-Key": "golden-device"},
-            json={
-                "client_device_id": "golden-phone",
-                "name": "Golden iPhone",
-                "kind": "mobile",
-                "platform": "ios",
-                "app_bundle_id": "com.veetbot.app",
-                "push_provider": "apns",
-                "push_token": "0123456789abcdef",
-                "push_environment": "sandbox",
-                "muted_kinds": [],
-            },
-        )
-        assert registered.status_code == 201, registered.text
-
-        created = await client.post(
-            "/v1/sessions",
-            json={"agent_id": "general", "metadata": {}},
-        )
-        assert created.status_code == 201, created.text
-        session_id = UUID(created.json()["id"])
-        submitted = await client.post(
-            f"/v1/sessions/{session_id}/messages",
-            headers={"Idempotency-Key": "golden-notify"},
-            json={"content": [{"type": "text", "text": "record an external write"}]},
-        )
-        assert submitted.status_code == 202, submitted.text
-        run_id = UUID(submitted.json()["run_id"])
-        await _run_worker(composition, "golden-notify-parker")
-        parked = await client.get(f"/v1/runs/{run_id}")
-        assert parked.json()["status"] == RunStatus.WAITING_FOR_APPROVAL.value
-
-        transport = FakePushTransport()
-        dispatcher = NotificationDispatcher(
-            uow_factory=composition.uow_factory,
-            transport=transport,
-            providers=frozenset({PushProvider.APNS}),
-            clock=composition.clock,
-            ids=composition.ids,
-            claimant="golden-dispatcher",
-            batch_size=10,
-            lease_seconds=30,
-            retry_delays=(30, 120, 600, 3600),
-        )
-        assert await dispatcher.run_once() == 1
-        assert await dispatcher.run_once() == 0
-
-        inbox = await client.get("/v1/notifications")
-
-    assert len(transport.calls) == 1
-    target, message = transport.calls[0]
-    assert target.token.get_secret_value() == "0123456789abcdef"
-    payload = message.payload.model_dump(mode="json")
-    assert payload["kind"] == "approval_requested"
-    flattened = json.dumps(payload)
-    assert "sensitive-effect-body" not in flattened
-    assert "record an external write" not in flattened
-
-    assert inbox.status_code == 200, inbox.text
-    items = inbox.json()["items"]
-    assert len(items) == 1
-    assert items[0]["notification"]["kind"] == "approval_requested"
-    assert items[0]["notification"]["run_id"] == str(run_id)
-    outcomes = [delivery["outcome"] for delivery in items[0]["deliveries"]]
-    assert outcomes == ["delivered"]
-
-
 async def test_implicitly_formed_memory_is_browsable_through_the_read_api() -> None:
     """Formation, consolidation, and the Milestone 17 read surface in one chain.
 
@@ -984,3 +906,388 @@ async def test_run_produced_artifact_downloads_through_the_public_api(tmp_path: 
     ]
     [completed] = [event.payload for event in events if event.event_type == "run.completed"]
     assert completed["final_message"] == reply
+
+
+def _notification_role_settings(tmp_path: Path) -> Settings:
+    """The lean production notification process: its own role, no app credentials."""
+
+    apns_key = tmp_path / "AuthKey_GOLDEN.p8"
+    apns_key.write_text("golden APNs private key material", encoding="ascii")
+    apns_key.chmod(0o600)
+    return dataclasses_replace(
+        database_settings(),
+        deployment_mode=DeploymentMode.PRODUCTION,
+        auth_mode=AuthMode.TOKEN,
+        sandbox=SandboxMechanism.GVISOR,
+        auth_tenant_id="local",
+        auth_principal_id="local-user",
+        auth_roles=frozenset({"notify"}),
+        auth_scopes=PLATFORM_SCOPES,
+        notification_api_enabled=True,
+        notification_dispatch_enabled=True,
+        push_provider=PushProviderKind.APNS,
+        apns_key_file=apns_key,
+        apns_key_id="KEYID",
+        apns_team_id="TEAMID",
+        apns_topic="com.veetbot.app",
+    )
+
+
+async def test_a_schedule_made_in_chat_runs_while_away_and_its_result_reaches_the_phone(
+    tmp_path: Path,
+) -> None:
+    """The away-from-keyboard loop, from a chat message to the lock screen.
+
+    The owner asks Chat for a reminder and approves the proposed schedule over
+    HTTP. At the fire instant the schedule worker materializes the occurrence,
+    a durable worker runs it, and accounting records the outcome and enqueues
+    `schedule_run_finished` in the same transaction. The separate production
+    notification process delivers both alerts to the device registered over
+    HTTP: the approval alert while the run waits, the result once it finishes.
+    The pinned title may ride along (ADR-0091); the instruction and the
+    scheduled reply may not.
+    """
+
+    now = datetime(2026, 8, 25, 20, tzinfo=UTC)
+    fire_at = datetime(2026, 8, 26, 2, tzinfo=UTC)
+    request_text = "Remind me at 7pm to stretch my back."
+    title = "Stretch break"
+    instruction = "Remind me to stand up and stretch my back."
+    scheduled_reply = "Time to stand up and stretch your back."
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="schedule.create",
+                        arguments={
+                            "title": title,
+                            "instruction": instruction,
+                            "at": fire_at.isoformat(),
+                        },
+                        call_id="golden-chat-schedule",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="I scheduled your stretch reminder."),
+            ScriptedTurn(text=scheduled_reply),
+        ]
+    )
+    settings = dataclasses_replace(
+        database_settings(),
+        schedule_api_enabled=True,
+        schedule_worker_enabled=True,
+        notification_api_enabled=True,
+        notification_dispatch_enabled=True,
+    )
+    transport = FakePushTransport()
+    clock = FixedClock(now)
+    async with (
+        build(settings=settings, storage="postgres", script=script, clock=clock) as composition,
+        build_notification_worker(
+            settings=_notification_role_settings(tmp_path), transport=transport, clock=clock
+        ) as notifier,
+        _client(composition) as client,
+    ):
+        registered = await client.post(
+            "/v1/devices",
+            headers={"Idempotency-Key": "golden-away-device"},
+            json={
+                "client_device_id": "golden-away-phone",
+                "name": "Golden iPhone",
+                "kind": "mobile",
+                "platform": "ios",
+                "app_bundle_id": "com.veetbot.app",
+                "push_provider": "apns",
+                "push_token": "fedcba9876543210",
+                "push_environment": "sandbox",
+                "muted_kinds": [],
+            },
+        )
+        assert registered.status_code == 201, registered.text
+        created = await client.post("/v1/sessions", json={"agent_id": "general", "metadata": {}})
+        assert created.status_code == 201, created.text
+        session_id = UUID(created.json()["id"])
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            headers={"Idempotency-Key": "golden-away-chat"},
+            json={"content": [{"type": "text", "text": request_text}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+        chat_run_id = UUID(submitted.json()["run_id"])
+
+        await _run_worker_on_wall_clock(composition, "golden-away-proposer")
+        assert await notifier.run_once() == 1
+        [approval] = (
+            await client.get("/v1/approvals", params={"run_id": str(chat_run_id)})
+        ).json()["items"]
+        assert approval["tool_name"] == "schedule.create"
+        resolved = await client.post(
+            f"/v1/approvals/{approval['id']}/resolve", json={"decision": "approve_once"}
+        )
+        assert resolved.status_code == 200, resolved.text
+        await _run_worker_on_wall_clock(composition, "golden-away-creator")
+        chat_run = await client.get(f"/v1/runs/{chat_run_id}")
+        assert chat_run.json()["status"] == RunStatus.COMPLETED.value, chat_run.json()
+
+        listed = await client.get("/v1/schedules")
+        assert listed.status_code == 200, listed.text
+        [schedule] = listed.json()["items"]
+        assert schedule["title"] == title
+        assert datetime.fromisoformat(schedule["next_fire_at"]) == fire_at
+        schedule_id = UUID(schedule["id"])
+        clock.advance(fire_at - clock.now())
+        schedule_worker = composition.schedule_worker_factory()
+        assert isinstance(schedule_worker, ScheduleWorker)
+        assert await schedule_worker.run_once() == 1
+        await _run_worker_on_wall_clock(composition, "golden-away-occurrence")
+
+        [occurrence] = (await client.get(f"/v1/schedules/{schedule_id}/occurrences")).json()[
+            "items"
+        ]
+        scheduled_run = await client.get(f"/v1/runs/{occurrence['run_id']}")
+        assert scheduled_run.json()["status"] == RunStatus.COMPLETED.value, scheduled_run.json()
+        async with composition.uow_factory() as uow:
+            [accounted] = await uow.process_events.list("schedule.run_accounted")
+        assert accounted.payload["run_id"] == occurrence["run_id"]
+        assert accounted.payload["run_status"] == RunStatus.COMPLETED.value
+
+        assert await notifier.run_once() == 1
+        assert await notifier.run_once() == 0
+        inbox = await client.get("/v1/notifications")
+
+    payloads = [message.payload.model_dump(mode="json") for _target, message in transport.calls]
+    assert {target.token.get_secret_value() for target, _message in transport.calls} == {
+        "fedcba9876543210"
+    }
+    assert [payload["kind"] for payload in payloads] == [
+        "approval_requested",
+        "schedule_run_finished",
+    ]
+    finished = payloads[1]
+    assert finished["schedule_id"] == str(schedule_id)
+    assert finished["run_id"] == occurrence["run_id"]
+    assert finished["status"] == RunStatus.COMPLETED.value
+    assert finished["schedule_context"]["title"] == title
+    assert datetime.fromisoformat(finished["schedule_context"]["scheduled_for"]) == fire_at
+    requested = payloads[0]
+    assert requested["run_id"] == str(chat_run_id)
+    assert requested["approval_id"] == approval["id"]
+    # Alerts are content-free: no request, tool argument or reply reaches Apple.
+    flattened = json.dumps(payloads)
+    for private in (request_text, instruction, scheduled_reply):
+        assert private not in flattened
+
+    assert inbox.status_code == 200, inbox.text
+    delivered = {
+        item["notification"]["kind"]: [delivery["outcome"] for delivery in item["deliveries"]]
+        for item in inbox.json()["items"]
+    }
+    assert delivered == {
+        "approval_requested": ["delivered"],
+        "schedule_run_finished": ["delivered"],
+    }
+
+
+async def test_a_fact_formed_in_one_chat_informs_the_first_answer_of_the_next() -> None:
+    """Implicit formation joined to recall, across two chats and two processes.
+
+    The first chat never calls memory.remember: idle consolidation forms the
+    belief from the owner's own message. A later process opens a new chat, and
+    its very first model request must already carry that belief, with no memory
+    tool call, and the answer is delivered over the API.
+    """
+
+    now = datetime(2026, 8, 25, 16, tzinfo=UTC)
+    clock = FixedClock(now)
+    remembered = "BMW X3"
+    first_script = FakeModelScript(turns=[ScriptedTurn(text="Noted, thanks.")])
+    async with build(
+        settings=database_settings(), storage="postgres", script=first_script, clock=clock
+    ) as first:
+        first_run_id = await first.runs.submit("I drive a BMW X3 to work every day.")
+        await _run_worker(first, "golden-formation-chat")
+        first_run = await first.runs.get(first_run_id)
+        async with first.uow_factory() as uow:
+            first_events = await uow.events.list_after(first_run.session_id, 0, first.principal)
+        formation = next(
+            event for event in first_events if event.event_type == "memory.formation.requested"
+        )
+        clock.advance(datetime.fromisoformat(str(formation.payload["not_before"])) - clock.now())
+        await cast(MaintenanceWorker, first.maintenance_factory()).run_once()
+        formed = [
+            memory.statement
+            for memory in await first.memory.list_memories()
+            if remembered in memory.statement
+        ]
+    assert first_run.status is RunStatus.COMPLETED
+    assert formed, "idle consolidation formed no belief about the car"
+
+    second_script = FakeModelScript(
+        turns=[ScriptedTurn(text="You drive a BMW X3.", context_contains=remembered)]
+    )
+    async with (
+        build(settings=database_settings(), storage="postgres", clock=clock) as api,
+        build(
+            settings=database_settings(), storage="postgres", script=second_script, clock=clock
+        ) as worker,
+        _client(api) as client,
+    ):
+        created = await client.post("/v1/sessions", json={"agent_id": "general", "metadata": {}})
+        assert created.status_code == 201, created.text
+        session_id = UUID(created.json()["id"])
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            headers={"Idempotency-Key": "golden-recall-next-chat"},
+            json={"content": [{"type": "text", "text": "What car do I drive?"}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+        run_id = UUID(submitted.json()["run_id"])
+        await _run_worker(worker, "golden-recall-next-chat")
+        run = await client.get(f"/v1/runs/{run_id}")
+        transcript = await client.get(f"/v1/sessions/{session_id}/messages")
+        events = await worker.runs.events(run_id)
+
+    assert run.json()["status"] == RunStatus.COMPLETED.value, run.json()
+    assert transcript.json()["items"][-1]["content"] == [
+        {"type": "text", "text": "You drive a BMW X3."}
+    ]
+    assert [event.event_type for event in events].count("model.request.started") == 1
+    assert _tool_names(events, "tool.call.completed") == []
+    assert "memory.recalled" in {event.event_type for event in events}
+
+
+async def test_a_file_dropped_into_chat_reaches_the_provider_and_answers_a_later_chat(
+    tmp_path: Path,
+) -> None:
+    """ADR-0120 end to end: upload, claim on send, release to the model, ingest, recall.
+
+    The owner uploads an image and a Markdown note over HTTP and sends them with
+    a message. A durable worker runs the turn through the OpenAI SDK request path,
+    and the serialized request carries both files' bytes. The maintenance worker
+    adds the owner-sent note to knowledge, and a later chat answers from it
+    through knowledge.search on PostgreSQL.
+    """
+
+    import base64
+
+    from tests.gates.test_attachment_upload_adr0120 import PNG
+
+    note = b"# Garden plan\n\nWater the tomatoes every morning before nine."
+    settings = dataclasses_replace(
+        database_settings(),
+        artifact_root=tmp_path / "artifacts",
+        attachment_uploads_enabled=True,
+        auth_tenant_id="local",
+        auth_principal_id="local-user",
+        auth_roles=frozenset({"user"}),
+        auth_scopes=PLATFORM_SCOPES,
+    )
+    wire = _OpenAIWire([openai_text_events("I have your garden plan and the photo.")])
+    async with (
+        # A sibling process of the same configuration lends the provider its
+        # attachment resolver; production composes each provider with its own.
+        build(settings=settings, storage="postgres") as resolver_host,
+        httpx.AsyncClient(transport=httpx.MockTransport(wire)) as http_client,
+    ):
+        provider = OpenAIResponsesProvider(
+            client=AsyncOpenAI(
+                api_key="test",
+                base_url="https://openai.test/v1",
+                http_client=http_client,
+                max_retries=0,
+            ),
+            attachment_resolver=resolver_host.attachment_resolver,
+        )
+        async with (
+            build(
+                settings=settings,
+                storage="postgres",
+                model_policy="balanced",
+                model_provider_overrides={"openai": provider},
+            ) as composition,
+            _client(composition) as client,
+        ):
+            created = await client.post(
+                "/v1/sessions", json={"agent_id": "general", "metadata": {}}
+            )
+            assert created.status_code == 201, created.text
+            session_id = UUID(created.json()["id"])
+
+            async def upload(content: bytes, name: str, media_type: str) -> str:
+                response = await client.post(
+                    f"/v1/sessions/{session_id}/artifacts",
+                    content=content,
+                    headers={
+                        "Content-Type": media_type,
+                        "X-Filename": name,
+                        "Idempotency-Key": f"golden-upload-{name}",
+                    },
+                )
+                assert response.status_code == 201, response.text
+                return str(response.json()["id"])
+
+            image_id = await upload(PNG, "tomatoes.png", "image/png")
+            note_id = await upload(note, "garden.md", "text/markdown")
+            sent = await client.post(
+                f"/v1/sessions/{session_id}/messages",
+                headers={"Idempotency-Key": "golden-attachment-send"},
+                json={
+                    "content": [
+                        {"type": "text", "text": "Here is my garden plan and a photo."},
+                        {"type": "image", "artifact_id": image_id, "media_type": "image/png"},
+                        {"type": "file", "artifact_id": note_id, "media_type": "text/markdown"},
+                    ]
+                },
+            )
+            assert sent.status_code == 202, sent.text
+            run_id = UUID(sent.json()["run_id"])
+            await _run_worker(composition, "golden-attachment-worker")
+            run = await client.get(f"/v1/runs/{run_id}")
+            assert run.json()["status"] == RunStatus.COMPLETED.value, run.json()
+
+            await cast(MaintenanceWorker, composition.maintenance_factory()).run_once()
+            async with composition.uow_factory() as uow:
+                ingested = await uow.artifacts.get(UUID(note_id), composition.principal)
+            assert ingested.metadata["auto_ingest"] == "ingested", ingested.metadata
+
+    # The provider received the image bytes and the note's text, fenced as data.
+    [request] = wire.requests
+    parts = request["input"][-1]["content"]
+    image_url = f"data:image/png;base64,{base64.b64encode(PNG).decode()}"
+    assert [part["image_url"] for part in parts if part["type"] == "input_image"] == [image_url]
+    [note_part] = [
+        part["text"]
+        for part in parts
+        if part["type"] == "input_text" and part["text"].startswith('[Attached file "garden.md"')
+    ]
+    assert note.decode() in note_part
+    assert '<untrusted trust="external_untrusted"' in note_part
+
+    passage = "Water the tomatoes every morning before nine."
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="knowledge.search",
+                        arguments={"text": "when to water the tomatoes"},
+                        call_id="golden-knowledge-search",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Every morning before nine.", context_contains=passage),
+        ]
+    )
+    async with build(settings=settings, storage="postgres", script=script) as later:
+        later_session = await later.sessions.create()
+        later_run_id = await later.runs.submit("When should I water the tomatoes?", later_session)
+        await _run_worker(later, "golden-knowledge-worker")
+        later_run = await later.runs.get(later_run_id)
+        later_events = await later.runs.events(later_run_id)
+
+    assert later_run.status is RunStatus.COMPLETED, later_run.failure
+    assert later_run.final_message == "Every morning before nine."
+    assert _tool_names(later_events, "tool.call.completed") == ["knowledge.search"]

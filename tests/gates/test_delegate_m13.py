@@ -1208,11 +1208,17 @@ async def test_delegation_is_one_level_deep(tmp_path: Path) -> None:
             assert await uow.delegations.get_for_parent_run(child_run_id) == []
             child_invocations = await uow.invocations.list_for_run(child_run_id, app.principal)
             forged = [record for record in child_invocations if record.tool_name == "delegate.run"]
-            for record in forged:
-                assert record.status in {
-                    ToolInvocationStatus.DENIED,
-                    ToolInvocationStatus.FAILED,
-                }
+            # Denied before materialization: the forged call leaves no invocation
+            # row, only the denial the child's model was answered with.
+            assert forged == []
+            child_run = await uow.runs.get(child_run_id, app.principal)
+            child_events = await uow.events.list_after(child_run.session_id, 0, app.principal)
+        denials = [
+            event.payload.get("name")
+            for event in child_events
+            if event.event_type == "tool.call.denied"
+        ]
+        assert denials == ["delegate.run"]
 
 
 async def test_a_child_result_is_external_and_untrusted(tmp_path: Path) -> None:

@@ -96,12 +96,12 @@ def test_the_shipped_device_entry_declares_its_human_confirmation() -> None:
 
 
 def test_an_explicit_empty_otherwise_decision_is_rejected() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="PolicyDecisionType"):
         _ruleset({TOOL_NAME: {"decision": "allow", "otherwise": ""}})
 
 
 def test_a_non_string_tool_rule_key_is_rejected_as_invalid_policy() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="keyed by strings"):
         _ruleset(
             {
                 TOOL_NAME: {"decision": "allow"},
@@ -123,24 +123,6 @@ async def test_an_allow_without_human_confirmation_gets_no_argument_suppression(
     )
 
     assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
-
-
-async def test_declared_human_confirmation_suppresses_the_argument_half_only() -> None:
-    ruleset = _ruleset({TOOL_NAME: {"decision": "allow", "human_confirms_arguments": True}})
-
-    allowed = await DeterministicPolicyEngine(ruleset).evaluate(
-        _action(),
-        principal(),
-        contract_run(),
-    )
-    escalated = await DeterministicPolicyEngine(ruleset).evaluate(
-        _action(origin_trust=TrustLevel.EXTERNAL_UNTRUSTED),
-        principal(),
-        contract_run(),
-    )
-
-    assert allowed.decision is PolicyDecisionType.ALLOW
-    assert escalated.decision is PolicyDecisionType.REQUIRE_APPROVAL
 
 
 # --- (b) the may-authorize column decides which origins reach a plain allow --

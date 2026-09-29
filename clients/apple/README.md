@@ -56,7 +56,7 @@ Markdown symbols), and Select Text, which opens the message in a native text vie
 where any range can be selected.
 
 The settings surface groups Connection, Models, Website Access, Appearance, and
-Data & Privacy in a scrolling layout. The Connect or Update Connection action sits in
+Data & Privacy, plus SMS Integration on iOS, in a scrolling layout. The Connect or Update Connection action sits in
 the Connection card, while device-local text-size and font-style controls save
 automatically and apply immediately throughout the client. The Models card reads
 and writes the server's `/v1/settings/models` resource (scopes `settings.read`
@@ -75,6 +75,12 @@ Before macOS 15, which ignores a sheet's ideal size, they open at their 480- to
 On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.
+Below New conversation, a collapsible Recent chats section lists the five most
+recently active chats, including those inside closed folders; a schedule with
+two or more sessions collapses into one row in the Scheduled section
+(ADR-0113). In Memory, the flag toggle shows memories that need review, and a
+memory's Review menu marks it reviewed, not true, or not relevant here, or
+deletes it after a confirmation (ADR-0117).
 
 Website Access creates and lists dedicated browser profiles from one Website URL.
 Enter a homepage such as `example.com` or a full login link such as

@@ -248,6 +248,25 @@ public struct VeetbotAPIClient: Sendable {
         }
     }
 
+    public func getBrowserTaskScopes() async throws -> BrowserTaskScopePolicy {
+        do {
+            return try await transport.send(TransportRequest(method: .get, path: "/v1/browser-task-scopes"))
+        } catch {
+            throw taskGrantCompatibilityError(from: error) ?? error
+        }
+    }
+
+    public func updateBrowserTaskScopes(_ policy: BrowserTaskScopePolicy) async throws -> BrowserTaskScopePolicy {
+        do {
+            return try await transport.send(TransportRequest(
+                method: .put, path: "/v1/browser-task-scopes",
+                body: try JSONEncoder.server.encode(policy), retryAttempts: 2
+            ))
+        } catch {
+            throw taskGrantCompatibilityError(from: error) ?? error
+        }
+    }
+
     public func getBrowserTaskGrant(_ grantID: UUID) async throws -> BrowserTaskGrantView {
         do {
             return try await transport.send(

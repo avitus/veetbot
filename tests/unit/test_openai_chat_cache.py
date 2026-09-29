@@ -1,26 +1,13 @@
 """Chat cache identity and the actual Responses wire prefix."""
 
+from typing import Any
+
 import pytest
 
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
 from agent_core.domain.messages import ResolvedModel, TextPart, UserMessage
 from tests.contract.support import NOW, agent, principal, run, session
 from tests.unit.test_history_cache_window import _checkpoint, _stack
-
-
-async def test_chat_payload_has_a_session_cache_key() -> None:
-    planner, builder = await _stack()
-    model = ResolvedModel(provider="openai", model="gpt-6-astra", resolved_at=NOW)
-    await planner.plan(session(), agent(), principal(), model)
-    active = run()
-    request = await builder.build(
-        active,
-        _checkpoint(active, [UserMessage(content=[TextPart(text="Plan the trip.")])]),
-        agent(),
-        principal(),
-    )
-    payload = OpenAIResponsesProvider._request_payload(request, model)
-    assert payload.get("prompt_cache_key"), "Chat has no per-session cache identity on the wire"
 
 
 def test_openai_accounts_for_cache_writes_at_the_profile_price() -> None:
@@ -460,3 +447,30 @@ def test_usage_reads_an_absent_token_count_as_zero() -> None:
         usage.output_tokens,
         usage.reasoning_tokens,
     ) == (100, 40, 0, 10, 0)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "prompt_tokens_details": {"cached_tokens": None},
+        },
+        {"prompt_tokens": None, "completion_tokens": None, "prompt_tokens_details": None},
+    ],
+    ids=["null_cached_tokens", "null_top_level_counts"],
+)
+def test_chat_completions_usage_reads_a_null_token_count_as_zero(raw: dict[str, Any]) -> None:
+    """OpenAI-compatible servers emit null counts; they mean nothing was counted."""
+    from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
+
+    model = ResolvedModel(provider="openai_compatible", model="local-model", resolved_at=NOW)
+    usage = ChatCompletionsProvider._usage(raw, model)
+
+    expected_input = raw["prompt_tokens"] or 0
+    assert (usage.input_tokens, usage.cached_input_tokens, usage.output_tokens) == (
+        expected_input,
+        0,
+        raw["completion_tokens"] or 0,
+    )

@@ -197,6 +197,9 @@ class Parser:
             self._guard_depth(depth + 1)
             self._take()
             exponent = self._unary(depth + 1)
+            if value == 0 and exponent < 0:
+                # Decimal returns Infinity here without signalling; 0^-n is 1/0^n.
+                raise CalculatorError("division_by_zero", "zero divisor")
             value **= exponent
         return value
 

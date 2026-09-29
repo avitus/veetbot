@@ -7,8 +7,12 @@ the required real-mailbox smoke, rollback, and milestone-close evidence.
 
 The governing design remains [Email Integration](plan/email-integration.md)
 and [ADR-0071](adr/0071-milestone-18-email-integration.md). This runbook does
-not widen that contract: one Gmail account, no attachment download, no
-permanent deletion, and explicit approval for every write and send.
+not widen that contract: the three designed Google scopes for each connected
+account, no attachment download, no permanent deletion, and explicit approval
+for every write and send. The Milestone 26
+[Email mode](#milestone-26-activate-email-mode) and the Milestone 31
+[unsubscribe assistance](#milestone-31-activate-and-smoke-unsubscribe-assistance)
+build on the same credentials and are activated in their own sections below.
 
 ## Finish line
 
@@ -699,6 +703,27 @@ The closing commit is a full-contract change and must carry a
 `Reading-Lane: A` trailer. Deliver it through the normal dev-to-main review
 path; do not treat credential installation or a local smoke alone as milestone
 completion.
+
+## Milestone 26 — Activate Email mode
+
+Email mode is the app's Email presentation: the priority inbox, reading pane,
+drafts, feedback and learning of the
+[email experience](plan/email-experience.md). It uses the accounts installed
+above and needs no new Google permission.
+
+1. Confirm the Phase 4 smoke passed for every connected account.
+2. In `/etc/veetbot/veetbot.env`, set `AGENT_EMAIL_MODE_ENABLED=1` and append
+   `email.read,email.write` to `AUTH_SCOPES`. The flag grants no authority;
+   the scopes and the existing account authority do.
+3. Automatic email work spends at most USD 20 per UTC day and USD 200 per
+   rolling 30 days. A reviewed `runtime/limits.yaml` overlay under
+   `AGENT_CONFIG_DIR` can set other finite `email.daily_cost` and
+   `email.monthly_cost` allowances.
+4. Restart `veetbot-api`, `veetbot-worker`, `veetbot-async-worker`, and
+   `veetbot-maintenance`, confirm each is active, then open Email in the app
+   and confirm each account reports a completed update.
+
+Set the flag back to `0` and restart the same services to turn it off.
 
 ## Milestone 31 — Activate and smoke unsubscribe assistance
 

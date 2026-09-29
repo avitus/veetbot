@@ -1,6 +1,7 @@
 # ADR-0116: Bulk mail never forms communication memory
 
-- Status: Accepted (authorized by the repository owner, 2026-09-22)
+- Status: Accepted (authorized by the repository owner, 2026-09-22); amended
+  by ADR-0121
 - Date: 2026-09-22
 - Related: ADR-0090, ADR-0096, ADR-0101, ADR-0112, ADR-0117; Sections 6 and 7
   of `docs/plan/email-experience.md`; Section 7 of

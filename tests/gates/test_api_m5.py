@@ -428,6 +428,139 @@ async def test_every_route_declares_exactly_one_scope_except_health(tmp_path: Pa
             assert declared in PLATFORM_SCOPES
 
 
+def _every_router_settings() -> Settings:
+    """Mount every flag-gated router the in-memory composition can build."""
+    import json
+
+    from agent_core.config import BrowserProviderKind
+    from tests.gates.test_call_m27 import call_configuration
+    from tests.gates.test_email_m18 import _email_settings
+
+    email = _email_settings()
+    bland = SecretStr(
+        json.dumps(
+            {"api_key": "fixture-key-12345", "configuration": call_configuration().model_dump()}
+        )
+    )
+    return replace(
+        email,
+        email_mode_enabled=True,
+        email_unsubscribe_enabled=True,
+        people_enabled=True,
+        schedule_api_enabled=True,
+        schedule_worker_enabled=True,
+        notification_api_enabled=True,
+        notification_dispatch_enabled=True,
+        memory_api_enabled=True,
+        persona_api_enabled=True,
+        thread_folders_api_enabled=True,
+        delegation_enabled=True,
+        device_channel_enabled=True,
+        device_sms_enabled=True,
+        surface_api_enabled=True,
+        surface_worker_enabled=True,
+        call_enabled=True,
+        call_configuration=call_configuration(),
+        attachment_uploads_enabled=True,
+        trajectory_export_enabled=True,
+        browser_provider=BrowserProviderKind.HOSTED,
+        browser_profile_service_url="https://profiles.example.test",
+        browser_task_grants_enabled=True,
+        credentials={
+            **email.credentials,
+            "bland_read": bland,
+            "bland_call": bland,
+            "browser_profile_control_plane": SecretStr("fixture-control-plane"),
+        },
+    )
+
+
+async def test_every_route_enforces_the_scope_it_declares() -> None:
+    """A principal holding every scope but a route's declared one is refused with 403.
+
+    The declaration test above reads `required_scope` metadata; this one sends
+    the request, so a route that declares one scope and checks another, or
+    forgets to check at all, fails here. Authorization precedes validation, so
+    an empty body never masks the refusal.
+    """
+
+    owner = Principal(
+        tenant_id="local", principal_id="local-user", roles={"user"}, scopes=set(PLATFORM_SCOPES)
+    )
+    async with build(
+        settings=_every_router_settings(), storage="memory", principal=owner
+    ) as composition:
+        app = create_app(
+            composition.services,
+            composition.settings,
+            owner,
+            composition.new_request_id,
+            composition.readiness_probe,
+        )
+        routes = [
+            nested
+            for route in app.routes
+            for nested in (
+                route.original_router.routes if hasattr(route, "original_router") else (route,)
+            )
+            if isinstance(nested, APIRoute)
+        ]
+        by_scope: dict[str, list[tuple[str, str]]] = {}
+        for route in routes:
+            if route.path in {"/health/live", "/health/ready"}:
+                continue
+            scope = (route.openapi_extra or {}).get("required_scope")
+            assert scope in PLATFORM_SCOPES, (route.path, scope)
+            path = route.path
+            for name in route.param_convertors:
+                path = path.replace("{" + name + "}", str(UUID(int=1)))
+            for method in sorted((route.methods or set()) - {"HEAD"}):
+                by_scope.setdefault(scope, []).append((method, path))
+        assert {path.split("/")[2] for pairs in by_scope.values() for _, path in pairs} >= {
+            "approvals",
+            "artifacts",
+            "browser-profiles",
+            "browser-task-grants",
+            "calls",
+            "devices",
+            "email",
+            "folders",
+            "memories",
+            "notifications",
+            "people",
+            "persona",
+            "runs",
+            "schedules",
+            "sessions",
+            "settings",
+            "surfaces",
+        }, "a router this gate should cover is no longer mounted"
+
+        mismatched: list[tuple[str, str, str, int]] = []
+        for scope, requests in by_scope.items():
+            lacking = create_app(
+                composition.services,
+                composition.settings,
+                owner.model_copy(update={"scopes": set(PLATFORM_SCOPES) - {scope}}),
+                composition.new_request_id,
+                composition.readiness_probe,
+            )
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(
+                    app=lacking, client=CLIENT, raise_app_exceptions=False
+                ),
+                base_url="http://agent.test",
+            ) as client:
+                for method, path in requests:
+                    body: dict[str, object] | None = (
+                        {} if method in {"POST", "PUT", "PATCH"} else None
+                    )
+                    response = await client.request(method, path, json=body)
+                    if response.status_code != 403:
+                        mismatched.append((method, path, scope, response.status_code))
+    assert mismatched == []
+
+
 async def test_health_probes_report_the_active_release_without_changing_bodies(
     tmp_path: Path,
 ) -> None:

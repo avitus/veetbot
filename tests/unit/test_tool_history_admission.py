@@ -193,7 +193,15 @@ async def test_large_web_batches_keep_prior_wire_history_stable_after_durable_re
     assert after.pressure.yield_steps == (), "a normal web batch rewrote admitted history"
     previous_wire = OpenAIResponsesProvider._request_payload(before.request, model)["input"]
     next_wire = OpenAIResponsesProvider._request_payload(after.request, model)["input"]
-    assert next_wire[: len(previous_wire)] == previous_wire
+    # The seeding input and runtime row are the current input, not carried
+    # history. Every admitted prior exchange stays byte-identical.
+    history_end = next(
+        i
+        for i, row in enumerate(previous_wire)
+        if str(row.get("content", "")).startswith("Runtime metadata")
+    )
+    assert sum("output" in row for row in previous_wire[:history_end]) == 8
+    assert next_wire[:history_end] == previous_wire[:history_end]
 
 
 async def test_legacy_session_history_gets_the_same_excerpt_before_new_results_arrive() -> None:
@@ -237,7 +245,13 @@ async def test_legacy_session_history_gets_the_same_excerpt_before_new_results_a
     old_before = next(i for i in first_wire if i.get("call_id") == "old-0" and "output" in i)
     assert "full output: event:3" in old_before["output"]
     assert len(old_before["output"].encode()) < INLINE_BYTES + 1000
-    assert next_wire[: len(first_wire)] == first_wire
+    history_end = next(
+        i
+        for i, row in enumerate(first_wire)
+        if str(row.get("content", "")).startswith("Runtime metadata")
+    )
+    assert sum("output" in row for row in first_wire[:history_end]) == 8
+    assert next_wire[:history_end] == first_wire[:history_end]
     assert after.pressure.fits
 
 

@@ -1638,3 +1638,617 @@ verification:
           Xcode Cloud, GitGuardian, and CodeRabbit status passed on that pull
           request's final head, and every review conversation is resolved.
     remaining: []
+  milestone_13:
+    recorded_at: 2026-09-28T21:30:00Z
+    status: complete
+    completed_on: 2026-08-27
+    evidence:
+      - check: twenty-one Milestone 13 gate.delegate.* gates
+        outcome: passed_locally
+        detail: >-
+          All twenty-one registered Milestone 13 entries in
+          evals/gates/delegate.yaml resolve to live checks — seventeen in
+          tests/gates/test_delegate_m13.py, one in
+          tests/unit/test_persistence_schema.py, and three in the
+          PostgreSQL integration lane
+          (tests/integration/test_delegation_materializer_m13.py and
+          tests/integration/test_migrations.py) — and all pass when
+          executed by node identifier. The later cumulative registry run recorded
+          below confirms agent eval gates --milestone 13 executes all
+          twenty-one successfully while reporting Milestones 14 and 15
+          pending; those milestones do not prevent the harness from running.
+      - check: build sequence steps 1 through 5 and the deterministic half of 6
+        outcome: passed_locally
+        detail: >-
+          The delegation domain values and limit derivation, the
+          delegations ledger persistence with erasure and its shared
+          repository contract on both tiers, delegate.run and the
+          one-transaction materializer with write-probe crash coverage,
+          the child_run suspension, join, requeue_after_child edge, and
+          downward-only cancel cascade, the delegation limits block with
+          the tenant admission lock and the default-off flag, and case 32
+          with the tools arm overlay are implemented and verified by the
+          static, contract, and PostgreSQL integration lanes. The capability
+          scenario schema now admits the Milestone 13 scenario while keeping
+          Milestone 14 outside its closed bound.
+      - check: red-green discipline for the Milestone 13 suites
+        outcome: recorded
+        detail: >-
+          Every build step began with a recorded failing run before its
+          green implementation. The focused red commands and their expected
+          failures were, in build order, pytest
+          tests/gates/test_delegate_m13.py failing on the unimplemented
+          limit derivation and materializer, tests/unit/
+          test_delegation_domain_m13.py failing on unenforced brief bounds,
+          tests/contract/test_delegation_repository_contract.py and
+          tests/unit/test_persistence_schema.py failing on the unimplemented
+          repositories and constraint-free row, the end-to-end suspension
+          suite failing with the parent completing without any delegation
+          machinery, and tests/unit/test_config.py failing on the ten
+          missing delegation knobs. The capability-bound continuation ran
+          pytest tests/unit/test_capability_boundaries.py -k
+          'milestone_thirteen or milestone_fourteen', which failed because
+          the pre-change schema rejected 13 and reported 10, not 13, as its
+          upper bound.
+      - check: hosted CI and final review for pull request 64
+        outcome: passed_on_final_head
+        detail: >-
+          On final head 071e6422503df592f8fe172484a7b1b304014540 all five
+          CircleCI lanes, the Xcode Cloud iOS and macOS archives, GitGuardian,
+          and CodeRabbit passed. CodeRabbit reviewed that exact head with no
+          new finding, every review thread was resolved, and GitHub merged the
+          dev-to-main pull request as 07c8bdfec085a2e6aef75311ea1d5cb046391ab5.
+          This evidence covers the implementation on that head, not the later
+          local capability-bound continuation or the still-unwritten live
+          scenario.
+      - check: capability scenario from a real failed trajectory
+        outcome: admitted_locally
+        detail: >-
+          Production run 85487ddf-5deb-45c3-a89b-a22b752f5406 supplies the
+          required real long-research failure: the single agent spent all 32
+          permitted tool calls across six providers and their second-source
+          cross-checks, then failed with budget_exceeded before producing an
+          answer. With active export consent, corrected trajectory@5 export
+          65b5b347-2891-4e58-a3f1-d9c583088f85 produced the checked-in
+          trajectory. Review confirmed the export's digest, matching failed
+          provenance, rule-based redactions, absence of event sequences and
+          principal identity, and successful redaction rescan. The repository
+          admission regression first failed because no trajectory-backed
+          scenario existed, then passed after the fixture and diagnosed
+          research scenario were added. Single-agent baseline and delegating
+          re-run scoring, hosted CI, and final review on the completed evidence
+          head remain.
+      - check: first single-agent live baseline attempt
+        outcome: blocked_by_cost_ceiling
+        detail: >-
+          Exact integrated build e238ce7 ran against a dedicated PostgreSQL
+          evaluation database with delegation explicitly disabled. Repeats 0
+          through 3 each exhausted the shared subject-and-judge cost ceiling
+          before any judge call, at USD 0.917954, USD 0.9954325, USD 0.861420,
+          and USD 0.913695 respectively. Repeat 4 then ended with zero usage
+          when the normalized model stream violated its contract, and the
+          suite emitted a release-blocking evaluation_error. The persisted
+          attempt cost is USD 3.6885015, with zero criterion rows and zero
+          scores. The owner then explicitly approved a USD 50 evaluation
+          budget. The governed ceilings are now USD 5.00 per repeat, USD 25.00
+          per suite invocation, and USD 50.00 per day, leaving the scored
+          five-repeat baseline and delegating arm to run under the approved
+          bound at that checkpoint.
+      - check: governed baseline and delegation calibration under the approved budget
+        outcome: blocked_by_call_ceiling
+        detail: >-
+          Exact staged build 95b3236 completed the five-repeat single-agent
+          baseline with five release-blocking ceiling hits, zero policy
+          failures, no criterion rows, and USD 7.8022225 persisted cost. Exact
+          staged build d0b0eed then completed the five-repeat delegation arm
+          with five tool-call ceiling hits, zero policy failures, no criterion
+          rows, and per-repeat costs USD 5.0662285, USD 2.6579855, USD
+          2.9546355, USD 2.4501290, and USD 1.7449210. The live failures exposed
+          three harness defects now covered by regressions: model-stream
+          invariant detail was discarded, approval-free child suspension was
+          treated as terminal and only the interactive queue was driven, and a
+          zero-tool judge was stopped by the runtime before its first model
+          call. A bearer-terminology false positive was also narrowed without
+          admitting raw authorization headers or credential-shaped values.
+          Because child usage is correctly additive, the scenario now allows
+          80 model and 200 tool calls while retaining every approved cost
+          ceiling. At that checkpoint, the final scored baseline and
+          delegating distributions remained outstanding; these calibration
+          runs are recorded rather than reclassified retrospectively.
+      - check: scored single-agent baseline under the approved budget
+        outcome: blocked_by_rubric_floor
+        detail: >-
+          Exact staged build 11e5b90 completed the delegation-disabled
+          five-repeat research baseline against the dedicated PostgreSQL
+          evaluation database. Repeats 0 through 4 scored 0.75, 0.55, 0.75,
+          0.65, and 0.75, for mean 0.69, floor 0.55, and population variance
+          0.0064. All five rows have zero ceiling hits and zero policy
+          failures, with USD 7.855529 total persisted and provider-ledger
+          cost. The suite correctly remained release-blocked because repeat 1
+          fell below the rubric's 0.60 floor. The aggregate provider ledger
+          reached USD 42.599510 of the owner-approved USD 50 cap, leaving USD
+          7.400490. The prior unscored five-repeat delegation calibration cost
+          USD 14.8738995, so the scored delegating re-run remains outstanding
+          rather than knowingly exceeding the approved aggregate cap.
+      - check: first scored delegating re-run under the raised aggregate cap
+        outcome: blocked_by_comparison
+        detail: >-
+          Exact staged build 877b3ec completed five delegation-enabled repeats
+          at scores 0.75, 0.75, 0.775, 0.65, and 0.35, for mean 0.655, floor
+          0.35, and population variance 0.0251. It persisted zero scenario
+          ceiling hits, zero policy failures, and USD 10.984242 cost, taking
+          aggregate provider spend to USD 53.583752 of the owner-approved USD
+          100 cap. The arm remained release-blocked and did not score above the
+          0.69 baseline. Its child ledger showed repeated exhaustion at the
+          shipped eight-step/eight-model/16-tool defaults or caller-guessed
+          lower caps, including the 0.35 repeat whose children returned no
+          usable research summary. The failed distribution remains recorded;
+          it was not reclassified or discarded.
+      - check: scored delegating exit evidence after child-budget calibration
+        outcome: passed_live
+        detail: >-
+          The failed arm drove a red-green calibration on exact code head
+          3c8772a: governed child defaults moved from 8 model/16 tool calls to
+          12 model/48 tool calls, child instructions expose the derived budget
+          and reserve a final synthesis model call, and delegate.run@1.0.1
+          tells callers to omit guessed per-brief limits unless stricter caps
+          are intended. The focused red test failed on all three old contracts;
+          its green run passed, as did 103 delegation/configuration tests and
+          the complete local check. Exact staged build
+          3c8772a-delegating-repair then scored 0.65, 0.65, 0.90, 0.65, and
+          0.75, for mean 0.72, floor 0.65, and population variance 0.0096.
+          All five rows and the durable suite event report zero scenario
+          ceiling hits, zero policy failures, and release_blocked false. The
+          arm cost USD 11.104456 and aggregate provider spend is USD 64.688208
+          of the USD 100 authorization. This satisfies ADR-0063 because the
+          delegating mean is above the scored single-agent baseline's 0.69;
+          the lower baseline is retained as the required failed-trajectory
+          comparison rather than retrospectively repaired.
+      - check: hosted CI and final CodeRabbit review for pull request 72, the milestone's final head
+        outcome: passed
+        detail: >-
+          Pull request 72, "Complete Milestone 13 capability evidence", carried
+          the admitted research trajectory, the child-budget calibration, the
+          scored two-arm evidence and the second-review repairs to main. On its
+          final head d9827c0b69bfb59ced57f6d9c01868ca893d0bf5 the CircleCI
+          static, contract, integration, sandbox and Apple lanes, the Xcode
+          Cloud archives and GitGuardian passed. CodeRabbit completed its review
+          of that exact head and its summary reports no actionable comment in
+          the most recent review; the two outside-diff findings of the previous
+          round (a stale secrets ruleset version and a stale synthesis reserve
+          on model retries) were fixed on that head, and all four review
+          conversations are resolved. The owner merged it on 2026-08-27 as
+          f34d021e, and that merge's deploy-app (CircleCI job 2069) and deploy-nginx
+          (job 2072) succeeded. This satisfies build step 7 and the
+          milestone's two remaining open items; it was verified from GitHub and
+          recorded on 2026-09-28.
+      - check: cumulative gate registry through Milestone 13 (agent eval gates --milestone 13)
+        outcome: passed
+        detail: >-
+          On 2026-09-28 at main e55551fa, against a freshly migrated disposable
+          PostgreSQL database, agent eval gates --milestone 13 reported 268
+          active gates. All twenty-one Milestone 13 gates pass, including the
+          three PostgreSQL-lane gates, and every Milestone 0 through 12 gate
+          passes except the seven Milestone 6 gate.sandbox.* gates, which fail
+          on that host only because no container runtime is installed
+          (ExecutionUnavailable: container runtime is unavailable). Those seven
+          run in the hosted real-Docker sandbox lane, which passed on pull
+          request 72's final head and on the final head 69a86e30 of pull request
+          141, main's latest. Milestones 14 through 31 report pending. The
+          earlier note that --milestone 13 would activate the pending Milestone
+          14 and 15 gates did not hold: the harness reports them pending and
+          runs. The verified sequential ceiling advances to Milestone 13.
+    remaining: []
+  milestone_19:
+    recorded_at: 2026-09-28T21:30:00Z
+    status: complete
+    completed_on: 2026-08-25
+    evidence:
+      - check: five Milestone 19 gate.schedule.* gates
+        outcome: passed_locally
+        detail: >-
+          The five registered Milestone 19 entries in evals/gates/schedule.yaml
+          all resolve to checks in tests/gates/test_schedule_tool_m19.py, and
+          the file's seven tests pass locally (2026-08-25, uv run pytest
+          tests/gates/test_schedule_tool_m19.py). The harness cannot execute
+          them through agent eval gates yet for the reason Milestones 16 and
+          17 recorded: --milestone 19 would also activate the still-pending
+          Milestone 13 through 15 gates and the registry validator correctly
+          refuses. They become executable through the harness when
+          project.current_milestone advances past them.
+      - check: Milestone 19 gate-area red phase
+        outcome: observed_expected_failure
+        detail: >-
+          The gate-area test was reconstructed on the exact pre-implementation
+          parent e79d517 with the test version introduced by 20d9c82. Running
+          pytest tests/gates/test_gate_registry.py::
+          test_conversational_scheduling_has_complete_milestone_19_gate_area
+          failed at its intended assertion because the registry contained zero
+          Milestone 19 entries rather than five; this was a behavioral gate
+          failure rather than an environment, import, or fixture error.
+      - check: clarification, approval, and schedule creation journey
+        outcome: passed_locally
+        detail: >-
+          pytest tests/gates/test_schedule_tool_m19.py
+          tests/integration/test_schedule_conversation_m19.py passes all eight
+          tests against isolated PostgreSQL 16. The integration journey asks
+          for missing time context, records exactly one answer tool result,
+          resumes once, waits for ordinary approval, and persists one future
+          one-time schedule.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 580 files and Ruff linting pass, strict mypy
+          reports no issue in 536 source files, the static partition passes
+          1297 tests, the contract partition passes 368, all deployment-script
+          tests pass, and strict documentation validation reconciles all 353
+          gates and checks 188 citations.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          make test-integration passes all 155 selected tests against isolated
+          PostgreSQL 16, with 1677 deselected. This includes the scheduling and
+          notification persistence paths and the clarification journey.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          pytest -m "not live" passes all 1830 selected tests with the two
+          live-model tests deselected.
+      - check: hosted CI and CodeRabbit review for pull requests 64 and 66
+        outcome: passed
+        detail: >-
+          Pull request 64 carried schedule.create, ADR-0072 and the five gates
+          to main. On its final head 071e6422 the five CircleCI lanes, both
+          Xcode Cloud archives and GitGuardian passed, CodeRabbit completed its
+          review of that head with no actionable comment in the most recent
+          review, and all twelve review conversations are resolved. The owner
+          merged it on 2026-08-25 as 07c8bdfe. That merge's static job failed on
+          the reading-lane floor, so the next merge, pull request 65 (15d45b3b;
+          deploy-app job 1888, deploy-nginx job 1891), delivered it. Pull
+          request 66, merged the same day as bb7e72f7 (deploy-app 1915, deploy-nginx
+          1918), fixed the clarified-reminder resume and added the
+          PostgreSQL clarification-to-approval journey
+          tests/integration/test_schedule_conversation_m19.py; on its head
+          eeb2afac every lane passed and CodeRabbit completed its review with no
+          actionable comment. A later ADR-0109 repair to the gate file reached
+          main in pull request 127, whose review and hosted CI were also clean.
+          Verified from GitHub and recorded on 2026-09-28.
+      - check: registered gates re-run at main e55551fa (2026-09-28)
+        outcome: passed_locally
+        detail: >-
+          Every registered check of the fifty-four Milestone 19, 20, 22, 23 and
+          29 gates except the one native bridge,
+          tests/native/test_folders_m29.py, was run by node identifier against a
+          freshly migrated disposable PostgreSQL database: sixty pytest cases
+          passed with none skipped. The native folder journeys it wraps run in
+          the hosted macOS and iOS simulator lanes, which passed on the final
+          heads above.
+    remaining: []
+  milestone_20:
+    recorded_at: 2026-09-28T21:30:00Z
+    status: complete
+    completed_on: 2026-08-28
+    evidence:
+      - check: six Milestone 20 gate.schedule.* gates
+        outcome: passed_locally
+        detail: >-
+          All six registered Milestone 20 entries in evals/gates/schedule.yaml
+          resolve to live checks in tests/gates/test_schedule_calendar_m20.py.
+          That file's nine test results pass, covering the closed calendar
+          values, deterministic and property-generated recurrence, bounded
+          long-range counting, the widened HTTP union, approval proposals,
+          validation, and idempotent replay.
+      - check: Milestone 20 red phase
+        outcome: observed_expected_failure
+        detail: >-
+          After installing the repository environment, uv run pytest
+          tests/gates/test_schedule_calendar_m20.py -q produced nine expected
+          behavioral failures: the monthly and yearly domain types were
+          absent, the HTTP boundary rejected those recurrence kinds, and the
+          model tool neither proposed recurring approval nor enforced the
+          exclusive at-or-cadence input contract. The environment error from
+          the earlier pre-install attempt was discarded and was not counted
+          as red evidence.
+      - check: deterministic civil-calendar behavior
+        outcome: passed_locally
+        detail: >-
+          Numbered monthly dates skip months that do not contain the date,
+          explicit last-day rules select the actual month end, yearly leap-day
+          rules skip non-leap years, existing gap and fold behavior is reused,
+          and long downtime counting uses bounded calendar arithmetic rather
+          than one recurrence step per missed occurrence.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          uv run pytest -m 'not live' passes 1753 tests with 141 PostgreSQL-gated
+          tests skipped and the two live-model tests deselected. The
+          first run exposed an existing Milestone 13 property-test classifier
+          that omitted requested child budgets at the documented final-synthesis
+          reserve; the assertion was repaired without changing
+          delegation behavior and the complete rerun passed.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 593 files and Ruff linting pass, strict mypy
+          reports no issue in 548 source files, the static partition passes
+          1360 tests, the contract partition passes 368, all deployment-script
+          tests pass, and strict documentation validation reconciles all 359
+          gates and checks 188 citations.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          A fresh isolated PostgreSQL 16 database migrated from base through
+          head a9c5e2f7d413, the twenty existing schedule integration tests
+          passed, and make test-integration passed all 156 selected tests. The
+          new PostgreSQL gate round-trips monthly and yearly definitions
+          through the existing JSONB schedule revision without a migration.
+      - check: hosted CI and CodeRabbit review for pull request 74
+        outcome: passed
+        detail: >-
+          Pull request 74, "feat: add flexible calendar schedules", carried
+          ADR-0073's monthly and yearly rules and recurring schedule.create to
+          main. On its final head 67d15a44 the CircleCI static, contract,
+          integration, sandbox and Apple lanes and GitGuardian passed;
+          CodeRabbit completed its review of that head with no actionable
+          comment in the most recent review, and all six review conversations
+          are resolved. The owner merged it on 2026-08-28 as 6b3c514d; deploy-app
+          (job 2145) and deploy-nginx (job 2148) succeeded. Verified from
+          GitHub and recorded on 2026-09-28.
+      - check: registered gates re-run at main e55551fa (2026-09-28)
+        outcome: passed_locally
+        detail: >-
+          Every registered check of the fifty-four Milestone 19, 20, 22, 23 and
+          29 gates except the one native bridge,
+          tests/native/test_folders_m29.py, was run by node identifier against a
+          freshly migrated disposable PostgreSQL database: sixty pytest cases
+          passed with none skipped. The native folder journeys it wraps run in
+          the hosted macOS and iOS simulator lanes, which passed on the final
+          heads above.
+    remaining: []
+  milestone_22:
+    recorded_at: 2026-09-28T21:30:00Z
+    status: complete
+    completed_on: 2026-09-01
+    evidence:
+      - check: local Milestone 22 behavior and contracts
+        outcome: passed_locally
+        detail: >-
+          All fourteen gate.persona.* checks are live and pass: the fifty-turn
+          plan drive with a mid-session edit yields exactly two prefix hashes
+          and one persona_changed rotation, an empty persona renders zero
+          bytes, the over-cap persona fails session open naming its class,
+          nominated-but-unaffirmed text never renders, secrets and injection
+          patterns are refused at every write surface, consolidation
+          nominates only closed-eligibility beliefs with durable declines,
+          affirmation links without consuming, the snapshot excludes promoted
+          beliefs and releases them on removal, the persona routes carry
+          exact scopes with /v1/memories still GET-only, writes are
+          revision-guarded, and both stores pass one principal-scoped
+          contract. The deterministic benchmark gates pass unchanged, so the
+          checked-in baseline stands re-verified under ADR-0069 decision 2.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting pass, strict mypy reports no issues,
+          the static and contract partitions pass with the persona suites
+          included, deployment-script tests pass, and the strict
+          documentation build reconciles 397 gates.
+      - check: Apple package test lane
+        outcome: passed_locally
+        detail: >-
+          make test-apple passes 175 Swift Testing cases in 20 suites,
+          including the persona view model's guarded save, conflict
+          retention, affirm refresh, and unavailable degradation, plus the
+          editor's structure pins and wire-model decoding.
+      - check: PostgreSQL Milestone 22 lane
+        outcome: passed_locally
+        detail: >-
+          A local PostgreSQL migrated from c2e0f4a6b831 through head
+          e3a1c5d7f9b2; the persona store parity test and all 159 selected
+          integration and resilience tests pass.
+      - check: hosted CI and CodeRabbit review for pull request 82
+        outcome: passed
+        detail: >-
+          Pull request 82, "Milestone 22: persona surface and curated belief
+          promotion", carried the whole milestone to main. On its final head
+          e0d79769 the CircleCI static, contract, integration, sandbox and Apple
+          lanes and GitGuardian passed. CodeRabbit had paused automatic review
+          during the fix rounds; it queued, ran and completed a review of that
+          exact head, and all eleven review conversations are resolved, the last
+          on the persona view model and this page's checklist. The owner merged
+          it on 2026-09-01 as c5397c67; deploy-app (job 2414) and deploy-nginx
+          (job 2419) succeeded. That merge's separate TestFlight upload failed
+          and was repaired by pull requests 86 through 88. Verified from GitHub
+          and recorded on 2026-09-28.
+      - check: registered gates re-run at main e55551fa (2026-09-28)
+        outcome: passed_locally
+        detail: >-
+          Every registered check of the fifty-four Milestone 19, 20, 22, 23 and
+          29 gates except the one native bridge,
+          tests/native/test_folders_m29.py, was run by node identifier against a
+          freshly migrated disposable PostgreSQL database: sixty pytest cases
+          passed with none skipped. The native folder journeys it wraps run in
+          the hosted macOS and iOS simulator lanes, which passed on the final
+          heads above.
+    remaining: []
+  milestone_23:
+    recorded_at: 2026-09-28T21:30:00Z
+    status: complete
+    completed_on: 2026-09-06
+    evidence:
+      - check: Milestone 23 red phase
+        outcome: observed_expected_failure
+        detail: >-
+          After the fresh worktree's locked development groups were installed,
+          uv run pytest tests/gates/test_schedule_lifecycle_tool_m23.py -q
+          failed all ten cases at the intended behavioral boundary: the enabled
+          composition could not resolve schedule.list, schedule.pause,
+          schedule.resume, or schedule.cancel, and conversational calls could
+          not reach an approval. The earlier pytest-not-installed environment
+          error was discarded and is not red evidence.
+      - check: Milestone 23 conversational-update red phase
+        outcome: observed_expected_failure
+        detail: >-
+          After the locked development groups were installed, uv run pytest
+          tests/gates/test_schedule_update_tool_m23.py -q failed all five
+          cases at the intended boundary because schedule.update was absent;
+          the chat case could not reach approval. The preceding
+          pytest-not-installed environment error was discarded and is not red
+          evidence.
+      - check: twelve Milestone 23 gate.schedule.* gates
+        outcome: passed_locally
+        detail: >-
+          All twelve registered entries resolve to fifteen cases across
+          tests/gates/test_schedule_lifecycle_tool_m23.py and
+          tests/gates/test_schedule_update_tool_m23.py. The focused suites
+          pass locally, covering feature gating and classification,
+          summary-only pagination, immutable content/cadence update with
+          preserved execution authority and at-most-once recovery,
+          approval-gated pause/resume with no backfill, terminal cancellation
+          with retained history and an unchanged active run, exact-scope
+          denial, fail-closed validation, and state-idempotent retry.
+      - check: repository verification
+        outcome: passed_locally
+        detail: >-
+          make check passes with Ruff formatting and linting, mypy over 592
+          source files, 1,721 static tests, 442 contract tests, deployment
+          script checks, strict documentation validation, 194 live citation
+          targets, and 444 reconciled gate entries. A fresh UTF-8 PostgreSQL
+          database migrated from base through head and the complete
+          integration and resilience lane passes with 169 tests, including
+          conversational resume and update journeys. The focused scheduling
+          partition passes all 35 selected tests.
+      - check: ADR-0089 schedule history and retention red phase
+        outcome: observed_expected_failure
+        detail: >-
+          After the fresh worktree's locked development groups were installed,
+          the focused Python contract and API run failed three tests because
+          lifecycle filtering and terminal purge were absent, the maintenance
+          test failed because no terminal-schedule sweep could be composed,
+          and the configuration tests failed because the three retention knobs
+          were absent. The focused Swift run failed to compile because the
+          state-filter request, browser section, section-aware reload, and
+          conditional time-zone formatter did not yet exist. The preceding
+          missing-package pytest error was discarded and is not red evidence.
+      - check: ADR-0089 focused implementation verification
+        outcome: passed_locally
+        detail: >-
+          The focused schedule repository, API, maintenance, configuration,
+          migration, and Swift suites pass 111 Python tests and the Apple
+          package lane passes 207 tests in 25 suites. The macOS, iPhone, and
+          iPad UI lane passes with the Recent History interaction included.
+          An isolated PostgreSQL 16 database migrated from base through the
+          single c9e2a7f4b106 head, and the shared schedule-repository contract,
+          terminal graph deletion with linked-run preservation, and migration
+          graph pass all five selected tests. On the final origin/dev-based
+          tree, the complete non-live Python lane passes 2,362 tests with 156
+          environment-gated skips and two intended deselections. The
+          repository-wide make check also passes, including formatting, lint,
+          strict typing, fast test partitions, deployment scripts, strict
+          documentation and citation validation, and the public website build.
+      - check: hosted CI and CodeRabbit review for pull requests 89 and 98
+        outcome: passed
+        detail: >-
+          Pull request 89 carried schedule.list, pause, resume and cancel
+          (ADR-0080) to main. On its final head 56592e2a the CircleCI static,
+          contract, integration, sandbox, Apple, Apple signing-smoke and public-site
+          lanes passed and GitGuardian reported neutral; CodeRabbit
+          completed its review of that head with no actionable comment in the
+          most recent review, and all twenty review conversations are resolved.
+          The owner merged it on 2026-09-03 as b6f003ff; deploy-app (job 2656)
+          and deploy-nginx (job 2658) succeeded. Pull request 98 carried
+          schedule.update (ADR-0088). On its final head c2873a97 every lane and
+          GitGuardian passed, CodeRabbit completed its review with no actionable
+          comment, and all seven conversations are resolved; the owner merged it
+          on 2026-09-06 as 9edd263d, and deploy-app (job 2982) and deploy-nginx
+          (job 2984) succeeded. Verified from GitHub and recorded on 2026-09-28.
+      - check: registered gates re-run at main e55551fa (2026-09-28)
+        outcome: passed_locally
+        detail: >-
+          Every registered check of the fifty-four Milestone 19, 20, 22, 23 and
+          29 gates except the one native bridge,
+          tests/native/test_folders_m29.py, was run by node identifier against a
+          freshly migrated disposable PostgreSQL database: sixty pytest cases
+          passed with none skipped. The native folder journeys it wraps run in
+          the hosted macOS and iOS simulator lanes, which passed on the final
+          heads above.
+    remaining: []
+  milestone_29:
+    recorded_at: 2026-09-28T21:30:00Z
+    status: complete
+    completed_on: 2026-09-21
+    evidence:
+      - check: uv run pytest tests/gates/test_gate_registry.py::test_identifier_grammar tests/gates/test_gate_registry.py::test_census_is_derived (ADR-0110 registry authorization red phase)
+        outcome: observed_expected_failure
+        detail: The registry held 538 entries rather than 543 and twelve Milestone 29 entries rather than seventeen, at the behavioral assertions (local, 2026-09-19). The four gate.judgment.* gates and gate.folder.judgment_matching are registered pending; registration is not passing evidence.
+      - check: uv run pytest tests/unit/test_folder_judgment_matching.py tests/unit/test_folder_proposals.py tests/unit/test_judgment_composition.py tests/gates/test_folder_m29.py tests/unit/test_config.py
+        outcome: pass
+        detail: The judgment folder matcher, its two knobs, the eight content-free judgment_* audit fields and the composed wrap pass, and gate.folder.judgment_matching is bound to a composed end-to-end check that accepts a judgment-made proposal through the routes and finds the lexical proposal unchanged after a forced provider failure (local, 2026-09-20). Red first - all seventeen matcher cases failed against a delegating skeleton, the two pass-audit cases failed on the missing fields, the knob cases failed on the missing defaults and the census of 177, and the wrap cases failed at their assertions. The matcher is off in every deployment.
+      - check: uv run pytest tests/contract/test_judgment_provider_contract.py tests/unit/test_judgment_composition.py tests/gates/test_judgment_m29.py tests/unit/test_config.py tests/unit/test_toolchain.py
+        outcome: pass
+        detail: The typed-judgment domain types, the port, the TypeSafe adapter, the scripted fake and the production census pass one contract suite; the default-off selector, the degrade-on-missing-key composition and the templates pass; and each of the four gate.judgment.* gates is bound to an executable check (local, 2026-09-20). Red first - the Choice contract case failed with NotImplementedError against the adapter skeleton, the selector tests failed at their assertions, the composition tests failed on the missing composition attribute and override, and the template test failed on the missing selector line. No live vendor call is part of this evidence.
+      - check: uv run pytest tests/unit/test_folder_domain.py tests/unit/test_folder_clustering.py tests/unit/test_folder_grouping.py tests/unit/test_folder_proposals.py tests/contract/test_folder_store_contract.py tests/gates/test_folder_api_boundary_m29.py tests/gates/test_folder_m29.py
+        outcome: pass
+        detail: Domain, lexical and model-assisted grouping, the pass, the store contract, the nine-route boundary and the composed end-to-end gate on 2026-09-16 (local).
+      - check: uv run pytest tests/integration/test_migrations.py tests/integration/test_folder_postgres_m29.py (DATABASE_URL pointing at the disposable compose PostgreSQL on port 55432)
+        outcome: pass
+        detail: Migration a4f7c1e9d2b3 upgrades with an empty autogenerate diff and round-trips; the PostgreSQL store passes parity including the membership cascade on session deletion (local, 2026-09-16).
+      - check: make test-apple
+        outcome: pass
+        detail: 349 package tests including the folder grouping, wire model, transport, store and view-model cases (local, 2026-09-16).
+      - check: xcodebuild test -project clients/apple/Veetbot.xcodeproj -scheme Veetbot -destination platform=macOS with the five folder journeys (tests/native/test_folders_m29.py::test_folder_native_journeys)
+        outcome: pass
+        detail: Folder sections and the flat older-server sidebar, the new-folder sheet, rename through the context menu, and accepting and declining a suggested folder, on macOS (local, 2026-09-16); the five iOS journeys also pass on the iPhone 17 Pro and iPad Air 11-inch (M4) simulators, iOS 26.5, through xcodebuild test-without-building (local, 2026-09-16) after the Save tap switched to a button-typed query.
+      - check: production activation of AGENT_THREAD_FOLDERS_API_ENABLED on the owner host
+        outcome: pass
+        detail: >-
+          On 2026-09-17 the owner enabled the surface in production. The key was
+          absent from /etc/veetbot/veetbot.env, so the router and the proposal
+          pass had both been default-off since the merge and the native sidebar
+          had been degrading to the flat list. It was appended as
+          AGENT_THREAD_FOLDERS_API_ENABLED=1 with tee so the file kept its
+          0640 root:veetbot mode, and veetbot-api and veetbot-maintenance, which
+          both read that EnvironmentFile, were restarted to active. An
+          unauthenticated loopback probe then returned 401 for /v1/folders
+          against 404 for an unrouted control path, confirming the nine routes
+          are mounted rather than absent. The running release
+          20260917-202850-8ae32c9 carries main at 8ae32c9c, so the delivered
+          revision contains the Milestone 29 implementation; that identity was
+          read from the host's running release rather than from the merge
+          pipeline's application and documentation job records. No proposal had
+          yet been observed at the time of this entry, the pass running on its
+          900-second timer.
+      - check: hosted CI, CodeRabbit review and production delivery for pull requests 118 and 127
+        outcome: passed
+        detail: >-
+          Pull request 118 carried the folders implementation to main. On its
+          final head 482a69ae the CircleCI static, contract, integration,
+          sandbox, Apple, iOS simulator, Apple signing-smoke and public-site
+          lanes and GitGuardian passed. CodeRabbit reviewed that exact head; its
+          one finding there (a documented DSN credential in the secret
+          allowlist) and the six of the previous round were answered, and all
+          seven conversations are resolved. The owner merged it on 2026-09-17 as
+          4f13fae2; deploy-app (job 4201) and deploy-nginx (job 4203) succeeded.
+          Pull request 127 carried the ADR-0110 amendment: the typed-judgment
+          port, the TypeSafe adapter and the judgment matcher. On its final head
+          6e5cf373 every lane, including both Apple simulator lanes, passed,
+          CodeRabbit completed its review with no actionable comment, and all
+          four conversations are resolved; the owner merged it on 2026-09-21 as
+          f7c3b7a4, and deploy-app (job 4388) and deploy-nginx (job 4393)
+          succeeded. The later judgment logging (pull request 132, a415283f) and
+          the native fix that keeps recent chats reachable across folders (pull
+          request 139, 9046049f) merged with the same clean review and hosted CI
+          and deployed. Production reports release 20260928-202932-e55551f on
+          the API readiness header, docs.veetbot.com and www.veetbot.com.
+          Verified and recorded on 2026-09-28.
+      - check: registered gates re-run at main e55551fa (2026-09-28)
+        outcome: passed_locally
+        detail: >-
+          Every registered check of the fifty-four Milestone 19, 20, 22, 23 and
+          29 gates except the one native bridge,
+          tests/native/test_folders_m29.py, was run by node identifier against a
+          freshly migrated disposable PostgreSQL database: sixty pytest cases
+          passed with none skipped. The native folder journeys it wraps run in
+          the hosted macOS and iOS simulator lanes, which passed on the final
+          heads above.
+    remaining: []

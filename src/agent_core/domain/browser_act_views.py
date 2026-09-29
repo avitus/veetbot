@@ -101,6 +101,7 @@ class TaskGrantSessionContext:
     session: Session | None
     profile: BrowserProfile | None
     active_grant: BrowserTaskGrant | None = None
+    scopes: tuple[BrowserTaskGrantScope, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

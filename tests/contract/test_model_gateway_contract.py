@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -63,7 +63,13 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.model.cost import price_usage
-from agent_core.model.streaming import ModelStreamAccumulator, collect_turn, validated_stream
+from agent_core.model.streaming import (
+    ModelStreamAccumulator,
+    ModelStreamError,
+    collect_turn,
+    validate_conversation_pairing,
+    validated_stream,
+)
 from agent_core.ports.models import ModelProvider
 from agent_core.tools.calculator import CalculatorTool
 from tests.contract.model_fixtures import (
@@ -348,6 +354,78 @@ def test_effort_never_reaches_a_model_without_native_reasoning() -> None:
     assert not {"reasoning", "reasoning_effort", "output_config"} & set(chat_payload)
 
 
+def _call(call_id: str) -> ToolCallItem:
+    return ToolCallItem(
+        call_id=call_id,
+        item_index=0,
+        name="math.calculate",
+        arguments={"expression": "17 * 23"},
+        raw_arguments=ARGUMENTS,
+    )
+
+
+def _result(call_id: str) -> ToolResultItem:
+    return ToolResultItem(call_id=call_id, content=[TextPart(text="391")])
+
+
+ASK = UserMessage(content=[TextPart(text="calculate")])
+UNPAIRED_HISTORIES = [
+    pytest.param([ASK, _call("call-1")], "dangling tool call", id="dangling_call"),
+    pytest.param([ASK, _result("call-1")], "orphan tool result", id="orphan_result"),
+    pytest.param(
+        [ASK, _call("call-1"), _result("call-1"), _call("call-1"), _result("call-1")],
+        "duplicate tool call id",
+        id="duplicate_call_id",
+    ),
+    pytest.param(
+        [ASK, _call("call-1"), _result("call-1"), _result("call-1")],
+        "duplicate tool result",
+        id="duplicate_result",
+    ),
+]
+
+
+@pytest.mark.parametrize(("history", "message"), UNPAIRED_HISTORIES)
+def test_conversation_pairing_rejects_unanswerable_tool_history(
+    history: list[Any], message: str
+) -> None:
+    with pytest.raises(ModelStreamError, match=message):
+        validate_conversation_pairing(history)
+
+
+def test_conversation_pairing_accepts_parallel_calls_answered_in_any_order() -> None:
+    validate_conversation_pairing(
+        [ASK, _call("call-1"), _call("call-2"), _result("call-2"), _result("call-1")]
+    )
+
+
+@pytest.mark.parametrize(("history", "message"), UNPAIRED_HISTORIES)
+@pytest.mark.parametrize("provider_name", ["openai", "anthropic", "chat_completions"])
+async def test_unpaired_history_fails_as_protocol_before_any_provider_request(
+    provider_name: str, history: list[Any], message: str
+) -> None:
+    """model-gateway.md, conversation invariants: rejected before it is paid for."""
+
+    del message
+    source = ScriptedRawSource([chat_text_events("never sent")])
+    provider = _raw_provider(provider_name, source)
+    try:
+        events = [
+            event
+            async for event in validated_stream(
+                provider.stream(request(history), resolved(provider_name), ATTEMPT)
+            )
+        ]
+    finally:
+        await provider.close()
+
+    assert source.requests == []
+    [failure] = events
+    assert isinstance(failure, ModelFailedEvent)
+    assert failure.sequence == 0
+    assert failure.error.kind == "protocol"
+
+
 async def test_malformed_arguments_remain_a_recoverable_tool_turn_on_every_adapter() -> None:
     for name, provider in providers_for_tool('{"expression":'):
         turn = await collect(provider, name)
@@ -591,32 +669,80 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
     assert second_turn.provider_metadata.previous_response_id == "resp-tool"
 
 
-async def test_openai_midstream_transport_failure_uses_the_next_sequence() -> None:
-    async def disconnect(_request: dict[str, Any]) -> Any:
-        yield {
-            "type": "response.output_text.delta",
-            "output_index": 0,
-            "delta": "first",
-        }
-        yield {
-            "type": "response.output_text.delta",
-            "output_index": 0,
-            "delta": "second",
-        }
-        raise OpenAIAPIConnectionError(
-            request=httpx.Request("POST", "https://api.openai.com/v1/responses")
-        )
+async def _openai_disconnect(_request: dict[str, Any]) -> Any:
+    yield {
+        "type": "response.output_text.delta",
+        "output_index": 0,
+        "delta": "first",
+    }
+    yield {
+        "type": "response.output_text.delta",
+        "output_index": 0,
+        "delta": "second",
+    }
+    raise OpenAIAPIConnectionError(
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses")
+    )
 
-    provider = OpenAIResponsesProvider(event_source=disconnect)
+
+async def _chat_disconnect(_request: dict[str, Any]) -> Any:
+    yield {
+        "choices": [{"delta": {"content": "partial"}, "finish_reason": None}],
+    }
+    raise httpx.ReadError(
+        "synthetic disconnect",
+        request=httpx.Request("POST", "http://127.0.0.1/chat/completions"),
+    )
+
+
+async def _anthropic_disconnect(_request: dict[str, Any]) -> Any:
+    for event in anthropic_text_events("partial")[:3]:
+        yield event
+    raise APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "provider_factory", "sequences"),
+    [
+        pytest.param(
+            "openai",
+            lambda: OpenAIResponsesProvider(event_source=_openai_disconnect),
+            [0, 1, 2],
+            id="openai",
+        ),
+        pytest.param(
+            "chat_completions",
+            lambda: ChatCompletionsProvider(
+                base_url="http://127.0.0.1:11434/v1", event_source=_chat_disconnect
+            ),
+            [0, 1],
+            id="chat_completions",
+        ),
+        pytest.param(
+            "anthropic",
+            lambda: AnthropicMessagesProvider(event_source=_anthropic_disconnect),
+            [0, 1, 2],
+            id="anthropic",
+        ),
+    ],
+)
+async def test_midstream_transport_failure_uses_the_next_sequence_across_api_modes(
+    provider_name: str,
+    provider_factory: Callable[[], ModelProvider],
+    sequences: list[int],
+) -> None:
+    """A disconnect after output is one transient terminal event, gapless, never a retry."""
+
+    provider = provider_factory()
     events = []
     try:
         async for event in validated_stream(
-            provider.stream(request(), resolved("openai"), ATTEMPT)
+            provider.stream(request(), resolved(provider_name), ATTEMPT)
         ):
             events.append(event)
     finally:
         await provider.close()
-    assert [event.sequence for event in events] == [0, 1, 2]
+    assert [event.sequence for event in events] == sequences
     assert isinstance(events[-1], ModelFailedEvent)
     assert events[-1].error.kind == "transient"
 
@@ -988,33 +1114,6 @@ def test_recorded_fixture_rejects_legacy_openai_credential_shapes() -> None:
     )
     with pytest.raises(ValueError, match="credential-shaped"):
         RecordedEventSource(fixture)
-
-
-async def test_midstream_chat_transport_failure_keeps_a_gapless_terminal_sequence() -> None:
-    async def disconnect(_request: dict[str, Any]) -> Any:
-        yield {
-            "choices": [{"delta": {"content": "partial"}, "finish_reason": None}],
-        }
-        raise httpx.ReadError(
-            "synthetic disconnect",
-            request=httpx.Request("POST", "http://127.0.0.1/chat/completions"),
-        )
-
-    provider = ChatCompletionsProvider(
-        base_url="http://127.0.0.1:11434/v1",
-        event_source=disconnect,
-    )
-    events = []
-    try:
-        async for event in validated_stream(
-            provider.stream(request(), resolved("chat_completions"), ATTEMPT)
-        ):
-            events.append(event)
-    finally:
-        await provider.close()
-    assert [event.sequence for event in events] == [0, 1]
-    assert isinstance(events[-1], ModelFailedEvent)
-    assert events[-1].error.kind == "transient"
 
 
 class _StreamedBody(httpx.AsyncByteStream):
@@ -1392,27 +1491,6 @@ async def test_anthropic_error_type_drives_retry_and_sdk_validation_is_protocol(
     assert isinstance(normalized[0], ModelFailedEvent)
     assert normalized[0].error.kind == "protocol"
     assert normalized[0].error.provider_code == "sdk_response_invalid"
-
-
-async def test_anthropic_midstream_transport_failure_keeps_sequence_gapless() -> None:
-    async def disconnect(_request: dict[str, Any]) -> Any:
-        for event in anthropic_text_events("partial")[:3]:
-            yield event
-        raise APIConnectionError(
-            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        )
-
-    provider = AnthropicMessagesProvider(event_source=disconnect)
-    events = []
-    try:
-        async for event in validated_stream(
-            provider.stream(request(), resolved("anthropic"), ATTEMPT)
-        ):
-            events.append(event)
-    finally:
-        await provider.close()
-    assert [event.sequence for event in events] == [0, 1, 2]
-    assert isinstance(events[-1], ModelFailedEvent)
 
 
 class _StubResolver:

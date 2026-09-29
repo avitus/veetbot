@@ -8,7 +8,9 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileControlPlane
+from agent_core.adapters.browser.unavailable import UnavailableBrowserProfileControlPlane
 from agent_core.domain.agents import Principal
+from agent_core.domain.browser import BrowserProfileControlPlaneError
 from agent_core.domain.errors import ConflictError
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 from tests.contract.support import principal
@@ -112,3 +114,21 @@ def test_control_plane_has_no_material_read_surface() -> None:
     }
 
     assert public_methods == {"provision", "revoke", "delete"}
+
+
+async def test_unconfigured_control_plane_fails_closed_without_provisioning() -> None:
+    """A deployment without a profile service composes a control plane that
+    refuses every lifecycle operation rather than inventing a profile."""
+
+    control_plane: BrowserProfileControlPlane = UnavailableBrowserProfileControlPlane()
+    operations = (
+        control_plane.provision(PROFILE_ID, principal(), ("https://example.org",)),
+        control_plane.revoke(PROFILE_ID, principal(), "provider-ref"),
+        control_plane.delete(PROFILE_ID, principal(), "provider-ref"),
+    )
+
+    for operation in operations:
+        with pytest.raises(BrowserProfileControlPlaneError) as refused:
+            await operation
+        assert refused.value.reason == "browser_profile.control_plane_unavailable"
+        assert refused.value.retryable is False

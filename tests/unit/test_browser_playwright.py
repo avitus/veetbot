@@ -1541,41 +1541,30 @@ async def _refused(
     return raised.value
 
 
-async def test_live_page_outside_prefix_is_refused_before_dispatch() -> None:
+@pytest.mark.parametrize(
+    ("setup", "index"),
+    [
+        ("history.pushState({}, '', '/settings')", 0),
+        ("document.getElementById('rename').textContent = 'Buy now'", 1),
+        (None, 2),
+        (None, 3),
+    ],
+    ids=[
+        "live_page_outside_prefix",
+        "renamed_element",
+        "hidden_label_source",
+        "sensitive_link_target",
+    ],
+)
+async def test_a_grant_refuses_before_dispatch(setup: str | None, index: int) -> None:
+    """The live page is rechecked: a left prefix, a renamed control, a hidden
+    label source ("Continue" over "Pay"), or a sensitive link target refuses."""
+
     async with grant_page() as (runtime, observation):
-        await runtime._current_page().evaluate("history.pushState({}, '', '/settings')")
-        refusal = await _refused(runtime, _click_on(observation, 0))
-        clicks = await _clicks(runtime)
-
-    assert refusal.reason_code == "tool.browser.grant_not_applicable"
-    assert clicks == []
-
-
-async def test_renamed_element_is_refused_before_dispatch() -> None:
-    async with grant_page() as (runtime, observation):
-        await runtime._current_page().evaluate(
-            "document.getElementById('rename').textContent = 'Buy now'"
-        )
-        refusal = await _refused(runtime, _click_on(observation, 1))
-        clicks = await _clicks(runtime)
-
-    assert refusal.reason_code == "tool.browser.grant_not_applicable"
-    assert clicks == []
-
-
-async def test_hidden_label_source_is_refused_before_dispatch() -> None:
-    async with grant_page() as (runtime, observation):
-        assert observation.elements[2].name == "Continue"
-        refusal = await _refused(runtime, _click_on(observation, 2))
-        clicks = await _clicks(runtime)
-
-    assert refusal.reason_code == "tool.browser.grant_not_applicable"
-    assert clicks == []
-
-
-async def test_sensitive_link_target_is_refused_before_dispatch() -> None:
-    async with grant_page() as (runtime, observation):
-        refusal = await _refused(runtime, _click_on(observation, 3))
+        assert observation.elements[index].name == "Continue"
+        if setup is not None:
+            await runtime._current_page().evaluate(setup)
+        refusal = await _refused(runtime, _click_on(observation, index))
         clicks = await _clicks(runtime)
 
     assert refusal.reason_code == "tool.browser.grant_not_applicable"

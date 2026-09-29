@@ -13,7 +13,7 @@ class AllowSurfaceAdmissionController:
     async def check(
         self,
         tenant_id: str,
-        reservation: Decimal | None,
+        reservation: Decimal,
         now: datetime,
     ) -> SurfaceAdmissionDecision:
         del tenant_id, reservation, now
@@ -30,7 +30,7 @@ class PostgresSurfaceAdmissionController:
     async def check(
         self,
         tenant_id: str,
-        reservation: Decimal | None,
+        reservation: Decimal,
         now: datetime,
     ) -> SurfaceAdmissionDecision:
         now_utc = now.astimezone(UTC)
@@ -70,11 +70,6 @@ class PostgresSurfaceAdmissionController:
             return SurfaceAdmissionDecision(
                 allowed=False,
                 reason_code="surface.concurrency_limit",
-            )
-        if reservation is None:
-            return SurfaceAdmissionDecision(
-                allowed=False,
-                reason_code="surface.cost_reservation_missing",
             )
         if Decimal(row.day_cost) + reservation > self._limits.daily_cost:
             return SurfaceAdmissionDecision(

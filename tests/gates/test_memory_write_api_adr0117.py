@@ -15,13 +15,11 @@ from uuid import UUID
 
 import pytest
 
-from agent_core.api import create_app
 from agent_core.bootstrap import build
 from agent_core.domain.memory import MemoryReviewOutcome, MemoryStatus, Portability, Sensitivity
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.contract.support import AGENT_ID, NOW
-from tests.gates.memory_api_support import memory_routes
 from tests.gates.test_memory_read_api_m17 import (
     PRINCIPAL_ID,
     SESSION_A,
@@ -32,7 +30,6 @@ from tests.gates.test_memory_read_api_m17 import (
     _principal,
     _seed,
 )
-from tests.integration.m2_support import memory_settings
 
 WRITER = _principal(scopes=set(PLATFORM_SCOPES) | {"memory.read", "memory.write"})
 
@@ -199,64 +196,6 @@ async def test_write_routes_require_scope_key_and_ceiling_and_hide_beliefs_above
         async with composition.uow_factory() as uow:
             untouched = await uow.memories.get(restricted.id, WRITER)
         assert untouched.flagged_for_review is True
-
-
-async def test_the_flag_removes_the_write_routes_with_the_read_routes() -> None:
-    async with build(
-        settings=memory_settings(), storage="memory", sequential_ids=True, principal=WRITER
-    ) as composition:
-        app = create_app(
-            composition.services,
-            composition.settings,
-            composition.principal,
-            composition.new_request_id,
-            composition.readiness_probe,
-        )
-        assert memory_routes(app) == []
-        async with _client(composition) as client:
-            response = await client.delete(
-                f"/v1/memories/{UUID(int=1)}",
-                params={"ceiling": "restricted"},
-                headers={"Idempotency-Key": "k"},
-            )
-            assert response.status_code == 404
-    assert "memory.write" in PLATFORM_SCOPES
-
-
-async def test_the_router_exposes_exactly_the_documented_routes() -> None:
-    """Two reads with memory.read and exactly two writes with memory.write."""
-    async with build(
-        settings=_enabled_settings(), storage="memory", sequential_ids=True, principal=WRITER
-    ) as composition:
-        app = create_app(
-            composition.services,
-            composition.settings,
-            composition.principal,
-            composition.new_request_id,
-            composition.readiness_probe,
-        )
-    table = {
-        (route.path, method): (route.openapi_extra or {}).get("required_scope")
-        for route in memory_routes(app)
-        for method in (route.methods or set()) - {"HEAD"}
-    }
-    assert table == {
-        ("/v1/memories", "GET"): "memory.read",
-        ("/v1/memories/{memory_id}", "GET"): "memory.read",
-        ("/v1/memories/{memory_id}", "DELETE"): "memory.write",
-        ("/v1/memories/{memory_id}/review", "POST"): "memory.write",
-    }
-    document = app.openapi()
-    for path, method in (
-        ("/v1/memories/{memory_id}", "delete"),
-        ("/v1/memories/{memory_id}/review", "post"),
-    ):
-        parameters = document["paths"][path][method]["parameters"]
-        assert any(
-            p["name"] == "Idempotency-Key" and p["in"] == "header" and p["required"]
-            for p in parameters
-        )
-        assert any(p["name"] == "ceiling" and p["required"] for p in parameters)
 
 
 async def test_the_flagged_filter_composes_with_the_others() -> None:

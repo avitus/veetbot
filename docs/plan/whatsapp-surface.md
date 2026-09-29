@@ -48,12 +48,17 @@ operational-hardening structural gate that keeps every bind loopback-only
 holds; Nginx remains the sole public terminator, and the API process
 gains no new unauthenticated route.
 
-The listener implements Meta's subscription handshake — the GET challenge
-echoed only on a constant-time verify-token match — and validates
+The listener serves one path, `/webhooks/whatsapp`. It implements Meta's
+subscription handshake — the GET challenge echoed only on a constant-time
+verify-token match — and on POST validates
 `X-Hub-Signature-256` (HMAC over the raw body with the app secret,
 constant-time) before any parse. A missing or wrong signature is a
 content-free reject that stores nothing but a content-free receipt.
-Bodies are bounded; anything over the limit is rejected unread.
+Bodies are bounded; anything over the limit is rejected unread. Because
+the listener reads a body before it can check the signature, the Nginx
+location admits at most ten requests a second per client address with a
+burst of fifty, far above Meta's delivery rate for one business number, and
+answers anything beyond that with 429.
 
 ## Credentials
 

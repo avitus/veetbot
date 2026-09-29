@@ -95,9 +95,10 @@ AGENT_SURFACE_WORKER_ENABLED=1
 AGENT_SURFACE_WHATSAPP_ENABLED=1
 ```
 
-Create `/etc/veetbot/veetbot-surface.env` from
-`deploy/veetbot-surface.env.example`. Set the same flags, the production
-database identity, tenant and principal identity, phone-number ID, current
+Create `/etc/veetbot/veetbot-surface.env` as the
+[Telegram surface runbook](telegram-surface-runbook.md) does, or from
+`deploy/veetbot-surface.env.example`. Set the same flags, the application
+database login, tenant and principal identity, phone-number ID, current
 reviewed Graph API version, and these paths:
 
 ```text

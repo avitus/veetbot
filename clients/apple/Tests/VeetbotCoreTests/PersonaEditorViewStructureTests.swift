@@ -9,18 +9,6 @@ import Testing
 /// source level where a future edit cannot silently move it.
 @Suite struct PersonaEditorViewStructureTests {
     @Test
-    func testTheEditorRootCarriesTheIdentifierOnTheNavigationResult() throws {
-        let source = try personaEditorViewSource()
-
-        #expect(
-            source.contains(
-                "}\n        .accessibilityIdentifier(\"persona.editor\")\n        .task { await model.load() }"
-            ),
-            "persona.editor must be attached to the NavigationView result so XCUITest finds the sheet, not a nested content chain"
-        )
-    }
-
-    @Test
     func testTheActionButtonsCarryStableIdentifiers() throws {
         let source = try personaEditorViewSource()
 

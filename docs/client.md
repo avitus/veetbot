@@ -120,5 +120,7 @@ This release is deliberately a terminal client rather than a desktop GUI. It
 does not persist sessions or credentials locally, list historical sessions or
 runs, upload files, or implement device presence,
 device-scoped tools, pairing, notifications, or offline-authoritative state.
-Those omissions keep it within the public versioned API and leave device
-identity, notifications, and pairing to Milestones 12 and 14.
+Those omissions keep it within the public versioned API. The
+[Apple client](apple-client.md) provides session history, attachments, device
+identity, and notifications, and messaging-surface pairing belongs to the
+server's `agent surface` commands.

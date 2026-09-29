@@ -481,6 +481,23 @@ _TASK_GRANT_END_REASONS = (
 )
 
 
+class BrowserTaskScopePolicyRow(Base):
+    """Owner-managed task approval scopes; an empty row prevents reseeding."""
+
+    __tablename__ = "browser_task_scope_policies"
+    __table_args__ = (
+        CheckConstraint("revision >= 0", name="browser_task_scope_revision_nonnegative"),
+        CheckConstraint(
+            "jsonb_typeof(scopes) = 'array' AND jsonb_array_length(scopes) <= 16",
+            name="browser_task_scopes_bounded",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    scopes: Mapped[list[dict[str, str]]] = mapped_column(JSONB)
+
+
 class BrowserTaskGrantRow(Base):
     """ADR-0129: a session-bound, thirty-minute, two-hundred-action task grant.
 
@@ -1658,7 +1675,7 @@ class SurfaceInboundReceiptRow(Base):
             "disposition IN ('submitted','input_delivered','command_handled',"
             "'rejected_unpaired','rejected_locked','rejected_rate',"
             "'rejected_active_run','rejected_admission','ignored_media',"
-            "'ignored_chat_kind')",
+            "'ignored_chat_kind','ignored_unreadable')",
             name="surface_receipt_disposition_closed",
         ),
     )

@@ -114,6 +114,7 @@ test-apple-ui-macos:
 		-destination 'platform=macOS' \
 		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleAccessibilityAtLargeText \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleEvidencePreservesTheOpenConversation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMemoryPeopleShowsEachChosenPerson \
@@ -148,6 +149,12 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRenamingASuggestedFolderBeforeAcceptingIt \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFolderNameSheetIsSizedForItsContentOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testAdjacentFoldersSitOneRowApartOnMac \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMovingAConversationIntoAFolderAndBackOut \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsCensusUnsubscribesOneSenderAfterConfirmation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsSelectAllSkipsProtectedAndUncheckedSenders \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsFailedUnsubscribeRestoresTheRowWithWhatRemains \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsThreadActionUnsubscribesTheConversationsSender \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsStayHiddenWhereNoAccountAdvertisesThem \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 

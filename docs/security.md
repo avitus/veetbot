@@ -194,6 +194,38 @@ storage before the public policy's encryption statement is deployed. This
 requirement is separate from Milestone 15's still-unimplemented encrypted
 off-host backup and restore tranche.
 
+## Controls in the later workstreams
+
+Each control below is owned by the design document the routing table in
+`AGENTS.md` names, and each capability is default-off behind its own flag; this
+page summarizes and does not claim a milestone complete.
+
+- Inbound surfaces deny unpaired senders without storing their content; pairing
+  uses one-time codes with lockout and revocation, and a paired message runs
+  with scopes no wider than the pairing grants and the principal currently
+  holds (Milestone 14). The WhatsApp webhook listens on loopback inside the surface
+  role, never the API, and verifies `X-Hub-Signature-256` over the raw body in
+  constant time before parsing (Milestone 25). An SMS relayed from the owner's
+  iPhone becomes one framed, untrusted triage turn (Milestone 24).
+- Calling splits authority across roles: `agent call-ingress` accepts only
+  signed Bland callbacks on a dedicated loopback listener with a receipt-only
+  database role, `agent call-worker` cannot start a call, and an outbound call
+  needs the owner's approval (Milestone 27).
+- `email.unsubscribe` is the only code that sends an unsubscribe request. Its
+  closed input names subscriptions, never a URL; the destination is the
+  stored, re-validated public HTTPS address whose evidence digest the approval
+  covered, and unsubscribe links in message bodies are never followed
+  (Milestone 31).
+- The policy advisory layer can only escalate an allowed network read to an
+  approval, never allow or modify one, abstains on any vendor failure, and
+  observes without enforcing until its thresholds are tuned (Milestone 30,
+  ADR-0111). The typed-judgment vendor never receives credentials, memory above
+  `INTERNAL` sensitivity, hardline rules, or policy contents (ADR-0110).
+- Bulk mail never forms communication memory (ADR-0116); memory review and
+  deletion over HTTP need the exact `memory.write` scope and an idempotency key
+  (ADR-0117); a file attached to a chat message is uploaded under
+  `artifact.write` and stays `EXTERNAL_UNTRUSTED` (ADR-0120).
+
 ## Production delivery controls
 
 Milestone 15 ([operational-hardening.md](plan/operational-hardening.md))

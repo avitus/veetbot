@@ -26,6 +26,7 @@ from agent_core.domain.memory import (
     DecayResult,
     MemoryAuthority,
     MemoryCandidate,
+    MemoryClaimKind,
     MemoryEdit,
     MemoryRecord,
     MemoryStatus,
@@ -40,9 +41,11 @@ from agent_core.domain.memory import (
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.formation import (
+    MAX_EXTRACTOR_PROPOSALS,
     MAX_INFERRED_CONFIDENCE,
     DeterministicCandidateExtractor,
     GovernedMemoryService,
+    HighRecallCandidateExtractor,
     portability_ceiling,
 )
 from agent_core.memory.profiles import DecayProfile, FormationProfile, UsageDeltas
@@ -1730,3 +1733,61 @@ async def test_present_perfect_is_not_ownership() -> None:
     )
 
     assert "User has a split keyboard." in [candidate.statement for candidate in candidates]
+
+
+_MANY_CLAIMS = (
+    "I run every morning. I review my calendar every Sunday night. "
+    "Every Sunday I bake bread. Most days I walk the dog. "
+    "I want to finish the marathon in under four hours. "
+    "I work professionally as a software developer. I love learning about exoplanets. "
+    "The project uses PostgreSQL. Dark mode works better for me. "
+    "I cannot take meetings on Fridays. I keep tax records in the Blue folder. "
+    "My knee often hurts after long runs."
+)
+
+
+@pytest.mark.parametrize("maximum", [0, MAX_EXTRACTOR_PROPOSALS + 1])
+def test_high_recall_fallback_refuses_an_out_of_range_candidate_cap(maximum: int) -> None:
+    with pytest.raises(ValueError, match="between 1 and"):
+        HighRecallCandidateExtractor(maximum_candidates=maximum)
+
+
+async def test_high_recall_fallback_caps_proposals_keeping_what_was_said_first() -> None:
+    """The bound holds in every claim family and never reorders what it keeps."""
+
+    event = _envelope("user.message.created", {"content": _MANY_CLAIMS})
+    unbounded = await HighRecallCandidateExtractor().extract(
+        [event], principal=principal(), scope="general"
+    )
+    assert len(unbounded) >= 10
+
+    for maximum in range(1, len(unbounded) + 1):
+        capped = await HighRecallCandidateExtractor(maximum_candidates=maximum).extract(
+            [event], principal=principal(), scope="general"
+        )
+        assert [candidate.statement for candidate in capped] == [
+            candidate.statement for candidate in unbounded[:maximum]
+        ]
+
+
+@pytest.mark.parametrize(
+    ("message", "subject", "statement"),
+    [
+        ("Every Sunday I bake bread.", "baking bread", "user bakes bread every sunday."),
+        ("Most days I walk the dog.", "walking the dog", "user walks the dog most days."),
+    ],
+)
+async def test_high_recall_fallback_reads_a_leading_frequency_as_a_habit(
+    message: str, subject: str, statement: str
+) -> None:
+    candidates = await HighRecallCandidateExtractor().extract(
+        [_envelope("user.message.created", {"content": message}, sequence=7)],
+        principal=principal(),
+        scope="general",
+    )
+
+    assert [(c.claim_kind, c.subject) for c in candidates] == [(MemoryClaimKind.HABIT, subject)]
+    # The rendered frequency keeps its source casing, so compare casefolded.
+    assert candidates[0].statement.casefold() == statement
+    assert candidates[0].source_event_ids == [7]
+    assert all(span.text in message for span in candidates[0].evidence_spans)

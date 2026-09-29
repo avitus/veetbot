@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
@@ -34,11 +34,11 @@ from agent_core.domain.browser_task_grants import (
     TASK_GRANT_MAX_TYPED_CHARACTERS,
     BrowserTaskGrant,
     BrowserTaskGrantEndReason,
-    BrowserTaskGrantScope,
     BrowserTaskGrantView,
+    BrowserTaskScopePolicy,
 )
-from agent_core.domain.errors import AgentCoreError, NotFoundError
-from agent_core.domain.events import NewEvent
+from agent_core.domain.errors import AgentCoreError, ConflictError, NotFoundError
+from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.policies import (
     AuthorizationTurn,
     PolicyDecision,
@@ -110,7 +110,10 @@ async def read_task_grant_context(
         except (NotFoundError, ValueError):
             profile = None
     grant = await uow.browser_task_grants.active_for_session(session_id, principal, now=now)
-    return TaskGrantSessionContext(session=session, profile=profile, active_grant=grant)
+    scopes = await uow.browser_task_grants.get_scopes(principal)
+    return TaskGrantSessionContext(
+        session=session, profile=profile, active_grant=grant, scopes=scopes.scopes
+    )
 
 
 class BrowserTaskGrantAuthorizer:
@@ -127,13 +130,11 @@ class BrowserTaskGrantAuthorizer:
         provider: BrowserProvider,
         uow_factory: UnitOfWorkFactory,
         policy: PolicyEngine,
-        scopes: tuple[BrowserTaskGrantScope, ...],
         now: Callable[[], datetime],
     ) -> None:
         self._provider = provider
         self._uow_factory = uow_factory
         self._policy = policy
-        self._scopes = scopes
         self._now = now
 
     async def authorize(
@@ -176,7 +177,7 @@ class BrowserTaskGrantAuthorizer:
             return _not_covered(grant, "run_not_eligible")
         if not any(
             (scope.origin, scope.path_prefix) == (grant.origin, grant.path_prefix)
-            for scope in self._scopes
+            for scope in context.scopes
         ):
             await self._end(grant, principal, run, BrowserTaskGrantEndReason.SCOPE_REMOVED)
             return _not_covered(grant, "scope_removed")
@@ -207,7 +208,15 @@ class BrowserTaskGrantAuthorizer:
         typed = (
             len(browser_action.value or "") if browser_action.kind is BrowserActionKind.TYPE else 0
         )
-        async with self._uow_factory() as uow:
+        async with (
+            self._uow_factory() as uow,
+            uow.browser_task_grants.locked_scopes(principal) as policy,
+        ):
+            if not any(
+                (scope.origin, scope.path_prefix) == (grant.origin, grant.path_prefix)
+                for scope in policy.scopes
+            ):
+                return _not_covered(grant, "scope_removed")
             used = await uow.browser_task_grants.consume(
                 grant.id, principal, session_id=run.session_id, typed=typed, now=now
             )
@@ -360,9 +369,8 @@ class CompositeStandingAuthorizer:
 @dataclass(frozen=True, slots=True)
 class TaskGrantResolution:
     """What the public approval service needs to allow a task (section 8.1):
-    the configured scopes and the clock that stamps the grant's window."""
+    the clock that stamps the grant's window. Scopes are read from storage."""
 
-    scopes: tuple[BrowserTaskGrantScope, ...]
     clock: Clock
 
 
@@ -372,6 +380,68 @@ class PublicBrowserTaskGrantService:
     def __init__(self, *, uow_factory: UnitOfWorkFactory, clock: Clock) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
+
+    async def get_scopes(self, principal: Principal) -> BrowserTaskScopePolicy:
+        require_scope(principal, "browser.grant.read")
+        async with self._uow_factory() as uow:
+            return await uow.browser_task_grants.get_scopes(principal)
+
+    async def update_scopes(
+        self, principal: Principal, requested: BrowserTaskScopePolicy
+    ) -> BrowserTaskScopePolicy:
+        require_scope(principal, "browser.grant.write")
+        async with (
+            self._uow_factory() as uow,
+            uow.browser_task_grants.locked_scopes(principal) as current,
+        ):
+            # Exact immediate replay is safe after a lost successful response.
+            if current.scopes == requested.scopes and current.revision in {
+                requested.revision,
+                requested.revision + 1,
+            }:
+                return current
+            if current.revision != requested.revision:
+                raise ConflictError("task approval websites changed; refresh and try again")
+            saved = BrowserTaskScopePolicy(revision=current.revision + 1, scopes=requested.scopes)
+            await uow.browser_task_grants.replace_scopes(principal, saved)
+            now = self._clock.now()
+            allowed = {(scope.origin, scope.path_prefix) for scope in saved.scopes}
+            for grant in await uow.browser_task_grants.list(principal, now=now):
+                if grant.ended_at is None and (grant.origin, grant.path_prefix) not in allowed:
+                    ended, transitioned = await uow.browser_task_grants.end(
+                        grant.id,
+                        principal,
+                        reason=BrowserTaskGrantEndReason.SCOPE_REMOVED,
+                        now=now,
+                    )
+                    if transitioned:
+                        await uow.events.append(
+                            task_grant_ended_event(
+                                ended,
+                                run_id=None,
+                                actor_type="principal",
+                                actor_id=principal.principal_id,
+                            )
+                        )
+            key = "browser.task_scopes.updated:" + json.dumps(
+                [principal.tenant_id, principal.principal_id, saved.revision], separators=(",", ":")
+            )
+            await uow.process_events.append(
+                ProcessEvent(
+                    id=uuid5(NAMESPACE_URL, key),
+                    event_type="browser.task_scopes.updated",
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    derivation_key=key,
+                    created_at=now,
+                    payload={
+                        "tenant_id": principal.tenant_id,
+                        "principal_id": principal.principal_id,
+                        **saved.model_dump(mode="json"),
+                    },
+                )
+            )
+            return saved
 
     async def list(
         self,

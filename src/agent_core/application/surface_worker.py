@@ -72,11 +72,12 @@ class SurfaceReplyDispatcher:
         batch_size: int,
         lease_seconds: int,
         retry_delays: tuple[float, ...],
+        max_attempts: int,
         chunk_size: int = 4096,
     ) -> None:
         if not deliveries:
             raise ValueError("surface reply dispatcher requires a transport")
-        if batch_size <= 0 or lease_seconds <= 0 or chunk_size <= 0:
+        if batch_size <= 0 or lease_seconds <= 0 or chunk_size <= 0 or max_attempts <= 0:
             raise ValueError("surface reply dispatcher limits must be positive")
         if not retry_delays or any(delay <= 0 for delay in retry_delays):
             raise ValueError("surface reply retry delays must be positive")
@@ -91,6 +92,7 @@ class SurfaceReplyDispatcher:
         self._batch_size = batch_size
         self._lease_seconds = lease_seconds
         self._retry_delays = retry_delays
+        self._max_attempts = max_attempts
         self._chunk_size = chunk_size
 
     async def run_once(self) -> int:
@@ -196,6 +198,14 @@ class SurfaceReplyDispatcher:
         return "surface.run_failed"
 
     async def _retry(self, reply: SurfaceReply) -> None:
+        # A claim counts the attempt, so the claim that reaches the limit is the last.
+        if reply.attempts >= self._max_attempts:
+            logger.warning(
+                "surface_reply_attempts_exhausted",
+                extra={"reply_id": str(reply.id), "attempts": reply.attempts},
+            )
+            await self._settle(reply, SurfaceReplyStatus.FAILED)
+            return
         delay = self._retry_delays[min(max(reply.attempts - 1, 0), len(self._retry_delays) - 1)]
         async with self._uow_factory() as uow:
             await uow.surfaces.replies.retry(

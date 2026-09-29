@@ -26,7 +26,7 @@ from agent_core.domain.browser_act_views import (
     session_is_task_grant_eligible,
     task_grant_offer,
 )
-from agent_core.domain.browser_task_grants import BrowserTaskGrantScope, TaskGrantNotCovered
+from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.policies import (
     AuthorizationTurn,
     IdempotencyClass,
@@ -90,13 +90,11 @@ class BrowserActApprovalPresenter:
         provider: BrowserProvider,
         *,
         context_reader: TaskGrantContextReader | None = None,
-        scopes: tuple[BrowserTaskGrantScope, ...] = (),
         enabled: bool = False,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._provider = provider
         self._context_reader = context_reader
-        self._scopes = scopes
         self._enabled = enabled
         self._now = now
 
@@ -136,7 +134,7 @@ class BrowserActApprovalPresenter:
                 enabled=True,
                 view=view,
                 action=action,
-                scopes=self._scopes,
+                scopes=context.scopes,
                 eligible=eligible,
                 turn=turn,
                 profile=context.profile,

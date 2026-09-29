@@ -1524,7 +1524,7 @@ reads is only meaningful once there are build steps to order.
 
 [email-experience.md](email-experience.md) declares thirty-two further gates in
 the existing `email` area, all at Milestone 26 under ADR-0092. They preserve
-Milestone 18 requirements and the verified Milestone 12 ceiling.
+Milestone 18 requirements and the verified sequential ceiling.
 
 ```text
 #   id                                                   kind    M

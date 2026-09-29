@@ -233,7 +233,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1654-1671) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1658-1675) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text
@@ -376,7 +376,8 @@ the device surface.
   method-not-allowed on a write is presented as *this server does not support
   memory changes yet*, the way browsing already degrades; a belief that is
   person-linked shows the person's name as its subject rather than the raw
-  `person:` key.
+  `person:` key. The operator's `agent memory review --outcome` offers the
+  same three review outcomes over the ordinary composition.
 - **Rendering.** A row shows the statement as its primary text, subject and
   belief type as secondary text, a text-labeled sensitivity badge, and a
   status tag when the belief's status is not `active`; a belief that is

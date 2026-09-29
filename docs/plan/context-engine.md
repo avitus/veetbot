@@ -106,12 +106,22 @@ Assembly order is fixed and total:
 | 7 | A | Skill catalog (pinned at session open) | per entry |
 | 8 | A | Session-open memory snapshot | `MEMORY` |
 | 9 | B | Compacted history summary, if any | `PLATFORM` (see below) |
-| 10 | B | Retained conversation items, oldest to newest | per item |
+| 10 | B | Retained conversation items and completed active exchanges, oldest to newest | per item |
 | 11 | B | Loaded skill bodies, in load order | per skill |
 | 12 | B | Working-state block | per entry |
 | 13 | B | In-turn recall and correction lines | `MEMORY` |
 | 14 | B | Runtime metadata: current date, principal scope, surface; the origins `browser.navigate` accepts when the plan offers it | `PLATFORM` |
-| 15 | B | The current user message | `USER` |
+| 15 | B | A new trailing user input, if present | `USER` |
+
+Completed exchanges include the active run's original user message once it has
+tool calls and results. Fresh rows 11–14 follow those exchanges; they must not
+be inserted back before the original user message on every step. Recall and
+corrections are recomputed as before, and remain in their memory-trust envelopes.
+An unanswered trailing user message (including supplemental input on resume)
+stays last. Tool-call/result batches and their latest opaque continuation retain
+their order before the fresh rows. This makes the portable history grow without
+freezing context updates (ADR-0139). It changes neither selection nor budgets:
+active items are still never-yield inputs, not candidates for the history cut.
 
 Rows 7 and 11 are added by [skills.md](skills.md), which owns their content,
 their caps, and their trust derivation. Row 4 is added at Milestone 22 by
@@ -228,14 +238,14 @@ markers, each naming the last conversation item its cached prefix includes
 (`CacheBreakpoint.through_item`):
 
 - **The carried-history marker** closes the compacted summary and the retained
-  history. It is the only Region B prefix the next run repeats, because rows 11
-  to 14 and the new run's items follow it and can differ between runs. A first
-  run carries nothing and has no such marker.
+  history. This boundary remains reusable even when fresh context changes and
+  the new run has not yet completed an exchange. A first run carries nothing
+  and has no such marker.
 - **The run marker** closes the longest prefix the run's next step repeats: the
-  whole conversation, stopping before a replayed provider continuation. The
-  runtime replays only the latest turn's reasoning items (ADR-0007), so the
-  next step no longer carries these, and every envelope nonce after them moves
-  with their indices.
+  completed conversation, stopping before fresh step context or a replayed
+  provider continuation. The runtime replays only the latest turn's reasoning
+  items (ADR-0007), so the next step no longer carries these, and every envelope
+  nonce after them moves with its index.
 
 A marker past either point would write a cache entry that no later request
 reads, paying the provider's write premium on every request for nothing. Both
@@ -278,10 +288,11 @@ the full `through_item` boundary. This is a cache annotation, never a rewrite
 of messages, trust envelopes, context order, or continuation lifetime.
 
 Recall is recomputed per step and its timestamp, corrections and selected facts
-can change; working-state edits and date changes also invalidate what follows
-carried history. The explicit carried-history write protects the prefix before
-those rows. Tool-result truncation or history compaction can change the history
-itself and legitimately lose that hit. Never freeze corrections, suppress
+can change. Working-state edits, skill loads and date changes also change the
+fresh context after completed exchanges. The run marker protects the growing
+portable prefix before those rows, and the carried-history marker additionally
+protects prior runs. Tool-result truncation or history compaction can change
+history itself and legitimately lose that hit. Never freeze corrections, suppress
 working-state updates, or exceed budgets to improve caching. Tests compare the
 actual Responses inputs, including the first changed byte at the latest
 reasoning item when the preceding body is stable. See
@@ -500,8 +511,8 @@ the prefix is what turns that property into a guarantee about seeding, and it
 needs no gate of its own: the dispensability gate is the test, and it only tests
 anything because the cut is fixed.
 
-**Legacy tool results get deterministic excerpts before selection.** New results
-carry the tool pipeline's persisted `context_content` excerpt alongside their
+**Legacy tool results get deterministic excerpts before selection** (ADR-0137). New
+results carry the tool pipeline's persisted `context_content` excerpt beside their
 canonical content. Both context builders select that excerpt on a deep copy
 before estimation or provider rendering, and clear the alternate field in the
 request. The checkpoint and event retain canonical content for source receipts. For a carried result

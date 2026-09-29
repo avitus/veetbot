@@ -232,6 +232,15 @@ website-install   validated local reuse or npm ci; always npm ci in CI
 test-website      website-install, static export tests, and lint
 ```
 
+Seven more serve checks, CI steps, or operators. `docs-check` runs
+`scripts/check_docs.py` and `test-deploy` the release, rollback, and Nginx
+deployment script tests; both are inside `make check` and CI's static job,
+which also runs `client-build` to build the downloadable client zipapp.
+`citations-fix` updates the citation ledger after an edit moves cited lines.
+`docs-serve` serves the documentation locally, `sandbox-image` builds the
+development sandbox image, and `production-check` validates a host-native
+production deployment.
+
 `make check` is `lint typecheck test-fast test-deploy docs-check
 test-website`. `test-fast` is `test-static` followed by `test-contract`;
 those Python checks plus the independent Node website lane are CI jobs 1,

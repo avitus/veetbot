@@ -1,6 +1,6 @@
 # ADR-0064: Milestone 14 inbound surfaces and pairing
 
-- Status: Proposed
+- Status: Proposed; amended 2026-09-28 (decision 13 accepted by the owner)
 - Date: 2026-08-20
 - Related: Sections 16, 21, 22, 27.5, and 29 of the engineering plan;
   ADR-0004, ADR-0011, ADR-0017, ADR-0034, ADR-0049, ADR-0058, ADR-0059,
@@ -105,3 +105,45 @@ be reached from a phone without the native client.
   from another client, so attribution belongs on the write.
 - **Inline-keyboard approvals:** deferred; a second resolution entry point for
   no added authority.
+
+## Amendment — 2026-09-28
+
+On PostgreSQL every paired message was refused (`REJECTED_ADMISSION`,
+`surface.cost_reservation_missing`): admission reserved the default agent's
+cost limit, and the shipped agent has none. The in-memory admission controller
+allows everything, so no gate saw it. The owner chose a surface budget over a
+cost limit on the default agent, which would have capped every chat, reversed
+ADR-0130's "every other chat has no cost limit", and changed the
+content-addressed agent version.
+
+13. **A surface run has its own budget.** (Owner, 2026-09-28.) The
+    `surfaces:` limits block gains `max_cost_per_run` (USD 10) and
+    `synthesis_reserve_cost` (USD 2). Admission reserves the budget and the
+    run a paired message starts carries it as its cost limit and synthesis
+    reserve, unless its agent's own limit is lower. The reservation therefore
+    bounds what the run can spend. With the USD 25 daily ceiling, two surface
+    runs can be in flight at once. Chats started from any other client keep
+    the ordinary limits. The ingress requires the budget and the self-approval
+    setting as arguments, so neither can be left unwired again.
+
+Engineering decisions made while resolving the review findings pull request
+104 left open:
+
+14. **An unreadable update is receipted, not retried.** A Telegram update with
+    an identifier but no readable sender, or one that is not a message,
+    receives an `IGNORED_UNREADABLE` receipt (migration `c978eb0bac0f`), so
+    the poll offset passes it rather than stalling on it.
+15. **Replies have a terminal attempt limit.** A reply still undelivered after
+    `reply_max_attempts` (eight) claims settles as failed.
+16. **A repeated pairing key is a non-retryable conflict.** Replaying the
+    response would present the code twice, which decision 4 forbids. The 409
+    names the issued code's identifier and expiry.
+17. **Credentials stay with their role.** The surface loader refuses a
+    provider credential variable, and every other role refuses a surface
+    secret-file variable, instead of ignoring it. The call roles still ignore
+    stray provider variables until their production environment files are
+    confirmed clean.
+
+Consequences: one limits key pair, one reply limit, one receipt disposition
+and migration, and one reason code (`surface.unavailable`, a pairing attempt
+on a revoked surface). `surface.cost_reservation_missing` no longer exists.

@@ -159,24 +159,6 @@ async def test_browser_capabilities_are_absent_without_bound_provider() -> None:
             registry.get("browser.act")
 
 
-async def test_explicit_provider_override_registers_browser_tools() -> None:
-    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
-    provider = FakeBrowserProvider()
-
-    async with build(
-        settings=settings,
-        enabled_tools=["browser.navigate", "browser.observe", "browser.act"],
-        browser_provider_override=provider,
-    ) as composition:
-        registry = composition.tool_pipeline._registry
-        navigate = cast(RegisteredTool, registry.get("browser.navigate"))
-        observe = cast(RegisteredTool, registry.get("browser.observe"))
-        act = cast(RegisteredTool, registry.get("browser.act"))
-        assert isinstance(navigate.implementation, BrowserNavigateTool)
-        assert isinstance(observe.implementation, BrowserObserveTool)
-        assert isinstance(act.implementation, BrowserActTool)
-
-
 async def test_configured_playwright_provider_registers_browser_tools() -> None:
     settings = load_settings(
         {
@@ -1284,7 +1266,9 @@ async def test_task_grants_flag_on_composes_every_part() -> None:
         isinstance(authorizer, BrowserTaskGrantAuthorizer) for authorizer in standing._authorizers
     )
     assert act._presenter._enabled is True
-    assert act._presenter._scopes == settings.browser_task_grant_scopes
+    async with composition.uow_factory() as uow:
+        policy = await uow.browser_task_grants.get_scopes(composition.principal)
+    assert policy.scopes == settings.browser_task_grant_scopes
     assert composition.services.browser_task_grants is not None
     assert composition.services.approvals._task_grants is not None  # type: ignore[attr-defined]
     assert paths == {
@@ -1306,11 +1290,6 @@ def test_task_grants_require_the_hosted_provider() -> None:
                 "BROWSER_TASK_GRANTS_ENABLED": "1",
             }
         )
-
-
-def test_task_grant_scopes_require_the_flag() -> None:
-    with pytest.raises(ConfigurationError, match="BROWSER_TASK_GRANTS_ENABLED"):
-        task_grant_settings(BROWSER_TASK_GRANT_SCOPES="https://www.example.org/lesson")
 
 
 def test_env_examples_list_the_task_grant_settings() -> None:

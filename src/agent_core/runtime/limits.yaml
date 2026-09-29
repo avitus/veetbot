@@ -73,12 +73,20 @@ surfaces:
   max_active_runs_per_tenant: 4
   daily_cost: 25
   monthly_cost: 250
+  # ADR-0064 amendment (owner, 2026-09-28): a run a paired message starts may
+  # spend USD 10, told to answer once USD 2 remains. Admission reserves the
+  # USD 10 against the ceilings above, so two such runs can be in flight at once.
+  max_cost_per_run: 10
+  synthesis_reserve_cost: 2
   inbound_text_max_chars: 32768
   chunk_size: 4096
   claim_batch: 100
   lease_seconds: 30
   fallback_poll_seconds: 2
   retry_delays_seconds: [30, 120, 600, 3600]
+  # A reply still undelivered after this many claims (about four hours on the
+  # delays above) settles as failed; the answer stays in the session.
+  reply_max_attempts: 8
 device:
   invocation_timeout_seconds: 300
   ingest_daily_cap: 500

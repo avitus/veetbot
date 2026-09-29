@@ -4026,7 +4026,7 @@ run history remain outside this read-only extension.
 
 The owner approved the complete client modes and email proposal and explicitly
 requested a new milestone on 2026-09-11 (ADR-0092). Milestone 26 is an independent
-parallel workstream; the verified gate ceiling remains 12. The canonical
+parallel workstream and does not move the verified gate ceiling. The canonical
 [email-experience.md](email-experience.md) defines its thirty-two blocking gates,
 exact approved quality thresholds, source lifecycle and implementation contracts.
 
@@ -4098,7 +4098,7 @@ owner authority or changes to existing messaging-surface pairing requirements.
 
 Acceptance requires all fourteen gates, relevant local and PostgreSQL checks,
 authorized live inbound/outbound smoke and signed callback evidence, and final-head
-hosted review and authorized production delivery. The verified ceiling remains 12.
+hosted review and authorized production delivery. It does not move the verified ceiling.
 Private in-call tools, automatic bookings or payments, transfers, SMS, campaigns
 and automatic call-derived memory remain excluded.
 
@@ -4125,7 +4125,7 @@ ninety-day boundary; older imports require explicit source/date/budget scope.
 Completion requires every declared gate and inherited suite, both repository
 adapters, all Apple lanes, comparative and private owner evaluation, and exact
 head hosted CI/review plus separately authorized production delivery evidence.
-The verified sequential ceiling stays at Milestone 12. New source providers,
+It does not move the verified sequential ceiling. New source providers,
 general graph inference, arbitrary history mining, external enrichment,
 automatic outreach and automatic persona changes remain outside this milestone.
 
@@ -4200,7 +4200,7 @@ Milestone 4 gates are unchanged and must stay green.
 Acceptance requires all five gates, the unchanged Milestone 4 policy gates,
 and final-head hosted CI/review plus separately authorized production
 delivery. Enabling the layer and moving it from observe to enforce are the
-owner's acts. The verified sequential ceiling stays at Milestone 12.
+owner's acts. It does not move the verified sequential ceiling.
 
 ### Milestone 31: Email unsubscribe assistance
 
@@ -4231,7 +4231,7 @@ content, which the owner approved explicitly in ADR-0112 decision 5.
 Acceptance requires all twenty gates, both repository adapters, the Apple
 package and simulator lanes, an owner-authorized real-mailbox smoke on both
 accounts, and final-head hosted CI/review plus separately authorized
-production delivery. The verified sequential ceiling stays at Milestone 12.
+production delivery. It does not move the verified sequential ceiling.
 Body links, web-form unsubscribes through browser automation, standing or
 automatic unsubscribe rules, background cleanup, Gmail filters and blocked
 senders, and another provider remain outside this milestone.

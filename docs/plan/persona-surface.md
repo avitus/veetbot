@@ -123,9 +123,8 @@ advertisement and everything enveloped. It renders un-enveloped at
 
 - **Cap.** Thirty entries and 2,000 tokens, a `persona` context class that
   never yields. An over-cap persona fails session open with the class named,
-  exactly as an over-cap agent instruction does. The prefix ceiling moves
-  from 15,000 to 17,000 — the cap's own size, so the ceiling remains the
-  exact sum of the Region A class caps.
+  exactly as an over-cap agent instruction does. The prefix ceiling is 22,000 tokens, the exact sum of the
+  Region A class caps since ADR-0105 and ADR-0123.
 - **Pinning.** The context plan records the persona text and version it was
   built from. The builder re-derives the prefix from the plan, so a
   mid-session edit cannot perturb an open epoch, and two builds of one plan
@@ -323,7 +322,7 @@ the memory browser's is.
    Registered as `gate.persona.prefix_row_stable`, case. **M22.**
 2. **The persona class is capped.** The row holds at most thirty entries and
    2,000 tokens and never yields; an over-cap persona fails session open with
-   the class named, and the 17,000-token prefix ceiling holds. Registered as
+   the class named, and the prefix ceiling (now 22,000 tokens) holds. Registered as
    `gate.persona.budget_capped`, case. **M22.**
 3. **Trust and provenance are labeled.** Persona content renders in Region A
    at `TRUSTED_CONFIGURATION` with per-entry provenance, and

@@ -54,6 +54,8 @@ public struct ConnectionSettingsView: View {
     @State private var token = ""
     @State private var isSaving = false
     @State private var websiteURL = ""
+    @State private var taskScopeURL = ""
+    @State private var confirmingTaskScope = false
 
     public init(
         model: ChatViewModel,
@@ -97,6 +99,7 @@ public struct ConnectionSettingsView: View {
                     await model.refreshBrowserProfiles()
                     await model.refreshOpenRemoteAuthentication()
                     await model.refreshTaskPermissions()
+                    await model.refreshTaskScopes()
                 }
             }
         }
@@ -104,10 +107,66 @@ public struct ConnectionSettingsView: View {
         // app returns, without polling (ADR-0128 D16).
         .onChange(of: scenePhase) { phase in
             if phase == .active {
-                Task { await model.refreshOpenRemoteAuthentication() }
+                Task {
+                    await model.refreshOpenRemoteAuthentication()
+                    await model.refreshTaskScopes()
+                    await model.refreshTaskPermissions()
+                }
             }
         }
         .deviceSignInPresentation(model: model)
+    }
+
+    private var taskApprovalWebsites: some View {
+        DisclosureGroup("Task approval websites") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Saved on the server and shared across your devices. These websites can offer Allow All Actions for this Task: up to 30 minutes and 200 actions. Sensitive actions still need separate approval.")
+                    .appFont(.caption)
+                    .foregroundColor(.secondary)
+                if let policy = model.taskScopePolicy {
+                    if policy.scopes.isEmpty { Text("No websites added.").foregroundColor(.secondary) }
+                    ForEach(policy.scopes) { scope in
+                        HStack {
+                            Text(scope.id).textSelection(.enabled)
+                            Spacer()
+                            Button("Remove", role: .destructive) {
+                                Task { _ = await model.removeTaskScope(scope) }
+                            }
+                            .disabled(model.isSavingTaskScopes)
+                            .accessibilityIdentifier("task-scopes.remove.\(scope.id)")
+                        }
+                    }
+                    Text("Removing a website ends its active task permissions.")
+                        .appFont(.caption).foregroundColor(.secondary)
+                    TextField("https://www.duolingo.com/lesson", text: $taskScopeURL)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("task-scopes.url")
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        #endif
+                    Button("Add website") { confirmingTaskScope = true }
+                        .disabled(model.isSavingTaskScopes || policy.scopes.count >= 16 || TaskGrantEcho.website(taskScopeURL) == nil)
+                        .accessibilityIdentifier("task-scopes.add")
+                        .confirmationDialog("Allow task approval for this website?", isPresented: $confirmingTaskScope, titleVisibility: .visible) {
+                            Button("Add website") {
+                                if let scope = TaskGrantEcho.website(taskScopeURL) {
+                                    Task { if await model.addTaskScope(scope) { taskScopeURL = "" } }
+                                }
+                            }
+                        } message: {
+                            Text("\(taskScopeURL) and paths below it can offer task permission. Each task still requires your approval.")
+                        }
+                }
+                if let error = model.taskScopeError {
+                    Text(error).foregroundColor(.red).appFont(.caption)
+                        .accessibilityIdentifier("task-scopes.error")
+                }
+                Button("Refresh websites") { Task { await model.refreshTaskScopes() } }
+                    .disabled(model.isSavingTaskScopes)
+                    .accessibilityIdentifier("task-scopes.refresh")
+            }.padding(.top, 8)
+        }
     }
 
     /// No second sign-in starts while a remote one is open (either mode).
@@ -204,6 +263,7 @@ public struct ConnectionSettingsView: View {
             ) {
                 if model.isConfigured {
                     VStack(alignment: .leading, spacing: 16) {
+                        taskApprovalWebsites
                         settingsField(
                             title: "Website URL",
                             help:

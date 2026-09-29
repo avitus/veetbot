@@ -18,6 +18,7 @@ PLATFORM_SCOPES = frozenset(
         "approval.resolve",
         "artifact.read",
         "artifact.write",
+        "media.generate",
         "workspace.read",
         "workspace.write",
         "sandbox.execute",

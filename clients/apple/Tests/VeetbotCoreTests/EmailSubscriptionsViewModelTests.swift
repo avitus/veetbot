@@ -40,6 +40,65 @@ import Testing
         #expect(!model.hasMore)
     }
 
+    /// A server without the census route reads as unavailable, never as a
+    /// failure to retry; any other failure is reported with Try again.
+    @Test func testAMissingCensusRouteReadsAsUnavailableAndOtherFailuresAsErrors() async throws {
+        let missing = try makeModel { _ in
+            (404, #"{"error":{"code":"not_found","message":"Not found.","details":{},"request_id":"test"}}"#)
+        }
+        let failing = try makeModel { _ in
+            (500, #"{"error":{"code":"internal","message":"Try later.","details":{},"request_id":"test"}}"#)
+        }
+        defer { missing.resetConnection(); failing.resetConnection() }
+        await missing.reload()
+        await failing.reload()
+
+        #expect(missing.unavailable)
+        #expect(missing.errorMessage == nil, "An absent route is not an error to retry")
+        #expect(missing.items.isEmpty)
+        #expect(!missing.hasMore)
+        #expect(!missing.isLoading)
+        #expect(!failing.unavailable)
+        #expect(failing.errorMessage != nil)
+        #expect(!failing.isLoading)
+    }
+
+    /// A cursor the server repeats is followed once, so a looping page never
+    /// duplicates rows or requests.
+    @Test func testARepeatedCursorIsFollowedOnlyOnce() async throws {
+        let requests = EmailSubscriptionRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            let next = request.url!.query?.contains("cursor=loop") == true
+            return (200, self.page(ids: [next ? self.id(2) : self.id(1)], cursor: "loop"))
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.loadMore()
+        await model.loadMore()
+
+        #expect(requests.snapshot.count == 2)
+        #expect(model.items.map(\.id) == [id(1), id(2)])
+    }
+
+    /// A census answer that arrives after the connection changed belongs to
+    /// the old connection and is discarded.
+    @Test func testACensusFromAClosedConnectionIsDiscarded() async throws {
+        let answer = EmailSubscriptionGate()
+        let model = try makeGatedModel { _ in (200, self.page(ids: [self.id(1)]), answer) }
+        defer { answer.release(); model.resetConnection() }
+        let loading = Task { await model.reload() }
+        try await waitFor { answer.isWaiting }
+        #expect(model.isLoading)
+        model.resetConnection()
+        answer.release()
+        await loading.value
+
+        #expect(model.items.isEmpty, "Rows from the previous connection must not appear")
+        #expect(model.errorMessage == nil)
+        #expect(!model.isLoading)
+    }
+
     /// Select all keeps the owner's valued senders and the batch bound intact.
     @Test func testSelectAllSkipsProtectedAndIneligibleRowsAndStopsAtTwentyFive() async throws {
         var rows = (1...28).map { row(id: id($0), mechanism: "one_click", verified: true, digest: Self.digest) }

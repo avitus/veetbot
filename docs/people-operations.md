@@ -271,6 +271,21 @@ repair-directory` to preview and remove them. Mail history does not keep such
 an entry. An identifier you confirmed or an edit you made, such as renaming
 someone “Sam from Legal”, does.
 
+## Correspondence summaries
+
+[ADR-0126](adr/0126-correspondence-summaries-and-original-email.md) gives each
+observed email exchange in a person's history a short generated summary. There
+is no backfill command: summaries appear only as Email mode refreshes, at most
+four correspondence records per refresh slice, newest first, after assessment,
+drafts and unsubscribe evidence. Each is one small model call billed to the
+approved automatic-email allowance. Mail older than ninety days, bulk mail,
+excluded, suppressed or erased sources, and anything while email learning is
+paused are never summarized. A result whose supporting quote is not verbatim in
+the message, or that fails the injection or secret-material checks, is
+retried once in a later slice and then abandoned. `people.history@1.1.0`
+returns the retained original text of one message to an owner holding
+`email.read`, for as long as the session that fetched it is kept.
+
 ## Historical imports
 
 Name exact source sessions/accounts, inclusive start, exclusive end, exclusions,

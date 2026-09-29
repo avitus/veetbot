@@ -262,6 +262,35 @@ def test_call_configuration_default_off_and_private_credentials(tmp_path: Any) -
         load_settings({**base_environment(), "AGENT_CALL_ENABLED": "1"})
 
 
+def test_surface_worker_rejects_call_credentials_even_when_calling_is_enabled(
+    tmp_path: Path,
+) -> None:
+    """A valid calling configuration cannot admit its API credential to the surface role."""
+    from agent_core.config import ConfigurationError, load_surface_worker_settings
+    from tests.unit.test_config import base_environment
+
+    configuration = tmp_path / "calls.json"
+    configuration.write_text(call_configuration().model_dump_json())
+    key = tmp_path / "bland-key"
+    key.write_text(KEY)
+    key.chmod(0o600)
+    telegram = tmp_path / "telegram-token"
+    telegram.write_text("telegram-test-token-with-at-least-32-chars")
+    telegram.chmod(0o600)
+    environment = {
+        **base_environment(),
+        "AGENT_CALL_ENABLED": "1",
+        "BLAND_CONFIGURATION_FILE": str(configuration),
+        "AGENT_SURFACE_API_ENABLED": "1",
+        "AGENT_SURFACE_WORKER_ENABLED": "1",
+        "AGENT_SURFACE_TELEGRAM_TOKEN_FILE": str(telegram),
+    }
+    # Establish that all unrelated configuration is valid before adding the forbidden credential.
+    assert load_surface_worker_settings(environment).credentials == {}
+    with pytest.raises(ConfigurationError, match="BLAND_API_KEY_FILE"):
+        load_surface_worker_settings({**environment, "BLAND_API_KEY_FILE": str(key)})
+
+
 def test_call_server_composition_and_approval_floor() -> None:
     import agent_core.mcp.configuration as configuration
     from agent_core.domain.policies import IdempotencyClass, SideEffectClass

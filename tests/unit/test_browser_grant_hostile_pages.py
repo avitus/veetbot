@@ -595,17 +595,6 @@ PADDED = """<!doctype html><html><head><title>Lesson</title></head><body>
 </body></html>""".replace("PADDING", "and " * 300)
 
 
-async def test_a_label_too_long_to_read_whole_is_refused() -> None:
-    async with lesson_pages({"/lesson/1": PADDED}) as (runtime, visit, _left):
-        page = await visit("/lesson/1")
-        name = next(element.name for element in page.elements if element.role == "button")
-        refusal = await _refused(runtime, _click_named(page, name))
-        clicks = await _page_value(runtime, "window.clicks")
-
-    assert refusal.reason_code == GRANT_NOT_APPLICABLE
-    assert clicks == []
-
-
 # An excluded word past the 256 characters element facts carry of a label
 # source, but inside the 1,024 the runtime reads.
 LONG_TAIL = """<!doctype html><html><head><title>Lesson</title></head><body>

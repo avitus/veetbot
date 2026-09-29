@@ -4,6 +4,76 @@ title: Changelog
 
 # Changelog
 
+## 2026-09-28 — Telegram messages are admitted, with their own budget
+
+- A paired Telegram or WhatsApp message was refused on PostgreSQL because the
+  default agent has no cost cap to reserve. Each run a paired message starts
+  now has its own budget of USD 10, told to answer once USD 2 remains; chats
+  from the Apple client keep no cost cap.
+- The sixteen review findings left open on the surface code are resolved. With
+  self-approval turned off in the policy, `/approve` from a chat could still
+  approve your own request; it is refused now. `/approve` with no identifier
+  crashed, and would otherwise have approved the only pending request; it now
+  matches nothing.
+- A Telegram message without a readable sender, such as a channel post, no
+  longer stalls every later message. Replies stop retrying after about four
+  hours, surface API responses are never cached, and pairings no longer expose
+  internal identities.
+- The [Telegram surface runbook](telegram-surface-runbook.md) walks through
+  creating the bot, installing its token, pairing, and a live smoke.
+
+## 2026-09-28 — Knowledge search answers questions, and a test-suite review
+
+- Searching your documents required every word of the question to appear in
+  one passage, so "When should I water the tomatoes?" found nothing in
+  production. A passage now matches when it shares any meaningful word, as
+  the tests' in-memory store always did; the best-ranked passages still come
+  first.
+- `math.calculate` answered "Infinity" for zero raised to a negative power.
+  It now reports `division_by_zero`, like any other division by zero.
+- `python -m gmail_mcp bootstrap` resolved the OAuth client file's path
+  before checking it, so a symlinked client file was accepted although the
+  runbook requires a regular, non-symlink file. It is refused now.
+- Usage from an OpenAI-compatible server that reports a token count as null
+  no longer fails the reply; a null count reads as zero.
+- The in-process run service the evaluation runner uses now ends a run
+  waiting for your answer at once and closes the question, as the HTTP and
+  CLI cancel always did.
+- The test suite was reviewed end to end: redundant and vacuous tests were
+  removed or merged, tests that could never fail were repaired, and new
+  PostgreSQL journeys cover a production-shaped Chat across worker restarts,
+  a reminder delivered while you are away, recall in a later chat, chat
+  attachments, and Telegram approval. They found that a paired Telegram or
+  WhatsApp message is refused on PostgreSQL because the default agent has no
+  cost cap; that is recorded as an open item for Milestones 14 and 25.
+
+## 2026-09-28 — A new chat's MCP records survive a failed write
+
+- A new chat holds the records of the MCP servers it connected to and the tool
+  lists it pinned until the chat exists, then writes them in one transaction.
+  A write that failed or was interrupted discarded them for good. They now
+  stay held until a write commits, and each carries a fixed identity, so a
+  retry after a commit whose acknowledgement was lost does not record them
+  twice.
+
+## 2026-09-28 — Website pop-ups never open, and task approval says what it allows
+
+- The website action card's task choice now reads **Allow all actions for
+  this task**, and the card shows its site scope, time and action limits,
+  and the actions that still ask before you choose it.
+- A form in a pop-up window could reach the website while Veetbot was still
+  closing that window, outside the checks every other request passes.
+  ADR-0138: Veetbot's agent browsers now refuse pop-up windows before they
+  exist. Veetbot's remote sign-in browser serves each page with an added rule
+  that forbids pop-ups but keeps scripts, forms, storage and navigation
+  working, alongside the site's own security policy. A pop-up that still
+  cannot be closed cleanly ends the whole browser session.
+- The remote sign-in browser now fetches pages through Veetbot's audited proxy
+  with its own HTTP client, so a site that demands a real browser's TLS
+  fingerprint may refuse that remote sign-in. Sign in on this device is
+  unaffected. No approval rule, grant duration, action budget or allowed site
+  changed.
+
 ## 2026-09-28 — A new chat writes its tool pins once
 
 - After the warm-up fix, recording which MCP tools a new chat pinned still
@@ -13,6 +83,30 @@ title: Changelog
   of that second, both when the chat is created and before its first reply.
 - `agent run latency` counted no chats bound to a browser profile, which is
   every new chat in the app. It counts them now.
+
+## 2026-09-27 — Opening an exported file no longer crashes the Mac app
+
+- Opening an SVG file attached to a reply could crash the Mac app before the
+  file could be downloaded: the viewer rebuilt its columns when the file
+  finished loading, and AppKit raised on the conflicting widths. The Mac
+  viewer is now one sheet, with the file name on top, a full-width preview,
+  and Close and Download fixed at the bottom.
+- A file with no preview, such as an SVG the image decoder cannot draw, shows
+  a short explanation and still downloads with its original bytes.
+  Cancelling the save panel keeps the viewer open, and a failed export shows
+  an alert. Installed apps get the fix from TestFlight.
+
+## 2026-09-27 — Recent chats stay one tap away
+
+- Once chats were filed into folders, returning to the one you just used
+  meant finding its folder. A collapsible **Recent chats** section below New
+  conversation now lists the five most recently active chats on Mac, iPhone
+  and iPad, including chats inside closed folders. Scheduled sessions are
+  left out.
+- They are shortcuts: each chat keeps its folder, and opening one changes
+  neither its place nor its activity. The section starts open, remembers on
+  each device whether you closed it, and also appears with a server that has
+  no folders.
 
 ## 2026-09-27 — Sign-in verification does not wait for every page resource
 
@@ -40,6 +134,37 @@ title: Changelog
   Pending tools are not executed and provider pins are never silently changed.
   Terminal checkpoints discard provider continuation state even when resuming
   fails before the model loop starts.
+
+## 2026-09-27 — Large tool results no longer push earlier ones out of a chat
+
+- One production chat fetched six pages, the largest 139,764 characters. To
+  make room, the context builder shortened thirteen older tool results,
+  including all eight carried from earlier turns, and the next request read
+  about a tenth as much from OpenAI's prompt cache.
+- ADR-0137: the model now sees at most 4 KiB of a tool result
+  (`output.inline_maximum_bytes` in the tool limits), as a head-and-tail
+  excerpt fixed when the result is recorded, so later requests repeat the
+  same bytes. A larger output is still captured whole as an artifact the
+  owner can download, and the stored result keeps its original content for
+  provenance checks. An excerpt can miss a passage from the middle of a long
+  page.
+- Results already in older chats get the same excerpt on every request,
+  without rewriting stored history. Each time the builder shrinks a request
+  it records `context.budget.pressure`, including when the shrunk request
+  fits.
+
+## 2026-09-27 — Research that repeats itself ends with an answer
+
+- A research chat failed with `ToolLoopDetected` after useful work. Large
+  results had been shortened in its context, so the model fetched the same
+  page again until the identical-call limit ended the run, with no answer.
+- ADR-0136: after four identical calls, the next turn is answer-only. The
+  model is told to give its best-supported answer, name what is missing, and
+  say that research stopped because it was repeating; it cannot call a tool
+  in that turn. The limit of five is unchanged, and a tool call returned in
+  that turn still fails the run before anything runs.
+- Budgets, deadlines and cancellation still apply, so the answer may be
+  partial.
 
 ## 2026-09-26 — Device sign-in verification has enough browser storage
 
@@ -76,6 +201,24 @@ title: Changelog
   times. Nothing waits on it; a chat's own handshakes keep the ten-second
   limit. `mcp_discovery_warmup_abandoned` in the journal names any server that
   never answered.
+
+## 2026-09-26 — Long chats reuse the model's prompt cache
+
+- On Claude models no conversation history was ever cached: plans marked only
+  the instructions and the tools, so each request of a long chat paid full
+  input price for everything said so far. Plans now also mark the history the
+  next request repeats, with up to two markers. Open chats gain them at their
+  next request.
+- ADR-0132: a scheduled run caches its instructions and tools for an hour
+  instead of five minutes, because it waits on delegated work, devices, the
+  queue and approvals for longer than that. Chats keep the five-minute cache.
+- ADR-0135: OpenAI Chat reused almost none of its history either, because
+  OpenAI's automatic cache point followed the working state and recalled
+  memory, which change every step. Requests now carry an anonymous
+  per-session cache key and explicit history cache points. In a live test
+  chat the cost, cache writes included, fell from USD 1.56 to USD 0.37, and
+  reported cost now includes OpenAI's cache-write price.
+- None of this changes the text a model reads.
 
 ## 2026-09-26 — Integration tests erase only a database marked disposable
 
@@ -379,6 +522,33 @@ title: Changelog
 - Deploying: set the flag, grant `artifact.write` and `knowledge.write`, and
   deploy the nginx change for the upload path.
 
+## 2026-09-23 — Choose the chat model and how hard it thinks
+
+- ADR-0119: Settings has a Models card on Mac, iPhone and iPad. Chat offers
+  the deployment's selectable models (`astra`, `fable` and `balanced` as
+  shipped, each only when its provider has a key) with the reasoning efforts
+  each accepts. Memory offers only the model and effort combinations that
+  passed the memory-formation evaluation.
+- A chat model applies to new app chats; existing chats, schedules, email,
+  Telegram, WhatsApp and SMS keep the deployment default. The chat effort
+  applies from your next message, except typed email tasks, which keep the
+  provider's default. A memory choice applies to later formation.
+- `GET` and `PUT /v1/settings/models` sit under the new `settings.read` and
+  `settings.write` scopes. A change saved elsewhere in the meantime reloads
+  the current values instead of being overwritten.
+- Deploying: add `settings.read,settings.write` to `AUTH_SCOPES`.
+
+## 2026-09-23 — Answering questions no longer strands a chat
+
+- A chat that asked three clarifying questions stayed queued for good: each
+  resume, after an answer, an approval or a delegated child, counted as a
+  crash retry, and the fourth claim was refused. ADR-0118: only an expired
+  worker claim counts toward the crash limit of three. A queued run that does
+  exhaust it now fails visibly instead of waiting.
+- The migration rebuilds past crash counts from the maintenance log, so runs
+  stranded this way resume from their saved checkpoint, with their approvals
+  and effect safeguards intact.
+
 ## 2026-09-22 — Bulk mail forms no memory, and flagged memories can be reviewed
 
 - The automatic email refresh had formed People facts about a founder named
@@ -432,6 +602,36 @@ title: Changelog
   re-enters at step 6 and each effect still happens once.
 - `ScriptedTurn` gains `provider_reasoning_payload`, so the fake provider can
   return a continuation. Nothing in the suite could reach that branch before.
+
+## 2026-09-21 — Email can unsubscribe you from bulk senders, off by default
+
+- Milestone 31 (ADR-0112) adds a Subscriptions view to Email mode. It lists
+  the bulk senders in your retained mail, how many conversations each sent,
+  when the last one arrived, and how it offers to unsubscribe. There you can
+  Keep a sender, Report spam, or Unsubscribe, up to twenty-five senders at
+  once, and optionally archive their existing mail. A bulk conversation
+  offers Unsubscribe beside its sender.
+- Nothing is sent without your tap on the confirmation, or your approval when
+  you ask Chat. Veetbot sends the sender's own one-click request from the
+  server, only for mail whose headers Gmail authenticated, and never follows a
+  link in a message body. A sender that offers only an address gets the email
+  it specified, from your account. An unsubscribe cannot be undone; Report
+  spam can, with Not spam.
+- Chat gains `email.subscriptions` and `email.unsubscribe`.
+- It stays off until `AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1`, which requires Email
+  mode. The [Gmail runbook](gmail-integration-runbook.md) has the activation
+  and smoke steps, and the privacy policy describes the processing.
+
+## 2026-09-21 — Scheduled chats group by schedule in the sidebar
+
+- A daily schedule added a history row every day. ADR-0113: a schedule with
+  two or more sessions now shows as one collapsible row in a Scheduled
+  section between the folders and the rest of the history, named after its
+  newest session, with its sessions in activity order. A lone scheduled
+  session stays in the history.
+- Groups start collapsed and remember your toggles on each device. Scheduled
+  sessions never enter a folder, so their rows have no move menu, and the
+  groups appear whether or not the server offers folders.
 
 ## 2026-09-21 — Paraphrased People labels no longer erase a family memory
 
@@ -833,6 +1033,34 @@ title: Changelog
   the scheduler as the database owner.
 - A schedule that paused after the missed run needs to be resumed.
 
+## 2026-09-16 — Chats can be filed into folders
+
+- Milestone 29 (ADR-0102): the Apple sidebar can hold folders you create,
+  rename and delete, and each chat's move menu files it into one. Folders
+  live on the server, so a move on one device reaches the others.
+- The maintenance pass proposes a folder once several unfiled chats belong
+  together, at most three proposals at a time. You accept, decline, or rename
+  a new folder as you accept it; nothing is filed without your acceptance, and
+  a declined grouping is not proposed again.
+- Only chats can be filed; email, scheduled and delegated sessions cannot.
+  The routes use the existing session scopes and stay off until
+  `AGENT_THREAD_FOLDERS_API_ENABLED=1`.
+
+## 2026-09-16 — Veetbot remembers the people in your life
+
+- Milestone 28 (ADR-0100, ADR-0101) adds People: who someone is, how they
+  relate to you and to each other, facts about them, dated interactions and
+  open commitments, each tied to the chat or email it came from. Chat forms
+  People memory from what you tell it, Email from your correspondence within
+  its 90-day window, and both recall it when a person comes up.
+- The People collection in Memory, on Mac, iPhone and iPad, shows each
+  person's evidence and lets you correct a fact, merge or split identities,
+  undo a repair, forget a person, and import older chats or mail under a date
+  range and a spending cap.
+- People is on by default; grant `people.read` and `people.write` to the
+  owner. The [People operations runbook](people-operations.md) covers imports,
+  erasure and rollback.
+
 ## 2026-09-16 — Call roles skip the client-certificate probe
 
 - The call worker crash-looped after the first calling release. Its unit hides
@@ -991,6 +1219,27 @@ title: Changelog
 - `memory.search` guides the model to look up missing personal context before
   asking the user to repeat it, using the needed fact rather than only the topic
   of the question. Existing session snapshots remain frozen for their context epoch.
+
+## 2026-09-14 — Veetbot can take and place phone calls, once set up
+
+- Milestone 27 adds Bland calling, off until the owner configures it. Callers
+  to the public number reach an assistant that takes a message and answers
+  only from a reviewed public profile. Chat can place an outbound call only
+  after you approve its exact brief, and can list and read the calls it
+  keeps.
+- Each finished call's transcript and summary arrive through a signed
+  webhook, stay for thirty days, and can be deleted, which also redacts what
+  they produced in chats. A notification can announce a finished call.
+- The [Bland setup guide](bland-setup.md) covers the credentials, service
+  roles, database grants and flags.
+
+## 2026-09-14 — Websites load their scripts and images without setup
+
+- Website Access profiles no longer need extra CDN origins. The isolated
+  browser loads a site's public HTTPS scripts, styles, images, fonts and
+  embedded verification frames through an audited proxy, while navigation
+  stays on the profile's own origins and private networks stay blocked
+  (ADR-0098).
 
 ## 2026-09-13 — Website Access redirect failures are actionable
 

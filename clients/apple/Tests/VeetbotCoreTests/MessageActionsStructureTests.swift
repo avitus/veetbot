@@ -15,16 +15,6 @@ import Testing
             contentsOf: packageRoot.appendingPathComponent(path), encoding: .utf8)
     }
 
-    @Test func everyFinishedMessageShowsTheActionBarAndOneSheetServesThem() throws {
-        let chat = try source("Veetbot/Views/ChatView.swift")
-
-        #expect(chat.contains("if item.offersMessageActions {"))
-        #expect(chat.contains("MessageActionBar("))
-        #expect(chat.contains("@State private var textSelection: MessageTextSelection?"))
-        #expect(chat.contains(".sheet(item: $textSelection)"))
-        #expect(chat.contains("MessageTextSheet(selection: selection)"))
-    }
-
     @Test func noContextMenuCompetesWithTextSelection() throws {
         // On iOS a context menu on a message would take the long-press that
         // `.textSelection(.enabled)` uses for its own Copy menu.

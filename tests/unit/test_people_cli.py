@@ -10,9 +10,8 @@ from typer.testing import CliRunner
 from agent_core.cli.main import app
 
 
-def test_people_operator_commands_and_explicit_write_owner() -> None:
-    runner = CliRunner()
-    result = runner.invoke(app, ["people", "--help"])
+def test_people_help_lists_every_operator_command() -> None:
+    result = CliRunner().invoke(app, ["people", "--help"])
     assert result.exit_code == 0, result.output
     for command in [
         "list",
@@ -21,24 +20,31 @@ def test_people_operator_commands_and_explicit_write_owner() -> None:
         "diagnose",
         "merge",
         "split",
+        "undo",
         "forget",
         "import",
+        "import-status",
         "link-existing",
+        "repair-directory",
+        "dedupe",
         "export-erasure",
         "restore-erasure",
     ]:
         assert command in result.output
-    refused = runner.invoke(app, ["people", "merge", "--request", "missing.json", "--key", "merge"])
-    assert refused.exit_code != 0
-    assert "--owner" in refused.output
 
 
-def test_directory_repair_is_listed_and_requires_the_owner() -> None:
-    runner = CliRunner()
-    listed = runner.invoke(app, ["people", "--help"])
-    assert "repair-directory" in listed.output
-    refused = runner.invoke(app, ["people", "repair-directory", "--confirm"])
-    assert refused.exit_code != 0
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["merge", "--request", "missing.json", "--key", "merge", "--ceiling", "sensitive"],
+        ["repair-directory", "--confirm"],
+        ["dedupe", "--confirm"],
+    ],
+    ids=["merge", "repair-directory", "dedupe"],
+)
+def test_destructive_people_commands_require_the_owner(args: list[str]) -> None:
+    refused = CliRunner().invoke(app, ["people", *args])
+    assert refused.exit_code == 2
     assert "--owner" in refused.output
 
 
@@ -104,13 +110,6 @@ async def test_directory_repair_previews_by_default_and_audits_a_confirmed_run(
     repair = None
     with pytest.raises(NotFoundError, match="disabled"):
         await people.repair_directory_report(identity, False)
-
-
-def test_duplicate_pass_is_listed_and_requires_the_owner() -> None:
-    runner = CliRunner()
-    assert "dedupe" in runner.invoke(app, ["people", "--help"]).output
-    refused = runner.invoke(app, ["people", "dedupe", "--confirm"])
-    assert refused.exit_code != 0 and "--owner" in refused.output
 
 
 async def test_duplicate_pass_previews_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -239,3 +238,241 @@ async def test_erasure_archive_is_private_exact_owner_checked_and_digest_bound(
         await people.restore_erasure_receipt(
             identity, path, hashlib.sha256(path.read_bytes()).hexdigest(), session().id
         )
+
+
+def _people_build(
+    monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True, names: tuple[str, ...] = ()
+) -> list[str]:
+    """Route the People commands to a fresh in-memory owner composition per invocation.
+
+    Each invocation re-creates the named people; sequential ids keep their ids
+    stable across invocations, and the returned list carries them in order.
+    """
+
+    import asyncio
+    from contextlib import asynccontextmanager
+    from dataclasses import replace
+
+    from agent_core.bootstrap import build
+    from agent_core.cli import people
+    from agent_core.domain.memory import Sensitivity
+    from agent_core.domain.people_views import CreatePerson
+    from tests.contract.support import principal, session
+    from tests.integration.m2_support import memory_settings
+
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    created: list[str] = []
+
+    @asynccontextmanager
+    async def people_build(**_kwargs: Any) -> AsyncIterator[Any]:
+        async with build(
+            settings=replace(memory_settings(), people_enabled=enabled),
+            storage="memory",
+            principal=owner,
+            sequential_ids=True,
+        ) as composition:
+            async with composition.uow_factory() as uow:
+                await uow.sessions.create(session())
+            ids = []
+            service = composition.services.people
+            for index, name in enumerate(names):
+                assert service is not None
+                person = await service.create(
+                    owner,
+                    CreatePerson(session_id=session().id, display_name=name),
+                    key=f"create-{index}",
+                    ceiling=Sensitivity.SENSITIVE,
+                )
+                ids.append(str(person.id))
+            created[:] = ids
+            yield composition
+
+    async def prime() -> None:
+        async with people_build():
+            pass
+
+    asyncio.run(prime())
+    monkeypatch.setattr(people, "build", people_build)
+    return created
+
+
+def test_people_reads_print_the_same_projections_as_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    created = _people_build(monkeypatch, names=("Maya Chen",))
+    runner = CliRunner()
+    listed = runner.invoke(app, ["people", "list", "--ceiling", "sensitive"])
+    assert listed.exit_code == 0, listed.output
+    [row] = json.loads(listed.stdout)["items"]
+    [person_id] = created
+    assert (row["id"], row["display_name"]) == (person_id, "Maya Chen")
+
+    fetched = runner.invoke(app, ["people", "get", person_id, "--ceiling", "sensitive"])
+    assert fetched.exit_code == 0, fetched.output
+    assert json.loads(fetched.stdout)["person"]["id"] == person_id
+    history = runner.invoke(app, ["people", "history", person_id, "--ceiling", "sensitive"])
+    assert history.exit_code == 0, history.output
+    assert json.loads(history.stdout)["items"] == []
+
+
+def test_people_diagnose_reports_counts_and_never_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    [person_id] = _people_build(monkeypatch, names=("Maya Chen",))
+    result = CliRunner().invoke(app, ["people", "diagnose", person_id, "--ceiling", "sensitive"])
+    assert result.exit_code == 0, result.output
+    diagnosis = json.loads(result.stdout)
+    assert diagnosis["person_id"] == person_id
+    assert diagnosis["visible_aliases"] >= 0
+    assert diagnosis["visible_facts"] == diagnosis["visible_interactions"] == 0
+    assert "Maya" not in result.stdout, "a diagnosis carries counts, not the person's content"
+
+
+@pytest.mark.parametrize(
+    ("enabled", "args", "exit_code", "message"),
+    [
+        (False, ["list", "--ceiling", "sensitive"], 1, "People is disabled"),
+        (True, ["get", "00000000-0000-0000-0000-00000000abcd", "--ceiling", "sensitive"], 1, ""),
+        (True, ["list", "--ceiling", "top-secret"], 2, ""),
+    ],
+    ids=["disabled", "unknown-person", "unknown-ceiling"],
+)
+def test_people_reads_fail_closed(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, args: list[str], exit_code: int, message: str
+) -> None:
+    _people_build(monkeypatch, enabled=enabled)
+    result = CliRunner().invoke(app, ["people", *args])
+    assert result.exit_code == exit_code
+    assert result.stdout == ""
+    assert message in result.stderr
+
+
+def test_people_merge_previews_through_the_identity_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from tests.contract.support import principal, session
+
+    source, target = _people_build(monkeypatch, names=("Al", "Alex"))
+    request = tmp_path / "merge.json"
+    request.write_text(
+        json.dumps(
+            {
+                "session_id": str(session().id),
+                "operation": "merge",
+                "source_id": source,
+                "target_id": target,
+                "expected_revisions": {source: 1, target: 1},
+            }
+        )
+    )
+    owner = principal()
+    result = CliRunner().invoke(
+        app,
+        [
+            "people",
+            "merge",
+            "--owner",
+            f"{owner.tenant_id}/{owner.principal_id}",
+            "--request",
+            str(request),
+            "--key",
+            "merge-preview",
+            "--ceiling",
+            "sensitive",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    preview = json.loads(result.stdout)
+    assert preview["operation"] == "merge"
+    assert preview["state"] == "preview"
+    assert set(preview["person_ids"]) == {source, target}
+    assert not {"tenant_id", "principal_id", "request_hash"} & preview.keys()
+
+
+@pytest.mark.parametrize(
+    ("command", "owner", "operation", "message"),
+    [
+        ("merge", "someone/else", "merge", "--owner must match"),
+        ("split", None, "merge", "differs from the selected command"),
+        ("undo", None, "split", "differs from the selected command"),
+    ],
+    ids=["foreign-owner", "split-with-merge-request", "undo-with-split-request"],
+)
+def test_people_writes_refuse_before_the_identity_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    owner: str | None,
+    operation: str,
+    message: str,
+) -> None:
+    import json
+    from uuid import UUID
+
+    from agent_core.application.people import PublicPeopleService
+    from tests.contract.support import principal, session
+
+    _people_build(monkeypatch)
+    called: list[object] = []
+
+    async def identity_operation(*args: object, **kwargs: object) -> object:
+        called.append(args)
+        raise AssertionError("a refused write must not reach the identity service")
+
+    monkeypatch.setattr(PublicPeopleService, "identity_operation", identity_operation)
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "session_id": str(session().id),
+                "operation": operation,
+                "source_id": str(UUID(int=1)),
+                "target_id": str(UUID(int=2)),
+            }
+        )
+    )
+    configured = principal()
+    result = CliRunner().invoke(
+        app,
+        [
+            "people",
+            command,
+            "--owner",
+            owner or f"{configured.tenant_id}/{configured.principal_id}",
+            "--request",
+            str(request),
+            "--key",
+            "refused",
+            "--ceiling",
+            "sensitive",
+        ],
+    )
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert message in result.stderr
+    assert called == []
+
+
+def test_people_write_reports_an_unreadable_request_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _people_build(monkeypatch)
+    result = CliRunner().invoke(
+        app,
+        [
+            "people",
+            "import",
+            "--owner",
+            "tenant-a/principal-a",
+            "--request",
+            str(tmp_path / "absent.json"),
+            "--key",
+            "import",
+            "--ceiling",
+            "sensitive",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output

@@ -4,6 +4,15 @@ title: Architecture
 
 # Architecture
 
+Image and video generation use the provider-neutral `MediaGenerationProvider`
+port. `image.generate` and `video.generate` initially use TensorScale and write
+external-untrusted PNG/MP4 streams through the existing run-bound artifact
+writer. The ordinary approval, scope, non-idempotent recovery and reply-file
+retention boundaries apply ([ADR-0140](adr/0140-tensorscale-media-generation.md)).
+`MediaInputResolver` releases checksum-verified, bounded PNG/JPEG/WebP images
+from the caller's own conversation after approval, under `artifact.read`.
+The provider adapter alone encodes input bytes; tool arguments carry IDs only.
+
 The platform is an explicitly bounded modular monolith. The normative module
 layout and dependency rules are defined by the
 [engineering plan](plan/engineering-plan.md#4-repository-structure), expanded
@@ -132,11 +141,48 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   established-fact admission, decay sweep, and usage feedback, and the
   read-only `/v1/memories` list and detail routes entered `agent_core.api`
   behind the exact `memory.read` scope and a default-off flag (Milestone 17,
-  complete).
+  complete); ADR-0117 added the review and deletion routes under
+  `memory.write`.
 - `agent_core.tools.schedule_create` is the model-callable, approval-gated
   one-time creation bridge over the existing
-  `agent_core.application.schedule_service` (Milestone 19, in progress).
+  `agent_core.application.schedule_service` (Milestone 19, in progress);
+  `agent_core.domain.recurrence` adds pure calendar recurrence (Milestone 20),
+  and `agent_core.tools.schedule_lifecycle` the governed list, update, pause,
+  resume, and cancel tools (Milestone 23).
+- `agent_core.adapters.telegram` and `agent_core.adapters.whatsapp` are
+  messaging transports behind the transactional pairing and inbound routing of
+  `agent_core.application.surfaces`, run by the least-privilege surface worker
+  role (Milestones 14 and 25). `agent_core.adapters.device_channel` and
+  `agent_core.application.device_ingest` carry SMS through the owner's iPhone
+  as one framed, untrusted triage turn per message (Milestone 24).
+- `src/gmail_mcp` and `src/bland_mcp` are first-party MCP server packages
+  beside `agent_core`, which they never import; the platform reaches them only
+  through its MCP process boundary (Milestones 18 and 27). Typed Email work runs
+  on the ordinary run, tool, and model path in `agent_core.runtime.email_*`
+  (Milestone 26), and `agent_core.adapters.unsubscribe` is the fixed one-click
+  unsubscribe transport (Milestone 31). Calling adds the `call-worker` and
+  `call-ingress` roles, whose dedicated ingress app never accepts owner runs
+  (Milestone 27).
+- `agent_core.memory` grew formation@9 adaptive distillation (Milestone 21)
+  and People formation, and `agent_core.application.people*` owns the People
+  directory, identity, duplicates, imports, and erasure behind the
+  `/v1/people` routes and the `agent people` CLI (Milestone 28).
+  `agent_core.domain.persona` holds the persona document and nomination types
+  behind `agent persona` (Milestone 22).
+- `agent_core.folders` groups chat threads into folders and proposals
+  (Milestone 29). `agent_core.ports.judgment` is the typed-judgment port, with
+  the TypeSafe and scripted adapters in `agent_core.adapters.judgment`
+  (ADR-0110); its consumers are judgment-backed folder matching and the
+  restrictive-only policy advisory layer in `agent_core.policy.advised` and
+  `agent_core.policy.judgment_advisor` (Milestone 30).
+- Owner-authorized extensions outside the milestone sequence keep the same
+  boundaries: owner model settings (ADR-0119) and chat attachment upload
+  (ADR-0120) are exact-scope `agent_core.api` routes; `tool.call` reaches
+  deferred tools (ADR-0123); the browser control plane accepts device sign-in
+  handoff (ADR-0128) and the API browser task grants (ADR-0129); and
+  `agent_core.observability.latency` derives the content-free `agent run
+  latency` report from the event log (ADR-0131).
 
-Milestones 14, 15, and 18 — inbound surfaces and pairing, operational
-hardening, first-class email integration — are authorized and add nothing to
-this page until their implementations land.
+Milestone 15, operational hardening, is authorized and adds nothing to this
+page until its implementation lands. Each workstream's status and open items
+are in `docs/status/project-state.yaml`.

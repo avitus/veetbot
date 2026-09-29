@@ -1,6 +1,7 @@
 # ADR-0103: Email admission never discovers MCP servers under the owner lock
 
-- Status: Accepted — owner chose this design and accepted it on 2026-09-16 after production measurements
+- Status: Accepted — owner chose this design and accepted it on 2026-09-16 after production measurements;
+  amended by ADR-0131
 - Date: 2026-09-16
 - Related: ADR-0030, ADR-0071, ADR-0092, ADR-0095
 - Detailed design: `docs/plan/email-experience.md`, `docs/plan/skills.md`

@@ -62,3 +62,22 @@ def test_only_the_attachment_upload_path_accepts_a_larger_body() -> None:
     assert "proxy_pass http://127.0.0.1:8000;" in upload
     assert "proxy_request_buffering off;" in upload
     assert nginx.count("client_max_body_size 33m;") == 1
+
+
+def test_whatsapp_webhook_is_rate_limited_per_client_before_the_worker() -> None:
+    """The worker reads the whole body before it checks the signature, so the
+    proxy bounds how fast one client can make it do that."""
+
+    nginx = (ROOT / "nginx/veetbot.conf").read_text(encoding="utf-8")
+    http_context = nginx.split("server {", 1)[0]
+    whatsapp_location = nginx.split("# VEETBOT_WHATSAPP_ROUTE_BEGIN", 1)[1].split(
+        "# VEETBOT_WHATSAPP_ROUTE_END", 1
+    )[0]
+
+    assert (
+        "limit_req_zone $binary_remote_addr zone=veetbot_whatsapp_webhook:1m rate=10r/s;"
+        in http_context
+    )
+    assert "limit_req zone=veetbot_whatsapp_webhook burst=50 nodelay;" in whatsapp_location
+    assert "limit_req_status 429;" in whatsapp_location
+    assert nginx.count("zone=veetbot_whatsapp_webhook") == 2

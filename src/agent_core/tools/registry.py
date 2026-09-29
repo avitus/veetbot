@@ -38,6 +38,8 @@ BUILTIN_DOMAINS = frozenset(
         "workspace",
         "sandbox",
         "artifact",
+        "image",
+        "video",
         "demo",
         "delegate",
         "conversation",

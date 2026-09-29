@@ -20,7 +20,7 @@ from agent_core.mcp.mapping import map_discovered_tools
 from agent_core.model.tool_definitions import tool_definition
 from agent_core.tools.current_time import CurrentTimeTool
 from gmail_mcp.client import GmailClient
-from gmail_mcp.constants import GOOGLE_TOKEN_ENDPOINT, OUTPUT_MAXIMUM_BYTES, ROSTERS
+from gmail_mcp.constants import GOOGLE_TOKEN_ENDPOINT, OUTPUT_MAXIMUM_BYTES
 from gmail_mcp.errors import GmailError
 from gmail_mcp.server import create_server
 from tests.contract.support import NOW
@@ -140,14 +140,6 @@ async def invoke(
     result = await server.call_tool(name, arguments)
     assert isinstance(result, CallToolResult)
     return result
-
-
-@pytest.mark.parametrize("mode", ["read", "write", "send"])
-async def test_m26_read_extensions_keep_the_three_server_boundary(mode: str) -> None:
-    server = create_server(mode, client(Mailbox(), mode))
-    names = {tool.name for tool in await server.list_tools()}
-    assert names == set(ROSTERS[mode])
-    assert names & NEW_READ_TOOLS == (NEW_READ_TOOLS if mode == "read" else set())
 
 
 async def test_m26_profile_verifies_only_provider_primary_identity() -> None:
@@ -325,27 +317,15 @@ async def test_m26_outbound_reply_headers_are_encoded_by_value(operation: str, m
     assert envelope["threadId"] == "thread-1"
 
 
-async def test_m26_reply_header_injection_is_rejected_before_any_request() -> None:
-    mailbox = Mailbox()
-    result = await invoke(
-        mailbox,
-        "send_message",
-        {
-            "to": "reply@example.test",
-            "subject": "Re: Contract subject",
-            "body": "Agreed.",
-            "in_reply_to": "<parent@example.test>\r\nBcc: intruder@example.test",
-        },
-        "send",
-    )
-    assert result.is_error is True
-    assert "gmail.arguments_invalid" in str(result)
-    assert mailbox.requests == []
-
-
 @pytest.mark.parametrize(
     "field,value",
-    [("in_reply_to", "not-a-message-id"), ("references", "<valid@example.test> invented")],
+    [
+        ("in_reply_to", "not-a-message-id"),
+        ("references", "<valid@example.test> invented"),
+        # A reply header must never smuggle another header into the message.
+        ("in_reply_to", "<parent@example.test>\r\nBcc: intruder@example.test"),
+    ],
+    ids=["malformed_in_reply_to", "invented_reference", "header_injection"],
 )
 async def test_m26_invalid_reply_identifiers_are_rejected_before_dispatch(
     field: str, value: str
@@ -354,10 +334,11 @@ async def test_m26_invalid_reply_identifiers_are_rejected_before_dispatch(
     result = await invoke(
         mailbox,
         "send_message",
-        {"to": "reply@example.test", "subject": "Reply", "body": "Hello", field: value},
+        {"to": "reply@example.test", "subject": "Re: Reply", "body": "Agreed.", field: value},
         "send",
     )
     assert result.is_error is True
+    assert "gmail.arguments_invalid" in str(result)
     assert mailbox.requests == []
 
 

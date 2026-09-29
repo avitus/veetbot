@@ -191,3 +191,114 @@ def test_reply_chunking_preserves_text_and_channel_bound() -> None:
 
     assert all(0 < len(chunk) <= 4096 for chunk in chunks)
     assert "".join(chunks) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A paragraph break that starts on the last character a chunk may hold.
+        "a" * 4095 + "\n\n" + "b" * 10,
+        # A line break exactly one past the last character a chunk may hold.
+        "a" * 4096 + "\n" + "b" * 10,
+    ],
+    ids=["paragraph_break_at_limit_minus_one", "line_break_at_limit"],
+)
+def test_reply_chunking_never_exceeds_the_limit_at_a_separator_boundary(text: str) -> None:
+    chunks = surfaces.chunk_surface_text(text, limit=4096)
+
+    assert all(0 < len(chunk) <= 4096 for chunk in chunks)
+    assert "".join(chunks) == text
+
+
+def _surface_limits(**overrides: object) -> surfaces.SurfaceLimits:
+    values: dict[str, object] = {
+        "poll_timeout_seconds": 30,
+        "session_idle_seconds": 86400,
+        "code_expiry_seconds": 600,
+        "code_max_attempts": 5,
+        "lockout_seconds": 3600,
+        "per_sender_messages_per_minute": 20,
+        "max_active_runs_per_tenant": 4,
+        "daily_cost": 25,
+        "monthly_cost": 250,
+        "max_cost_per_run": 10,
+        "synthesis_reserve_cost": 2,
+        "inbound_text_max_chars": 32768,
+        "chunk_size": 4096,
+        "claim_batch": 100,
+        "lease_seconds": 30,
+        "fallback_poll_seconds": 2,
+        "retry_delays_seconds": [30, 120],
+        "reply_max_attempts": 8,
+    }
+    values.update(overrides)
+    return surfaces.SurfaceLimits.model_validate(values)
+
+
+def test_surface_run_budget_is_finite_and_fits_the_daily_ceiling() -> None:
+    from decimal import Decimal
+
+    limits = _surface_limits()
+
+    assert limits.run_budget == surfaces.SurfaceRunBudget(
+        max_cost=Decimal("10"), synthesis_reserve_cost=Decimal("2")
+    )
+    with pytest.raises(ValidationError, match="reserve"):
+        _surface_limits(synthesis_reserve_cost=10)
+    with pytest.raises(ValidationError, match="daily"):
+        _surface_limits(max_cost_per_run=26)
+    with pytest.raises(ValidationError):
+        _surface_limits(max_cost_per_run=0)
+    with pytest.raises(ValidationError):
+        _surface_limits(reply_max_attempts=0)
+
+
+def test_surface_run_budget_caps_an_uncapped_run_and_keeps_a_lower_cap() -> None:
+    from decimal import Decimal
+
+    from agent_core.domain.runs import RunLimits
+
+    budget = surfaces.SurfaceRunBudget(max_cost=Decimal("10"), synthesis_reserve_cost=Decimal("2"))
+    uncapped = RunLimits(max_steps=32, max_model_calls=24, max_tool_calls=64)
+    lower = uncapped.model_copy(
+        update={"max_cost": Decimal("3"), "synthesis_reserve_cost": Decimal("1")}
+    )
+    higher = RunLimits(
+        max_steps=160,
+        max_model_calls=120,
+        max_tool_calls=160,
+        max_cost=Decimal("30"),
+        synthesis_reserve_cost=Decimal("3"),
+    )
+
+    capped = budget.applied_to(uncapped)
+    assert capped.max_cost == Decimal("10")
+    assert capped.synthesis_reserve_cost == Decimal("2")
+    assert capped.max_steps == 32
+    assert budget.applied_to(lower) == lower
+    assert budget.applied_to(higher).max_cost == Decimal("10")
+    assert budget.applied_to(higher).synthesis_reserve_cost == Decimal("2")
+
+
+def test_a_revoked_surface_cannot_acquire_a_delivery_route() -> None:
+    from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
+
+    revoked = Device(
+        id=SURFACE_ID,
+        tenant_id="tenant-a",
+        principal_id="owner",
+        client_device_id="telegram:configured",
+        name="Veetbot Telegram",
+        kind=DeviceKind.SURFACE,
+        platform=PushProvider.TELEGRAM.value,
+        muted_kinds=frozenset(),
+        capabilities=frozenset(),
+        status=DeviceStatus.REVOKED,
+        revoked_at=NOW,
+        last_seen_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    with pytest.raises(ValueError, match="active"):
+        revoked.with_surface_route(PushProvider.TELEGRAM, "12345", NOW)

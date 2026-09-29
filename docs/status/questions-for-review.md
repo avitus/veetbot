@@ -7029,3 +7029,87 @@ leave it to the milestone that eventually designs the trace route?
 
 **Reversal cost:** none for the deferral. The fix itself is small, and leaving
 it unfixed costs nothing until something tries to reach a trace.
+
+## Milestone status review of 2026-09-28
+
+### Six milestones recorded complete from their pull requests' records
+
+**Decided:** Milestones 13, 19, 20, 22, 23, and 29 are recorded complete. Each
+had only "hosted CI and the CodeRabbit review loop" left open, and each had
+already passed both on the dev to main pull request that carried it: pull
+request 72 for Milestone 13, 64 and 66 for 19, 74 for 20, 82 for 22, 89 and 98
+for 23, and 118 and 127 for 29. On every final head all hosted lanes passed,
+CodeRabbit completed its review, and every conversation is resolved; you merged
+each one. Pull request 64's merge static job failed; pull request 65 first
+deployed its changes. The other listed merges' deploy jobs succeeded. The evidence moved to
+`verification-history.yaml`. Completing Milestone 13 advances the verified
+ceiling to Milestone 13 and 268 gates; `agent eval gates --milestone 13` passes
+every gate except the seven sandbox gates, which need Docker and pass in the
+hosted sandbox lane.
+
+**Why:** the state file had not been updated since those merges, so it showed
+finished work as open.
+
+**Question for you:** none, unless you want a milestone kept open for a reason
+the state file never recorded.
+
+**Reversal cost:** cheap; a status and its evidence move back.
+
+### Two pull requests merged with CodeRabbit findings unresolved
+
+**Decided:** Milestones 14, 18 and 25 keep their review items open and now name
+the findings. Pull request 104 merged on 2026-09-11 with sixteen unresolved
+findings on the Telegram and WhatsApp surface code, including an
+authorization-bypass finding and three sensitive-data-exposure findings. Pull
+request 94 merged forty seconds after CodeRabbit posted one finding on the
+multi-account Gmail bootstrap, and that defect is still in the code.
+
+**Why:** AGENTS.md makes a resolved conversation part of the merge gate, so
+these loops are not complete.
+
+**Question for you:** fix the seventeen findings in one dev to main pull
+request, or answer the ones you judge inapplicable on the original threads?
+
+**Reversal cost:** none; the items only describe open work.
+
+### Milestone 31's flag went on before its smoke
+
+**Decided:** the item "Production activation of AGENT_EMAIL_UNSUBSCRIBE_ENABLED
+after the smoke" is closed as done, because the flag was already on in
+production by 2026-09-21. The owner-authorized real-mailbox smoke stays open as
+the milestone's acceptance evidence for the live mailboxes.
+
+**Question for you:** keep the flag on while the smoke is outstanding, or turn
+it off until the smoke passes?
+
+**Reversal cost:** cheap; one environment line and a restart.
+
+### Eight implemented ADRs are still Proposed
+
+**Decided:** recorded as an open item rather than changed. ADR-0104, ADR-0105,
+ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138 each say
+Proposed, although their mechanisms are implemented, described in the detailed
+designs, and on `main`.
+
+**Question for you:** accept or reject each one.
+
+**Reversal cost:** cheap for an acceptance; a rejection means reverting the
+mechanism or writing a replacement ADR.
+
+### The `.git/config` hardline blocks only the workspace root
+
+**Decided:** recorded as an owner decision outside the milestones, not fixed.
+The hardline `protected_host_path` rule blocks `.git/config` and
+`./.git/config`, but not `sub/.git/config`, while `.env` and `~/.ssh` already
+match at any depth.
+
+**Why:** the rule is a security boundary, and the obvious repair, an edit to
+`hardline.yaml`, moves `policy_version` and unbinds the memory-formation
+release evidence.
+
+**Question for you:** should the rule match `.git/config` at any depth? If so,
+a change to the matcher in `policy/hardline.py` achieves it without moving the
+policy version.
+
+**Reversal cost:** cheap in code; expensive if done through the YAML, because
+the memory-formation evidence would have to be regenerated.

@@ -118,6 +118,28 @@ async def test_repeats_in_batches_also_get_synthesis() -> None:
     assert run.tool_call_count == 4
 
 
+async def test_a_batch_that_reaches_the_threshold_fails_before_any_call_runs() -> None:
+    """ADR-0136 decision 4: synthesis adds no execution allowance to one oversized batch."""
+
+    script = FakeModelScript(
+        turns=[
+            _tool_turn(*(_calc("1 + 1", f"duplicate-{n}") for n in range(5))),
+            ScriptedTurn(text="should not reach this"),
+        ]
+    )
+    async with build(settings=_settings(), script=script, limits=LIMITS) as composition:
+        run_id = await composition.runs.submit("research")
+        run = await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+
+    assert run.status is RunStatus.FAILED
+    assert run.failure is not None
+    assert run.failure.reason is FailureReason.TOOL_LOOP_DETECTED
+    assert run.tool_call_count == 0
+    assert run.model_call_count == 1
+    assert "tool.call.proposed" not in [event.event_type for event in events]
+
+
 async def test_distinct_calls_keep_their_tools() -> None:
     script = FakeModelScript(
         turns=[

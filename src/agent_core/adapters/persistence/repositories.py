@@ -53,6 +53,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     BrowserGrantRow,
     BrowserProfileRow,
     BrowserTaskGrantRow,
+    BrowserTaskScopePolicyRow,
     CheckpointRow,
     ConsolidationWatermarkRow,
     DerivedEventKeyRow,
@@ -104,6 +105,8 @@ from agent_core.domain.browser_task_grants import (
     TASK_GRANT_MAX_TYPED_CHARACTERS,
     BrowserTaskGrant,
     BrowserTaskGrantEndReason,
+    BrowserTaskGrantScope,
+    BrowserTaskScopePolicy,
 )
 from agent_core.domain.errors import (
     ConcurrencyConflict,
@@ -1908,6 +1911,69 @@ class PostgresBrowserTaskGrantRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def get_scopes(self, principal: Principal) -> BrowserTaskScopePolicy:
+        row = (
+            await self._session.scalars(
+                select(BrowserTaskScopePolicyRow)
+                .where(
+                    BrowserTaskScopePolicyRow.tenant_id == principal.tenant_id,
+                    BrowserTaskScopePolicyRow.principal_id == principal.principal_id,
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).one_or_none()
+        return (
+            BrowserTaskScopePolicy()
+            if row is None
+            else BrowserTaskScopePolicy.model_validate(
+                {"revision": row.revision, "scopes": row.scopes}
+            )
+        )
+
+    @asynccontextmanager
+    async def locked_scopes(
+        self, principal: Principal, *, defaults: tuple[BrowserTaskGrantScope, ...] = ()
+    ) -> AsyncIterator[BrowserTaskScopePolicy]:
+        await self._session.execute(
+            pg_insert(BrowserTaskScopePolicyRow)
+            .values(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                revision=0,
+                scopes=[scope.model_dump() for scope in defaults],
+            )
+            .on_conflict_do_nothing()
+        )
+        row = (
+            await self._session.scalars(
+                select(BrowserTaskScopePolicyRow)
+                .where(
+                    BrowserTaskScopePolicyRow.tenant_id == principal.tenant_id,
+                    BrowserTaskScopePolicyRow.principal_id == principal.principal_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).one()
+        yield BrowserTaskScopePolicy.model_validate(
+            {"revision": row.revision, "scopes": row.scopes}
+        )
+
+    async def replace_scopes(self, principal: Principal, policy: BrowserTaskScopePolicy) -> None:
+        result = await self._session.execute(
+            update(BrowserTaskScopePolicyRow)
+            .where(
+                BrowserTaskScopePolicyRow.tenant_id == principal.tenant_id,
+                BrowserTaskScopePolicyRow.principal_id == principal.principal_id,
+                BrowserTaskScopePolicyRow.revision == policy.revision - 1,
+            )
+            .values(
+                revision=policy.revision, scopes=[scope.model_dump() for scope in policy.scopes]
+            )
+        )
+        if not _rowcount(result):
+            raise ConflictError("task approval websites changed; refresh and try again")
 
     def _owned(self, principal: Principal) -> tuple[Any, Any]:
         return (

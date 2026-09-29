@@ -584,15 +584,17 @@ class ChatCompletionsProvider:
         prompt_details = raw.get("prompt_tokens_details")
         if not isinstance(prompt_details, dict):
             prompt_details = {}
-        input_tokens = max(0, int(raw.get("prompt_tokens", 0)))
-        cached_input_tokens = min(
-            input_tokens,
-            max(0, int(prompt_details.get("cached_tokens", 0))),
-        )
+
+        def count(source: dict[str, Any], key: str) -> int:
+            # OpenAI-compatible servers may send a count as null; it means none was counted.
+            return max(0, int(source.get(key) or 0))
+
+        input_tokens = count(raw, "prompt_tokens")
+        cached_input_tokens = min(input_tokens, count(prompt_details, "cached_tokens"))
         normalized = ModelUsage(
             input_tokens=input_tokens,
             cached_input_tokens=cached_input_tokens,
-            output_tokens=max(0, int(raw.get("completion_tokens", 0))),
+            output_tokens=count(raw, "completion_tokens"),
             reasoning_tokens=None,
             provider="chat_completions",
             model=resolved.model,

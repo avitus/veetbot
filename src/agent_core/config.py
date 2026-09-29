@@ -553,6 +553,15 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
 )
 
 
+_PROVIDER_CREDENTIAL_VARIABLES = frozenset(
+    {
+        "VEETBOT_OPENAI_KEY",
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+        "BLAND_API_KEY_FILE",
+    }
+)
+
+
 def _environment(environ: Mapping[str, str] | None) -> dict[str, str]:
     if environ is not None:
         return dict(environ)
@@ -1515,6 +1524,7 @@ def load_surface_worker_settings(
         load_email_credentials=False,
         load_provider_credentials=False,
         load_surface_credentials=True,
+        refuse_provider_credentials=True,
     )
 
 
@@ -1529,6 +1539,7 @@ def _load_settings(
     load_call_credentials: bool | None = None,
     load_call_webhook_secret: bool = False,
     require_owner_scopes: bool = True,
+    refuse_provider_credentials: bool = False,
 ) -> Settings:
 
     if load_call_credentials is None:
@@ -1549,6 +1560,22 @@ def _load_settings(
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     raw_dir = values.get("AGENT_CONFIG_DIR", "").strip()
     config_dir = Path(raw_dir).expanduser().resolve() if raw_dir else None
+    if refuse_provider_credentials:
+        # The surface role refuses to start with a provider credential in its
+        # environment, rather than leaving it there unread (inbound-surfaces.md).
+        misplaced = sorted(
+            name
+            for name, value in values.items()
+            if value.strip()
+            and (
+                (name.endswith("_API_KEY") and name != "BLAND_API_KEY")
+                or name in _PROVIDER_CREDENTIAL_VARIABLES
+            )
+        )
+        if misplaced:
+            raise ConfigurationError(
+                "this role loads no provider credentials; remove " + ", ".join(misplaced)
+            )
     credentials = (
         {
             name.removesuffix("_API_KEY").lower(): SecretStr(value)
@@ -1628,6 +1655,16 @@ def _load_settings(
         "surface_whatsapp_verify_token": "AGENT_SURFACE_WHATSAPP_VERIFY_TOKEN_FILE",
     }
     surface_secrets: dict[str, SecretStr | None] = dict.fromkeys(surface_secret_files)
+    if not load_surface_credentials:
+        misplaced = [
+            variable
+            for variable in surface_secret_files.values()
+            if values.get(variable, "").strip()
+        ]
+        if misplaced:
+            raise ConfigurationError(
+                ", ".join(misplaced) + " may be set only in the surface worker's environment"
+            )
     if load_surface_credentials:
         for field, variable in surface_secret_files.items():
             raw_path = values.get(variable, "").strip()

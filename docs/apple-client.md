@@ -81,8 +81,13 @@ server's site scope, limits and exceptions beside that choice. An active task pe
 above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 
-Settings use a compact header and a scrolling body. Connection, Website Access,
-Appearance, and Data & Privacy cards group controls by user intent. The Connect
+Settings use a compact header and a scrolling body. Connection, Models, Website
+Access, Appearance, and Data & Privacy cards group controls by user intent, and
+iOS adds SMS Integration. The Models card (ADR-0119) reads and saves
+`/v1/settings/models` under `settings.read` and `settings.write`: a chat model
+and reasoning effort, which apply to new chats and to the next message, and a
+memory model and effort limited to the evaluated combinations the server
+offers. A server without the resource hides the pickers. The Connect
 or Update Connection action sits inside the Connection card, while the footer is
 limited to closing the configured settings surface. Configured macOS clients
 open settings in a separate window that resizes horizontally and vertically and
@@ -179,6 +184,15 @@ to the named run and does not queue a second message. A waiting user's answer is
 routed to run input with the displayed question identifier. Stop requests use
 the run-cancel route. The native composer uses padded multiline input; Return
 sends its contents, while Command-Return inserts a newline.
+
+Files can be attached to a message (ADR-0120): dropped on the conversation or
+the message field on Mac and iPad, or chosen with the paperclip from Files on
+every device and from Photos on iOS. Each file uploads to
+`POST /v1/sessions/{id}/artifacts` as soon as it is added, with progress, retry
+and removal, and a message may be attachments alone. Images other than small
+PNG, GIF, and WebP files are re-encoded as JPEG with a 2000-pixel long edge,
+which drops their location metadata. A server without the upload route marks
+each file as not accepted, and an answer to a clarifying question stays text.
 
 Submitting a top-level message inserts its user bubble before the first network
 await. The persisted `user.message.created` event replaces that optimistic item
@@ -376,6 +390,29 @@ to the public content/trust view. The server additions for authoritative history
 and deletion are limited to the session list and delete routes described by
 ADR-0050; no richer tool-detail route was added.
 
+## Memory and People
+
+Memory opens from the toolbar (on iOS, from the More menu) with two
+collections; the server mounts its routes when `AGENT_MEMORY_API_ENABLED=1`.
+**Memories** lists the principal's governed beliefs with status and
+type filters and a flag toggle that shows only memories needing review; every
+email-derived memory arrives flagged. A memory's Review menu offers Mark
+reviewed, Not true, Not relevant here, and Delete memory, and a row can be
+swiped to delete after a confirmation (ADR-0117, under `memory.write`). A
+deleted statement does not form again; its original messages stay at their
+source.
+
+**People** (Milestone 28, under `people.read` and `people.write`) lists the
+people the owner knows or writes to (ADR-0121), with Pinned and Needs review
+collections. Needs review holds people known only by a name or role and each
+possible duplicate, answered with Merge or Not the same (ADR-0125). A person's
+profile shows names and contact details, relationships, a history timeline
+that includes email summaries (ADR-0126), open threads, and facts with Inspect
+evidence and correction actions; Manage person holds Repair identity and
+Forget person. Import history analyses selected chats or mail accounts under a
+date range, record limit and spending cap; see
+[People operations](people-operations.md).
+
 ## Milestone 26 client modes
 
 The approved [email experience](plan/email-experience.md) adds Chat and Email
@@ -508,7 +545,8 @@ Unsubscribe assistance (Milestone 31, `plan/email-unsubscribe.md`) adds a
 Subscriptions surface to Email mode, in its own `EmailSubscriptionsViewModel`.
 The entry appears in the Email toolbar — the shared Mac window toolbar, and the
 iPhone and iPad navigation bar — only while an account's projection reports
-`unsubscribe_supported`. A server or account that advertises nothing shows no
+`unsubscribe_supported`. The open Mac window updates that entry when accounts
+finish loading or the connection is cleared. A server or account that advertises nothing shows no
 entry and no thread action, and the client never substitutes another command
 for the missing one. Rows come from `GET /v1/email/subscriptions` in the order
 the server returns them, filtered by account and state and paged by cursor;

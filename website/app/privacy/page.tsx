@@ -22,7 +22,7 @@ export default function PrivacyPolicy() {
             This policy explains how Veetbot handles information on its public
             website and in its optional Gmail integration.
           </p>
-          <p className="effective-date">Effective September 21, 2026</p>
+          <p className="effective-date">Effective September 28, 2026</p>
         </header>
 
         <div className="legal-layout">
@@ -91,7 +91,9 @@ export default function PrivacyPolicy() {
                   <dt><code>gmail.send</code></dt>
                   <dd>
                     Send a plain-text message after the complete proposed
-                    message has been presented for approval.
+                    message has been presented for approval, or, for an
+                    unsubscribe you confirm, the message that sender&apos;s own
+                    list header specifies.
                   </dd>
                 </div>
               </dl>
@@ -130,6 +132,17 @@ export default function PrivacyPolicy() {
                 until you approve the exact message for sending.
               </p>
               <p>
+                When People memory is enabled, Veetbot keeps a private
+                directory of the people you know or write to. From your
+                correspondence it records their names and email addresses, how
+                they relate to you, facts stated in messages, dated exchanges
+                with short generated summaries, and open commitments, each
+                linked to the message it came from, so Chat can recall them.
+                Automatic People analysis covers the last 90 days of mail;
+                older mail is analyzed only in an import you start. Bulk mail
+                does not form People records or memories.
+              </p>
+              <p>
                 When enabled, Veetbot reads the list headers of bulk mail to
                 show you who sends it. It sends an unsubscribe request only when
                 you ask for that sender, by your tap or your approval. The
@@ -137,7 +150,11 @@ export default function PrivacyPolicy() {
                 header, returned to that sender with no other Google data, no
                 cookie, and no credential. It is sent from your Veetbot server,
                 so the sender can see the address of your Veetbot server and
-                learn that the mailbox is active. Veetbot never follows an
+                learn that the mailbox is active. When a sender publishes only
+                an unsubscribe email address, Veetbot instead sends the message
+                that header specifies, and nothing else, from your Gmail account
+                to that address; the confirmation names the address before
+                anything is sent. Veetbot never follows an
                 unsubscribe link in a message body, and it offers no automated
                 unsubscribe for mail that Google did not authenticate.
               </p>
@@ -209,7 +226,9 @@ export default function PrivacyPolicy() {
                 excerpts of at most 2,000 characters each. Unsent drafts remain
                 until discarded; sent or discarded draft body revisions are
                 removed after 30 days. Structured feedback and derived
-                preferences remain until reset or erased.
+                preferences remain until reset or erased. People records and
+                exchange summaries remain until you correct, delete, or forget
+                them or exclude their source.
               </p>
               <p>
                 Gmail content selected for a task, tool inputs and outputs,
@@ -240,7 +259,12 @@ export default function PrivacyPolicy() {
                 <li>
                   pause email learning, reset importance preferences or writing
                   style, and exclude an email thread from retained sources and
-                  derived learning; and
+                  derived learning;
+                </li>
+                <li>
+                  delete an individual memory, remove a fact about a person, or
+                  forget a person, which also removes the copies generated from
+                  it; and
                 </li>
                 <li>
                   delete available sessions or ask the deployment operator to

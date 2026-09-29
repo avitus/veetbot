@@ -286,6 +286,32 @@ import UserNotifications
         #expect(model.runState.activeRunID == nil)
     }
 
+    /// The Mac window observes the coordinator while account capabilities arrive asynchronously.
+    @Test
+    func testCoordinatorUpdatesWindowControlsWhenEmailAccountsLoadOrReset() async throws {
+        let model = try configuredModel { request in
+            let body = request.url?.path == "/v1/email/accounts"
+                ? #"{"items":[{"id":"work","label":"Work","status":"ready","history_complete":true,"history_processed":1,"unsubscribe_supported":true}]}"#
+                : #"{"items":[],"next_cursor":null}"#
+            return try response(for: request, statusCode: 200, body: body)
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let coordinator = AppCoordinator(chat: model)
+        var changes = 0
+        let subscription = coordinator.objectWillChange.sink { changes += 1 }
+        defer { subscription.cancel() }
+        #expect(!coordinator.email.unsubscribeAvailable)
+
+        await coordinator.email.reload()
+        #expect(coordinator.email.unsubscribeAvailable)
+        #expect(changes > 0, "The window must discover newly advertised controls")
+
+        changes = 0
+        coordinator.email.resetConnection()
+        #expect(!coordinator.email.unsubscribeAvailable)
+        #expect(changes > 0, "The window must withdraw controls and any open capability sheet")
+    }
+
     @Test
     func testModeSwitchPreservesLiveChatAndUsesSameConnectionForEmailHandoff() async throws {
         let chatSessionID = UUID()

@@ -40,6 +40,7 @@ from agent_core.domain.surfaces import (
     SurfaceChatKind,
     SurfaceInboundMessage,
     SurfaceMessageKind,
+    SurfaceReplyStatus,
     SurfaceTransportOutcome,
     SurfaceTransportResult,
 )
@@ -175,16 +176,25 @@ async def test_terminal_surface_run_enqueues_then_sends_redacted_chunks_once(
             batch_size=10,
             lease_seconds=30,
             retry_delays=(30,),
+            max_attempts=3,
             chunk_size=4096,
         )
         assert await dispatcher.run_once() == 1
         assert await dispatcher.run_once() == 0
+        async with composition.uow_factory() as uow:
+            settled = await uow.surfaces.replies.for_run(result.run_id)
 
     assert len(replies) == 1
     assert replies[0].run_id == result.run_id
+    assert settled is not None
+    assert settled.status is SurfaceReplyStatus.DISPATCHED
+    assert settled.chunks_total == settled.chunks_sent == len(sent)
     assert replies[0].chat_ref == "15550001111"
     assert "secretword" not in replies[0].model_dump_json()
     assert len(sent) == 2
+    # The redacted text has no break to split at, so the first chunk is exactly
+    # the channel limit and the second holds the rest.
+    assert len(sent[0]) == 4096
     assert all(len(chunk) <= 4096 for chunk in sent)
     assert "secretword" not in "".join(sent)
     assert "[redacted:tenant]" in "".join(sent)
@@ -275,6 +285,7 @@ async def test_whatsapp_reply_outside_window_sends_one_content_free_template(
             batch_size=10,
             lease_seconds=30,
             retry_delays=(30,),
+            max_attempts=3,
             chunk_size=4096,
         )
 
@@ -391,3 +402,98 @@ async def test_question_notification_reads_redacts_and_delivers_paired_detail() 
 
     assert outcome.outcome is DeliveryOutcome.DELIVERED
     assert sent == [f"Send [redacted:tenant] now?\nID: {str(question_id).split('-', 1)[0]}"]
+
+
+async def test_a_reply_that_never_delivers_fails_at_its_attempt_limit(tmp_path: Path) -> None:
+    clock = FixedClock(NOW)
+    settings = Settings(
+        database_url="postgresql+asyncpg://unused/agent",
+        deployment_mode=DeploymentMode.DEVELOPMENT,
+        auth_mode=AuthMode.DEV,
+        auth_token=None,
+        sandbox=SandboxMechanism.FAKE,
+        config_dir=None,
+        credentials={},
+        interpolation={"OPENAI_MODEL": ""},
+        artifact_root=tmp_path / "artifacts",
+        auth_tenant_id="local",
+        auth_principal_id="local-user",
+        auth_roles=frozenset({"user"}),
+        auth_scopes=PLATFORM_SCOPES,
+        surface_api_enabled=True,
+        surface_worker_enabled=True,
+    )
+    attempts: list[str] = []
+
+    async def unavailable(
+        chat_ref: str,
+        text: str,
+        *,
+        last_inbound_at: datetime | None,
+        now: datetime,
+    ) -> SurfaceTransportResult:
+        del chat_ref, last_inbound_at, now
+        attempts.append(text)
+        if len(attempts) == 1:
+            raise RuntimeError("transport crashed before answering")
+        return SurfaceTransportResult(
+            outcome=SurfaceTransportOutcome.RETRY,
+            reason_code="surface.transport_unavailable",
+        )
+
+    async with build(
+        settings=settings,
+        clock=clock,
+        sequential_ids=True,
+        script=FakeModelScript(turns=[ScriptedTurn(text="short reply")]),
+    ) as composition:
+        registered = await composition.services.devices.register(
+            composition.principal,
+            DeviceRegistration(
+                client_device_id="whatsapp:attempt-limit",
+                name="Veetbot WhatsApp",
+                kind=DeviceKind.SURFACE,
+                platform="whatsapp",
+                push_provider=PushProvider.WHATSAPP,
+                push_token=SecretStr("15551234567"),
+            ),
+        )
+        issued = await composition.services.surfaces.issue_code(
+            composition.principal,
+            registered.device.id,
+            granted_scopes=frozenset({"run.write", "run.read"}),
+            label="Owner",
+            idempotency_key="attempt-limit",
+        )
+        await composition.surface_ingress.ingest(
+            _message(
+                registered.device.id,
+                "wamid.limit.pair",
+                f"/pair {issued.code.get_secret_value()}",
+            )
+        )
+        result = await composition.surface_ingress.ingest(
+            _message(registered.device.id, "wamid.limit.ask", "Answer eventually")
+        )
+        assert result.run_id is not None
+        dispatcher = SurfaceReplyDispatcher(
+            uow_factory=composition.uow_factory,
+            deliveries={PushProvider.WHATSAPP: unavailable},
+            clock=clock,
+            redactor=TrajectoryRedactor(),
+            worker_id="surface:attempt-limit",
+            batch_size=10,
+            lease_seconds=30,
+            retry_delays=(30,),
+            max_attempts=3,
+        )
+        for _ in range(6):
+            await dispatcher.run_once()
+            clock.advance(timedelta(seconds=31))
+        async with composition.uow_factory() as uow:
+            reply = await uow.surfaces.replies.for_run(result.run_id)
+
+    assert attempts == ["short reply"] * 3
+    assert reply is not None
+    assert reply.status is SurfaceReplyStatus.FAILED
+    assert reply.attempts == 3

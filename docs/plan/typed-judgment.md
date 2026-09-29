@@ -36,6 +36,10 @@ the selector that composes them, and the rules every consumer follows. The
 first consumer is the add-to-folder half of chat thread grouping
 ([thread-folders.md](thread-folders.md)). ADR-0110 also admits an offline,
 non-activating email-importance evaluation as an evaluation-only consumer.
+[ADR-0111](../adr/0111-advisory-approval-through-the-judgment-port.md) admits
+the second consumer under Milestone 30: the restrictive-only policy advisory
+layer, specified in [policy-and-approvals.md](policy-and-approvals.md), whose
+judgment-backed advisor can only escalate and abstains whenever the port fails.
 
 Out of scope, each for a reason:
 
@@ -48,8 +52,9 @@ Out of scope, each for a reason:
    deletes anything. Consumers turn answers into proposals or into a more
    restrictive decision, never into a less restrictive one.
 4. **Any further consumer.** Each new consumer needs its own authorization and
-   names its data classes and its fallback. The policy advisory layer in
-   particular is roadmap item B8 and enters only through its own policy ADR.
+   names its data classes and its fallback. The policy advisory layer entered
+   that way, through its own policy ADR (ADR-0111), and is specified there and
+   in [policy-and-approvals.md](policy-and-approvals.md), not here.
 
 ## The port
 

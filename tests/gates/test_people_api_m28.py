@@ -958,3 +958,101 @@ async def test_people_directory_rejects_blank_search_with_validation_error(text:
             result = await client.get("/v1/people", params={"ceiling": "sensitive", "text": text})
         assert result.status_code == 422, result.text
         assert result.json()["error"]["code"] == "tool_validation_error"
+
+
+async def test_people_evidence_and_correction_routes_hold_their_boundaries() -> None:
+    """The source behind a person, and corrections to it, keep the route matrix.
+
+    Evidence opens only for the person it supports and needs the source's own
+    read scope besides `people.read`; a correction needs `people.write`, an
+    Idempotency-Key, a closed body, and an existing person and belief.
+    """
+    from uuid import UUID
+
+    owner = principal().model_copy(
+        update={"scopes": {"people.read", "people.write", "session.read"}}
+    )
+    async with build(
+        settings=replace(memory_settings(), people_enabled=True), storage="memory", principal=owner
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+
+        def client_for(scopes: set[str]) -> httpx.AsyncClient:
+            api = create_app(
+                app.services,
+                app.settings,
+                owner.model_copy(update={"scopes": scopes}),
+                app.new_request_id,
+                app.readiness_probe,
+            )
+            return httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=api, client=("127.0.0.1", 1234)),
+                base_url="http://localhost",
+            )
+
+        async with client_for(set(owner.scopes)) as client:
+            people = []
+            for name in ("Sam", "Alex"):
+                created = await client.post(
+                    "/v1/people?ceiling=sensitive",
+                    json={"session_id": str(session().id), "display_name": name},
+                    headers={"Idempotency-Key": f"create-{name}"},
+                )
+                assert created.status_code == 200, created.text
+                people.append(created.json())
+            sam, alex = people
+            [reference] = sam["support_ids"]
+            evidence_path = f"/v1/people/{sam['id']}/evidence/{reference}?ceiling=sensitive"
+
+            evidence = await client.get(evidence_path)
+            assert evidence.status_code == 200, evidence.text
+            assert evidence.headers["cache-control"] == "private, no-store"
+            assert evidence.json()["source_kind"] == "owner"
+            assert evidence.json()["session_id"] == str(session().id)
+            assert "Sam" in evidence.json()["owner_assertion"]
+            missing = f"/v1/people/{sam['id']}/evidence/{UUID(int=5)}?ceiling=sensitive"
+            assert (await client.get(missing)).status_code == 404
+            unrelated = f"/v1/people/{alex['id']}/evidence/{reference}?ceiling=sensitive"
+            assert (await client.get(unrelated)).status_code == 404
+            assert (await client.get(evidence_path.split("?")[0])).status_code == 400
+
+            correction = {
+                "session_id": str(session().id),
+                "belief_id": str(UUID(int=9)),
+                "expected_revision": 1,
+                "expected_position": 1,
+                "operation": "correct",
+                "statement": "Sam is my brother.",
+            }
+            path = f"/v1/people/{sam['id']}/corrections?ceiling=sensitive"
+            unkeyed = await client.post(path, json=correction)
+            assert unkeyed.status_code == 400
+            assert unkeyed.json()["error"]["code"] == "malformed_request"
+            closed = await client.post(
+                path, json={**correction, "unexpected": True}, headers={"Idempotency-Key": "a"}
+            )
+            assert closed.status_code == 400
+            unsafe = await client.post(
+                path, json={**correction, "statement": None}, headers={"Idempotency-Key": "b"}
+            )
+            assert unsafe.status_code == 422
+            assert unsafe.json()["error"]["code"] == "tool_validation_error"
+            absent_belief = await client.post(
+                path, json=correction, headers={"Idempotency-Key": "c"}
+            )
+            assert absent_belief.status_code == 404
+            absent_person = await client.post(
+                f"/v1/people/{UUID(int=7)}/corrections?ceiling=sensitive",
+                json=correction,
+                headers={"Idempotency-Key": "d"},
+            )
+            assert absent_person.status_code == 404
+
+        async with client_for({"people.read", "people.write"}) as client:
+            assert (await client.get(evidence_path)).status_code == 403
+        async with client_for({"session.read", "people.write"}) as client:
+            assert (await client.get(evidence_path)).status_code == 403
+        async with client_for({"people.read", "session.read"}) as client:
+            denied = await client.post(path, json=correction, headers={"Idempotency-Key": "e"})
+            assert denied.status_code == 403

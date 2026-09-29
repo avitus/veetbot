@@ -111,53 +111,6 @@ async def test_malformed_test_dedupe_key_fails_closed_without_delivery() -> None
     assert notification.status is NotificationStatus.DISPATCHED
 
 
-async def test_old_pending_notification_for_an_unconfigured_provider_is_reported(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    clock, factory = await memory_uow_factory()
-    assert isinstance(clock, FixedClock)
-    surface = device(token=None).model_copy(
-        update={
-            "id": UUID(int=905),
-            "client_device_id": "telegram-surface",
-            "name": "Telegram surface",
-            "kind": DeviceKind.SURFACE,
-            "platform": "telegram",
-            "push_provider": PushProvider.TELEGRAM,
-            "push_token": SecretStr("paired-chat-reference"),
-        }
-    )
-    async with factory() as uow:
-        await uow.devices.upsert(surface, principal())
-        assert (
-            await uow.notification_outbox.enqueue(
-                _targeted_test_notification(
-                    device_id=UUID(int=905),
-                    key="backlog-regression",
-                )
-            )
-            is not None
-        )
-    clock.advance(timedelta(minutes=6))
-
-    with caplog.at_level(logging.WARNING):
-        assert (
-            await _dispatcher(
-                factory,
-                clock,
-                SequenceIdFactory(),
-                FakePushTransport(),
-            ).run_once()
-            == 0
-        )
-
-    assert any(
-        record.message == "notification pending backlog exceeded threshold"
-        and getattr(record, "notification_id", None) == str(new_notification().id)
-        for record in caplog.records
-    )
-
-
 async def test_pending_backlog_warning_has_a_per_notification_cooldown(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

@@ -282,6 +282,8 @@ def _effective_output_trust(result: ToolResult, tool: Tool) -> TrustLevel:
 
 
 def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
+    if tool.spec.name in {"image.generate", "video.generate"}:
+        return ArtifactOrigin.MODEL_OUTPUT
     # artifact.export is intentionally an in-process capability over a sandbox
     # workspace; its persisted object is nevertheless a sandbox export. Text the
     # model passed as `content` never touched the workspace (ADR-0122).
@@ -1362,14 +1364,15 @@ class ToolPipeline:
             if result.ok:
                 validate_output(result.structured, tool.spec.output_schema)
         except TimeoutError:
+            media_generation = tool.spec.name in {"image.generate", "video.generate"}
             result = ToolResult(
                 ok=False,
                 content=[],
                 failure=ToolFailure(
                     kind=ToolFailureKind.TIMEOUT,
-                    reason_code="tool.timeout",
+                    reason_code="tool.media.timeout" if media_generation else "tool.timeout",
                     detail="tool timeout elapsed",
-                    retryable=True,
+                    retryable=not media_generation,
                 ),
             )
         except WorkspaceEscape:

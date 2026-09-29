@@ -78,6 +78,11 @@ After repair, the focused context, cache, web, artifact, runtime and configurati
 suites passed 205 cases in 8.67 seconds (9.48 seconds command wall time). The full
 repository gate and production follow-up are reported with the submitted revision.
 
+The production follow-up verified bounded persisted excerpts but still found
+flat cache reads without aggregate pressure. ADR-0139 records the subsequent
+active-history ordering diagnosis and repair; excerpt admission alone did not
+solve within-run cache reuse.
+
 The first full gate caught two email continuation regressions: replacing the
 canonical result invalidated source receipts that parse its JSON. Separating the
 persisted context excerpt from canonical content fixed both without changing

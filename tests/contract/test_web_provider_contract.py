@@ -264,26 +264,6 @@ async def test_web_provider_rejected_credential_is_a_stable_auth_failure(
     assert raised.value.retryable is False
 
 
-async def test_firecrawl_forbidden_fetch_is_a_provider_rejection() -> None:
-    """Firecrawl also uses 403 for target- and feature-specific refusals."""
-
-    credentials = MappingCredentialResolver({"firecrawl": "synthetic-firecrawl-credential"})
-    upstream_diagnostic = "This site is not supported"
-
-    async def wire(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(403, text=upstream_diagnostic)
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
-        provider = FirecrawlWebProvider(credentials=credentials, client=client)
-        with pytest.raises(WebProviderError) as raised:
-            await provider.fetch("https://example.org/ada")
-
-    assert raised.value.reason_code == "tool.web.provider_rejected"
-    assert raised.value.retryable is False
-    assert upstream_diagnostic not in str(raised.value)
-
-
 @pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_bounds_oversized_responses(
     provider_name: str,

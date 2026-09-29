@@ -169,62 +169,33 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
         assert not list(composition.settings.artifact_root.rglob(str(mismatch.artifact_id)))
 
 
-async def test_artifact_export_normalizes_an_unavailable_workspace() -> None:
+@pytest.mark.parametrize(
+    ("workspace_available", "artifacts", "reason_code"),
+    [
+        (False, object(), "tool.internal_error"),
+        (True, _UnavailableCollaborator(), "tool.internal_error"),
+        (True, _OversizeWriter(), "tool.output_invalid"),
+    ],
+    ids=["unavailable_workspace", "unavailable_writer", "writer_size_failure"],
+)
+async def test_artifact_export_normalizes_collaborator_failures(
+    tmp_path: Path, workspace_available: bool, artifacts: object, reason_code: str
+) -> None:
+    workspace: object = _UnavailableCollaborator()
+    if workspace_available:
+        workspace = LocalWorkspaceHandle(tmp_path / "workspace")
+        await workspace.write("result.bin", b"result")
     result = await ArtifactExportTool().execute(
         {
             "path": "result.bin",
             "filename": "result.bin",
             "media_type": "application/octet-stream",
         },
-        replace(
-            tool_context(),
-            workspace=_UnavailableCollaborator(),
-            artifacts=object(),
-        ),
+        replace(tool_context(), workspace=workspace, artifacts=artifacts),
     )
     assert result.ok is False
     assert result.failure is not None
-    assert result.failure.reason_code == "tool.internal_error"
-
-
-async def test_artifact_export_normalizes_an_unavailable_writer(tmp_path: Path) -> None:
-    workspace = LocalWorkspaceHandle(tmp_path / "workspace")
-    await workspace.write("result.bin", b"result")
-    result = await ArtifactExportTool().execute(
-        {
-            "path": "result.bin",
-            "filename": "result.bin",
-            "media_type": "application/octet-stream",
-        },
-        replace(
-            tool_context(),
-            workspace=workspace,
-            artifacts=_UnavailableCollaborator(),
-        ),
-    )
-    assert result.ok is False
-    assert result.failure is not None
-    assert result.failure.reason_code == "tool.internal_error"
-
-
-async def test_artifact_export_maps_writer_size_failures(tmp_path: Path) -> None:
-    workspace = LocalWorkspaceHandle(tmp_path / "workspace")
-    await workspace.write("result.bin", b"result")
-    result = await ArtifactExportTool().execute(
-        {
-            "path": "result.bin",
-            "filename": "result.bin",
-            "media_type": "application/octet-stream",
-        },
-        replace(
-            tool_context(),
-            workspace=workspace,
-            artifacts=_OversizeWriter(),
-        ),
-    )
-    assert result.ok is False
-    assert result.failure is not None
-    assert result.failure.reason_code == "tool.output_invalid"
+    assert result.failure.reason_code == reason_code
 
 
 async def test_generated_workspace_file_exports_as_authorized_artifact(tmp_path: Path) -> None:

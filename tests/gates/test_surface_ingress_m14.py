@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -29,7 +30,9 @@ from agent_core.domain.surfaces import (
     SurfaceChatKind,
     SurfaceInboundMessage,
     SurfaceMessageKind,
+    SurfaceRunBudget,
     SurfaceSession,
+    SurfaceUnreadableUpdate,
     issue_pairing_code,
 )
 from tests.contract.support import agent, memory_uow_factory, principal, run, session
@@ -38,6 +41,7 @@ NOW = datetime(2026, 9, 10, 23, 0, tzinfo=UTC)
 SURFACE_ID = UUID("00000000-0000-4000-8000-000000001440")
 SURFACE_SESSION_ID = UUID("00000000-0000-4000-8000-000000001441")
 SURFACE_RUN_ID = UUID("00000000-0000-4000-8000-000000001442")
+BUDGET = SurfaceRunBudget(max_cost=Decimal("10"), synthesis_reserve_cost=Decimal("2"))
 
 
 def _application_types() -> tuple[type[Any], type[Any]]:
@@ -96,6 +100,8 @@ async def test_unpaired_sender_is_content_free_and_replay_is_a_noop() -> None:
 
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(principal()),
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
@@ -202,6 +208,8 @@ async def test_approval_command_is_scope_guarded_idempotent_and_first_wins() -> 
     state_writer = SurfaceRunStateWriter(FixedClock(NOW), SequenceIdFactory())
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(caller),
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
@@ -274,6 +282,8 @@ async def test_stop_command_uses_the_runtime_writer_and_current_scope() -> None:
     state_writer = SurfaceRunStateWriter(FixedClock(NOW), SequenceIdFactory())
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(caller),
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
@@ -352,9 +362,11 @@ async def test_pairing_then_submission_intersects_fresh_authority_and_dedupes() 
         await uow.sessions.create(created)
         return created
 
-    async def submit(uow, bound_principal, mapped_session, text, origin, authority_version):  # type: ignore[no-untyped-def]
+    async def submit(uow, bound_principal, mapped_session, text, origin, authority_version, budget):  # type: ignore[no-untyped-def]
         del uow
         submissions.append((set(bound_principal.scopes), text, authority_version))
+        # The run is capped at the budget admission reserved for it.
+        assert budget == BUDGET
         assert mapped_session.id == SURFACE_SESSION_ID
         assert origin["external_update_id"] == "wamid.message"
         return prepared_type(
@@ -371,6 +383,8 @@ async def test_pairing_then_submission_intersects_fresh_authority_and_dedupes() 
 
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(caller),
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
@@ -435,6 +449,8 @@ async def test_failed_pairing_threshold_locks_before_a_correct_code_is_verified(
 
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(caller),
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
@@ -478,9 +494,12 @@ async def test_admission_denial_happens_before_session_or_content_write() -> Non
             )
         )
 
+    reservations: list[Decimal] = []
+
     class RejectAdmission:
         async def check(self, tenant_id, reservation, now):  # type: ignore[no-untyped-def]
-            del tenant_id, reservation, now
+            del tenant_id, now
+            reservations.append(reservation)
             return SimpleNamespace(allowed=False, reason_code="surface.daily_cost_limit")
 
     async def forbidden(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -495,9 +514,10 @@ async def test_admission_denial_happens_before_session_or_content_write() -> Non
 
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(caller),
         admission=RejectAdmission(),
-        max_cost_reservation=None,
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
         create_session=forbidden,
@@ -510,6 +530,7 @@ async def test_admission_denial_happens_before_session_or_content_write() -> Non
 
     assert result.disposition is InboundDisposition.REJECTED_ADMISSION
     assert result.reason_code == "surface.daily_cost_limit"
+    assert reservations == [BUDGET.max_cost]
     assert notices == ["surface.daily_cost_limit"]
     async with uow_factory() as uow:
         assert await uow.surfaces.sessions.live(SURFACE_ID, "dm:sender-1") is None
@@ -552,7 +573,7 @@ async def test_per_sender_rate_limit_stops_content_before_submission() -> None:
         await uow.sessions.create(created)
         return created
 
-    async def submit(uow, principal, mapped_session, text, origin, version):  # type: ignore[no-untyped-def]
+    async def submit(uow, principal, mapped_session, text, origin, version, budget):  # type: ignore[no-untyped-def]
         del uow, principal, mapped_session, origin, version
         submitted.append(text)
         return prepared_type(
@@ -567,6 +588,8 @@ async def test_per_sender_rate_limit_stops_content_before_submission() -> None:
 
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(caller),
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
@@ -627,7 +650,7 @@ async def test_active_run_rejects_while_waiting_run_receives_plain_input() -> No
     dispatched: list[UUID] = []
     notices: list[str] = []
 
-    async def submit(uow, bound_principal, mapped_session, text, origin, version):  # type: ignore[no-untyped-def]
+    async def submit(uow, bound_principal, mapped_session, text, origin, version, budget):  # type: ignore[no-untyped-def]
         del uow, bound_principal, mapped_session, origin, version
         submitted.append(text)
         return prepared_type(
@@ -642,6 +665,8 @@ async def test_active_run_rejects_while_waiting_run_receives_plain_input() -> No
 
     service = service_type(
         uow_factory=uow_factory,
+        run_budget=BUDGET,
+        self_approval_enabled=True,
         principals=ConfiguredSchedulePrincipalDirectory(caller),
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
@@ -667,3 +692,224 @@ async def test_active_run_rejects_while_waiting_run_receives_plain_input() -> No
     assert submitted == ["answer"]
     assert dispatched == [active.id]
     assert notices == ["surface.active_run"]
+
+
+async def _unreachable_submission(*args: object, **kwargs: object) -> Any:
+    del args, kwargs
+    raise AssertionError("command entered run submission")
+
+
+def _command_service(
+    service_type: type[Any], uow_factory: Any, caller: Any, **overrides: Any
+) -> Any:
+    values: dict[str, Any] = {
+        "uow_factory": uow_factory,
+        "run_budget": BUDGET,
+        "self_approval_enabled": True,
+        "principals": ConfiguredSchedulePrincipalDirectory(caller),
+        "clock": FixedClock(NOW),
+        "ids": SequenceIdFactory(),
+        "create_session": _unreachable_submission,
+        "submit": _unreachable_submission,
+        "dispatch": lambda prepared: None,
+        "notice": _noop_notice,
+    }
+    values.update(overrides)
+    return service_type(**values)
+
+
+async def _pair_sender(uow_factory: Any, caller: Any, scopes: frozenset[str]) -> None:
+    async with uow_factory() as uow:
+        await uow.surfaces.pairings.create_pairing(
+            Pairing(
+                id=UUID("00000000-0000-4000-8000-0000000014c0"),
+                surface_id=SURFACE_ID,
+                tenant_id=caller.tenant_id,
+                principal_id=caller.principal_id,
+                sender_id="sender-1",
+                granted_scopes=scopes,
+                paired_at=NOW,
+            )
+        )
+
+
+async def test_an_approval_command_without_an_identifier_settles_as_not_found() -> None:
+    """A bare command names no approval, even when exactly one is pending: an
+    empty prefix would otherwise match it and approve it unasked."""
+
+    _, service_type = _application_types()
+    _, uow_factory = await memory_uow_factory()
+    caller = principal().model_copy(update={"scopes": {"approval.resolve"}})
+    await _pair_sender(uow_factory, caller, frozenset({"approval.resolve"}))
+    pending_id = UUID("00000000-0000-4000-8000-0000000014c2")
+    async with uow_factory() as uow:
+        await uow.approvals.create(
+            ApprovalRequest(
+                id=pending_id,
+                tenant_id=caller.tenant_id,
+                principal_id=caller.principal_id,
+                session_id=session().id,
+                run_id=run().id,
+                action_kind=ActionKind.TOOL_CALL,
+                action_id=UUID("00000000-0000-4000-8000-0000000014c3"),
+                status=ApprovalStatus.PENDING,
+                action_summary="Send a message.",
+                arguments={},
+                normalized_arguments_hash="hash",
+                required_scopes=set(),
+                agent_version="1.0.0",
+                risk=RiskLevel.HIGH,
+                policy_reason="policy.test",
+                policy_decision=PolicyDecision(
+                    decision=PolicyDecisionType.REQUIRE_APPROVAL,
+                    reason_code="policy.test",
+                    explanation="Test approval.",
+                    policy_version="test@1",
+                ),
+                policy_version="test@1",
+                created_at=NOW,
+            )
+        )
+    service = _command_service(service_type, uow_factory, caller)
+
+    approve = await service.ingest(_message("wamid.bare.approve", "/approve "))
+    deny = await service.ingest(_message("wamid.bare.deny", "/deny"))
+
+    assert approve.disposition is InboundDisposition.COMMAND_HANDLED
+    assert approve.reason_code == "surface.approval_not_found"
+    assert deny.disposition is InboundDisposition.COMMAND_HANDLED
+    assert deny.reason_code == "surface.approval_not_found"
+    async with uow_factory() as uow:
+        stored = await uow.surfaces.receipts.get(SURFACE_ID, "wamid.bare.approve")
+        approval = await uow.approvals.get(pending_id, caller)
+    assert stored is not None
+    assert stored.reason_code == "surface.approval_not_found"
+    assert approval.status is ApprovalStatus.PENDING
+
+
+def test_every_reason_code_a_sender_can_receive_has_its_own_notice() -> None:
+    import re
+    from pathlib import Path
+
+    from agent_core.application.surfaces import surface_notice_text
+
+    root = Path(__file__).resolve().parents[2] / "src/agent_core"
+    emitted: set[str] = set()
+    for relative in ("application/surfaces.py", "adapters/surface_admission.py"):
+        source = (root / relative).read_text(encoding="utf-8")
+        emitted |= set(re.findall(r'"(surface\.[a-z_]+)"', source))
+    # Scopes, API conflict reasons, the in-transaction placeholder, and the
+    # receipt for an update that names no chat never reach a sender.
+    not_notices = {
+        "surface.read",
+        "surface.write",
+        "surface.pairing_active",
+        "surface.pairing_code_already_issued",
+        "surface.scope_ceiling",
+        "surface.processing",
+        "surface.update_unreadable",
+    }
+    fallback = surface_notice_text("surface.not-a-code")
+
+    missing = sorted(
+        code for code in emitted - not_notices if surface_notice_text(code) == fallback
+    )
+
+    assert missing == []
+    assert "surface." not in surface_notice_text("surface.self_approval_denied")
+
+
+async def test_per_sender_windows_forget_senders_once_their_minute_passes() -> None:
+    _, service_type = _application_types()
+    _, uow_factory = await memory_uow_factory()
+    caller = principal().model_copy(update={"scopes": {"run.write"}})
+    clock = FixedClock(NOW)
+    service = _command_service(service_type, uow_factory, caller, clock=clock)
+
+    for index in range(50):
+        await service.ingest(
+            _message(f"wamid.flood.{index}", "unpaired", sender=f"stranger-{index}")
+        )
+    assert len(service._sender_windows) == 50
+    assert len(service._notice_windows) == 50
+
+    clock.advance(timedelta(minutes=2))
+    await service.ingest(_message("wamid.flood.after", "unpaired", sender="stranger-late"))
+
+    assert set(service._sender_windows) == {(SURFACE_ID, "stranger-late")}
+    assert set(service._notice_windows) == {(SURFACE_ID, "stranger-late", "surface.unpaired")}
+
+
+async def test_a_revoked_surface_refuses_pairing_without_consuming_the_code() -> None:
+    _, service_type = _application_types()
+    _, uow_factory = await memory_uow_factory()
+    caller = principal().model_copy(update={"scopes": {"run.write"}})
+    issued = issue_pairing_code(
+        pairing_id=UUID("00000000-0000-4000-8000-0000000014c1"),
+        surface_id=SURFACE_ID,
+        tenant_id=caller.tenant_id,
+        principal_id=caller.principal_id,
+        created_by_principal_id=caller.principal_id,
+        granted_scopes=frozenset({"run.write"}),
+        label=None,
+        now=NOW,
+        expires_after=timedelta(minutes=10),
+        max_attempts=5,
+        code="R3v0kedQ",
+        salt=b"0123456789abcdef",
+    )
+    async with uow_factory() as uow:
+        await uow.devices.upsert(
+            Device(
+                id=SURFACE_ID,
+                tenant_id=caller.tenant_id,
+                principal_id=caller.principal_id,
+                client_device_id="whatsapp:revoked",
+                name="Revoked WhatsApp",
+                kind=DeviceKind.SURFACE,
+                platform="whatsapp",
+                muted_kinds=frozenset(),
+                capabilities=frozenset(),
+                status=DeviceStatus.REVOKED,
+                revoked_at=NOW,
+                last_seen_at=NOW,
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+            caller,
+        )
+        await uow.surfaces.pairings.create_code(issued.record, caller)
+    service = _command_service(service_type, uow_factory, caller)
+
+    refused = await service.ingest(_message("wamid.revoked.pair", "/pair R3v0kedQ"))
+
+    assert refused.disposition is InboundDisposition.REJECTED_ADMISSION
+    assert refused.reason_code == "surface.unavailable"
+    async with uow_factory() as uow:
+        assert await uow.surfaces.pairings.live_pairing(SURFACE_ID, "sender-1") is None
+        [code] = await uow.surfaces.pairings.active_codes_for_surface(SURFACE_ID, NOW)
+        surface = await uow.devices.get(SURFACE_ID, caller)
+    assert code.consumed_at is None
+    assert surface.push_token is None
+
+
+async def test_an_unreadable_update_gets_one_content_free_receipt() -> None:
+    _, service_type = _application_types()
+    _, uow_factory = await memory_uow_factory()
+    caller = principal().model_copy(update={"scopes": {"run.write"}})
+    service = _command_service(service_type, uow_factory, caller)
+
+    unreadable = SurfaceUnreadableUpdate(surface_id=SURFACE_ID, external_update_id="77")
+    first = await service.record_unreadable(unreadable)
+    replay = await service.record_unreadable(unreadable)
+
+    assert first.disposition is InboundDisposition.IGNORED_UNREADABLE
+    assert first.reason_code == "surface.update_unreadable"
+    assert replay.replayed is True
+    async with uow_factory() as uow:
+        receipt = await uow.surfaces.receipts.get(SURFACE_ID, "77")
+        latest = await uow.surfaces.receipts.latest_numeric_update_id(SURFACE_ID)
+    assert receipt is not None
+    assert receipt.session_id is None
+    assert receipt.run_id is None
+    assert latest == 77
