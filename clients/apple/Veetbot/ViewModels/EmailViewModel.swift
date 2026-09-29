@@ -752,6 +752,7 @@ public final class EmailViewModel: ObservableObject {
     public func generateDraft(instruction: String? = nil) async {
         guard let id = selectedThreadID, let api = makeAPIClient(), !isPerformingAction else { return }
         if currentEdit?.isDirty == true, !(await saveDraft()) { return }
+        draftActionError = nil
         isPerformingAction = true
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
@@ -810,6 +811,12 @@ public final class EmailViewModel: ObservableObject {
             do {
                 let run = try await api.getRun(runID)
                 await openThread(threadID, refreshOnly: true)
+                guard generation == connection, selectedThreadID == threadID, !Task.isCancelled else { return }
+                if run.status == .failed {
+                    draftActionError = run.failure?.userFacingMessage ?? "The email operation failed. Try again."
+                } else if run.status == .cancelled {
+                    draftActionError = "The email operation was cancelled."
+                }
                 if run.status.isTerminal || run.status == .waitingForApproval || run.status == .waitingForUser { return }
                 try await Task.sleep(nanoseconds: 1_000_000_000)
             } catch { if generation == connection { report(error, draft: true) }; return }

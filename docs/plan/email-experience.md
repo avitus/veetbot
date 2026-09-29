@@ -425,6 +425,13 @@ thread, including replies made in Gmail or another client. Abstain when the
 request is unclear, an attachment is essential, or a consequential decision is
 missing. A draft can request the missing decision; it must not invent one.
 
+An explicit Draft reply or refinement request takes precedence over the earlier
+automatic reply-need assessment, without changing that assessment. Its draft
+still requires complete, current source content and verified reply recipients;
+the same limits on missing decisions and invented commitments apply. Failed or
+cancelled generation runs show an error beside the draft action, including when
+no draft exists yet, and preserve any existing draft and edits.
+
 Use relevant shared memory, thread facts, the learned style profile, and a small
 set of appropriate examples. Broad memory sharing permits relevant context; it
 does not authorize inserting unrelated private facts into outgoing email.

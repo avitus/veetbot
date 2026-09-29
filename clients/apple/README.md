@@ -297,3 +297,5 @@ the Swift Testing suite when `swift test` builds without discovering tests.
 People identity-evidence paging retains the final fetched page and stops when a
 server cursor repeats. If saving during Review & Send makes a draft stale, the
 composer asks the owner to refresh the thread and review the draft again.
+Failed or cancelled draft operations show an error beside the reply action even
+before the first draft exists; existing drafts and edits remain available.
