@@ -140,6 +140,52 @@ import UniformTypeIdentifiers
     }
 
     @Test
+    func testPickedSVGIsPreservedAsAFile() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).svg")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let svg = Data(#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>"#.utf8)
+        try svg.write(to: url)
+
+        let staged = try AttachmentStaging.stage(fileURL: url)
+        #expect(staged.filename == url.lastPathComponent)
+        #expect(staged.mediaType == "image/svg+xml")
+        #expect(staged.data == svg)
+    }
+
+    @Test
+    func testDroppedSVGRepresentationIsPreservedAsAFile() async throws {
+        let svg = Data(#"<svg xmlns="http://www.w3.org/2000/svg"/>"#.utf8)
+        let provider = NSItemProvider()
+        provider.suggestedName = "garden.svg"
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.svg.identifier, visibility: .all) {
+            completion in
+            completion(svg, nil)
+            return nil
+        }
+
+        let staged = try await AttachmentStaging.stage(itemProvider: provider)
+        #expect(staged.filename.hasSuffix(".svg"))
+        #expect(staged.mediaType == "image/svg+xml")
+        #expect(staged.data == svg)
+    }
+
+    @Test(arguments: [UTType.svg, UTType.data])
+    func testSVGExtensionPreservesBytesWithSpecificOrGenericType(type: UTType) throws {
+        let svg = Data(#"<svg xmlns="http://www.w3.org/2000/svg"/>"#.utf8)
+        let staged = try AttachmentStaging.stage(data: svg, filename: "garden.SVG", type: type)
+        #expect(staged.filename == "garden.SVG")
+        #expect(staged.mediaType == "image/svg+xml")
+        #expect(staged.data == svg)
+        #expect(throws: AttachmentStagingError.tooLarge(filename: "garden.svg")) {
+            _ = try AttachmentStaging.stage(
+                data: Data(count: AttachmentStaging.maximumBytes + 1),
+                filename: "garden.svg", type: type
+            )
+        }
+    }
+
+    @Test
     func testAFileOverTheLimitIsRefusedBeforeUpload() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(UUID().uuidString).bin")
@@ -197,6 +243,7 @@ import UniformTypeIdentifiers
         let recorder = AttachmentRequestRecorder()
         let imageID = UUID()
         let noteID = UUID()
+        let svgID = UUID()
         let model = try makeModel { request in
             recorder.record(request)
             let path = request.url?.path ?? ""
@@ -209,13 +256,14 @@ import UniformTypeIdentifiers
                 return try jsonResponse(request, status: 200, body: sessionJSON())
             case ("POST", "/v1/sessions/\(sessionID.uuidString)/artifacts"):
                 let isImage = request.value(forHTTPHeaderField: "Content-Type") == "image/png"
+                let isSVG = request.value(forHTTPHeaderField: "Content-Type") == "image/svg+xml"
                 return try jsonResponse(
                     request, status: 201,
                     body: artifactJSON(
-                        isImage ? imageID : noteID,
+                        isImage ? imageID : (isSVG ? svgID : noteID),
                         runID: nil,
-                        name: isImage ? "chart.png" : "notes.md",
-                        mediaType: isImage ? "image/png" : "text/markdown"
+                        name: isImage ? "chart.png" : (isSVG ? "garden.svg" : "notes.md"),
+                        mediaType: isImage ? "image/png" : (isSVG ? "image/svg+xml" : "text/markdown")
                     )
                 )
             case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
@@ -238,14 +286,18 @@ import UniformTypeIdentifiers
         try makeImage(width: 20, height: 10, type: .png, gps: false).write(to: png)
         let notes = directory.appendingPathComponent("notes.md")
         try Data("# Notes".utf8).write(to: notes)
+        let svg = directory.appendingPathComponent("garden.svg")
+        let svgBytes = Data(#"<svg xmlns="http://www.w3.org/2000/svg"/>"#.utf8)
+        try svgBytes.write(to: svg)
 
-        await model.attach(fileURLs: [png, notes])
-        try await waitUntil { model.attachmentsReady && model.attachments.count == 2 }
+        await model.attach(fileURLs: [png, notes, svg])
+        try await waitUntil { model.attachmentsReady && model.attachments.count == 3 }
         #expect(recorder.matching("POST", "/v1/sessions").count == 1)
         #expect(model.selectedSessionID == sessionID)
         let uploads = recorder.matching("POST", "/v1/sessions/\(sessionID.uuidString)/artifacts")
-        #expect(uploads.count == 2)
-        #expect(Set(uploads.compactMap { $0.headers["Idempotency-Key"] }).count == 2)
+        #expect(uploads.count == 3)
+        #expect(Set(uploads.compactMap { $0.headers["Idempotency-Key"] }).count == 3)
+        #expect(uploads.first { $0.headers["Content-Type"] == "image/svg+xml" }?.body == svgBytes)
 
         #expect(await model.send("   "))
         let submitted = try #require(
@@ -256,11 +308,14 @@ import UniformTypeIdentifiers
             (try JSONSerialization.jsonObject(with: body) as? [String: Any])?["content"]
                 as? [[String: Any]]
         )
-        #expect(content.count == 2)
+        #expect(content.count == 3)
         #expect(content[0]["type"] as? String == "image")
         #expect(content[0]["artifact_id"] as? String == imageID.uuidString)
         #expect(content[1]["type"] as? String == "file")
         #expect(content[1]["filename"] as? String == "notes.md")
+        #expect(content[2]["type"] as? String == "file")
+        #expect(content[2]["artifact_id"] as? String == svgID.uuidString)
+        #expect(content[2]["filename"] as? String == "garden.svg")
         #expect(model.attachments.isEmpty)
         #expect(model.history.first?.title == "chart.png")
     }

@@ -39,9 +39,12 @@ anywhere on the conversation or on the message field; plain text dropped on the
 field is still inserted as text. The paperclip beside the field opens Files on
 every device and, on iOS, the photo library, which needs no photo permission.
 Each file uploads as soon as it is added and shows its progress; a failed upload
-can be retried or removed, and a message may be attachments alone. Images other
+can be retried or removed, and a message may be attachments alone. Raster images other
 than small PNG, GIF, and WebP files are re-encoded as JPEG with a 2000-pixel
-long edge before upload, which removes their location metadata. A server
+long edge before upload, which removes their location metadata. SVGs from Files
+or drag and drop keep their original bytes and filename and are sent as file
+references, subject to the same 32 MiB upload limit; they are not rasterized for
+model vision. A server
 without the upload route shows each file as not accepted, and an answer to a
 clarifying question stays text: staged files wait for the next message.
 
