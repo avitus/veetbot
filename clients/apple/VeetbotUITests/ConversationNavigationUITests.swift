@@ -1356,6 +1356,68 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(banner.waitForNonExistence(timeout: 10))
     }
 
+    /// Approved chat checkpoints keep their details accessible but out of the way.
+    func testChatApprovalCollapsesAfterApproval() {
+        configureApprovalChat(generic: true)
+        app.launch()
+        openApprovalChat()
+        XCTAssertTrue(app.staticTexts["Approval checkpoint"].waitForExistence(timeout: 10))
+        activate(app.buttons["Approve once"])
+        assertCollapsedApproval(detail: "Approval checkpoint")
+    }
+
+    func testChatApprovalLoadedApprovedStartsCollapsed() {
+        app.launchArguments.append("--ui-testing-approved-checkpoint")
+        configureApprovalChat(generic: true)
+        app.launch()
+        openApprovalChat()
+        assertCollapsedApproval(detail: "Approval checkpoint")
+    }
+
+    func testBrowserChatApprovalCollapsesAfterTaskApproval() {
+        configureApprovalChat(generic: false)
+        app.launch()
+        openApprovalChat()
+        let allow = app.buttons["approval.allow-for-task"]
+        XCTAssertTrue(allow.waitForExistence(timeout: 10))
+        activate(allow)
+        let confirm = app.buttons["task-grant.confirm.allow"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        activate(confirm)
+        assertCollapsedApproval(detail: "Text from the website")
+    }
+
+    private func configureApprovalChat(generic: Bool) {
+        app.launchArguments.append("--ui-testing-browser-task-grant")
+        if generic { app.launchArguments.append("--ui-testing-generic-checkpoint") }
+        #if os(macOS)
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,900"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
+        #endif
+    }
+
+    private func openApprovalChat() {
+        app.activate()
+        let conversation = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(conversation.waitForExistence(timeout: 10))
+        activate(conversation)
+    }
+
+    private func assertCollapsedApproval(detail: String) {
+        let summary = app.buttons["approval.details"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertEqual(summary.value as? String, "Collapsed")
+        XCTAssertFalse(app.staticTexts[detail].exists)
+        activate(summary)
+        XCTAssertTrue(app.staticTexts[detail].waitForExistence(timeout: 5))
+        XCTAssertEqual(summary.value as? String, "Expanded")
+        XCTAssertFalse(app.buttons["Approve once"].exists)
+        XCTAssertFalse(app.buttons["approval.allow-once"].exists)
+        XCTAssertFalse(app.buttons["approval.allow-for-task"].exists)
+        activate(summary)
+        XCTAssertFalse(app.staticTexts[detail].exists)
+    }
+
     /// Choosing one person after another in Memory's People collection replaces
     /// the open profile. The directory is longer than the window, as a real one
     /// is: on the Mac, a second click there once left the first profile open.

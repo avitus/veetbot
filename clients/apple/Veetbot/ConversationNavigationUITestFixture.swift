@@ -216,12 +216,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var taskGrantJourney: Bool {
         ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.taskGrantLaunchArgument)
     }
+    private static var genericCheckpoint: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-testing-generic-checkpoint")
+    }
     /// Starts the task-grant journey with the approval pending and no grant.
     static func resetTaskGrant() {
         taskGrantLock.withLock {
             taskScopeRevision = 0
             taskScopes = []
-            taskGrantResolved = false
+            taskGrantResolved = ProcessInfo.processInfo.arguments.contains("--ui-testing-approved-checkpoint")
             taskGrantRevoked = false
         }
     }
@@ -783,7 +786,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             // The client must repeat the offer's scope exactly (ADR-0129 D4).
             let payload = requestJSON()
             let echo = payload["task_grant"] as? [String: String]
-            if payload["decision"] as? String == "approve_for_task",
+            if Self.genericCheckpoint, payload["decision"] as? String == "approve_once" {
+                Self.taskGrantLock.withLock { Self.taskGrantResolved = true }
+                statusCode = 200
+                body = Self.taskApprovalJSON
+            } else if payload["decision"] as? String == "approve_for_task",
                 echo == ["origin": "https://www.duolingo.com", "path_prefix": "/lesson"]
             {
                 Self.taskGrantLock.withLock { Self.taskGrantResolved = true }
@@ -795,7 +802,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         case ("GET", "/v1/browser-task-grants") where Self.taskGrantJourney:
             statusCode = 200
-            let active = Self.taskGrantLock.withLock { Self.taskGrantResolved && !Self.taskGrantRevoked }
+            let active = Self.taskGrantLock.withLock { !Self.genericCheckpoint && Self.taskGrantResolved && !Self.taskGrantRevoked }
             body = "{\"items\":[\(active ? Self.taskGrantJSON(status: "active") : "")],\"next_cursor\":null}"
         case ("POST", "/v1/browser-task-grants/\(Self.taskGrantID)/revoke") where Self.taskGrantJourney:
             Self.taskGrantLock.withLock { Self.taskGrantRevoked = true }
@@ -1258,6 +1265,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var taskApprovalJSON: String {
         let resolved = taskGrantLock.withLock { taskGrantResolved }
         let status = resolved ? "APPROVED" : "PENDING"
+        if genericCheckpoint {
+            let decision = resolved ? "\"approve_once\"" : "null"
+            return """
+                {"id":"\(taskApprovalID)","run_id":"\(taskRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"\(status)","tool_name":"workspace.write_text","action_summary":"Write the approved note","arguments":{"path":"note.txt","text":"Keep these details available"},"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-09-25T18:00:00Z","resolved_at":null,"resolved_by":null,"decision":\(decision)}
+                """
+        }
         let decision = resolved ? "\"approve_for_task\"" : "null"
         let grant = resolved ? "\"\(taskGrantID)\"" : "null"
         let resolvedAt = resolved ? "\"2026-09-25T18:00:30Z\"" : "null"

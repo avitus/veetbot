@@ -228,8 +228,45 @@ struct ApprovalCardView: View {
     let approval: ApprovalView
     var activeTaskGrant: BrowserTaskGrantView? = nil
     let resolve: (ApprovalDecision, String?, TaskGrantEcho?) -> Void
+    @State private var expanded = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if approval.status == .approved {
+                Button {
+                    expanded.toggle()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(approval.decision == .approveForTask ? "Allowed for this task" : "Approved")
+                                .appFont(.subheadline, weight: .semibold)
+                            Text(verbatim: approval.actionSummary)
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    }
+                    .padding(12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("approval.details")
+                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                if expanded { details }
+            } else {
+                details
+            }
+        }
+        .onChange(of: approval.status) { _ in expanded = false }
+        .onChange(of: approval.id) { _ in expanded = false }
+    }
+
+    @ViewBuilder
+    private var details: some View {
         if let presentation = BrowserActionApprovalPresentation(approval: approval, activeGrant: activeTaskGrant) {
             BrowserActionApprovalCard(approval: approval, presentation: presentation, resolve: resolve)
         } else {

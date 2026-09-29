@@ -348,6 +348,13 @@ horizontally rather than compressing their contents past readability. Messages
 and tool calls retain their first-seen event order as later status events update
 an existing tool card. Approval rule internals are intentionally not shown.
 
+Approved checkpoints collapse automatically to a summary showing the action and
+whether it was approved once or allowed for the task. Selecting the summary
+expands the original details for inspection without restoring decision controls.
+This applies to generic and website approvals, inside tool cards and standalone
+in chat, including approvals loaded from history. Pending requests remain open
+until the server confirms approval; a failed resolution leaves them actionable.
+
 Every finished message with text has Copy and Select Text (ADR-0122): labelled
 under an answer, icon-only under the owner's own messages and at accessibility
 text sizes. SwiftUI selection stops at each rendered paragraph, list item, and
