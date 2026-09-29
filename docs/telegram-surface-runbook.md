@@ -28,7 +28,8 @@ Activation is complete only when:
   `0600`. Only the surface role reads it; every other role refuses to start
   with a surface secret-file variable in its environment.
 - The surface environment holds no API bearer and no model, web, browser, or
-  sandbox credential; the surface role refuses to start with a provider key.
+  sandbox credential; the surface role refuses to start with a provider key,
+  including `BLAND_API_KEY_FILE` even when calling is configured.
 - A pairing code is shown once, expires in ten minutes, and is single use.
   Five wrong codes lock that sender for an hour.
 - Every production command below runs as `root` or `veetbot` by SSH key. None
