@@ -111,6 +111,10 @@ scopes, so their environments leave `AUTH_SCOPES` empty. The separate
 `veetbot-call-ingress` listener has only a webhook signing secret and receipt
 database access. It verifies the raw bytes before parsing, queues only a call ID,
 and listens at `127.0.0.1:8003`; the public proxy exposes only `/webhooks/bland`.
+Neither role starts while its environment sets a model key (any `*_API_KEY`),
+`VEETBOT_OPENAI_KEY` or `BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE`, and the
+listener also refuses `BLAND_API_KEY_FILE`; remove the variable rather than
+leaving it unread.
 
 Provision the unprivileged Linux user/group `veetbot-call-ingress` before enabling
 its unit. Never add it to the `veetbot` group, which can read the application

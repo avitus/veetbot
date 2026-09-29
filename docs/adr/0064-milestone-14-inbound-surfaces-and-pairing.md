@@ -138,11 +138,13 @@ Engineering decisions made while resolving the review findings pull request
 16. **A repeated pairing key is a non-retryable conflict.** Replaying the
     response would present the code twice, which decision 4 forbids. The 409
     names the issued code's identifier and expiry.
-17. **Credentials stay with their role.** The surface loader refuses a
-    provider credential variable, and every other role refuses a surface
-    secret-file variable, instead of ignoring it. The call roles still ignore
-    stray provider variables until their production environment files are
-    confirmed clean.
+17. **Credentials stay with their role.** The surface and call loaders refuse
+    a provider credential variable they do not load, and every other role
+    refuses a surface secret-file variable, instead of ignoring it. The call
+    worker keeps its own `BLAND_API_KEY_FILE`, which ingress refuses as
+    release preflight already did. The call roles began refusing on
+    2026-09-29, once production's two call environment files were confirmed
+    to hold none of these variables.
 
 Consequences: one limits key pair, one reply limit, one receipt disposition
 and migration, and one reason code (`surface.unavailable`, a pairing attempt
