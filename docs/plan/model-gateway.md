@@ -117,6 +117,16 @@ the newest owner messages first; the limits, the selection, and the token
 estimate per attachment live in one module, `agent_core.model.attachments`,
 which the token estimator also uses.
 
+SVG attachments (`image/svg+xml`) use the text path: the model receives their
+UTF-8 XML source, without rasterization, XML parsing, or loading external
+resources. They keep their original media type and filename, use the same
+256 KiB excerpt limit and shared request budget as other text attachments,
+and remain inside the untrusted envelope. Upload inspection admits only UTF-8
+source as text; invalid bytes remain an opaque file reference. Existing SVG
+uploads with `kind=other` metadata also resolve as text from their retained
+media type on subsequent turns, without re-upload or a data migration. This
+does not add SVGs to automatic knowledge ingestion.
+
 ```python
 class SystemMessage(BaseModel):
     kind: Literal["system"] = "system"

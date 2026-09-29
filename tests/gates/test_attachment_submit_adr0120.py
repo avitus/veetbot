@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+import pytest
 
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.sessions import Session, SessionStatus
@@ -275,8 +276,11 @@ async def _finish(composition: Any) -> None:
         await drain()
 
 
+@pytest.mark.parametrize("legacy_svg", [False, True])
 async def test_a_sent_attachment_reaches_the_model_through_the_composed_resolver(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_svg: bool,
 ) -> None:
     """Upload and send over HTTP; the composed resolver releases it to an adapter."""
 
@@ -294,6 +298,17 @@ async def test_a_sent_attachment_reaches_the_model_through_the_composed_resolver
         image = await _uploaded(client, session_id, PNG, "cat.png", "image/png", "u1")
         pdf_bytes = _pdf(2)
         pdf = await _uploaded(client, session_id, pdf_bytes, "a.pdf", "application/pdf", "u2")
+        svg_bytes = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Lavender bed</text></svg>'
+        with monkeypatch.context() as patch:
+            if legacy_svg:
+                # Existing uploads retain their original kind=other metadata.
+                patch.setattr(
+                    "agent_core.adapters.artifacts.inspection.is_text_media_type", lambda _: False
+                )
+            svg = await _uploaded(
+                client, session_id, svg_bytes, "garden.svg", "image/svg+xml", "u3"
+            )
+        assert svg["metadata"]["attachment"]["kind"] == ("other" if legacy_svg else "text")
         sent = await _send(
             client,
             session_id,
@@ -301,6 +316,7 @@ async def test_a_sent_attachment_reaches_the_model_through_the_composed_resolver
                 {"type": "text", "text": "look"},
                 {"type": "image", "artifact_id": image["id"], "media_type": "image/png"},
                 {"type": "file", "artifact_id": pdf["id"], "media_type": "application/pdf"},
+                {"type": "file", "artifact_id": svg["id"], "media_type": "image/svg+xml"},
             ],
         )
         assert sent.status_code == 202, sent.text
@@ -331,3 +347,5 @@ async def test_a_sent_attachment_reaches_the_model_through_the_composed_resolver
         assert content[2]["image_url"].endswith(base64.b64encode(PNG).decode())
         assert content[4]["file_data"].endswith(base64.b64encode(pdf_bytes).decode())
         assert content[4]["filename"] == "a.pdf"
+        assert svg_bytes.decode() in content[5]["text"]
+        assert '<untrusted trust="external_untrusted"' in content[5]["text"]
