@@ -359,21 +359,21 @@ made thirty-three strings. Milestone 27 adds `call.read`, `call.cancel`, and
 `call.delete` for the call routes in [bland-calling.md](bland-calling.md);
 Milestone 28 adds `people.read` and `people.write`; ADR-0117 adds
 `memory.write`; ADR-0119 adds `settings.read` and `settings.write`; ADR-0140
-adds `media.generate`. The implemented platform vocabulary therefore contains
-forty-two strings.
+adds `media.generate`; ADR-0143 adds `notification.write`. The implemented
+platform vocabulary therefore contains forty-three strings.
 
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
 joined by dots, of which the last is the action. The four `browser.` scopes
-have three; the other thirty-eight have exactly two.
+have three; the other thirty-nine have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
 contributor the list cannot enumerate. `tool-system.md:1382` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
-when it is one of the forty-two, or when its first segment is `mcp` and its
+when it is one of the forty-three, or when its first segment is `mcp` and its
 second is the server id. `mcp.files.write` is legal on a tool from the
 `files` server. `run.cancel` on that tool is not.
 

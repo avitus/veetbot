@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import pytest
+
 from agent_core.domain.artifacts import AttachmentContent
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -203,3 +205,36 @@ def test_svg_uses_the_text_budget_and_untrusted_envelope() -> None:
     assert "<text>Lavender</text>" in rendered.text
     assert "&lt;/untrusted:x>" in rendered.text
     assert "Only the first 256 KB" in rendered.text
+
+
+@pytest.mark.parametrize("media_type", ["image/svg+xml", "text/plain"])
+@pytest.mark.parametrize(
+    ("data", "truncated", "readable"),
+    [
+        (b"<svg>\xff</svg>", False, False),
+        (b"<svg>\xff</svg>", True, False),
+        (b"<svg>\xe2\x82", False, False),
+        (b"<svg>\xe2\x82", True, True),
+        ("<svg>€</svg>".encode(), False, True),
+    ],
+)
+def test_text_rendering_rejects_corruption_but_allows_a_truncated_utf8_suffix(
+    media_type: str, data: bytes, truncated: bool, readable: bool
+) -> None:
+    part = FileReferencePart(artifact_id=UUID(int=1), media_type=media_type, size_bytes=100)
+    rendered = attachments.render_attachments(
+        attachments.select_attachments([UserMessage(content=[part])]),
+        ModelCapabilities(images=False, files=False),
+        {
+            part.artifact_id: AttachmentContent(
+                artifact_id=part.artifact_id, data=data, truncated=truncated
+            )
+        },
+    )[(0, 0)]
+    if readable:
+        assert rendered.marker is None
+        assert rendered.text is not None and "<svg>" in rendered.text
+        assert ("Only the first 256 KB" in rendered.text) == truncated
+    else:
+        assert rendered.text is None
+        assert rendered.marker == attachments.reference_marker(part, MarkerReason.UNREADABLE)

@@ -2134,6 +2134,7 @@ import UserNotifications
             case "/v1/sessions":
                 return try response(for: request, statusCode: 200, body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}")
             case "/v1/sessions/\(sessionID.uuidString)":
+                recorder.record(request)
                 return try response(for: request, statusCode: 200, body: sessionBody)
             case "/v1/sessions/\(sessionID.uuidString)/messages":
                 return try response(for: request, statusCode: 200, body: #"{"items":[{"sequence":2,"role":"assistant","content":[{"type":"text","text":"Done"}]}],"next_cursor":null}"#)
@@ -2163,10 +2164,17 @@ import UserNotifications
         model.notificationOverlayPresented = true
         #expect(model.visibleNotificationSessionID == nil)
         model.notificationOverlayPresented = false
+        model.reportNotificationRegistrationFailure(NSError(domain: "notification-test", code: 1))
+        #expect(model.visibleNotificationSessionID == nil)
+        model.clearError()
+        #expect(model.visibleNotificationSessionID == sessionID)
         model.notificationTranscriptVisible = false
         #expect(model.visibleNotificationSessionID == nil)
         model.notificationTranscriptVisible = true
         model.notificationSyncActive = true
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(model.visibleNotificationSessionID == sessionID)
+        #expect(recorder.matching(method: "GET", path: "/v1/sessions/\(sessionID.uuidString)").count == 2)
         // Let replay reach its terminal event, then exercise the real HTTP wire.
         for _ in 0..<100 {
             await model.synchronizeNotifications()

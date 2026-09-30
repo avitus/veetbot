@@ -213,7 +213,7 @@ public final class ChatViewModel: ObservableObject {
     private var notificationSyncInProgress = false
 
     var visibleNotificationSessionID: UUID? {
-        guard isConfigured, !isReconfiguring, notificationAttentionEnabled,
+        guard isConfigured, !isReconfiguring, errorMessage == nil, notificationAttentionEnabled,
             notificationTranscriptVisible, !notificationOverlayPresented,
             loadedNotificationSessionID == selectedSessionID else { return nil }
         return selectedSessionID
@@ -298,6 +298,7 @@ public final class ChatViewModel: ObservableObject {
             guard try await tokenStore.readToken() != nil else {
                 throw HTTPTransportError.missingToken
             }
+            errorMessage = nil
             try await install(configuration)
             if previousConfiguration?.baseURL != configuration.baseURL {
                 selectedBrowserProfileID = nil
@@ -320,7 +321,6 @@ public final class ChatViewModel: ObservableObject {
             }
             await configurationStore.save(configuration)
             requiresReauthentication = false
-            errorMessage = nil
             return true
         } catch {
             present(error)
@@ -2440,6 +2440,10 @@ public final class ChatViewModel: ObservableObject {
         isReconfiguring = true
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
+        let installedGeneration = connectionGeneration
+        let retainedSessionID = selectedSessionID
+        selectionRequestID = nil
+        watchTasks.cancel()
         observedTerminalNotificationRunID = nil
         loadedNotificationSessionID = nil
         activeTaskGrants = []
@@ -2467,6 +2471,11 @@ public final class ChatViewModel: ObservableObject {
         if let pendingNotificationPayload {
             self.pendingNotificationPayload = nil
             await openNotification(pendingNotificationPayload)
+        } else if connectionGeneration == installedGeneration,
+            selectionRequestID == nil,
+            let retainedSessionID, selectedSessionID == retainedSessionID,
+            let entry = history.first(where: { $0.sessionID == retainedSessionID }) {
+            await selectSession(entry)
         }
     }
 

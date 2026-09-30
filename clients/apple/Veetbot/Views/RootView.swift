@@ -104,6 +104,7 @@ public struct RootView: View {
             updateEmailActivity()
         }
         .onChange(of: model.isReconfiguring) { _ in updateEmailActivity() }
+        .onChange(of: model.errorMessage) { _ in updateEmailActivity() }
         .onChange(of: scenePhase) { _ in updateEmailActivity() }
         .onAppear { updateEmailActivity() }
         .onChange(of: showingGlobalMemory) { _ in updateEmailActivity() }
@@ -296,7 +297,8 @@ public struct RootView: View {
     private func updateEmailActivity() {
         model.notificationSyncActive = model.isConfigured && scenePhase == .active
         var visible = model.isConfigured && !model.isReconfiguring && scenePhase == .active
-            && coordinator.mode == .chat && !showingGlobalMemory && !showingGlobalPersona && !showingGlobalSchedules
+            && model.errorMessage == nil && coordinator.mode == .chat
+            && !showingGlobalMemory && !showingGlobalPersona && !showingGlobalSchedules
         #if os(macOS)
         visible = visible && controlActiveState == .key
         #else
