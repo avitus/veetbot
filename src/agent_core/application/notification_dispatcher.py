@@ -9,22 +9,18 @@ from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
-from agent_core.domain.agents import Principal
-from agent_core.domain.approvals import ApprovalStatus
+from agent_core.application.notification_relevance import notification_obsolete
 from agent_core.domain.devices import PushProvider, PushTarget, push_token_fingerprint
-from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.notifications import (
     DEVICE_CONFINED_KINDS,
     DeliveryOutcome,
     Notification,
     NotificationDelivery,
-    NotificationKind,
     NotificationStatus,
     PushMessage,
     PushOutcome,
 )
-from agent_core.domain.runs import RunStatus
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.devices import DeviceRegistry
 from agent_core.ports.events import ProcessEventRepository
@@ -198,6 +194,7 @@ class NotificationDispatcher:
             return
 
         outcomes: list[tuple[PushTarget, PushOutcome]] = []
+        obsolete_status: NotificationStatus | None = None
         message = PushMessage(
             notification_id=notification.id,
             dedupe_key=notification.dedupe_key,
@@ -206,6 +203,23 @@ class NotificationDispatcher:
             expires_at=notification.expires_at,
         )
         for target in pending_targets:
+            # Resolve/acknowledge may race the preceding device's network send.
+            async with self._uow_factory() as uow:
+                if await notification_obsolete(uow, notification, self._clock.now()):
+                    obsolete_status = (
+                        NotificationStatus.SUPERSEDED
+                        if await self._is_stale(uow, notification, self._clock.now())
+                        else NotificationStatus.EXPIRED
+                    )
+                    outcomes.append(
+                        (
+                            target,
+                            PushOutcome(
+                                outcome=DeliveryOutcome.SKIPPED, provider_reason="Obsolete"
+                            ),
+                        )
+                    )
+                    continue
             try:
                 outcome = await self._transport.deliver(target, message)
             except DispatchProbeError:
@@ -254,7 +268,9 @@ class NotificationDispatcher:
                 elif outcome.outcome is DeliveryOutcome.UNREGISTERED:
                     await self._invalidate_token(uow, target, outcome, now)
 
-            if saw_retry:
+            if obsolete_status is not None:
+                await self._settle_claim(uow, notification, obsolete_status, None)
+            elif saw_retry:
                 retry_index = notification.attempts - 1
                 if retry_index < len(self._retry_delays):
                     await self._settle_claim(
@@ -317,47 +333,9 @@ class NotificationDispatcher:
         return settled
 
     async def _is_stale(
-        self,
-        uow: NotificationDispatchUnitOfWork,
-        notification: Notification,
-        now: datetime,
+        self, uow: NotificationDispatchUnitOfWork, notification: Notification, now: datetime
     ) -> bool:
-        principal = Principal(
-            tenant_id=notification.tenant_id,
-            principal_id=notification.principal_id,
-        )
-        try:
-            if notification.session_id is not None:
-                await uow.sessions.get(notification.session_id, principal)
-            if notification.kind is NotificationKind.APPROVAL_REQUESTED:
-                assert notification.approval_id is not None
-                approval = await uow.approvals.get(notification.approval_id, principal)
-                return approval.status is not ApprovalStatus.PENDING or (
-                    approval.expires_at is not None and approval.expires_at <= now
-                )
-            if notification.run_id is None:
-                return False
-            run = await uow.runs.get(notification.run_id, principal)
-            if notification.kind is NotificationKind.QUESTION_ASKED:
-                if run.status is not RunStatus.WAITING_FOR_USER:
-                    return True
-                checkpoint = await uow.checkpoints.latest(run.id)
-                if checkpoint is None:
-                    return True
-                return checkpoint.working_state.get("outstanding_question_id") != str(
-                    notification.question_id
-                )
-            if notification.kind is NotificationKind.RUN_FAILED:
-                return run.status is not RunStatus.FAILED
-            if notification.kind is NotificationKind.SCHEDULE_RUN_FINISHED:
-                return run.status not in {
-                    RunStatus.COMPLETED,
-                    RunStatus.FAILED,
-                    RunStatus.CANCELLED,
-                }
-        except NotFoundError:
-            return True
-        return False
+        return await notification_obsolete(uow, notification, now, include_expiry=False)
 
     async def _invalidate_token(
         self,

@@ -4006,7 +4006,7 @@ async def _compose(
             notification_expiry_seconds=notification_expiry_seconds,
             invocation_timeout_seconds=device_invocation_timeout_seconds,
         )
-        notification_inbox = NotificationInboxService(uow_factory=uow_factory)
+        notification_inbox = NotificationInboxService(uow_factory=uow_factory, clock=clock)
         surface_management = SurfaceManagementService(
             uow_factory=uow_factory,
             clock=clock,

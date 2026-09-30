@@ -361,3 +361,26 @@ public enum NotificationDeepLinkReducer {
         return NotificationDeepLink(sessionID: sessionID, runID: runID, focus: focus)
     }
 }
+
+public struct NotificationSyncRequest: Encodable, Sendable {
+    public let deliveredNotificationIDs: [UUID]
+    public let seenRunIDs: [UUID]
+    enum CodingKeys: String, CodingKey {
+        case deliveredNotificationIDs = "delivered_notification_ids"
+        case seenRunIDs = "seen_run_ids"
+    }
+}
+
+public struct NotificationSyncResult: Decodable, Sendable {
+    public let obsoleteNotificationIDs: [UUID]
+    enum CodingKeys: String, CodingKey {
+        case obsoleteNotificationIDs = "obsolete_notification_ids"
+    }
+}
+
+public enum NotificationPresentation {
+    public static func suppress(_ payload: NotificationPushPayload?, visibleSessionID: UUID?) -> Bool {
+        guard let payload, let visibleSessionID else { return false }
+        return payload.sessionID == visibleSessionID
+    }
+}

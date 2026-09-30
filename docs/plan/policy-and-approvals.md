@@ -1560,3 +1560,8 @@ unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent
 consumer ADR-0095 introduced, never through a standing authorization, and a
 Chat proposal parks in the ordinary queue.
+
+
+ADR-0143 adds the exact `notification.write` scope for the bounded notification
+sync route. It authorizes terminal-result receipts and reconciliation, never
+approval resolution, question input, device actions or mutation of run state.

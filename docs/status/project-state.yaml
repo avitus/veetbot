@@ -147,6 +147,9 @@ project:
   # ADR-0139 (Proposed, 2026-09-28) records the owner-requested cache repair:
   # completed active-run history precedes the fresh per-step context, so
   # recomputed recall no longer invalidates the cached tool history.
+  # ADR-0143 records the owner's 2026-09-30 notification extension: a
+  # thirty-second grace period, shared terminal-result receipts, foreground
+  # suppression and server-authoritative cleanup of delivered native alerts.
   authorized_milestones:
     - 0
     - 1

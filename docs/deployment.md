@@ -576,6 +576,7 @@ GRANT SELECT ON
   export_consent,
   notification_deliveries,
   notification_outbox,
+  notification_run_receipts,
   process_events,
   projection_watermarks,
   runs,
@@ -1377,3 +1378,12 @@ no automatic restart. Otherwise the release fails after promotion, like any
 other unit failure. These probes use the calling rules in
 `deploy/sudoers/veetbot-deploy`, so reinstall that contract on hosts
 provisioned before calling support.
+
+
+For ADR-0143 notification reconciliation, include `notification.write` in the
+owner client's `AUTH_SCOPES` and bearer-token grants. Apply the migration before
+starting the new API and dispatcher. The API database role needs SELECT and
+INSERT on `notification_run_receipts`; the notify and surface dispatcher roles
+need SELECT (the surface allowlist above includes it). Check these privileges for the deployed database roles and grant any missing
+ones before restarting dispatch. Apple clients from before this change still receive
+alerts; cleanup and viewed-result acknowledgement require the updated client.

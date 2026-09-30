@@ -1373,7 +1373,7 @@ async def test_prompt_not_authz() -> None:
 
 
 def test_scope_grammar() -> None:
-    assert len(PLATFORM_SCOPES) == 42  # media.generate joined under ADR-0140
+    assert len(PLATFORM_SCOPES) == 43  # notification.write joined under ADR-0143
     assert {
         "schedule.read",
         "schedule.write",
@@ -1381,6 +1381,7 @@ def test_scope_grammar() -> None:
         "device.read",
         "device.write",
         "notification.read",
+        "notification.write",
         "memory.read",
         "people.read",
         "people.write",

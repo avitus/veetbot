@@ -311,9 +311,9 @@ async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> 
             route
             for route in all_routes
             if isinstance(route, APIRoute)
-            and (route.path.startswith("/v1/devices") or route.path == "/v1/notifications")
+            and (route.path.startswith("/v1/devices") or route.path.startswith("/v1/notifications"))
         ]
-        assert len(routes) == 7
+        assert len(routes) == 8
         assert {
             (method, (route.openapi_extra or {})["required_scope"])
             for route in routes
@@ -323,6 +323,7 @@ async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> 
             ("GET", "device.read"),
             ("DELETE", "device.write"),
             ("GET", "notification.read"),
+            ("POST", "notification.write"),
         }
 
 
@@ -336,7 +337,7 @@ def _notification_routes(app: Any) -> list[APIRoute]:
             route.original_router.routes if hasattr(route, "original_router") else (route,)
         )
         if isinstance(nested, APIRoute)
-        and (nested.path.startswith("/v1/devices") or nested.path == "/v1/notifications")
+        and (nested.path.startswith("/v1/devices") or nested.path.startswith("/v1/notifications"))
     ]
 
 

@@ -352,7 +352,7 @@ skill.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
-device.read       device.write       notification.read
+device.read       device.write       notification.read    notification.write
 memory.read       memory.write
 ```
 
@@ -481,6 +481,7 @@ POST   /v1/devices/{device_id}/revoke               device.write
 DELETE /v1/devices/{device_id}                      device.write
 POST   /v1/devices/{device_id}/test-notification    device.write
 GET    /v1/notifications                            notification.read
+POST   /v1/notifications/sync                       notification.write
 ```
 
 Device views never carry a push token; the notification inbox is the durable

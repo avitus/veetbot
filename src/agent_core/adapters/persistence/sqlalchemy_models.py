@@ -1759,6 +1759,18 @@ class DeviceRegistrationIdempotencyRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class NotificationRunReceiptRow(Base):
+    __tablename__ = "notification_run_receipts"
+    __table_args__ = (Index("ix_notification_run_receipts_run", "run_id"),)
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class NotificationOutboxRow(Base):
     __tablename__ = "notification_outbox"
     __table_args__ = (

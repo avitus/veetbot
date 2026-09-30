@@ -85,7 +85,11 @@ from agent_core.domain.devices import (
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
-from agent_core.domain.notifications import NotificationKind
+from agent_core.domain.notifications import (
+    NotificationKind,
+    NotificationSyncRequest,
+    NotificationSyncResult,
+)
 from agent_core.domain.persona import (
     PERSONA_MAX_ENTRIES,
     PersonaEntryDraft,
@@ -1544,6 +1548,17 @@ def create_app(
             return await services.notifications.list(authenticated, limit, cursor)
         except ValueError as exc:
             raise MalformedRequestError("notification cursor is malformed") from exc
+
+    @notification_router.post(
+        "/v1/notifications/sync",
+        openapi_extra={"required_scope": "notification.write"},
+    )
+    async def sync_notifications(
+        body: NotificationSyncRequest,
+        authenticated: Annotated[Principal, secured("notification.write")],
+    ) -> NotificationSyncResult:
+        """Acknowledge viewed terminal results and reconcile delivered alerts."""
+        return await services.notifications.sync(authenticated, body)
 
     if settings.notification_api_enabled:
         app.include_router(notification_router)

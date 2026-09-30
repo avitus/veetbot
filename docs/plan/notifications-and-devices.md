@@ -998,3 +998,39 @@ presentation memory and clears it on logout or connection replacement. Only the
 latest call-result request may update the sheet or present an error; dismissal
 also invalidates a pending read. The dedicated
 notification carries no authority to place calls or to act on caller claims.
+
+
+## Attention and delivered-notification reconciliation
+
+The owner's 2026-09-30 extension, [ADR-0143](../adr/0143-notification-attention-and-reconciliation.md),
+adds a thirty-second initial dispatch grace period for `approval_requested`,
+`question_asked`, `schedule_run_finished` and `schedule_occurrence_skipped`.
+Enqueue remains atomic with its triggering event. Expiry and retry deadlines
+retain their meaning; device wake-ups and operational alerts are not delayed.
+Staleness is checked again before each target send.
+
+`POST /v1/notifications/sync`, under the new exact `notification.write` scope
+and the existing API flag, accepts `delivered_notification_ids` (at most 200)
+and `seen_run_ids` (at most 100), both UUID arrays with no extra fields.
+It atomically validates ownership and terminal status for every seen run,
+stores idempotent principal-scoped run receipts, and returns
+`obsolete_notification_ids`: only requested, owned notification IDs whose
+subject is stale, expired, or whose terminal result has been seen.
+An invalid or foreign run fails the entire request without partial receipts;
+foreign and unknown notification IDs are ignored. Repeat requests are safe.
+Receipts use a separate `notification_run_receipts` table keyed by tenant,
+principal and run, with tenant RLS and deletion cascading from the run.
+Dispatch checks the receipt even if it predates the notification's enqueue.
+Receipts suppress `run_failed` and `schedule_run_finished`, never unresolved
+approvals, questions, device actions or unrelated alerts.
+
+The Apple client suppresses banner, list and sound only for a valid push
+matching its active, visible and loaded Chat conversation. It acknowledges
+only terminal results actually loaded there, reconciles on foreground entry,
+relevant stream changes and selection, and polls every ten seconds while
+active. A covered transcript or another mode does not count as viewing it.
+Each sync maps obsolete notification IDs back to the operating system's
+request identifiers, removing only those delivered entries. Connection
+replacement invalidates in-flight cleanup and acknowledgements. An older
+server or a failed request leaves alerts untouched. Sleeping clients reconcile
+when they next become active; remote recall is not guaranteed.

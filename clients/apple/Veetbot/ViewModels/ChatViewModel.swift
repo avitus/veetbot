@@ -203,6 +203,37 @@ public final class ChatViewModel: ObservableObject {
     /// change clears this, since nothing may be sent once the credential that
     /// began the attempt is being replaced.
     private var closedDuringDeviceSignInID: UUID?
+    var notificationAttention = NotificationAttentionCoordinator(store: SystemDeliveredNotificationStore())
+    @Published var notificationSyncActive = false
+    @Published var notificationAttentionEnabled = false
+    @Published var notificationTranscriptVisible = false
+    @Published var notificationOverlayPresented = false
+    @Published private var loadedNotificationSessionID: UUID?
+    private var observedTerminalNotificationRunID: UUID?
+    private var notificationSyncInProgress = false
+
+    var visibleNotificationSessionID: UUID? {
+        guard isConfigured, !isReconfiguring, notificationAttentionEnabled,
+            notificationTranscriptVisible, !notificationOverlayPresented,
+            loadedNotificationSessionID == selectedSessionID else { return nil }
+        return selectedSessionID
+    }
+
+    func synchronizeNotifications() async {
+        guard let api, isConfigured, notificationSyncActive, !isReconfiguring, !notificationSyncInProgress else { return }
+        notificationSyncInProgress = true
+        defer { notificationSyncInProgress = false }
+        let generation = connectionGeneration
+        let visible = visibleNotificationSessionID
+        let seen = visible != nil && runState.runStatus?.isTerminal == true
+            ? observedTerminalNotificationRunID.map { [$0] } ?? [] : []
+        await notificationAttention.synchronize(using: api, seenRunIDs: seen) { [weak self] in
+            guard let self else { return false }
+            return self.isConfigured && self.notificationSyncActive && !self.isReconfiguring && self.connectionGeneration == generation
+                && self.visibleNotificationSessionID == visible
+        }
+    }
+
     private var api: VeetbotAPIClient?
     private var eventStream: ReconnectingEventStream?
     private let watchTasks = WatchTaskBox()
@@ -809,6 +840,8 @@ public final class ChatViewModel: ObservableObject {
     private func resetSelectedSession() {
         selectionRequestID = nil
         watchTasks.cancel()
+        observedTerminalNotificationRunID = nil
+        loadedNotificationSessionID = nil
         selectedSessionID = nil
         sessionBusy = false
         loadedApprovalIDs.removeAll()
@@ -830,6 +863,8 @@ public final class ChatViewModel: ObservableObject {
         selectionRequestID = requestID
         watchTasks.cancel()
         if selectedSessionID != entry.sessionID { clearAttachments() }
+        observedTerminalNotificationRunID = nil
+        loadedNotificationSessionID = nil
         selectedSessionID = entry.sessionID
         sessionBusy = false
         loadedApprovalIDs.removeAll()
@@ -880,6 +915,8 @@ public final class ChatViewModel: ObservableObject {
                 runState.seed(run: run)
                 watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive)
             }
+            loadedNotificationSessionID = session.id
+            Task { await synchronizeNotifications() }
             if selectedSessionUsesWebsiteProfile {
                 await loadTaskGrant()
             }
@@ -1333,6 +1370,7 @@ public final class ChatViewModel: ObservableObject {
         if sessionCreation == creation {
             sessionCreation = nil
             selectedSessionID = session.id
+            loadedNotificationSessionID = session.id
             selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
             try await store(session: session, lastRunID: nil, suggestedTitle: suggestedTitle)
         }
@@ -2402,6 +2440,8 @@ public final class ChatViewModel: ObservableObject {
         isReconfiguring = true
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
+        observedTerminalNotificationRunID = nil
+        loadedNotificationSessionID = nil
         activeTaskGrants = []
         taskScopePolicy = nil
         taskScopeError = nil
@@ -2451,6 +2491,13 @@ public final class ChatViewModel: ObservableObject {
                 for try await frame in eventStream.frames(runID: runID) {
                     guard let self else { return }
                     self.runState.reduce(frame)
+                    if ["run.completed", "run.failed", "run.cancelled"].contains(frame.event),
+                        self.runState.activeRunID == runID {
+                        self.observedTerminalNotificationRunID = runID
+                    }
+                    if ["run.completed", "run.failed", "run.cancelled", "run.resumed", "approval.resolved", "run.waiting_for_user", "run.waiting_for_approval"].contains(frame.event) {
+                        Task { await self.synchronizeNotifications() }
+                    }
                     await self.applyTaskGrantFrame(frame)
                     if frame.event == "approval.requested"
                         || frame.event == "run.waiting_for_approval"

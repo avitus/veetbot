@@ -151,3 +151,5 @@ implementation without one.
 - [ADR-0140 — Image and video tools with TensorScale as the first provider (Accepted)](0140-tensorscale-media-generation.md)
 - [ADR-0141 — Client-managed task approval websites (Accepted; amends ADR-0129)](0141-client-managed-task-approval-websites.md)
 - [ADR-0142 — Denials record their result item, and old denials project from what they recorded (Accepted)](0142-denials-record-their-result-item.md)
+
+- [ADR-0143 — Notification attention and reconciliation (Proposed)](0143-notification-attention-and-reconciliation.md)

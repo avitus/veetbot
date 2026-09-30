@@ -31,6 +31,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     DeviceRow,
     NotificationDeliveryRow,
     NotificationOutboxRow,
+    NotificationRunReceiptRow,
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.devices import (
@@ -255,10 +256,32 @@ class InMemoryNotificationOutbox:
     def __init__(self, clock: Clock, devices: InMemoryDeviceRegistry) -> None:
         self._clock = clock
         self._devices = devices
+        self._seen_runs: dict[tuple[str, str, UUID], datetime] = {}
         self._notifications: dict[UUID, Notification] = {}
         self._dedupe_keys: set[str] = set()
         self._deliveries: dict[tuple[UUID, UUID, int], NotificationDelivery] = {}
         self._lock = asyncio.Lock()
+
+    async def get_many(
+        self, principal: Principal, notification_ids: tuple[UUID, ...]
+    ) -> list[Notification]:
+        return [
+            value.model_copy(deep=True)
+            for identity in dict.fromkeys(notification_ids)
+            if (value := self._notifications.get(identity)) is not None
+            and _owned_by(value, principal)
+        ]
+
+    async def mark_runs_seen(
+        self, principal: Principal, run_ids: tuple[UUID, ...], seen_at: datetime
+    ) -> None:
+        for run_id in run_ids:
+            self._seen_runs.setdefault(
+                (principal.tenant_id, principal.principal_id, run_id), _aware_utc(seen_at)
+            )
+
+    async def run_seen(self, principal: Principal, run_id: UUID) -> bool:
+        return (principal.tenant_id, principal.principal_id, run_id) in self._seen_runs
 
     async def enqueue(self, notification: NewNotification) -> Notification | None:
         async with self._lock:
@@ -720,6 +743,50 @@ class PostgresDeviceRegistrationIdempotencyRepository:
 
 
 class PostgresNotificationOutbox:
+    async def get_many(
+        self, principal: Principal, notification_ids: tuple[UUID, ...]
+    ) -> list[Notification]:
+        rows = await self._session.scalars(
+            select(NotificationOutboxRow).where(
+                NotificationOutboxRow.id.in_(notification_ids),
+                NotificationOutboxRow.tenant_id == principal.tenant_id,
+                NotificationOutboxRow.principal_id == principal.principal_id,
+            )
+        )
+        return [notification_to_domain(row) for row in rows]
+
+    async def mark_runs_seen(
+        self, principal: Principal, run_ids: tuple[UUID, ...], seen_at: datetime
+    ) -> None:
+        if not run_ids:
+            return
+        await self._session.execute(
+            pg_insert(NotificationRunReceiptRow)
+            .values(
+                [
+                    {
+                        "tenant_id": principal.tenant_id,
+                        "principal_id": principal.principal_id,
+                        "run_id": run_id,
+                        "seen_at": _aware_utc(seen_at),
+                    }
+                    for run_id in set(run_ids)
+                ]
+            )
+            .on_conflict_do_nothing()
+        )
+
+    async def run_seen(self, principal: Principal, run_id: UUID) -> bool:
+        return (
+            await self._session.scalar(
+                select(NotificationRunReceiptRow.run_id).where(
+                    NotificationRunReceiptRow.tenant_id == principal.tenant_id,
+                    NotificationRunReceiptRow.principal_id == principal.principal_id,
+                    NotificationRunReceiptRow.run_id == run_id,
+                )
+            )
+        ) is not None
+
     def __init__(self, session: AsyncSession, clock: Clock) -> None:
         self._session = session
         self._clock = clock
@@ -1014,7 +1081,7 @@ def _pending_target_exists(provider_values: set[str] | None = None) -> ColumnEle
     return exists(select(device.id).where(*conditions)).correlate(NotificationOutboxRow)
 
 
-def _owned_by(device: Device, principal: Principal) -> bool:
+def _owned_by(device: Device | Notification, principal: Principal) -> bool:
     return device.tenant_id == principal.tenant_id and device.principal_id == principal.principal_id
 
 

@@ -98,7 +98,7 @@ ALTER ROLE veetbot_surface LOGIN PASSWORD '$pw' NOSUPERUSER NOCREATEDB NOCREATER
 GRANT CONNECT ON DATABASE agent TO veetbot_surface;
 GRANT USAGE ON SCHEMA public TO veetbot_surface;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM veetbot_surface;
-GRANT SELECT ON agents, alembic_version, approvals, checkpoints, delegations, derived_event_keys, devices, events, export_consent, notification_deliveries, notification_outbox, process_events, projection_watermarks, runs, session_history_items, sessions, surface_inbound_receipts, surface_pairing_codes, surface_pairings, surface_replies, surface_sender_lockouts, surface_sessions, tool_invocations TO veetbot_surface;
+GRANT SELECT ON agents, alembic_version, approvals, checkpoints, delegations, derived_event_keys, devices, events, export_consent, notification_deliveries, notification_outbox, notification_run_receipts, process_events, projection_watermarks, runs, session_history_items, sessions, surface_inbound_receipts, surface_pairing_codes, surface_pairings, surface_replies, surface_sender_lockouts, surface_sessions, tool_invocations TO veetbot_surface;
 GRANT INSERT ON checkpoints, derived_event_keys, devices, events, notification_deliveries, process_events, projection_watermarks, runs, session_history_items, sessions, surface_inbound_receipts, surface_pairings, surface_sender_lockouts, surface_sessions TO veetbot_surface;
 GRANT UPDATE ON approvals, delegations, devices, events, notification_outbox, projection_watermarks, runs, sessions, surface_inbound_receipts, surface_pairing_codes, surface_pairings, surface_replies, surface_sender_lockouts, surface_sessions, tool_invocations TO veetbot_surface;
 GRANT DELETE ON surface_sender_lockouts TO veetbot_surface;
