@@ -941,6 +941,11 @@ class InMemorySessionDeletionRepository:
             for value in self._memories._records.values()
             if value.source_session_id == session_id or value.formation_run_id in run_ids
         }
+        self._notification_outbox._seen_runs = {
+            key: value
+            for key, value in self._notification_outbox._seen_runs.items()
+            if key[2] not in run_ids
+        }
         notification_rows = self._notification_outbox._notifications.items()
         pending_notification_ids = {
             notification_id

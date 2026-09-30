@@ -40,6 +40,16 @@ class RunNotificationProducer(Protocol):
 
 
 class NotificationOutbox(Protocol):
+    async def get_many(
+        self, principal: Principal, notification_ids: tuple[UUID, ...]
+    ) -> builtins.list[Notification]: ...
+
+    async def mark_runs_seen(
+        self, principal: Principal, run_ids: tuple[UUID, ...], seen_at: datetime
+    ) -> None: ...
+
+    async def run_seen(self, principal: Principal, run_id: UUID) -> bool: ...
+
     async def enqueue(self, notification: NewNotification) -> Notification | None: ...
 
     async def claim_due(

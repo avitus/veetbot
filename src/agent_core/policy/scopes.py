@@ -35,6 +35,7 @@ PLATFORM_SCOPES = frozenset(
         "device.read",
         "device.write",
         "notification.read",
+        "notification.write",
         "surface.read",
         "surface.write",
         "memory.read",

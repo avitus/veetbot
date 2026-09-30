@@ -1693,3 +1693,60 @@ async def test_an_unreleased_attachment_is_described_as_unavailable() -> None:
     assert turn.stop_reason is StopReason.END_TURN
     texts = [block["text"] for block in source.requests[0]["input"][0]["content"]]
     assert sum("it is no longer available" in text for text in texts) == 3
+
+
+@pytest.mark.parametrize("provider_name", ["openai", "anthropic", "chat_completions"])
+async def test_svg_source_reaches_each_provider_as_untrusted_text(provider_name: str) -> None:
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Lavender bed</text></svg>'
+    resolver = _StubResolver({_TEXT: svg})
+    source = ScriptedRawSource(
+        [
+            {
+                "openai": openai_text_events,
+                "anthropic": anthropic_text_events,
+                "chat_completions": chat_text_events,
+            }[provider_name]()
+        ]
+    )
+    provider: ModelProvider
+    if provider_name == "openai":
+        provider = OpenAIResponsesProvider(event_source=source, attachment_resolver=resolver)
+    elif provider_name == "anthropic":
+        provider = AnthropicMessagesProvider(event_source=source, attachment_resolver=resolver)
+    else:
+        provider = ChatCompletionsProvider(
+            base_url="http://127.0.0.1:11434/v1",
+            event_source=source,
+            attachment_resolver=resolver,
+        )
+    conversation = [
+        UserMessage(
+            content=[
+                FileReferencePart(
+                    artifact_id=_TEXT,
+                    media_type="image/svg+xml",
+                    filename="garden.svg",
+                    size_bytes=len(svg),
+                )
+            ]
+        )
+    ]
+    try:
+        await collect_turn(
+            provider.stream(request(conversation), _multimodal(provider_name), ATTEMPT)
+        )
+    finally:
+        await provider.close()
+    assert {read.artifact_id for read in resolver.reads} == {_TEXT}
+    payload = source.requests[0]
+    if provider_name == "openai":
+        text = payload["input"][0]["content"][0]["text"]
+    elif provider_name == "anthropic":
+        text = payload["messages"][0]["content"][0]["text"]
+    else:
+        text = next(
+            message["content"] for message in payload["messages"] if message["role"] == "user"
+        )
+    assert svg.decode() in text
+    assert '<untrusted trust="external_untrusted"' in text
+    assert "garden.svg" in text

@@ -360,3 +360,32 @@ async def test_notification_claim_is_partitioned_by_provider() -> None:
     await assert_notification_claim_is_partitioned_by_provider(
         InMemoryNotificationOutbox(FixedClock(NOW), registry), registry
     )
+
+
+async def assert_notification_receipts_and_lookup_are_principal_scoped(
+    outbox: NotificationOutbox,
+) -> None:
+    from tests.contract.support import RUN_ID
+
+    owner = principal()
+    stranger = owner.model_copy(update={"principal_id": "stranger"})
+    foreign = owner.model_copy(update={"tenant_id": "foreign"})
+    first = new_notification()
+    assert await outbox.enqueue(first) is not None
+    assert [
+        row.id for row in await outbox.get_many(owner, (first.id, first.id, UUID(int=9000)))
+    ] == [first.id]
+    assert await outbox.get_many(stranger, (first.id,)) == []
+    assert await outbox.get_many(foreign, (first.id,)) == []
+    assert not await outbox.run_seen(owner, RUN_ID)
+    await outbox.mark_runs_seen(owner, (RUN_ID, RUN_ID), NOW)
+    await outbox.mark_runs_seen(owner, (RUN_ID,), NOW + timedelta(seconds=10))
+    assert await outbox.run_seen(owner, RUN_ID)
+    assert not await outbox.run_seen(stranger, RUN_ID)
+    assert not await outbox.run_seen(foreign, RUN_ID)
+
+
+async def test_memory_notification_receipts_and_lookup_are_principal_scoped() -> None:
+    await assert_notification_receipts_and_lookup_are_principal_scoped(
+        InMemoryNotificationOutbox(FixedClock(NOW), InMemoryDeviceRegistry())
+    )

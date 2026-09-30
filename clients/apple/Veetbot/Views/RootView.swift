@@ -65,6 +65,9 @@ public struct RootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
     @Environment(\.scenePhase) private var scenePhase
+    #if os(macOS)
+    @Environment(\.controlActiveState) private var controlActiveState
+    #endif
     @EnvironmentObject private var appearance: AppearancePreferences
     #if os(iOS)
     @EnvironmentObject private var smsIntegration: SmsIntegrationPreferences
@@ -101,8 +104,24 @@ public struct RootView: View {
             updateEmailActivity()
         }
         .onChange(of: model.isReconfiguring) { _ in updateEmailActivity() }
+        .onChange(of: model.errorMessage) { _ in updateEmailActivity() }
         .onChange(of: scenePhase) { _ in updateEmailActivity() }
         .onAppear { updateEmailActivity() }
+        .onChange(of: showingGlobalMemory) { _ in updateEmailActivity() }
+        .onChange(of: showingGlobalPersona) { _ in updateEmailActivity() }
+        .onChange(of: showingGlobalSchedules) { _ in updateEmailActivity() }
+        #if os(macOS)
+        .onChange(of: controlActiveState) { _ in updateEmailActivity() }
+        #else
+        .onChange(of: showingSettings) { _ in updateEmailActivity() }
+        #endif
+        .task(id: "\(model.connectionGeneration)-\(model.isConfigured)-\(scenePhase == .active)") {
+            guard model.isConfigured, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await model.synchronizeNotifications()
+                do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
+            }
+        }
         #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
             ConnectionSettingsView(model: model, embedded: false)
@@ -276,6 +295,17 @@ public struct RootView: View {
     }
 
     private func updateEmailActivity() {
+        model.notificationSyncActive = model.isConfigured && scenePhase == .active
+        var visible = model.isConfigured && !model.isReconfiguring && scenePhase == .active
+            && model.errorMessage == nil && coordinator.mode == .chat
+            && !showingGlobalMemory && !showingGlobalPersona && !showingGlobalSchedules
+        #if os(macOS)
+        visible = visible && controlActiveState == .key
+        #else
+        visible = visible && !showingSettings
+        #endif
+        model.notificationAttentionEnabled = visible
+        if visible { Task { await model.synchronizeNotifications() } }
         coordinator.email.setActive(model.isConfigured && !model.isReconfiguring && scenePhase == .active && coordinator.mode == .email)
     }
 
@@ -469,6 +499,9 @@ private struct SessionSidebar: View {
             }
         } message: { _ in
             Text("The conversations in this folder return to History. Nothing is deleted.")
+        }
+        .onChange(of: showingMemoryBrowser || showingPersonaEditor || showingScheduleBrowser || folderEditor != nil) { covered in
+            model.notificationOverlayPresented = covered
         }
         .sheet(item: $folderEditor) { request in
             FolderNameSheet(request: request, model: model)

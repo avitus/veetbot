@@ -528,3 +528,13 @@ def _aware_utc(value: datetime) -> datetime:
 
 def _optional_aware_utc(value: datetime | None) -> datetime | None:
     return None if value is None else _aware_utc(value)
+
+
+class NotificationSyncRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    delivered_notification_ids: list[UUID] = Field(default_factory=list, max_length=200)
+    seen_run_ids: list[UUID] = Field(default_factory=list, max_length=100)
+
+
+class NotificationSyncResult(BaseModel):
+    obsolete_notification_ids: list[UUID]

@@ -14,6 +14,7 @@ from agent_core.domain.errors import ToolValidationError
 from agent_core.model.attachments import (
     IMAGE_MEDIA_TYPES,
     PDF_MEDIA_TYPE,
+    SVG_MEDIA_TYPE,
     AttachmentKind,
     is_text_media_type,
 )
@@ -37,6 +38,7 @@ _TEXT_EXTENSIONS: dict[str, str] = {
     ".yml": "application/yaml",
     ".toml": "application/toml",
     ".xml": "application/xml",
+    ".svg": SVG_MEDIA_TYPE,
     ".html": "text/html",
     ".htm": "text/html",
     ".css": "text/css",

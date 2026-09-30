@@ -31,6 +31,7 @@ UPLOAD_MAX_BYTES = 32 * 1024 * 1024
 MAX_ATTACHMENTS_PER_MESSAGE = 10
 IMAGE_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 PDF_MEDIA_TYPE = "application/pdf"
+SVG_MEDIA_TYPE = "image/svg+xml"
 TEXT_APPLICATION_TYPES = frozenset(
     {
         "application/json",
@@ -94,7 +95,11 @@ _REASON_PHRASES: dict[MarkerReason, str] = {
 
 
 def is_text_media_type(media_type: str) -> bool:
-    return media_type.startswith("text/") or media_type in TEXT_APPLICATION_TYPES
+    return (
+        media_type.startswith("text/")
+        or media_type in TEXT_APPLICATION_TYPES
+        or media_type == SVG_MEDIA_TYPE
+    )
 
 
 def media_kind(media_type: str) -> AttachmentKind:
@@ -348,14 +353,25 @@ def render_attachments(
             if content is None:
                 reason = MarkerReason.UNAVAILABLE
             elif kind is AttachmentKind.TEXT:
-                text = content.data.decode("utf-8", errors="ignore")
-                rendered[key] = RenderedAttachment(
-                    part=part,
-                    kind=kind,
-                    label=label,
-                    text=envelope_text(part, text, truncated=content.truncated),
-                )
-                continue
+                try:
+                    text = content.data.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    if (
+                        content.truncated
+                        and exc.reason == "unexpected end of data"
+                        and exc.end == len(content.data)
+                    ):
+                        text = content.data[: exc.start].decode("utf-8")
+                    else:
+                        reason = MarkerReason.UNREADABLE
+                if reason is None:
+                    rendered[key] = RenderedAttachment(
+                        part=part,
+                        kind=kind,
+                        label=label,
+                        text=envelope_text(part, text, truncated=content.truncated),
+                    )
+                    continue
             else:
                 rendered[key] = RenderedAttachment(
                     part=part, kind=kind, label=label, data=content.data

@@ -43,8 +43,9 @@ can be retried or removed, and a message may be attachments alone. Raster images
 than small PNG, GIF, and WebP files are re-encoded as JPEG with a 2000-pixel
 long edge before upload, which removes their location metadata. SVGs from Files
 or drag and drop keep their original bytes and filename and are sent as file
-references, subject to the same 32 MiB upload limit; they are not rasterized for
-model vision. A server
+references, subject to the same 32 MiB upload limit. The server includes UTF-8
+SVG source in the model context as untrusted text, within the text-attachment
+budget; it does not rasterize SVGs for model vision. A server
 without the upload route shows each file as not accepted, and an answer to a
 clarifying question stays text: staged files wait for the next message.
 

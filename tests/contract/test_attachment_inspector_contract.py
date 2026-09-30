@@ -80,3 +80,19 @@ async def test_inspection_classifies_from_bytes(
     inspector = SignatureAttachmentInspector()
     facts = await inspector.inspect(content, filename=filename, declared_media_type=declared)
     assert facts == expected
+
+
+@pytest.mark.parametrize("declared", ["image/svg+xml", "application/octet-stream"])
+@pytest.mark.parametrize("valid_utf8", [True, False])
+async def test_svg_source_is_text_only_when_utf8(declared: str, valid_utf8: bool) -> None:
+    content = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Lavender</text></svg>'
+    if not valid_utf8:
+        content += b"\xff"
+    facts = await SignatureAttachmentInspector().inspect(
+        content, filename="garden.SVG", declared_media_type=declared
+    )
+    assert facts == (
+        AttachmentFacts("image/svg+xml", "text")
+        if valid_utf8
+        else AttachmentFacts("application/octet-stream", "other")
+    )

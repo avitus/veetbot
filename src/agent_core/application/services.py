@@ -27,6 +27,7 @@ from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningSta
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
 from agent_core.domain.model_settings import ModelChoice, ModelSettingsView
+from agent_core.domain.notifications import NotificationSyncRequest, NotificationSyncResult
 from agent_core.domain.people import (
     PeopleErasure,
     PeopleOperation,
@@ -410,6 +411,10 @@ class DeviceIngestService(Protocol):
 
 
 class NotificationService(Protocol):
+    async def sync(
+        self, principal: Principal, request: NotificationSyncRequest
+    ) -> NotificationSyncResult: ...
+
     async def list(
         self, principal: Principal, limit: int, cursor: str | None
     ) -> Page[NotificationInboxItem]: ...

@@ -423,3 +423,35 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
 
 def owned_id_int(offset: int) -> int:
     return int("40000000000000000000000000000000", 16) + offset * 10
+
+
+async def test_postgres_notification_receipts_contract_and_cascade() -> None:
+    from tests.contract.support import RUN_ID, agent, run, session
+    from tests.contract.test_notification_outbox_contract import (
+        assert_notification_receipts_and_lookup_are_principal_scoped,
+    )
+
+    async with build(
+        settings=database_settings(), storage="postgres", principal=principal()
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+            await uow.runs.create(run())
+            await assert_notification_receipts_and_lookup_are_principal_scoped(
+                uow.notification_outbox
+            )
+        async with composition.uow_factory() as uow:
+            assert isinstance(uow, PostgresUnitOfWork)
+            assert await uow.notification_outbox.run_seen(principal(), RUN_ID)
+            await uow.session.execute(text("DELETE FROM runs WHERE id = :id"), {"id": RUN_ID})
+            assert not await uow.notification_outbox.run_seen(principal(), RUN_ID)
+            rls = (
+                await uow.session.execute(
+                    text(
+                        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                        "WHERE relname = 'notification_run_receipts'"
+                    )
+                )
+            ).one()
+            assert tuple(rls) == (True, True)

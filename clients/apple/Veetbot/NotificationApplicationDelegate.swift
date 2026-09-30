@@ -168,7 +168,10 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .list, .sound])
+        let payload = NotificationPushPayload(userInfo: notification.request.content.userInfo)
+        let suppress = NotificationPresentation.suppress(payload, visibleSessionID: model?.visibleNotificationSessionID)
+        completionHandler(suppress ? [] : [.banner, .list, .sound])
+        if let model { Task { await model.synchronizeNotifications() } }
     }
 }
 
@@ -223,3 +226,69 @@ final class NotificationApplicationDelegate: NotificationApplicationDelegateBase
     }
 }
 #endif
+
+struct DeliveredNotification: Sendable {
+    let requestIdentifier: String
+    let notificationID: UUID
+}
+
+@MainActor
+protocol DeliveredNotificationStore {
+    func delivered() async -> [DeliveredNotification]
+    func remove(identifiers: [String])
+}
+
+protocol NotificationSyncAPI: Sendable {
+    func syncNotifications(_ request: NotificationSyncRequest) async throws -> NotificationSyncResult
+}
+
+@MainActor
+final class NotificationAttentionCoordinator {
+    private let store: any DeliveredNotificationStore
+    init(store: any DeliveredNotificationStore) { self.store = store }
+
+    func synchronize(
+        using api: any NotificationSyncAPI,
+        seenRunIDs: [UUID],
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async {
+        guard isCurrent(), !Task.isCancelled else { return }
+        let delivered = await store.delivered()
+        guard isCurrent(), !Task.isCancelled else { return }
+        let ids = Array(Set(delivered.map(\.notificationID))).sorted { $0.uuidString < $1.uuidString }
+        // APNs can leave a large backlog; reconcile all entries in bounded batches.
+        let batches = max(1, (ids.count + 199) / 200)
+        for batch in 0..<batches {
+            guard isCurrent(), !Task.isCancelled else { return }
+            let lower = min(batch * 200, ids.count)
+            let upper = min(lower + 200, ids.count)
+            do {
+                let result = try await api.syncNotifications(NotificationSyncRequest(
+                    deliveredNotificationIDs: Array(ids[lower..<upper]),
+                    seenRunIDs: batch == 0 ? Array(Set(seenRunIDs).prefix(100)) : []
+                ))
+                guard isCurrent(), !Task.isCancelled else { return }
+                let obsolete = Set(result.obsoleteNotificationIDs).intersection(ids[lower..<upper])
+                let requests = delivered.filter { obsolete.contains($0.notificationID) }.map(\.requestIdentifier)
+                if !requests.isEmpty { store.remove(identifiers: requests) }
+            } catch {
+                // Unsupported servers, denied scopes and offline devices retain
+                // their notifications; the next foreground sync retries.
+                return
+            }
+        }
+    }
+}
+
+@MainActor
+final class SystemDeliveredNotificationStore: DeliveredNotificationStore {
+    func delivered() async -> [DeliveredNotification] {
+        await UNUserNotificationCenter.current().deliveredNotifications().compactMap { notification in
+            guard let payload = NotificationPushPayload(userInfo: notification.request.content.userInfo) else { return nil }
+            return DeliveredNotification(requestIdentifier: notification.request.identifier, notificationID: payload.notificationID)
+        }
+    }
+    func remove(identifiers: [String]) {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+}

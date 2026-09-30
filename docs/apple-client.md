@@ -310,6 +310,14 @@ its scheduled occurrence time, even if the schedule was renamed afterward
 results, and failure details are fetched after opening the app. Existing clients
 can open the enriched alerts because their version-1 tap dictionary is unchanged.
 
+Approvals, questions, and scheduled outcomes wait thirty seconds before push
+delivery, giving you time to handle them on another device. A loaded conversation
+visible in the active Chat window suppresses its foreground alerts. Active clients
+also clear delivered alerts once the server confirms they are obsolete, and
+viewing a terminal result acknowledges it across devices. Covered or background
+conversations do not count as viewed. Sleeping devices clear obsolete alerts
+when next active; a banner already shown cannot be recalled (ADR-0143).
+
 On macOS, **System Settings → Notifications → Veetbot → Allow Notifications**
 controls permission. On iOS, use **Settings → Notifications → Veetbot**.
 The client checks existing authorization before asking, respects a denial

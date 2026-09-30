@@ -469,6 +469,7 @@ async def _assert_resolved_or_expired_approval_is_superseded_without_send() -> N
                     None,
                 )
 
+        clock.advance(timedelta(seconds=30))
         assert await _dispatcher(factory, clock, ids, transport).run_once() == 1
         async with factory() as uow:
             [notification] = await uow.notification_outbox.list(principal(), limit=10)
@@ -507,6 +508,7 @@ async def _assert_answered_question_or_run_no_longer_waiting_is_superseded() -> 
                 question_id=question_id,
             )
 
+        clock.advance(timedelta(seconds=30))
         assert await _dispatcher(factory, clock, ids, transport).run_once() == 1
         async with factory() as uow:
             [notification] = await uow.notification_outbox.list(principal(), limit=10)
@@ -602,3 +604,55 @@ async def test_crash_after_transport_accept_replays_with_same_collapse_key() -> 
         assert notification.attempts == 2
         [delivery] = await uow.notification_outbox.list_deliveries(notification.id)
         assert delivery.attempt == 2
+
+
+async def test_resolution_during_fanout_keeps_first_delivery_and_suppresses_remaining_devices() -> (
+    None
+):
+    clock, factory = await memory_uow_factory()
+    ids = SequenceIdFactory()
+    approval = approval_request()
+    async with factory() as uow:
+        await uow.approvals.create(approval)
+        await uow.devices.upsert(device(), principal())
+        await uow.devices.upsert(
+            device().model_copy(
+                update={
+                    "id": UUID(int=999),
+                    "client_device_id": "second-phone",
+                    "push_token": SecretStr("second-token"),
+                }
+            ),
+            principal(),
+        )
+        await NotificationProducer(clock=clock, ids=ids).for_run_transition(
+            uow,
+            run=run(status=RunStatus.WAITING_FOR_APPROVAL),
+            principal_id=principal().principal_id,
+            status=RunStatus.WAITING_FOR_APPROVAL,
+            approval_id=approval.id,
+            approval_expires_at=approval.expires_at,
+        )
+    from agent_core.domain.devices import PushTarget
+    from agent_core.domain.notifications import PushMessage
+
+    class ResolvingTransport:
+        calls = 0
+
+        async def deliver(self, target: PushTarget, message: PushMessage) -> PushOutcome:
+            self.calls += 1
+            async with factory() as uow:
+                await uow.approvals.resolve(
+                    approval.id, principal(), ApprovalResolutionType.DENY, None
+                )
+            return PushOutcome(outcome=DeliveryOutcome.DELIVERED)
+
+    transport = ResolvingTransport()
+    clock.advance(timedelta(seconds=30))
+    await _dispatcher(factory, clock, ids, transport).run_once()
+    assert transport.calls == 1
+    async with factory() as uow:
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+        outcomes = await uow.notification_outbox.list_deliveries(notification.id)
+    assert notification.status is NotificationStatus.SUPERSEDED
+    assert {row.outcome for row in outcomes} == {DeliveryOutcome.DELIVERED, DeliveryOutcome.SKIPPED}

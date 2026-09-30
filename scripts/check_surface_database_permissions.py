@@ -31,6 +31,7 @@ REQUIRED_TABLE_PRIVILEGES: Mapping[str, frozenset[str]] = {
     "export_consent": frozenset({"SELECT"}),
     "notification_deliveries": frozenset({"INSERT", "SELECT"}),
     "notification_outbox": frozenset({"SELECT", "UPDATE"}),
+    "notification_run_receipts": frozenset({"SELECT"}),
     "process_events": frozenset({"INSERT", "SELECT"}),
     "projection_watermarks": frozenset({"INSERT", "SELECT", "UPDATE"}),
     "runs": frozenset({"INSERT", "SELECT", "UPDATE"}),

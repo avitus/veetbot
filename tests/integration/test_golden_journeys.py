@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace as dataclasses_replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from datetime import time as civil_time
 from decimal import Decimal
 from pathlib import Path
@@ -943,7 +943,8 @@ async def test_a_schedule_made_in_chat_runs_while_away_and_its_result_reaches_th
     a durable worker runs it, and accounting records the outcome and enqueues
     `schedule_run_finished` in the same transaction. The separate production
     notification process delivers both alerts to the device registered over
-    HTTP: the approval alert while the run waits, the result once it finishes.
+    HTTP: the approval alert while the run waits, the result once it finishes,
+    each after the thirty-second attention grace period (ADR-0143).
     The pinned title may ride along (ADR-0091); the instruction and the
     scheduled reply may not.
     """
@@ -1018,6 +1019,10 @@ async def test_a_schedule_made_in_chat_runs_while_away_and_its_result_reaches_th
         chat_run_id = UUID(submitted.json()["run_id"])
 
         await _run_worker_on_wall_clock(composition, "golden-away-proposer")
+        assert await notifier.run_once() == 0
+        clock.advance(timedelta(seconds=29))
+        assert await notifier.run_once() == 0
+        clock.advance(timedelta(seconds=1))
         assert await notifier.run_once() == 1
         [approval] = (
             await client.get("/v1/approvals", params={"run_id": str(chat_run_id)})
@@ -1053,6 +1058,10 @@ async def test_a_schedule_made_in_chat_runs_while_away_and_its_result_reaches_th
         assert accounted.payload["run_id"] == occurrence["run_id"]
         assert accounted.payload["run_status"] == RunStatus.COMPLETED.value
 
+        assert await notifier.run_once() == 0
+        clock.advance(timedelta(seconds=29))
+        assert await notifier.run_once() == 0
+        clock.advance(timedelta(seconds=1))
         assert await notifier.run_once() == 1
         assert await notifier.run_once() == 0
         inbox = await client.get("/v1/notifications")

@@ -10,6 +10,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.notification_relevance import notification_obsolete
 from agent_core.domain.agents import Principal
 from agent_core.domain.devices import (
     Device,
@@ -30,8 +31,11 @@ from agent_core.domain.notifications import (
     NotificationCursor,
     NotificationKind,
     NotificationPayload,
+    NotificationSyncRequest,
+    NotificationSyncResult,
     device_test_key,
 )
+from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import (
     DeviceInvocationResultView,
     DeviceInvocationView,
@@ -380,8 +384,29 @@ class DeviceManagementService:
 
 
 class NotificationInboxService:
-    def __init__(self, *, uow_factory: UnitOfWorkFactory) -> None:
+    def __init__(self, *, uow_factory: UnitOfWorkFactory, clock: Clock) -> None:
         self._uow_factory = uow_factory
+        self._clock = clock
+
+    async def sync(
+        self, principal: Principal, request: NotificationSyncRequest
+    ) -> NotificationSyncResult:
+        require_scope(principal, "notification.write")
+        async with self._uow_factory() as uow:
+            run_ids = tuple(dict.fromkeys(request.seen_run_ids))
+            # Validate the whole batch before mutation, including in-memory adapters.
+            for run_id in run_ids:
+                run = await uow.runs.get(run_id, principal)
+                if run.status not in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
+                    raise ConflictError("only terminal run results can be acknowledged")
+            await uow.notification_outbox.mark_runs_seen(principal, run_ids, self._clock.now())
+            rows = await uow.notification_outbox.get_many(
+                principal, tuple(request.delivered_notification_ids)
+            )
+            obsolete = [
+                row.id for row in rows if await notification_obsolete(uow, row, self._clock.now())
+            ]
+        return NotificationSyncResult(obsolete_notification_ids=sorted(obsolete))
 
     async def list(
         self,

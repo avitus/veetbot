@@ -1049,3 +1049,13 @@ private struct DeviceMessageBody: Encodable {
         case receivedAt = "received_at"
     }
 }
+
+
+extension VeetbotAPIClient: NotificationSyncAPI {
+    public func syncNotifications(_ request: NotificationSyncRequest) async throws -> NotificationSyncResult {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/notifications/sync",
+            body: try JSONEncoder.server.encode(request), retryAttempts: 2
+        ))
+    }
+}

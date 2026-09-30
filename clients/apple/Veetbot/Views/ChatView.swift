@@ -45,6 +45,20 @@ public struct ChatView: View {
         self.state = model.runState
     }
 
+    private var notificationCovered: Bool {
+        var covered = artifactSelection != nil || textSelection != nil || showingPeople
+            || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
+        #if os(iOS)
+        covered = covered || showingPhotoPicker || model.pendingSmsInvocation != nil
+        #endif
+        return covered
+    }
+
+    private func updateNotificationVisibility() {
+        model.notificationTranscriptVisible = activeMode == .chat && !notificationCovered
+        if model.notificationTranscriptVisible { Task { await model.synchronizeNotifications() } }
+    }
+
     /// Renders the live conversation and composer while the active mode controls the window title.
     public var body: some View {
         VStack(spacing: 0) {
@@ -166,6 +180,10 @@ public struct ChatView: View {
             Divider()
             composer
         }
+        .onAppear { updateNotificationVisibility() }
+        .onDisappear { model.notificationTranscriptVisible = false }
+        .onChange(of: notificationCovered) { _ in updateNotificationVisibility() }
+        .onChange(of: activeMode) { _ in updateNotificationVisibility() }
         // While the conversation is on screen, its task permission is re-read
         // every 30 seconds; a revoke or sweep elsewhere reaches no run stream.
         .task(id: model.selectedSessionID) {
