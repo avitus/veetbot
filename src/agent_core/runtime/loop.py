@@ -97,6 +97,8 @@ class RunContext:
     max_compactions_per_step: int = 2
     # ADR-0119: the owner's chat effort, when this run's model accepts it.
     reasoning_effort: ReasoningEffort | None = None
+    # ADR-0144: a chat run asks for a reasoning summary its client can show.
+    reasoning_summary: bool = False
 
 
 class CheckpointContext(Protocol):
@@ -605,6 +607,8 @@ async def _invoke_model(
             attempt_request = attempt_request.model_copy(
                 update={"reasoning_effort": context.reasoning_effort}
             )
+        if context.reasoning_summary and not attempt_request.reasoning_summary:
+            attempt_request = attempt_request.model_copy(update={"reasoning_summary": True})
         step.attempt_count += 1
         attempt = ModelAttempt(
             attempt_id=context.ids.new_id(),

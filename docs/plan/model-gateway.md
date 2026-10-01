@@ -1618,6 +1618,26 @@ chat effort when the run's model accepts it, and memory formation sends
 exactly the effort its evidence was evaluated at. A pinned run re-resolves
 the same accepted levels, and effort is not part of the pin.
 
+### Reasoning summaries (ADR-0144)
+
+`ModelRequest.reasoning_summary`, false by default, asks for a displayable
+summary of the model's reasoning. The run loop sets it on the runs that
+receive the owner's chat effort. Typed tasks and memory formation never set
+it. The OpenAI Responses adapter sends `reasoning.summary: "auto"` when the
+flag is set and the resolved model has native reasoning, beside
+`reasoning.effort` when an effort is sent. The Anthropic Messages and
+chat-completions adapters ignore the flag.
+
+The summary arrives as `ReasoningDeltaEvent`s with `is_summary=True`, and the
+live stream carries them as transient `reasoning.delta` frames. Like all
+reasoning text, it is never persisted, and a replayed reasoning item keeps
+an empty `summary` array.
+
+OpenAI generates summaries only for verified organizations. It may reject
+the `reasoning.summary` parameter before any output. The adapter then
+repeats the request without it, as an internal retry, and stops asking for
+that model for the rest of the process.
+
 ## Conversation invariants the gateway enforces
 
 Section 10.4 specifies the turn shape and does not say what the gateway

@@ -150,6 +150,9 @@ project:
   # ADR-0143 records the owner's 2026-09-30 notification extension: a
   # thirty-second grace period, shared terminal-result receipts, foreground
   # suppression and server-authoritative cleanup of delivered native alerts.
+  # ADR-0144 (Accepted, 2026-10-01) records the owner-requested progress
+  # display: Chat runs ask OpenAI for reasoning summaries, and the Apple
+  # client shows the latest summary heading while the model reasons.
   authorized_milestones:
     - 0
     - 1

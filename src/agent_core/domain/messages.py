@@ -306,6 +306,8 @@ class ModelRequest(BaseModel):
     stream_idle_seconds: float = 60.0
     # None leaves the provider's own default in force.
     reasoning_effort: ReasoningEffort | None = None
+    # Ask for a displayable summary of the reasoning, streamed live and never stored.
+    reasoning_summary: bool = False
 
 
 class ModelCapabilities(BaseModel):

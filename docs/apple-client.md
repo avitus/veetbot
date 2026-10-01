@@ -208,7 +208,9 @@ transient deltas are best effort. It does not infer a gap from non-contiguous
 sequence values. Disconnects and overflow reconnect with `Last-Event-ID`,
 suspension keeps the logical stream alive, and only completed, failed, or
 cancelled run events close it. Raw reasoning text is discarded at the reducer
-boundary and represented by a compact activity indicator. A failed run renders
+boundary and represented by a compact activity indicator. A reasoning summary
+contributes only the heading of its latest part, which the indicator shows as
+"Thinking: <heading>" until the answer starts (ADR-0144). A failed run renders
 the API's public failure message inside the conversation together with its
 stable reason and available step and attempt numbers; the header status is not
 the only failure indication.

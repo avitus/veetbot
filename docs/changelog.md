@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-01 — Chats show what the assistant is thinking about
+
+- While the assistant reasons before it answers, the Apple app now shows the
+  step it is working on, for example "Thinking: Planning day trips", where
+  it used to show only "Working…". The step comes from the short reasoning
+  summary the model provider streams. It is shown live and never stored.
+  ADR-0144 records the change.
+
 ## 2026-09-29 — A denied approval no longer breaks the chat
 
 - After you denied an approval, the next message in that chat failed with an

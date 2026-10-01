@@ -151,6 +151,8 @@ class OpenAIResponsesProvider:
         self._api_key = api_key
         self._max_internal_attempts = max_internal_attempts
         self._attachment_resolver = attachment_resolver
+        # Models this account may not summarize for (ADR-0144).
+        self._summaries_refused: set[str] = set()
         if self._owns_client:
             if not api_key:
                 raise ValueError("OpenAI provider requires its resolved credential")
@@ -195,6 +197,8 @@ class OpenAIResponsesProvider:
                 detail="invalid neutral request history",
             )
             return
+        if resolved.model in self._summaries_refused:
+            payload = _without_summary(payload)
 
         for internal_attempt in range(1, self._max_internal_attempts + 1):
             emitted_count = 0
@@ -240,6 +244,22 @@ class OpenAIResponsesProvider:
                     and emitted_count == 0
                     and internal_attempt < self._max_internal_attempts
                 ):
+                    continue
+                if (
+                    failure.provider_parameter == "reasoning.summary"
+                    and "summary" in payload.get("reasoning", {})
+                    and emitted_count == 0
+                    and internal_attempt < self._max_internal_attempts
+                ):
+                    # OpenAI summarizes only for verified organizations. The
+                    # summary is a display nicety, so ask again without it.
+                    self._summaries_refused.add(resolved.model)
+                    logger.warning(
+                        "openai_reasoning_summary_refused model=%s code=%s",
+                        resolved.model,
+                        failure.provider_code,
+                    )
+                    payload = _without_summary(payload)
                     continue
                 logger.warning(
                     "openai_request_rejected status=%s code=%s parameter=%s",
@@ -410,8 +430,8 @@ class OpenAIResponsesProvider:
                         if key in item
                     }
                     # Responses requires this array when the reasoning item is
-                    # replayed as input. Summaries are not requested, so retain
-                    # the required empty field without persisting reasoning text.
+                    # replayed as input. A summary streams for display only and
+                    # is never persisted (ADR-0144), so the field stays empty.
                     opaque["summary"] = []
                     if response_id is not None:
                         opaque["response_id"] = response_id
@@ -635,16 +655,29 @@ class OpenAIResponsesProvider:
                     "schema": request.response_schema,
                 }
             }
-        if (
-            request.reasoning_effort is not None
-            and resolved.capabilities.reasoning is ReasoningSupport.NATIVE
-        ):
-            payload["reasoning"] = {"effort": request.reasoning_effort.value}
+        if resolved.capabilities.reasoning is ReasoningSupport.NATIVE:
+            reasoning: dict[str, str] = {}
+            if request.reasoning_effort is not None:
+                reasoning["effort"] = request.reasoning_effort.value
+            if request.reasoning_summary:
+                reasoning["summary"] = "auto"
+            if reasoning:
+                payload["reasoning"] = reasoning
         return payload
 
     async def close(self) -> None:
         if self._owns_client and self._client is not None:
             await cast(Any, self._client).close()
+
+
+def _without_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    reasoning = {
+        key: value for key, value in payload.get("reasoning", {}).items() if key != "summary"
+    }
+    stripped = {key: value for key, value in payload.items() if key != "reasoning"}
+    if reasoning:
+        stripped["reasoning"] = reasoning
+    return stripped
 
 
 def _optional_string(value: object) -> str | None:
