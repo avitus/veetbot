@@ -614,7 +614,7 @@ private struct EmailThreadScreen: View {
         }.padding(18).emailCard()
     }
 
-    /// Renders source messages as selectable plain text with recipient and attachment metadata.
+    /// Presents an inert reading view alongside the unchanged retained source.
     private func conversation(_ thread: EmailThreadView) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Conversation").appFont(.headline)
@@ -647,9 +647,7 @@ private struct EmailThreadScreen: View {
                     }
                     .appFont(.caption).foregroundColor(.secondary)
                     Divider()
-                    // Plain text never loads external HTML, remote images or tracking pixels.
-                    Text(message.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    EmailReadingView(message: message)
                     if !message.complete {
                         Label(
                             "This message is incomplete. Refresh before relying on its full contents.",
@@ -882,6 +880,51 @@ private struct EmailThreadScreen: View {
     private func accountDescription(_ id: String) -> String {
         guard let account = model.accounts.first(where: { $0.id == id }) else { return id }
         return account.emailAddress.map { "\(account.label) · \($0)" } ?? account.label
+    }
+}
+
+/// Native text only: links open on a gesture; remote images and HTML never load.
+private struct EmailReadingView: View {
+    let message: EmailMessageView
+    @State private var showingOriginal = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let reader = message.readerBody, !reader.isEmpty {
+                HStack {
+                    Text(showingOriginal ? "Original message" : "Reading view")
+                        .appFont(.caption).foregroundColor(.secondary)
+                    Spacer()
+                    Button(showingOriginal ? "Reading view" : "Show original") {
+                        showingOriginal.toggle()
+                    }
+                    .buttonStyle(.plain).appFont(.caption)
+                    .accessibilityIdentifier("email.reader.original")
+                }
+                if showingOriginal {
+                    original
+                } else {
+                    MarkdownContentView(text: reader)
+                        .appFont(.body).lineSpacing(5)
+                        .environment(\.openURL, OpenURLAction { url in
+                            guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+                                  url.host != nil else { return .discarded }
+                            return .systemAction
+                        })
+                        .accessibilityIdentifier("email.reader.content")
+                }
+            } else {
+                original
+            }
+        }
+        .frame(maxWidth: 720, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .onChange(of: message.id) { _ in showingOriginal = false }
+    }
+
+    private var original: some View {
+        Text(message.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

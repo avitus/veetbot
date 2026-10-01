@@ -332,6 +332,28 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(action.label, "Archive in Gmail")
     }
 
+    /// The cleaned reading view keeps an accessible, reversible route to source text.
+    func testEmailReadingViewCanRevealOriginal() {
+        app.launchArguments.append("--ui-testing-email-reader")
+        app.launch()
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        activate(mode)
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        activate(row)
+        let toggle = app.buttons["email.reader.original"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Research and discovery"].exists)
+        attachEmailScreenshot("Clean email reading view")
+        activate(toggle)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Unsubscribe")).firstMatch.exists)
+        attachEmailScreenshot("Original email preserved")
+        activate(toggle)
+        XCTAssertTrue(app.staticTexts["Research and discovery"].exists)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Unsubscribe")).firstMatch.exists)
+    }
+
     /// Verifies the reading and reply flow with normal platform appearance.
     func testEmailReadingKeepsFeedbackOptionalAndReplyReachable() {
         app.launch()

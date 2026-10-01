@@ -87,7 +87,7 @@ not find it here should find the reason here.
    Milestone 26 excludes automatic mailbox actions. Nothing here unsubscribes,
    reports, or archives without an owner act for those exact senders.
 4. **Background or scheduled cleanup.** The census advances only inside
-   foreground refresh slices (email-experience.md:134-139). There is no
+   foreground refresh slices (email-experience.md:150-155). There is no
    monitor, digest, or notification about subscriptions.
 5. **Gmail filters and blocked senders.** Both need the
    `gmail.settings.basic` OAuth scope and a new consent ceremony. No new
@@ -111,7 +111,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:739-755).
+  (email-experience.md:755-771).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -128,7 +128,7 @@ not find it here should find the reason here.
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
   exclusion of Spam and Trash, apply unchanged
-  (email-experience.md:235-249).
+  (email-experience.md:251-265).
 
 Nothing in the platform dials an arbitrary public host today. `web.fetch`
 hands its URL to a hosted provider, which owns resolution and redirects
@@ -273,7 +273,7 @@ without any of them carrying it.
 ### How records form
 
 The refresh task already pages thread summaries for each account, up to 100
-per slice (email-experience.md:259-264). The census reads the `bulk` block on
+per slice (email-experience.md:275-280). The census reads the `bulk` block on
 the summaries refresh was already reading. It issues no query of its own and
 adds no page. A summary whose block says anything but `none`, or that carries
 a `List-Id`, creates or updates its subscription; owner-sent mail, Spam, and

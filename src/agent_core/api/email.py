@@ -1,12 +1,13 @@
 """Flag-mounted Email API. Exact authorization and private cache semantics."""
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_core.application.email_reader import reading_body
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.services import EmailService
 from agent_core.domain.agents import Principal
@@ -103,7 +104,15 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         thread_id: UUID,
         authenticated: Annotated[Principal, secured("email.read")],
     ) -> dict[str, object]:
-        return await service.thread(authenticated, thread_id)
+        result = await service.thread(authenticated, thread_id)
+        # HTTP presentation only, after authorization and retention, outside the
+        # owner lock. Chat, drafting and learning keep the original service data.
+        messages = cast(list[dict[str, Any]], result["messages"])
+        for message in messages:
+            message["reader_body"] = reading_body(
+                message["body"], subject=message["subject"] or str(result["subject"])
+            )
+        return result
 
     @router.post("/v1/email/feedback", openapi_extra={"required_scope": "email.write"})
     async def feedback(

@@ -1067,9 +1067,20 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let status = reads < emailArchiveCompletionRead ? "pending" : failed ? "failed" : "completed"
             archiveOperation = "{\"operation_id\":\"\(emailThreadID)\",\"run_id\":\"\(emailRunID)\",\"target_archived\":\(target),\"status\":\"\(status)\",\"error\":null}"
         } else { archiveOperation = "null" }
+        let readerFields: String
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-reader") {
+            let original = "Research and discovery\n<https://example.com/article>\n\nBy Jane Writer\n\nA careful reading starts with clear evidence.\n\nUnsubscribe\n<https://example.com/leave>"
+            let reader = "## Research and discovery\n\nBy Jane Writer\n\nA careful reading starts with [clear evidence](https://example.com/article)."
+            let sourceJSON = String(data: try! JSONEncoder().encode(original), encoding: .utf8)!
+            let readerJSON = String(data: try! JSONEncoder().encode(reader), encoding: .utf8)!
+            readerFields = "\"body\":\(sourceJSON),\"reader_body\":\(readerJSON),"
+        } else {
+            readerFields = "\"body\":\"Please review the agenda before Friday.\","
+        }
         return """
         {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","topics":["Board planning","Hiring"],"senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":"\(emailDraftID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(emailDraftJSON)}
         """.replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"dismissed_revision\":\(dismissedRevision),\"in_inbox\":\(!archived),\"archive_operation\":\(archiveOperation),\"revision\":1,\"summary\"")
+            .replacingOccurrences(of: "\"body\":\"Please review the agenda before Friday.\",", with: readerFields)
     }
     private static var emailApprovalJSON: String {
         let (body, sent) = emailLock.withLock { (emailBody, emailStatus == "sent") }
