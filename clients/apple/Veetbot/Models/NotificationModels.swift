@@ -365,16 +365,27 @@ public enum NotificationDeepLinkReducer {
 public struct NotificationSyncRequest: Encodable, Sendable {
     public let deliveredNotificationIDs: [UUID]
     public let seenRunIDs: [UUID]
+    public var queryRunIDs: [UUID] = []
     enum CodingKeys: String, CodingKey {
         case deliveredNotificationIDs = "delivered_notification_ids"
         case seenRunIDs = "seen_run_ids"
+        case queryRunIDs = "query_run_ids"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deliveredNotificationIDs, forKey: .deliveredNotificationIDs)
+        try container.encode(seenRunIDs, forKey: .seenRunIDs)
+        if !queryRunIDs.isEmpty { try container.encode(queryRunIDs, forKey: .queryRunIDs) }
     }
 }
 
 public struct NotificationSyncResult: Decodable, Sendable {
     public let obsoleteNotificationIDs: [UUID]
+    public var unreadRunIDs: [UUID]? = nil
     enum CodingKeys: String, CodingKey {
         case obsoleteNotificationIDs = "obsolete_notification_ids"
+        case unreadRunIDs = "unread_run_ids"
     }
 }
 

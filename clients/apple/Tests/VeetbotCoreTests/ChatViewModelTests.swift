@@ -2124,9 +2124,9 @@ import UserNotifications
 
     @Test
     func testNotificationAttentionRequiresVisibleLoadedTranscriptAndAcknowledgesOnlyItsResult() async throws {
-        let sessionID = UUID(), runID = UUID()
+        let sessionID = UUID(), runID = UUID(), scheduleID = UUID()
         let sessionBody = """
-        {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Result","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
+        {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Result","metadata":{"schedule_id":"\(scheduleID.uuidString)"},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
         """
         let recorder = WebsiteLoginRequestRecorder()
         let model = try configuredModel { request in
@@ -2146,16 +2146,27 @@ import UserNotifications
                 return try response(for: request, statusCode: 200, body: "id: 3\nevent: run.completed\ndata: {\"run_id\":\"\(runID.uuidString)\"}\n\n", headers: ["Content-Type": "text/event-stream"])
             case "/v1/notifications/sync":
                 recorder.record(request)
-                return try response(for: request, statusCode: 200, body: #"{"obsolete_notification_ids":[]}"#)
+                let seen = recorder.matching(method: "POST", path: "/v1/notifications/sync").contains {
+                    guard let body = $0.body,
+                        let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return false }
+                    return (json["seen_run_ids"] as? [String])?.contains(runID.uuidString) == true
+                }
+                let unread = seen ? "[]" : "[\"\(runID.uuidString)\"]"
+                return try response(for: request, statusCode: 200, body: "{\"obsolete_notification_ids\":[],\"unread_run_ids\":\(unread)}")
             default:
                 return try response(for: request, statusCode: 404, body: "{}")
             }
         }
         model.notificationAttention = NotificationAttentionCoordinator(store: AttentionStore(values: []))
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        model.notificationSyncActive = true
+        await model.synchronizeNotifications()
+        let report = try #require(model.history.first)
+        #expect(model.hasUnreadReport(report))
         model.notificationAttentionEnabled = true
         model.notificationTranscriptVisible = true
         #expect(model.visibleNotificationSessionID == nil)
+        model.notificationSyncActive = false
         await model.selectSession(try #require(model.history.first))
         #expect(model.visibleNotificationSessionID == sessionID)
         model.notificationAttentionEnabled = false
@@ -2178,13 +2189,21 @@ import UserNotifications
         // Let replay reach its terminal event, then exercise the real HTTP wire.
         for _ in 0..<100 {
             await model.synchronizeNotifications()
-            if recorder.matching(method: "POST", path: "/v1/notifications/sync").contains(where: {
-                String(data: $0.body ?? Data(), encoding: .utf8)?.contains(runID.uuidString) == true
-            }) { break }
+            let acknowledged = recorder.matching(method: "POST", path: "/v1/notifications/sync").contains {
+                guard let body = $0.body,
+                    let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return false }
+                return (json["seen_run_ids"] as? [String])?.contains(runID.uuidString) == true
+            }
+            if acknowledged { break }
             await Task.yield()
         }
         let requests = recorder.matching(method: "POST", path: "/v1/notifications/sync")
-        #expect(requests.contains { String(data: $0.body ?? Data(), encoding: .utf8)?.contains(runID.uuidString) == true })
+        #expect(!model.hasUnreadReport(report))
+        #expect(requests.contains {
+            guard let body = $0.body,
+                let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return false }
+            return (json["seen_run_ids"] as? [String])?.contains(runID.uuidString) == true
+        })
         #expect(requests.allSatisfy { $0.authorization == "Bearer test-token" })
         model.newSession()
         #expect(model.visibleNotificationSessionID == nil)

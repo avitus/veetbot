@@ -105,6 +105,7 @@ struct FolderHeaderRow: View {
 struct ScheduleGroupHeaderRow: View {
     let group: ScheduledConversationGroup
     let isExpanded: Bool
+    var hasUnreadReport = false
     let onToggle: () -> Void
 
     var body: some View {
@@ -112,6 +113,7 @@ struct ScheduleGroupHeaderRow: View {
             HStack(spacing: 8) {
                 Label(group.title, systemImage: "calendar.badge.clock")
                     .lineLimit(1)
+                if hasUnreadReport { NewReportIndicator() }
                 Spacer()
                 Text("\(group.entries.count)")
                     .appFont(.caption)
@@ -124,7 +126,7 @@ struct ScheduleGroupHeaderRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(group.title), \(group.entries.count) scheduled conversations")
+        .accessibilityLabel("\(group.title), \(group.entries.count) scheduled conversations\(hasUnreadReport ? ", New report" : "")")
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint(isExpanded ? "Collapses the schedule" : "Expands the schedule")
         .accessibilityIdentifier("sidebar.schedule.\(group.scheduleID.uuidString)")
@@ -362,5 +364,15 @@ struct FolderNameSheet: View {
                 }
             }
         }
+    }
+}
+
+/// Quiet shared-state cue; VoiceOver does not have to infer meaning from color.
+struct NewReportIndicator: View {
+    var body: some View {
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: 6, height: 6)
+            .accessibilityLabel("New report")
     }
 }

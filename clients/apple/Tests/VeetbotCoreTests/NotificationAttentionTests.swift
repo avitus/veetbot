@@ -3,6 +3,51 @@ import Testing
 @testable import VeetbotCore
 
 @Suite @MainActor struct NotificationAttentionTests {
+    @Test func sharesReadStateInBoundedBatchesAndIgnoresUnrequestedIDs() async throws {
+        let ids = (0..<101).map { _ in UUID() }
+        let unrelated = UUID()
+        let api = AttentionAPI(obsolete: [], unread: ids + [unrelated])
+        let coordinator = NotificationAttentionCoordinator(store: AttentionStore(values: []))
+        var state: Set<UUID> = []
+        await coordinator.synchronize(using: api, seenRunIDs: [], queryRunIDs: ids,
+            onReadState: { queried, unread in state.subtract(queried); state.formUnion(unread) }, isCurrent: { true })
+        #expect(state == Set(ids))
+        #expect(await api.requests.map { $0.queryRunIDs.count } == [100, 1])
+        // Another device has read the first report. The next authoritative
+        // response clears just that report, without clearing newer reports.
+        let afterRead = AttentionAPI(obsolete: [], unread: Array(ids.dropFirst()))
+        await coordinator.synchronize(using: afterRead, seenRunIDs: [], queryRunIDs: ids,
+            onReadState: { queried, unread in state.subtract(queried); state.formUnion(unread) }, isCurrent: { true })
+        #expect(state == Set(ids.dropFirst()))
+        let failed = AttentionAPI(obsolete: [], fails: true)
+        await coordinator.synchronize(using: failed, seenRunIDs: [], queryRunIDs: ids,
+            onReadState: { _, _ in state = [] }, isCurrent: { true })
+        #expect(state == Set(ids.dropFirst()))
+        let context = AttentionContext()
+        let changed = AttentionAPI(obsolete: [], unread: [], afterResponse: { await MainActor.run { context.current = false } })
+        await coordinator.synchronize(using: changed, seenRunIDs: [], queryRunIDs: ids,
+            onReadState: { _, _ in state = [] }, isCurrent: { context.current })
+        #expect(state == Set(ids.dropFirst()))
+    }
+
+    @Test func olderSyncServerStillReceivesAcknowledgements() async throws {
+        let run = UUID(), notification = UUID()
+        let store = AttentionStore(values: [.init(requestIdentifier: "old-alert", notificationID: notification)])
+        let api = AttentionAPI(obsolete: [notification], rejectsQueries: true)
+        var published = false
+        await NotificationAttentionCoordinator(store: store).synchronize(
+            using: api, seenRunIDs: [run], queryRunIDs: [run],
+            onReadState: { _, _ in published = true }, isCurrent: { true })
+        #expect(!published)
+        #expect(store.removed == ["old-alert"])
+        let requests = await api.requests
+        #expect(requests.count == 2)
+        #expect(requests.last?.seenRunIDs == [run])
+        #expect(requests.last?.queryRunIDs == [])
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(try #require(requests.last))) as? [String: Any]
+        #expect(body?["query_run_ids"] == nil)
+    }
+
     @Test func suppressOnlyTheVisibleConversation() throws {
         let sessionID = UUID(), runID = UUID(), notificationID = UUID()
         let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
@@ -77,14 +122,24 @@ import Testing
 private actor AttentionAPI: NotificationSyncAPI {
     let obsolete: [UUID]
     let fails: Bool
+    let unread: [UUID]?
+    let rejectsQueries: Bool
     let afterResponse: (@Sendable () async -> Void)?
     var requests: [NotificationSyncRequest] = []
-    init(obsolete: [UUID], fails: Bool = false, afterResponse: (@Sendable () async -> Void)? = nil) { self.obsolete = obsolete; self.fails = fails; self.afterResponse = afterResponse }
+    init(obsolete: [UUID], fails: Bool = false, unread: [UUID]? = nil, rejectsQueries: Bool = false, afterResponse: (@Sendable () async -> Void)? = nil) {
+        self.obsolete = obsolete; self.fails = fails; self.unread = unread
+        self.rejectsQueries = rejectsQueries; self.afterResponse = afterResponse
+    }
     func syncNotifications(_ request: NotificationSyncRequest) async throws -> NotificationSyncResult {
         requests.append(request)
         if fails { throw URLError(.notConnectedToInternet) }
+        if rejectsQueries && !request.queryRunIDs.isEmpty {
+            var error = APIError(code: .unknown("malformed_request"), message: "Unknown field", requestID: "old-server")
+            error.statusCode = 400
+            throw HTTPTransportError.api(error)
+        }
         await afterResponse?()
-        return NotificationSyncResult(obsoleteNotificationIDs: obsolete)
+        return NotificationSyncResult(obsoleteNotificationIDs: obsolete, unreadRunIDs: unread)
     }
 }
 

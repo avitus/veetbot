@@ -1034,3 +1034,29 @@ request identifiers, removing only those delivered entries. Connection
 replacement invalidates in-flight cleanup and acknowledgements. An older
 server or a failed request leaves alerts untouched. Sleeping clients reconcile
 when they next become active; remote recall is not guaranteed.
+
+### Scheduled report indicators
+
+The owner's 2026-10-01 amendment to ADR-0143 reuses these receipts for a quiet
+new-report dot. Sync additionally accepts `query_run_ids` (at most 100 UUIDs)
+and returns `unread_run_ids`: only requested, owned `COMPLETED` runs with no
+receipt, evaluated after any acknowledgements in the same request. Queries
+never acknowledge a result; unknown and foreign IDs are omitted identically.
+No notification need have been enqueued or delivered for a report to be unread.
+
+Apple clients query the latest runs of scheduled conversations in their history,
+in bounded batches, and refresh the session index during the active ten-second
+poll so new occurrences appear. A six-point accent dot marks an unread scheduled
+row and any group containing one, including a collapsed group. VoiceOver names
+it “New report.” Expanding a group does not acknowledge its reports. Only the
+existing visible, successfully loaded terminal-transcript path does that.
+A new result has its own run ID and therefore its own receipt; reading an older
+report cannot clear it. Running and failed attempts show no new-report dot.
+
+The indicator is a presentation cache of server state, cleared on connection
+replacement and logout. Failed requests retain the last confirmed state;
+late responses from an old connection or visibility context cannot change it.
+An older sync server that rejects the query field is retried without it so
+existing acknowledgement and alert cleanup still work; a response without the
+new field does not invent unread state. Active devices clear read dots on their
+next sync, normally within ten seconds; sleeping devices do so on foregrounding.
