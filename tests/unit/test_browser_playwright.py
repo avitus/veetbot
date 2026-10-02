@@ -41,6 +41,7 @@ from agent_core.domain.browser import (
     BrowserPageEvidence,
     BrowserProviderError,
     BrowserTargetFacts,
+    BrowserVerificationStage,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
 from tests.real_browser_support import RealBrowserRuntime, local_https_site, require_real_browser
@@ -1277,6 +1278,74 @@ async def test_verification_cancellation_removes_its_request_listeners() -> None
     assert not page.handlers["requestfinished"]
     assert not page.handlers["requestfailed"]
     assert not page.handlers["response"]
+
+
+async def test_page_evidence_reports_each_stage_as_it_begins() -> None:
+    """ADR-0128 amendment: a load says which stage it is in, and nothing about the page."""
+
+    learn = "https://www.duolingo.com/learn"
+    members = FakeEvidencePage()
+    signed_out = FakeEvidencePage(lands_on="https://www.duolingo.com/log-in?next=/learn")
+    signed_out.password_visible = True
+    refused = FakeEvidencePage(refused_hop="https://accounts.example.net/login")
+    stayed: list[BrowserVerificationStage] = []
+    challenged: list[BrowserVerificationStage] = []
+    left: list[BrowserVerificationStage] = []
+
+    await evidence_runtime(members).load_page_evidence(learn, on_stage=stayed.append)
+    await evidence_runtime(signed_out).load_page_evidence(learn, on_stage=challenged.append)
+    await evidence_runtime(refused).load_page_evidence(learn, on_stage=left.append)
+
+    # Only a page that may be signed in waits for its application to settle.
+    assert stayed == [
+        BrowserVerificationStage.NAVIGATE,
+        BrowserVerificationStage.IDLE,
+        BrowserVerificationStage.INSPECT,
+        BrowserVerificationStage.SETTLE,
+        BrowserVerificationStage.REINSPECT,
+    ]
+    assert challenged == [
+        BrowserVerificationStage.NAVIGATE,
+        BrowserVerificationStage.IDLE,
+        BrowserVerificationStage.INSPECT,
+    ]
+    assert left == [BrowserVerificationStage.NAVIGATE]
+
+
+async def test_a_load_cancelled_while_its_application_settles_last_reported_settle() -> None:
+    """The service's deadline cancels a load; its last stage is where the time went."""
+
+    class PendingEvidencePage(FakeEvidencePage):
+        async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+            await super().goto(url, wait_until=wait_until, timeout=timeout)
+            request = FakeNavigationRequest(url, resource_type="fetch")
+            for handler in self.handlers["request"]:
+                handler(request)
+
+    stages: list[BrowserVerificationStage] = []
+    checking = asyncio.create_task(
+        evidence_runtime(PendingEvidencePage()).load_page_evidence(
+            "https://www.duolingo.com/learn", on_stage=stages.append
+        )
+    )
+    for _ in range(200):
+        if BrowserVerificationStage.SETTLE in stages or checking.done():
+            break
+        await asyncio.sleep(0.005)
+    # Longer than the 500 ms of quiet a settled page needs: the request holds it.
+    await asyncio.sleep(0.6)
+    still_checking = not checking.done()
+    checking.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await checking
+
+    assert still_checking
+    assert stages == [
+        BrowserVerificationStage.NAVIGATE,
+        BrowserVerificationStage.IDLE,
+        BrowserVerificationStage.INSPECT,
+        BrowserVerificationStage.SETTLE,
+    ]
 
 
 async def test_page_evidence_normalizes_other_load_failures() -> None:

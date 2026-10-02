@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -418,10 +419,11 @@ async def test_a_pending_image_does_not_prevent_the_site_from_verifying_the_sess
 
 @pytest.mark.parametrize("outcome", ["ready", "challenge", "redirect", "timeout"])
 async def test_verification_waits_for_the_sites_delayed_session_decision(
-    tmp_path: Path, outcome: str
+    tmp_path: Path, outcome: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A rendered application shell is not yet the site's authentication decision."""
     require_real_browser()
+    caplog.set_level(logging.INFO, logger="agent_core.browser_control_plane.sessions")
     checking_session = asyncio.Event()
     answer_session = asyncio.Event()
     session_answered = asyncio.Event()
@@ -518,6 +520,19 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
             assert response.status_code == 409, response.text
             assert response.json()["error"]["code"] == "tool.browser.provider_unavailable"
             assert status.status is BrowserAuthenticationStatus.CANCELLED
+            # The service says which load ran out the clock and where, and
+            # nothing of the page or the session (ADR-0128 amendment).
+            unfinished = [
+                record
+                for record in caplog.records
+                if record.name == "agent_core.browser_control_plane.sessions"
+            ]
+            assert [record.msg for record in unfinished] == [
+                "device verification did not finish (%s) after %.1f s"
+            ]
+            assert unfinished[0].args == ("with_session=settle", pytest.approx(8, abs=2))
+            assert members.token not in repr(vars(unfinished[0]))
+            assert "site.test" not in repr(vars(unfinished[0]))
             # Let the site's cancelled request finish rotating its cookie
             # before the owner signs in again and supplies a fresh session.
             async with asyncio.timeout(5):

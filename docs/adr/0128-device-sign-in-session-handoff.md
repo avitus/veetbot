@@ -11,6 +11,8 @@
   and ADR-0058 each gain an `Amended by` header line naming this ADR.
 - Amended by: ADR-0145 (2026-10-01), which makes the two verification browsers
   of decision 6 headed
+- Amended: 2026-10-06, below, adding one diagnostic to decision 7 for a
+  verification that cannot finish
 - Detailed design: `docs/plan/browser-automation.md` (device sign-in ceremony),
   `docs/plan/http-api-and-streaming.md` (browser profiles, authentication, and
   grants)
@@ -197,6 +199,113 @@ the owner's device to the isolated service.
     commands. Remote sign-in is unaffected. No orchestration flag is added:
     device mode is reachable only through an authenticated
     `browser.profile.write` begin, and older clients never ask for it.
+
+## Amendment, 2026-10-06: an unfinished verification says where it stopped
+
+Status: Accepted by the owner on 2026-10-06. The owner asked for this
+diagnostic on 2026-10-01 and set its limits.
+
+On 2026-10-01 two x.com handoffs ended `409 tool.browser.provider_unavailable`
+thirty seconds after they began (ADR-0145, Evidence). The service had logged
+nothing. The handoff route answers that failure with its fixed body and writes
+no record, and decision 6's verification gives one code to a deadline, a failed
+load, a state over its size bound, and a browser crash. Nobody could tell which
+of the two loads ran out the time, or whether it was the browser starting, the
+page loading, the network wait, the wait for the application's requests, or
+reading the state. ADR-0145 records that the stall was not reproduced without
+the owner's session and is unexplained.
+
+Decision 7 says that nothing from the payload reaches "a log, error, event,
+metric or diagnostic", and the detailed design says that no request URL or
+content becomes a diagnostic. Both rules forbid content. Neither forbids a
+diagnostic that holds none, but the handoff path has written no diagnostic at
+all, and the record below is derived from how the website behaved with the
+handed-off session. So it is decided here and not added under a reading of the
+old wording.
+
+1. **One record for a verification that cannot finish.** When a verification
+   has started its two loads and ends `tool.browser.provider_unavailable`, the
+   service writes one warning record to its log. The message is always
+   `device verification did not finish`.
+2. **Its values come from a closed vocabulary.** The record names the load
+   that stopped the verification, `with_session` or `without_session`, and the
+   stage that load was in: `start`, `navigate`, `idle`, `inspect`, `settle`,
+   `reinspect` or `capture`. A load that failed is named alone. Otherwise every
+   load the deadline interrupted is named. When both pages had loaded,
+   `with_session` is named at `capture`. The record also gives the seconds
+   since the loads were started, to one decimal place.
+3. **It holds nothing else.** No ceremony, profile, tenant or principal
+   identifier. No URL, origin, path or page content. No cookie, storage value
+   or capability. No exception class or text, and no count or size. The
+   browser runtime reports each stage as it begins, and the service keeps only
+   a value from the vocabulary. Any other value fails that load and is not
+   recorded.
+4. **Decision 7 is otherwise unchanged.** Nothing from the payload is logged.
+   The log configuration still replaces exception detail on every logger.
+   Responses still carry fixed codes only, and the `409` body is the same. No
+   event or metric is added, and the client is not changed. A verification
+   that ends `ready` or with a `422` code writes no record.
+
+What the record discloses: a load reaches `settle` only when its page stayed on
+the confirmed path and showed no sign-in challenge. So `with_session=settle`
+says that the website appeared to accept the session. That is one fact about
+the session's effect, and less than the `200` and `422` answers already say.
+The record goes to the service container's log on the service host, which only
+the operator reads, and that host already holds the sealed profiles and their
+key.
+
+Consequences of the amendment:
+
+- The next handoff that ends `409` can be attributed to a load and a stage
+  from the service log alone. This observes the unexplained stall. It does not
+  fix it.
+- A handoff refused before its loads start still writes no record. That covers
+  a revoked profile, a filtered state over the profile material bound, and a
+  container with no room for two more browsers (ADR-0145).
+- The runtime's `load_page_evidence` takes a stage observer. The stage must be
+  tracked as the load progresses because the deadline reaches the load as a
+  cancellation, which cannot say where it landed.
+
+Alternatives rejected for the amendment:
+
+- **Log the exception's class, as the service's other failure records do.**
+  The set of class names is open, since it follows Playwright and the standard
+  library. The elapsed time already tells a deadline from a failure.
+- **Log in the handoff route.** The route does not know the load or the stage.
+  It would need them carried on the exception, which decision 7 keeps free of
+  detail.
+- **Add the ceremony or profile identifier for correlation.** The proxy's
+  access log already records the `409` and its time, which is enough to match
+  one record to one handoff.
+- **Name the pending request or the page.** That is the content decision 7
+  forbids.
+- **Return the stage to the client, or record it as an event or a metric.**
+  The response stays fixed, and no consumer needs it.
+
+Validation of the amendment, all red first:
+
+- `tests/contract/test_hosted_profile_session_service_contract.py`: a
+  verification that cannot finish writes exactly one record whose values are
+  the expected loads and stages and a number. The cases are a signed-in page
+  that never settles, a signed-out load that hangs, both loads hanging, a
+  browser that never starts, browsers that fail to start, a load that fails
+  while the other still runs, a state that cannot be captured, and a deadline
+  that falls between the loads and the capture. The record holds no session
+  value, capability, identifier, host, path or exception text, and it prints
+  as one line through the service's own formatter and exception filter. A
+  runtime that reports a stage outside the vocabulary cannot put it in the
+  record. A verification that reaches a verdict writes no record.
+- `tests/unit/test_browser_playwright.py`: the Playwright runtime reports each
+  stage as it begins, and a load cancelled while its application's requests
+  are pending last reported `settle`.
+- `tests/unit/test_hosted_browser_runtime.py`: the hosted runtime passes the
+  observer to its browser.
+- `tests/contract/test_profile_service_http_contract.py`: over HTTP the failed
+  verification writes the record, the `409` body is unchanged, and no sentinel
+  from the payload reaches any record.
+- `tests/unit/test_device_handoff_real_chromium.py`: in real Chromium, a
+  signed-in page whose session check never answers ends `409` and the record
+  reads `with_session=settle`.
 
 ## Consequences
 

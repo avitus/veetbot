@@ -52,7 +52,9 @@ from agent_core.domain.browser import (
     BrowserPageEvidence,
     BrowserProviderError,
     BrowserTargetFacts,
+    BrowserVerificationStage,
     browser_origin,
+    ignore_verification_stage,
     normalize_browser_origin,
 )
 from agent_core.domain.browser_classification import (
@@ -600,7 +602,12 @@ class PythonPlaywrightRuntime:
             return None
         return self._facts
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+    ) -> BrowserPageEvidence:
         """Load one page and report where it landed and whether it asks to sign in.
 
         ADR-0128 verifies a device handoff by loading the page the owner
@@ -608,10 +615,15 @@ class PythonPlaywrightRuntime:
         refuses is evidence (the page left the allowed origins), not a failure;
         any other load failure is ``provider_unavailable``. Nothing from the
         page or Playwright's message leaves this method but the evidence.
+
+        ``on_stage`` hears each stage as it begins. The service's deadline
+        arrives here as a cancellation, which cannot say where it landed, so
+        the stage reported last is where an unfinished load stopped.
         """
         page = self._current_page()
         self._disallowed_navigation = False
         with _verification_requests(page) as wait_for_application:
+            on_stage(BrowserVerificationStage.NAVIGATE)
             try:
                 # A full "load" also waits for passive images and subframes.
                 # Those must not spend the whole verification budget, but the
@@ -626,9 +638,11 @@ class PythonPlaywrightRuntime:
                     "tool.browser.provider_unavailable",
                     retryable=True,
                 ) from exc
+            on_stage(BrowserVerificationStage.IDLE)
             with suppress(PlaywrightError):
                 await page.wait_for_load_state("networkidle", timeout=5_000)
             try:
+                on_stage(BrowserVerificationStage.INSPECT)
                 challenge_visible = await self._sign_in_challenge_visible(page)
                 confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
                 current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
@@ -644,7 +658,9 @@ class PythonPlaywrightRuntime:
                     # evidence. Background work on that page must not hold
                     # the signed-out control open. A possible positive result
                     # must still wait for its application's session decision.
+                    on_stage(BrowserVerificationStage.SETTLE)
                     await wait_for_application()
+                    on_stage(BrowserVerificationStage.REINSPECT)
                     challenge_visible = await self._sign_in_challenge_visible(page)
             except (PlaywrightError, TimeoutError) as exc:
                 raise BrowserProviderError(

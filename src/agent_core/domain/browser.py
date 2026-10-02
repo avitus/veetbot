@@ -165,6 +165,23 @@ class BrowserPageEvidence(BaseModel):
     challenge_visible: bool
 
 
+class BrowserVerificationStage(StrEnum):
+    """What one verification load is doing; all a diagnostic may say of it (ADR-0128)."""
+
+    START = "start"
+    NAVIGATE = "navigate"
+    IDLE = "idle"
+    INSPECT = "inspect"
+    SETTLE = "settle"
+    REINSPECT = "reinspect"
+    CAPTURE = "capture"
+
+
+def ignore_verification_stage(stage: BrowserVerificationStage) -> None:
+    """The stage observer of a caller that keeps no verification diagnostic."""
+    del stage
+
+
 class BrowserAuthenticationStatus(StrEnum):
     AUTHENTICATION_REQUIRED = "authentication_required"
     NEEDS_USER = "needs_user"

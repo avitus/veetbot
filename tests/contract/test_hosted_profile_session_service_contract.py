@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import re
+import time
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -15,6 +21,10 @@ import pytest
 
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
 from agent_core.browser_control_plane.handoff import DeviceSessionHandoff
+from agent_core.browser_control_plane.log_redaction import (
+    ExceptionDetailFilter,
+    profile_service_log_config,
+)
 from agent_core.browser_control_plane.models import (
     ProfileMaterialIdentity,
     ProfileMaterialMetadata,
@@ -43,6 +53,8 @@ from agent_core.domain.browser import (
     BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserVerificationStage,
+    ignore_verification_stage,
 )
 from agent_core.domain.errors import ConflictError
 from tests.contract.support import NOW, principal
@@ -69,6 +81,10 @@ class HandoffScenario:
     # The signed-out browser's start waits on this, if set, and records cancellation.
     signed_out_start_gate: asyncio.Event | None = None
     signed_out_start_cancelled: bool = False
+    # The stages each load reports, in order, before its outcome.
+    stages: tuple[BrowserVerificationStage, ...] = (BrowserVerificationStage.NAVIGATE,)
+    # The signed-out load holds the event loop this long before it returns.
+    signed_out_blocks_seconds: float = 0
 
 
 @dataclass
@@ -158,15 +174,24 @@ class FakeSessionRuntime:
     def facts(self, revision: str) -> BrowserObservationFacts | None:
         return self.known_facts.get(revision)
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+    ) -> BrowserPageEvidence:
         self.evidence_urls.append(url)
         scenario = self.scenario or HandoffScenario()
         if scenario.gate is not None:
             scenario.started.set()
             await scenario.gate.wait()
+        for stage in scenario.stages:
+            on_stage(stage)
         outcome = scenario.with_session if self.signed_in else scenario.without_session
         if outcome == "hang":
             await asyncio.sleep(3600)
+        if not self.signed_in and scenario.signed_out_blocks_seconds:
+            time.sleep(scenario.signed_out_blocks_seconds)
         if isinstance(outcome, BaseException):
             raise outcome
         if outcome is None:
@@ -1172,6 +1197,187 @@ async def test_a_verification_that_cannot_finish_is_unavailable_and_writes_nothi
     assert writes == []
     assert await sealed_material(sessions) == before
     assert runtimes and all(runtime.closed for runtime in runtimes)
+
+
+# --- ADR-0128 amendment: an unfinished verification says where it stopped ----
+
+VERIFICATION_LOGGER = "agent_core.browser_control_plane.sessions"
+VERIFICATION_MESSAGE = "device verification did not finish (%s) after %.1f s"
+FAILURE_SENTINEL = "verification-failure-sentinel"
+SETTLING = (
+    BrowserVerificationStage.NAVIGATE,
+    BrowserVerificationStage.IDLE,
+    BrowserVerificationStage.INSPECT,
+    BrowserVerificationStage.SETTLE,
+)
+
+
+def verification_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.name == VERIFICATION_LOGGER]
+
+
+def everything_in(record: logging.LogRecord) -> str:
+    """All a handler or formatter could print from one record."""
+
+    return " ".join((record.getMessage(), repr(record.args), repr(vars(record))))
+
+
+@pytest.mark.parametrize(
+    ("scenario", "loads", "deadline"),
+    [
+        pytest.param(
+            HandoffScenario(with_session="hang", stages=SETTLING),
+            "with_session=settle",
+            True,
+            id="signed-in-page-never-settles",
+        ),
+        pytest.param(
+            HandoffScenario(without_session="hang"),
+            "without_session=navigate",
+            True,
+            id="signed-out-load-hangs",
+        ),
+        pytest.param(
+            HandoffScenario(with_session="hang", without_session="hang", stages=SETTLING),
+            "with_session=settle without_session=settle",
+            True,
+            id="both-loads-hang",
+        ),
+        pytest.param(
+            HandoffScenario(signed_out_start_gate=asyncio.Event()),
+            "without_session=start",
+            True,
+            id="signed-out-browser-never-starts",
+        ),
+        pytest.param(
+            HandoffScenario(start_error=RuntimeError(FAILURE_SENTINEL)),
+            "with_session=start without_session=start",
+            False,
+            id="browsers-fail-to-start",
+        ),
+        pytest.param(
+            HandoffScenario(
+                with_session="hang",
+                without_session=RuntimeError(f"net::ERR at /{FAILURE_SENTINEL}"),
+                stages=SETTLING,
+            ),
+            "without_session=settle",
+            False,
+            id="a-failed-load-is-named-alone",
+        ),
+        pytest.param(
+            HandoffScenario(storage_error=ValueError(FAILURE_SENTINEL)),
+            "with_session=capture",
+            False,
+            id="state-cannot-be-captured",
+        ),
+        pytest.param(
+            # Both loads end in the loop turn the deadline expires in, so the
+            # deadline is delivered after them and before the capture begins.
+            HandoffScenario(signed_out_blocks_seconds=0.15),
+            "with_session=capture",
+            True,
+            id="deadline-falls-between-the-loads-and-the-capture",
+        ),
+    ],
+)
+async def test_a_verification_that_cannot_finish_logs_only_its_load_stage_and_elapsed_seconds(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    scenario: HandoffScenario,
+    loads: str,
+    deadline: bool,
+) -> None:
+    """Production, 2026-10-01: two x.com handoffs ended 409 after thirty seconds, and
+    nothing on the service said which load ran out the clock, or where."""
+
+    caplog.set_level(logging.DEBUG)
+    lifecycle, sessions, _runtimes, _times = services(
+        tmp_path, scenario=scenario, verification_seconds=0.1
+    )
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    records = verification_records(caplog)
+    assert [record.msg for record in records] == [VERIFICATION_MESSAGE]
+    (record,) = records
+    assert record.levelno == logging.WARNING
+    assert isinstance(record.args, tuple)
+    named, elapsed = record.args
+    assert named == loads
+    assert isinstance(elapsed, float)
+    assert (0.1 if deadline else 0.0) <= elapsed < 5
+    assert (record.exc_info, record.exc_text, record.stack_info) == (None, None, None)
+    for withheld in (
+        SESSION_SENTINEL,
+        FAILURE_SENTINEL,
+        capability,
+        str(ceremony_id),
+        str(PROFILE_ID),
+        "example.org",
+        "/learn",
+    ):
+        assert withheld not in everything_in(record)
+    # What the service's own log configuration prints, exception filter included.
+    assert ExceptionDetailFilter().filter(record) is True
+    line = logging.Formatter(profile_service_log_config()["formatters"]["service"]["format"])
+    assert re.fullmatch(
+        rf"WARNING {re.escape(VERIFICATION_LOGGER)} "
+        rf"device verification did not finish \({loads}\) after \d+\.\d s",
+        line.format(record),
+    )
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        pytest.param(HandoffScenario(), id="ready"),
+        pytest.param(HandoffScenario(with_session=SIGNED_OUT), id="signed-out"),
+        pytest.param(HandoffScenario(without_session=None), id="unconfirmed"),
+    ],
+)
+async def test_a_verification_that_reaches_a_verdict_logs_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, scenario: HandoffScenario
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    lifecycle, sessions, _runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with suppress(DeviceSessionRejected):
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert verification_records(caplog) == []
+
+
+async def test_a_load_cannot_report_a_stage_outside_the_vocabulary(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Whatever a runtime passes as its stage, only a known stage reaches the log."""
+
+    caplog.set_level(logging.DEBUG)
+    unknown: Any = f"https://example.org/{FAILURE_SENTINEL}"
+    scenario = HandoffScenario(
+        with_session="hang", stages=(BrowserVerificationStage.NAVIGATE, unknown)
+    )
+    lifecycle, sessions, _runtimes, _times = services(
+        tmp_path, scenario=scenario, verification_seconds=0.1
+    )
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(BrowserProviderError):
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    records = verification_records(caplog)
+    assert [record.msg for record in records] == [VERIFICATION_MESSAGE]
+    assert isinstance(records[0].args, tuple)
+    assert records[0].args[0] == "with_session=navigate without_session=navigate"
+    assert FAILURE_SENTINEL not in everything_in(records[0])
 
 
 async def test_a_failed_load_stops_the_other_before_its_browser_is_closed(

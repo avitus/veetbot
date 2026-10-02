@@ -18,6 +18,8 @@ from agent_core.domain.browser import (
     BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserVerificationStage,
+    ignore_verification_stage,
     normalize_browser_origin,
 )
 from agent_core.domain.browser_upload import BrowserImageFile
@@ -50,7 +52,12 @@ class StatefulBrowserRuntime(Protocol):
         now: datetime | None = None,
     ) -> BrowserObservation: ...
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None],
+    ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
@@ -166,10 +173,15 @@ class HostedPlaywrightSessionRuntime:
         """The element facts of ``revision``, while it is the current observation."""
         return self._runtime.facts(revision)
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+    ) -> BrowserPageEvidence:
         """Load one confirmed page and report what it showed (ADR-0128)."""
         try:
-            return await self._runtime.load_page_evidence(url)
+            return await self._runtime.load_page_evidence(url, on_stage=on_stage)
         except BrowserProviderError:
             raise
         except Exception as exc:

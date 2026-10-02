@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 from collections.abc import Callable
 from contextlib import suppress
@@ -43,6 +44,7 @@ from agent_core.domain.browser import (
     BrowserPageEvidence,
     BrowserProviderError,
     BrowserSnapshot,
+    BrowserVerificationStage,
     browser_origin,
     require_service_origin,
 )
@@ -67,6 +69,7 @@ TERMINAL_CEREMONY_RETENTION_SECONDS = 24 * 60 * 60
 SWEEP_WINDOW_SECONDS = 20
 _NO_SESSION_MATERIAL = b'{"format_version":1}'
 SurfaceOperation = Literal["frame", "events", "handoff"]
+_LOGGER = logging.getLogger(__name__)
 
 
 class CeremonyCapabilityRejected(Exception):  # noqa: N818 - a refusal, not a fault
@@ -131,6 +134,20 @@ class _CeremonyState:
     runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
+@dataclass(slots=True)
+class _VerificationLoad:
+    """How far one of a handoff's two loads got: all its diagnostic may say (ADR-0128)."""
+
+    name: Literal["with_session", "without_session"]
+    stage: BrowserVerificationStage = BrowserVerificationStage.START
+    finished: bool = False
+    failed: bool = False
+
+    def enter(self, stage: BrowserVerificationStage) -> None:
+        # A runtime's value outside the vocabulary fails its load, unrecorded.
+        self.stage = BrowserVerificationStage(stage)
+
+
 @dataclass(frozen=True, slots=True)
 class _TerminalCeremonyState:
     id: UUID
@@ -165,7 +182,12 @@ class BrowserSessionRuntime(Protocol):
         now: datetime,
     ) -> BrowserObservation: ...
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None],
+    ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
@@ -704,9 +726,14 @@ class HostedProfileSessionService:
         origins = state.identity.allowed_origins
         signed_in = self._runtime_factory(state.tenant_id)
         signed_out = self._runtime_factory(state.tenant_id)
+        progress = (_VerificationLoad("with_session"), _VerificationLoad("without_session"))
+        clock = asyncio.get_running_loop().time
+        began = clock()
         loads = [
-            asyncio.create_task(_page_evidence(signed_in, material, origins, page)),
-            asyncio.create_task(_page_evidence(signed_out, _NO_SESSION_MATERIAL, origins, page)),
+            asyncio.create_task(_page_evidence(signed_in, material, origins, page, progress[0])),
+            asyncio.create_task(
+                _page_evidence(signed_out, _NO_SESSION_MATERIAL, origins, page, progress[1])
+            ),
         ]
         try:
             try:
@@ -720,6 +747,7 @@ class HostedProfileSessionService:
                 # A provider error, a timeout, an oversized state or a browser
                 # crash: the check could not finish. The cause stays chained
                 # and is never rendered.
+                _log_unfinished_verification(progress, clock() - began)
                 raise BrowserProviderError(
                     "tool.browser.provider_unavailable", retryable=True
                 ) from exc
@@ -1031,10 +1059,39 @@ async def _page_evidence(
     material: bytes,
     origins: tuple[str, ...],
     url: str,
+    progress: _VerificationLoad,
 ) -> BrowserPageEvidence:
-    # Both loads use the browser a lease will use, so the control is fair (ADR-0145).
-    await runtime.start(material, origins, headed=True)
-    return await runtime.load_page_evidence(url)
+    try:
+        # Both loads use the browser a lease will use, so the control is fair (ADR-0145).
+        await runtime.start(material, origins, headed=True)
+        evidence = await runtime.load_page_evidence(url, on_stage=progress.enter)
+    except Exception:
+        # The deadline arrives as a cancellation, which is not a failure of this load.
+        progress.failed = True
+        raise
+    progress.finished = True
+    return evidence
+
+
+def _log_unfinished_verification(
+    progress: tuple[_VerificationLoad, ...], elapsed_seconds: float
+) -> None:
+    """Say which load stopped a verification, at which stage, after how long.
+
+    That is the whole record (ADR-0128, amendment of 2026-10-06): load names, stage
+    names and a number. A load that failed is named alone; otherwise every
+    load the deadline left unfinished is named.
+    """
+    stopped = [load for load in progress if load.failed] or [
+        load for load in progress if not load.finished
+    ]
+    named = " ".join(f"{load.name}={load.stage.value}" for load in stopped)
+    _LOGGER.warning(
+        "device verification did not finish (%s) after %.1f s",
+        # Both pages loaded: what remained was reading the verifying browser's state.
+        named or f"with_session={BrowserVerificationStage.CAPTURE.value}",
+        elapsed_seconds,
+    )
 
 
 def _normalized_path(path: str) -> str:

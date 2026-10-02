@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -38,6 +39,8 @@ from agent_core.domain.browser import (
     BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserVerificationStage,
+    ignore_verification_stage,
 )
 from agent_core.domain.credentials import SecretValue
 from tests.contract.support import NOW, principal
@@ -102,8 +105,14 @@ class FakeRuntime:
             elements={f"{revision}:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)},
         )
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+    ) -> BrowserPageEvidence:
         """A public home page, and members' pages that send a visitor to sign in."""
+        on_stage(BrowserVerificationStage.NAVIGATE)
         if self.evidence_failure is not None:
             raise self.evidence_failure
         if self.material == NO_SESSION and urlsplit(url).path not in {"", "/"}:
@@ -1171,6 +1180,13 @@ async def test_device_handoff_logs_nothing_from_the_payload(
     for response, _capability in answers:
         assert not any(secret in response.text for secret in _LOG_SENTINELS)
     assert any(record.getMessage() == "device handoff failed" for record in caplog.records)
+    # The provider failure is the one handoff whose verification could not
+    # finish; its record names loads and stages and nothing else.
+    assert [
+        record.args
+        for record in caplog.records
+        if record.msg == "device verification did not finish (%s) after %.1f s"
+    ] == [("with_session=navigate without_session=navigate", pytest.approx(0, abs=5))]
 
 
 @pytest.mark.parametrize("failure", injected_failures(), ids=lambda failure: type(failure).__name__)

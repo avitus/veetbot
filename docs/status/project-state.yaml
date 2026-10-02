@@ -97,7 +97,9 @@ project:
   # 2026-09-25: Website Access signs in on the owner's device and hands only
   # that site's session to the isolated service, which filters, verifies and
   # seals it; every sign-in advances the profile generation, ending its
-  # grants; remote ceremonies no longer lose a finished sign-in.
+  # grants; remote ceremonies no longer lose a finished sign-in. Amended
+  # 2026-10-06: a verification that cannot finish logs which load stopped
+  # it, at which stage and after how long, and nothing else.
   # ADR-0129 records the owner's non-milestone extension to the Milestone 10
   # browser tranche on 2026-09-25: a browser.act approval card names what it
   # acts on and, only inside an owner-configured site scope, can create a

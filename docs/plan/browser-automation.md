@@ -913,6 +913,39 @@ every failure with a fixed response, and the service's log configuration
 replaces the text, traceback, and causes of any logged exception, including
 the web server's own records, with a fixed message and the exception's class.
 
+The handoff path writes one diagnostic of its own (ADR-0128, amendment of
+2026-10-06). A verification that started its two loads and ends
+`409 tool.browser.provider_unavailable` writes a single warning record to the
+service log, so an operator can tell where it stopped. The message is always
+`device verification did not finish`, followed by only these values:
+
+- The load that stopped it, `with_session` or `without_session`, with the
+  stage that load was in. A load that failed is named alone. Otherwise every
+  load the deadline interrupted is named. When both pages had loaded,
+  `with_session` is named at `capture`.
+- The seconds since the loads were started, to one decimal place.
+
+The stages are, in order:
+
+| Stage | What the load is doing |
+| --- | --- |
+| `start` | starting the egress proxy and the browser |
+| `navigate` | loading the confirmed page until `DOMContentLoaded` |
+| `idle` | waiting up to five seconds for the network to be briefly idle |
+| `inspect` | reading where the page landed and whether it shows a sign-in challenge |
+| `settle` | waiting for the application's requests to finish and stay idle |
+| `reinspect` | looking for a sign-in challenge again after that wait |
+| `capture` | reading the verifying browser's storage state |
+
+The record holds nothing else: no ceremony, profile, tenant, or principal
+identifier; no URL, origin, path, or page content; no cookie, storage value, or
+capability; and no exception class or text. The runtime reports each stage as
+it begins, because the deadline reaches a load as a cancellation, which cannot
+say where it landed. The service keeps only a value from the table; any other
+value fails that load and is not recorded. A verification that ends `ready` or
+with a `422` code writes no record, and neither does a handoff refused before
+its loads start. The response is the same fixed body in every case.
+
 The handoff crosses TLS 1.2 or later to the ceremony host and then host
 loopback, the path the remote ceremony's keystrokes already take, and adds no
 application-layer encryption (ADR-0128). The device ceremony cannot sign in to a

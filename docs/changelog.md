@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-06 — A sign-in check that cannot finish says where it stopped
+
+- When Veetbot could not finish checking a sign-in you made on your device,
+  its browser service recorded nothing, so nobody could tell why. It now logs
+  one line that says which of its two page loads stopped the check, what that
+  load was doing, and after how many seconds. The line holds nothing about the
+  website, the page or your session, and the app shows the same message as
+  before. An amendment to ADR-0128 records the change.
+
 ## 2026-10-06 — Choose a schedule's website access in the app
 
 - A schedule's detail now has a Website access picker. Choosing one of your

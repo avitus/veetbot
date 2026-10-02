@@ -784,6 +784,21 @@ not offer TLS 1.1, so the check did not run. OpenSSL 3 offers it only with
 the lowered security level above, and macOS's LibreSSL rejects that option,
 so use OpenSSL 1.1 or later, such as Homebrew's `openssl@3`.
 
+When a handoff answers `409 tool.browser.provider_unavailable`, the
+browser-profile service's container log holds one line that says where the
+verification stopped (ADR-0128, amendment of 2026-10-06), for example:
+
+```text
+WARNING agent_core.browser_control_plane.sessions device verification did not finish (with_session=settle) after 30.0 s
+```
+
+It names the load that stopped the verification and the stage it was in, then
+the seconds since the loads were started; `docs/plan/browser-automation.md`
+lists the stages. A time at the thirty-second deadline means the deadline
+stopped the named loads, and a shorter one means the named stage failed. Match
+the line to a handoff by the time of the `409` in Nginx's access log. The line
+holds no identifier and nothing about the website or the session.
+
 `BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED` (`true` when unset) turns device
 sign-in off in the browser-profile service without a release. Remote sign-in
 is unaffected. Compose reads it from `/etc/veetbot/veetbot.env` only when it
