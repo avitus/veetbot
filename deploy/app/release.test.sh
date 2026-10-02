@@ -237,6 +237,11 @@ write_stub curl '
       "$VEETBOT_TEST_READY_RELEASE" >"$headers"
   else
     cat >"$VEETBOT_TEST_AUTH_HEADERS"
+    if [[ "$request_url" == */v1/settings/models ]]; then
+      printf "curl model-settings\n" >>"$VEETBOT_TEST_LOG"
+      printf "%s" "${VEETBOT_TEST_SETTINGS_STATUS:-200}"
+      exit 0
+    fi
     printf "curl session-index %s\n" "$request_url" >>"$VEETBOT_TEST_LOG"
     if [[ "${VEETBOT_TEST_FAIL_SESSION_INDEX:-0}" == 1 ]]; then exit 1; fi
     printf "%s" "${VEETBOT_TEST_SESSION_STATUS:-200}"
@@ -248,10 +253,13 @@ make_stage() {
   local stage="$DEPLOY_ROOT/releases/$release_id"
   mkdir -p \
     "$stage/deploy/systemd" \
+    "$stage/deploy/app" \
     "$stage/deploy" \
     "$stage/execution" \
     "$stage/scripts" \
     "$stage/.venv/bin"
+  cp "$SCRIPT_DIR/owner-scopes.sh" "$stage/deploy/app/owner-scopes.sh"
+  cp "$SCRIPT_DIR/../veetbot.env.example" "$stage/deploy/veetbot.env.example"
   touch \
     "$stage/pyproject.toml" \
     "$stage/uv.lock" \
@@ -397,6 +405,14 @@ VEETBOT_TEST_UNPRUNABLE_RELEASE="$legacy_unprunable_id" \
   VEETBOT_TEST_UNREMOVABLE_IMAGE="agent-core-sandbox:20260809-120002-0000002" \
   run_release "$release_id" >"$TEST_ROOT/first.out" 2>&1
 cat "$TEST_ROOT/first.out"
+
+# An old host must gain the shipped settings scopes without editing its file.
+owner_scopes="$DEPLOY_ROOT/releases/$release_id/.owner-scopes.env"
+[[ -f "$owner_scopes" ]] || { printf 'release did not provision owner scopes\n' >&2; exit 1; }
+grep -Eq '(^|,)settings.read(,|$)' "$owner_scopes"
+grep -Eq '(^|,)settings.write(,|$)' "$owner_scopes"
+grep -Fxq 'AUTH_SCOPES=notification.read' "$ENV_FILE"
+grep -Fxq 'curl model-settings' "$LOG_FILE"
 
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
@@ -1159,5 +1175,17 @@ fi
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$slow_start_id" ]]
 [[ "$(grep -cFx 'curl health' "$LOG_FILE")" == 121 ]]
 [[ "$(grep -cFx 'sleep 1' "$LOG_FILE")" == 120 ]]
+
+# Healthy readiness and sessions cannot mask an unauthorized Settings screen.
+settings_failure_id="20260812-152233-abcdef1"
+make_stage "$settings_failure_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$settings_failure_id" "$PROCESS_ROOT/4242/cwd"
+if VEETBOT_TEST_SETTINGS_STATUS=403 run_release "$settings_failure_id" \
+  >"$TEST_ROOT/settings-failure.out" 2>&1; then
+  printf 'release with forbidden model settings unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'model settings returned HTTP 403' "$TEST_ROOT/settings-failure.out"
 
 printf 'release script tests passed\n'

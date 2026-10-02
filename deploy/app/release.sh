@@ -182,6 +182,8 @@ for required in \
   alembic.ini \
   docker-compose.yml \
   deploy/docker-compose.production.yml \
+  deploy/veetbot.env.example \
+  deploy/app/owner-scopes.sh \
   deploy/browser-profile-service.Dockerfile \
   deploy/veetbot-schedule.env.example \
   deploy/veetbot-notify.env.example \
@@ -230,6 +232,12 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+# Generate before preflight, but activate only with this release's current
+# symlink. Restricted role environments never load this owner-only file.
+bash deploy/app/owner-scopes.sh deploy/veetbot.env.example >"$STAGE/.owner-scopes.env"
+# shellcheck disable=SC1090
+. "$STAGE/.owner-scopes.env"
+export AUTH_SCOPES
 export AGENT_EXECUTION_SERVICE_SOCKET="$EXECUTION_SERVICE_SOCKET"
 export BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE="$BROWSER_CONTROL_CREDENTIAL_FILE"
 [[ -n "${AUTH_TOKEN:-}" ]] || fail "AUTH_TOKEN is required for the API contract probe"
@@ -566,6 +574,17 @@ if ! session_index_status="$(
 fi
 [[ "$session_index_status" =~ ^2[0-9][0-9]$ ]] || fail \
   "the promoted API session index returned HTTP $session_index_status"
+
+if ! settings_status="$(
+  printf 'Authorization: %s %s\n' Bearer "$AUTH_TOKEN" \
+    | curl --silent --show-error \
+      --connect-timeout 2 --max-time 5 --header @- --output /dev/null \
+      --write-out '%{http_code}' "$API_BASE_URL/v1/settings/models"
+)"; then
+  fail "the promoted API does not expose model settings"
+fi
+[[ "$settings_status" == 200 ]] || fail \
+  "the promoted API model settings returned HTTP $settings_status"
 
 for unit in "${UNITS[@]}"; do
   sudo systemctl is-active --quiet "$unit" || fail "$unit is not active"

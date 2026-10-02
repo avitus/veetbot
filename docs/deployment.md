@@ -85,7 +85,8 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 4. builds `agent-core-sandbox:<release-id>`;
 5. checks active provider pins against the staged registry on an existing
    installation, then ensures the local PostgreSQL service is running;
-6. applies `alembic upgrade head` and runs the production preflight;
+6. reconciles owner permissions into the staged `.owner-scopes.env`, applies
+   `alembic upgrade head`, and runs the production preflight;
 7. stops both run workers, rechecks active provider pins, then switches
    `/opt/veetbot/current`, tags the sandbox image as `production`, and
    restarts the credential-free execution service and all application units;
@@ -93,7 +94,7 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
    (`VEETBOT_HEALTH_TIMEOUT_SECS`; every unit restarts at once, and the API has
    needed more than a minute to bind), makes an authenticated request to the
-   authoritative session index, and requires every process to run from the
+   authoritative session index and model settings, and requires every process to run from the
    promoted directory;
 9. retains the five newest valid releases; and
 10. retains the two newest timestamped `agent-core-sandbox` and
@@ -387,27 +388,33 @@ provider-assisted formation falls back to deterministic until the evidence is
 regenerated on the new version. Observe first, read the
 `agent.policy.advisory.*` metrics, and enforce only when no approval is pending.
 
-The client's model settings (ADR-0119) need `settings.read,settings.write`
-appended to `AUTH_SCOPES` in that same file; without them the Settings screen
-reports the missing scopes and every model stays at the deployment default.
+The client's model settings (ADR-0119) need `settings.read,settings.write`.
+Deployment provisions both automatically and requires an authenticated HTTP
+200 from `GET /v1/settings/models` before declaring success (ADR-0149).
 The routes are always mounted. A saved chat model applies to new app chats;
 the chat effort applies to later agent runs except typed email tasks, which
 retain provider-default effort. The memory choice applies to later formation.
 
-The template's `AUTH_SCOPES` grants the owner chat, artifacts and attachments,
-Website Access and task grants, schedules, devices and notifications, memory
-review and deletion (`memory.write`, ADR-0117), People, and model settings. A
-scope grants nothing while its feature's flag is off. A host whose file
-predates a feature lacks that feature's scopes, so compare the line with the
-template after a release that adds one. Scopes are exact strings with no
-wildcard, and a name outside the platform's closed vocabulary stops the
-service at startup; MCP server scopes are derived from configuration and never
-listed here. Features the template leaves out need their own:
-`email.read,email.write` for Email mode (see the
-[Gmail runbook](gmail-integration-runbook.md)), `persona.read,persona.write`
-for the Persona screen, `call.read,call.cancel,call.delete` for calling (see
-[Bland calling setup](bland-setup.md)), and `run.delegate` for delegated child
-runs. The surface role's own environment carries `surface.read` and
+The template's `AUTH_SCOPES` is the reviewed owner permission set, including
+optional Email, Persona, calling, media and delegation features. Every release
+unions that set with the host's explicit grants, sorts and deduplicates it,
+and writes only `AUTH_SCOPES` to the staged `.owner-scopes.env`. The API and
+owner workers load it after the host environment; restricted service roles
+never load it. Deployment does not rewrite `/etc/veetbot/veetbot.env` or copy
+its credentials. Promotion activates the file with the release; rollback uses
+the target's file, or the host grants for older targets without one.
+
+New platform scopes must be classified in `test_deployment_scopes.py` and
+added to the template when owner-facing, so adding a feature cannot silently
+omit its deployment grants. Feature flags, provider credentials, evidence gates,
+policy and approvals still govern activation and use. Scopes are exact strings,
+with no wildcard; unknown scopes stop startup. MCP scopes continue to derive
+from account configuration. Removing a managed scope only from the host file
+does not revoke it: a deliberately restricted owner deployment needs a reviewed
+change to the template. When running owner CLI commands directly, source the
+current `.owner-scopes.env` after the host environment if the file exists.
+
+The surface role's own environment carries `surface.read` and
 `surface.write`.
 
 The host exports no metrics, so the service log answers whether these consumers
