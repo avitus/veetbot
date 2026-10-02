@@ -428,7 +428,10 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
     release_stream = asyncio.Event()
 
     class DelayedSessionSite(MembersSite):
+        """Delay the authentication decision independently of the live updates stream."""
+
         async def learn(self, request: Request) -> Response:
+            """Start live updates alongside the members-only page load."""
             response = await super().learn(request)
             if response.status_code != 200:
                 return response
@@ -443,15 +446,18 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
             )
 
         async def updates(self, request: Request) -> Response:
+            """Establish an event stream whose body stays open until test cleanup."""
             del request
 
             async def events() -> AsyncIterator[bytes]:
+                """Flush an initial event-stream comment, then hold the connection open."""
                 yield b": connected\n\n"
                 await release_stream.wait()
 
             return StreamingResponse(events(), media_type="text/event-stream")
 
         async def check_session(self, request: Request) -> Response:
+            """Return the delayed decision and rotate the session cookie on completion."""
             assert request.cookies.get("session") == self.token
             checking_session.set()
             await answer_session.wait()
@@ -536,7 +542,10 @@ async def test_an_open_event_stream_does_not_prevent_session_verification(tmp_pa
     release_stream = asyncio.Event()
 
     class StreamingSite(MembersSite):
+        """Serve members-only content with an indefinitely open updates connection."""
+
         async def learn(self, request: Request) -> Response:
+            """Start live updates alongside the members-only page load."""
             response = await super().learn(request)
             if response.status_code != 200:
                 return response
@@ -545,9 +554,11 @@ async def test_an_open_event_stream_does_not_prevent_session_verification(tmp_pa
             )
 
         async def updates(self, request: Request) -> Response:
+            """Establish an event stream whose body stays open until test cleanup."""
             assert request.cookies.get("session") == self.token
 
             async def events() -> AsyncIterator[bytes]:
+                """Flush an initial event-stream comment, then hold the connection open."""
                 yield b": connected\n\n"
                 stream_started.set()
                 await release_stream.wait()

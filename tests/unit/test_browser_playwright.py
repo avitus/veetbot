@@ -1915,6 +1915,7 @@ async def test_an_arrow_key_on_a_radio_is_refused_before_dispatch() -> None:
 async def test_established_event_stream_finishes_the_verification_wait(
     resource_type: str, content_type: str
 ) -> None:
+    """A successful fetch or XHR stream need not close before verification."""
     page = FakeEvidencePage()
     request = FakeNavigationRequest("https://resource.test/updates", resource_type=resource_type)
     response = SimpleNamespace(request=request, status=200, headers={"content-type": content_type})
@@ -1945,6 +1946,7 @@ async def test_established_event_stream_finishes_the_verification_wait(
 async def test_only_an_established_event_stream_is_exempt_from_verification(
     resource_type: str, status: int, content_type: str, send_headers: bool
 ) -> None:
+    """Other requests still block until completion, even with stream-like headers."""
     page = FakeEvidencePage()
     request = FakeNavigationRequest("https://resource.test/updates", resource_type=resource_type)
     response = SimpleNamespace(

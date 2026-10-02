@@ -1094,6 +1094,7 @@ def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]
     last_change = loop.time()
 
     def began(request: Request) -> None:
+        """Track finite-request candidates until completion or stream establishment."""
         nonlocal last_change
         if request.resource_type in {"document", "script", "stylesheet", "xhr", "fetch"}:
             pending.add(request)
@@ -1101,6 +1102,7 @@ def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]
             changed.set()
 
     def ended(request: Request) -> None:
+        """Restart the quiet interval when a tracked request finishes."""
         nonlocal last_change
         if request in pending:
             pending.remove(request)
@@ -1108,6 +1110,7 @@ def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]
             changed.set()
 
     def responded(response: Response) -> None:
+        """Recognize an established event stream without reading its continuing body."""
         request = response.request
         if (
             request in pending
@@ -1119,6 +1122,7 @@ def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]
             ended(request)
 
     async def wait_until_quiet() -> None:
+        """Wait for finite requests to finish and remain quiet for 500 ms."""
         # Also bound direct callers; the service's enclosing deadline expires
         # sooner because it includes browser startup and document navigation.
         async with asyncio.timeout(30):
