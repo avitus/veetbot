@@ -53,9 +53,9 @@ class FakeStatefulRuntime:
         allowed_origins: tuple[str, ...],
         *,
         storage_state: dict[str, object],
-        interactive: bool,
+        headed: bool,
     ) -> None:
-        self.started = (proxy_url, allowed_origins, storage_state, interactive)
+        self.started = (proxy_url, allowed_origins, storage_state, headed)
 
     async def navigate(self, url: str) -> BrowserObservation:
         return BrowserObservation(url=url, revision="r1")
@@ -121,7 +121,7 @@ async def test_hosted_runtime_loads_and_seals_versioned_storage_state() -> None:
         }
     ).encode()
 
-    await runtime.start(material, ("https://example.org",), interactive=True)
+    await runtime.start(material, ("https://example.org",), headed=True)
     sealed = json.loads(await runtime.storage_state())
     status = await runtime.authentication_status()
     await runtime.close()
@@ -161,7 +161,7 @@ async def test_hosted_runtime_rejects_invalid_material_before_browser_start(
     )
 
     with pytest.raises(ValueError):
-        await runtime.start(material, ("https://example.org",), interactive=False)
+        await runtime.start(material, ("https://example.org",), headed=False)
 
     assert low_level.started is None
 
@@ -205,7 +205,7 @@ async def test_hosted_runtime_accepts_additional_playwright_storage_state_keys()
         }
     ).encode()
 
-    await runtime.start(material, ("https://example.org",), interactive=False)
+    await runtime.start(material, ("https://example.org",), headed=False)
 
     assert low_level.started is not None
     assert low_level.started[2]["future_playwright_field"] == {"version": 2}

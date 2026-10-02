@@ -4,6 +4,32 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-01 — Website Access works on sites that refuse headless browsers
+
+- Some websites, x.com among them, answer a headless browser with an empty
+  "access denied" page on every page. Veetbot's sign-in check and its agent
+  runs used a headless browser, so the check could not confirm a sign-in you
+  had just completed and a run would have seen a blank page. Both now use the
+  full browser, run with a display, that the remote sign-in already used. The
+  browser still reports honestly that it is automated. ADR-0145 records the
+  change.
+- The browser service needs more memory for this. Its container limit rises
+  from 1 GiB to 3 GiB, and the production host needs that memory free. At most
+  three such browsers run at once; a fourth run or sign-in waits for one to
+  close.
+- A sender can no longer write a link into the email reading view. Only links
+  the reader builds from the message's own anchors and URLs are links.
+- A chat no longer fails when OpenAI refuses the optional reasoning summary on
+  the request's last internal attempt.
+
+## 2026-10-01 — Chats show what the assistant is thinking about
+
+- While the assistant reasons before it answers, the Apple app now shows the
+  step it is working on, for example "Thinking: Planning day trips", where
+  it used to show only "Working…". The step comes from the short reasoning
+  summary the model provider streams. It is shown live and never stored.
+  ADR-0144 records the change.
+
 ## 2026-09-29 — A denied approval no longer breaks the chat
 
 - After you denied an approval, the next message in that chat failed with an

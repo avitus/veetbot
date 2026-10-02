@@ -11,6 +11,51 @@ from tests.gates.test_notification_api_m12 import _client
 from tests.integration.m2_support import memory_settings
 
 
+async def test_report_read_state_is_shared_and_new_runs_remain_unread() -> None:
+    from agent_core.domain.runs import RunStatus
+    from tests.contract.support import agent, run, session
+
+    owner = principal().model_copy(update={"scopes": set(PLATFORM_SCOPES)})
+    settings = replace(
+        memory_settings(), notification_api_enabled=True, notification_dispatch_enabled=True
+    )
+    async with build(settings=settings, storage="memory", principal=owner) as composition:
+        completed = run(status=RunStatus.COMPLETED)
+        newer = completed.model_copy(update={"id": UUID(int=9002)})
+        active = completed.model_copy(update={"id": UUID(int=9003), "status": RunStatus.RUNNING})
+        failed = completed.model_copy(update={"id": UUID(int=9004), "status": RunStatus.FAILED})
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+            for value in (completed, newer, active, failed):
+                await uow.runs.create(value)
+        query = {"query_run_ids": [str(value.id) for value in (completed, newer, active, failed)]}
+        async with _client(composition) as device_a, _client(composition) as device_b:
+            response = await device_b.post("/v1/notifications/sync", json=query)
+            assert response.status_code == 200
+            assert set(response.json()["unread_run_ids"]) == {str(completed.id), str(newer.id)}
+            for _ in range(2):
+                read = await device_a.post(
+                    "/v1/notifications/sync", json={**query, "seen_run_ids": [str(completed.id)]}
+                )
+                assert read.status_code == 200
+                assert read.json()["unread_run_ids"] == [str(newer.id)]
+            response = await device_b.post("/v1/notifications/sync", json=query)
+            assert response.json()["unread_run_ids"] == [str(newer.id)]
+            oversized = await device_b.post(
+                "/v1/notifications/sync", json={"query_run_ids": [str(completed.id)] * 101}
+            )
+            assert oversized.status_code == 400
+        stranger = owner.model_copy(update={"principal_id": "stranger"})
+        async with _client(composition, principal=stranger) as client:
+            response = await client.post(
+                "/v1/notifications/sync",
+                json={"query_run_ids": [str(completed.id), str(UUID(int=999))]},
+            )
+            assert response.status_code == 200
+            assert response.json()["unread_run_ids"] == []
+
+
 async def test_sync_validates_scope_body_and_unknown_runs_without_partial_success() -> None:
     owner = principal().model_copy(update={"scopes": set(PLATFORM_SCOPES) | {"notification.write"}})
     settings = replace(
@@ -23,7 +68,7 @@ async def test_sync_validates_scope_body_and_unknown_runs_without_partial_succes
                 json={"delivered_notification_ids": [], "seen_run_ids": []},
             )
             assert response.status_code == 200
-            assert response.json() == {"obsolete_notification_ids": []}
+            assert response.json() == {"obsolete_notification_ids": [], "unread_run_ids": []}
             invalid = await client.post(
                 "/v1/notifications/sync", json={"seen_run_ids": ["not-uuid"]}
             )

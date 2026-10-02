@@ -125,8 +125,8 @@ public struct MemoryDetailView: View {
         .navigationTitle("Memory")
         .accessibilityIdentifier("memory.detail")
         .toolbar {
-            if let model {
-                ToolbarItem(placement: .primaryAction) { reviewMenu(model) }
+            ToolbarItem(placement: .primaryAction) {
+                if let model { reviewMenu(model) }
             }
         }
         .confirmationDialog(

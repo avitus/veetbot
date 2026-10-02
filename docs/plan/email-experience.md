@@ -110,6 +110,26 @@ and active HTML do not load. Show attachment metadata and the fact that an
 attachment was not read. A draft that depends on an unread attachment requests
 the missing information rather than claiming to have reviewed it.
 
+The reading view derives inert Markdown from each retained message on the scoped
+thread read, after source retention is enforced. It removes invisible preheader
+padding and recognizable promotional controls, collapses a forwarded envelope to
+its source attribution, embeds source URLs as labeled links, and restores article
+headings and paragraph flow. Explicit HTML advertisements and hidden/active HTML
+are omitted; ambiguous prose, author attribution, substantive disclosures, and
+postscripts remain. No link is fetched or resolved during cleanup. Only the
+reader makes a link, from an HTML anchor or a source URL whose destination it
+checked: brackets, angle brackets and backslashes in the sender's own text are
+escaped, so that text cannot author a Markdown link, image or markup, while its
+emphasis and lists still format. Native text renders the result at a
+comfortable line width, with external HTTP(S) links opened
+only by a user gesture and a **Show original** toggle for the unchanged retained
+body. This is presentation, not a summary or rewrite: it makes no model call,
+stores no extra body copy, and never replaces drafting or memory evidence. The
+additive `reader_body` message field is absent on older servers; clients then show
+the original text. Source incompleteness and attachment notices remain visible in
+both views. Formatting cannot recover links or structure already lost during
+provider normalization.
+
 Feedback offers Important and Less important, with an optional target: this
 thread, this person, or this kind of content. Needs reply / No reply needed is a
 separate judgment. Natural-language feedback such as “Her board updates matter,
@@ -1219,7 +1239,9 @@ facts deduplicate across passages and re-reads. A passage processed successfully
 does not mark an unread remainder as assessed. Coverage remains explicit until
 all resumable work is complete. Semantic writes append a content-free current-run
 audit under the worker lease in the same transaction; cached older evidence
-keeps its original source session/date.
+keeps its original source session/date. A receipt whose source or header
+session has since been deleted has no governed event left to check, so it is
+rejected like a missing event: that passage forms nothing and the task continues.
 
 Historical import order cannot supersede newer evidence, and several supported
 facts in one source remain distinct. Source erasure also removes selected

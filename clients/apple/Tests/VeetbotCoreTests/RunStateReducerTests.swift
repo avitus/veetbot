@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Testing
 @testable import VeetbotCore
@@ -906,5 +907,114 @@ import Testing
         #expect(plain.authorizationKind == nil)
         #expect(plain.authorizationView == nil)
         #expect(reducer.lastTaskGrantEvent == .used(grantID: grantID, use: 1))
+    }
+
+    private func summaryFrame(_ text: String, runID: UUID? = nil) -> SSEFrame {
+        var data: [String: JSONValue] = ["text": .string(text), "is_summary": .bool(true)]
+        if let runID { data["run_id"] = .string(runID.uuidString) }
+        return SSEFrame(id: nil, event: "reasoning.delta", data: data)
+    }
+
+    @Test
+    func testTheLatestSummaryHeadingBecomesTheThinkingTitle() {
+        let reducer = RunStateReducer()
+        for delta in [
+            "**Considering travel", " trade-offs**\n\nI'm weighing", " the itinerary.",
+            "**Planning day trips**\n\n", "Uji is quieter",
+        ] {
+            reducer.reduce(summaryFrame(delta))
+        }
+        #expect(reducer.reasoningTitle == "Planning day trips")
+        #expect(reducer.reasoningActive)
+        #expect(reducer.timeline.isEmpty)
+    }
+
+    @Test
+    func testOnlyAPartsOwnShortHeadingBecomesATitle() {
+        let reducer = RunStateReducer()
+        reducer.reduce(summaryFrame("**Comparing towns**\n\nI prefer **Uji**\n"))
+        #expect(reducer.reasoningTitle == "Comparing towns")
+        let tooLong = String(repeating: "a", count: 81)
+        reducer.reduce(summaryFrame("Done.**\(tooLong)**\n"))
+        #expect(reducer.reasoningTitle == "Comparing towns")
+    }
+
+    @Test
+    func testAHeadingFollowedBySpacesStillBecomesATitle() {
+        let reducer = RunStateReducer()
+        reducer.reduce(summaryFrame("**Checking sources** \t\n\nI'm reading"))
+        #expect(reducer.reasoningTitle == "Checking sources")
+        let longest = String(repeating: "a", count: 80)
+        reducer.reduce(summaryFrame("**\(longest)**" + String(repeating: " ", count: 12) + "\n"))
+        #expect(reducer.reasoningTitle == longest)
+    }
+
+    @Test
+    func testRawReasoningNeverBecomesATitle() {
+        let reducer = RunStateReducer()
+        reducer.reduce(
+            SSEFrame(
+                id: nil,
+                event: "reasoning.delta",
+                data: ["text": .string("**Private heading**"), "is_summary": .bool(false)]
+            )
+        )
+        #expect(reducer.reasoningTitle == nil)
+        #expect(reducer.reasoningActive)
+    }
+
+    @Test
+    func testTheThinkingTitleClearsWhenTheAnswerStarts() {
+        let reducer = RunStateReducer()
+        reducer.reduce(summaryFrame("**Checking sources**\n\n"))
+        reducer.reduce(SSEFrame(id: nil, event: "message.delta", data: ["text": .string("Here")]))
+        #expect(reducer.reasoningTitle == nil)
+        #expect(!reducer.reasoningActive)
+    }
+
+    @Test
+    func testRepeatedReasoningFramesPublishOnlyWhatChanges() {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        var publishes = 0
+        let watcher = reducer.objectWillChange.sink { publishes += 1 }
+        reducer.reduce(summaryFrame("**Reading the question**\n\n", runID: runID))
+        let afterTitle = publishes
+        for _ in 0..<20 {
+            reducer.reduce(summaryFrame("more detail ", runID: runID))
+        }
+        watcher.cancel()
+        #expect(publishes == afterTitle)
+    }
+
+    @Test
+    func testTheActivityLabelNamesTheThinkingStep() {
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .running, reasoningActive: true,
+                reasoningTitle: "Planning day trips"
+            ) == "Thinking: Planning day trips"
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .running, reasoningActive: true, reasoningTitle: nil
+            ) == "Reasoning…"
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .running, reasoningActive: false, reasoningTitle: nil
+            ) == "Working…"
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .completed, reasoningActive: false,
+                reasoningTitle: nil
+            ) == nil
+        )
+        #expect(
+            RunActivity.label(
+                isSending: true, runStatus: .running, reasoningActive: true, reasoningTitle: "X"
+            ) == "Sending…"
+        )
     }
 }

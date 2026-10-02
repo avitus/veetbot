@@ -812,13 +812,15 @@ class RunExecutor:
                 identical_call_threshold=self._identical_call_threshold,
                 identical_denial_threshold=self._identical_denial_threshold,
                 max_compactions_per_step=self._max_compactions_per_step,
-                # A typed task keeps its provider default; the owner's effort
-                # is a chat setting.
+                # A typed task keeps its provider default; the owner's effort,
+                # and the summary a client shows while the model reasons, are
+                # chat settings.
                 reasoning_effort=(
                     None
                     if typed or chat_choice is None
                     else chat_reasoning_effort(chat_choice, resolved_model.reasoning_efforts)
                 ),
+                reasoning_summary=not typed and chat_choice is not None,
             )
             if pin_created:
                 await checkpoint(context, "provider_pinned")

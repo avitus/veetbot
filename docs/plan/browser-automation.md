@@ -430,6 +430,15 @@ resumed after its approval, reuse the lease while it outlives the call; the
 provider drops a lease the service no longer honours or does not answer for,
 and an expired lease is replaced.
 
+Every hosted browser is headed and shares one container, so the service
+admits at most three at once (ADR-0145): each lease and each remote ceremony
+counts one, and a device verification counts two from the moment its handoff
+is accepted. A new lease or remote ceremony beyond that is refused before its
+browser starts, as retryable `tool.browser.provider_unavailable`; re-attaching
+to a live lease needs no room. A handoff that finds no room for its two
+browsers still spends its capability and ends as a verification that could not
+run.
+
 A lease renews in steps of at most fifteen minutes, up to sixty minutes after
 acquisition and never past the run's deadline, only while its run is running,
 queued to resume, or parked on its own approval (ADR-0127). The run worker that
@@ -528,10 +537,11 @@ prefix with no sensitive segment, whatever the page hid from the facts, such
 as a closed shadow root. When it refuses the page's own document, the page is
 left on the browser's error page and the act's outcome is
 `tool.browser.outcome_unknown`. A new window never loads, including its first
-navigation, which it issues before its frame exists. Headless agent browsers
-deny web-created windows inside Chromium before creation, so a popup cannot
-submit while an asynchronous close is pending. In a headed user-controlled
-sign-in ceremony, document responses gain an additional CSP sandbox policy
+navigation, which it issues before its frame exists. The ephemeral adapter's
+headless browser denies web-created windows inside Chromium before creation,
+so a popup cannot submit while an asynchronous close is pending. Full headed
+Chromium has no such switch. In every hosted browser, which is headed
+(ADR-0145), document responses gain an additional CSP sandbox policy
 that permits scripts, forms, same-origin access and navigation, but never
 popups. The runtime fetches each headed document through the browser context's
 request transport and the same audited proxy, with automatic retries and
@@ -541,9 +551,10 @@ each redirect through the existing origin guard;
 a failed form exchange is never replayed. Existing headers, including cookies
 and the site's own CSP, remain intact; body bytes are forwarded unchanged.
 This transport uses Playwright's HTTP client, so a site that requires the
-browser's TLS fingerprint may reject the remote ceremony. The device sign-in
-ceremony is unaffected. The policy also prevents legacy `document.domain`
-relaxation. Unexpected pages retain a closure guard. Popup closure uses the
+browser's TLS fingerprint may reject a hosted browser: the remote ceremony, a
+run-attempt lease, or a device sign-in's verification. The owner's own web
+view in a device sign-in is unaffected. The policy also prevents legacy
+`document.domain` relaxation. Unexpected pages retain a closure guard. Popup closure uses the
 Chromium target protocol so context interception remains active until the
 target is destroyed; marking a Playwright page as closing first can bypass
 interception of a form submitted from its initial blank document. The guard
@@ -601,8 +612,11 @@ native display. A display that cannot start fails the launch as
 `tool.browser.provider_unavailable`; the runtime never falls back to headless.
 The browser reports its real user agent and automation state: the runtime
 overrides no user agent and masks no automation indicator, so a website that
-still refuses the browser is unsupported rather than evaded. Run-attempt leases
-remain headless. The direct surface relays each key as the user presses it,
+still refuses the browser is never evaded. A website can refuse a headless
+browser on any page, so run-attempt leases and a device sign-in's two
+verification browsers are headed in the same way, each on a private display
+of its own (ADR-0145). The direct surface relays each key as the user presses
+it,
 and the runtime delivers text as one key press per character with no added
 timing; a field that fills with no keyboard events is scored as automated and
 refused.
@@ -760,8 +774,9 @@ The service filters without trusting the client's filter:
 
 The first well-formed handoff consumes the capability, whatever follows; a
 repeated or concurrent handoff is `401`. The service verifies without holding
-its service-wide lock. It starts two headless run-attempt runtimes through the
-audited egress proxy, one from the filtered state and one from none, and loads
+its service-wide lock. It starts two headed run-attempt runtimes (ADR-0145)
+through the audited egress proxy, one from the filtered state and one from
+none, and loads
 the confirmed page in both until `DOMContentLoaded`, including deferred
 scripts, then waits up to five seconds for the network to be briefly idle,
 within thirty seconds in total. A pending image, including one inside an

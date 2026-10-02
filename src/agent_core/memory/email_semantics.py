@@ -58,6 +58,7 @@ from agent_core.domain.messages import TextPart, ToolResultItem
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import Run
+from agent_core.domain.sessions import Session
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
@@ -429,6 +430,14 @@ class EmailSemanticFormationService:
         assessment = await uow.email.get(self._principal, "assessment", thread_id)
         return assessment is not None and assessment.payload.get("bulk") is True
 
+    async def _source_session(self, uow: RepositoryUnitOfWork, session_id: UUID) -> Session:
+        try:
+            return await uow.sessions.get(session_id, self._principal)
+        except NotFoundError:
+            # A deleted session took its governed tool events with it, so a cached
+            # receipt that names it has nothing left to be checked against.
+            raise ToolTrustRejectedError("email source session is missing") from None
+
     async def _validate_source(
         self,
         uow: RepositoryUnitOfWork,
@@ -443,7 +452,7 @@ class EmailSemanticFormationService:
             # ADR-0116: bulk mail, by census or by verdict, registers no source and
             # forms nothing, whoever the caller is.
             raise ConflictError("bulk email never forms communication memory")
-        session = await uow.sessions.get(source.session_id, self._principal)
+        session = await self._source_session(uow, source.session_id)
         bindings = session.metadata.get("email_account_servers", {})
         binding = bindings.get(source.account_id, {}) if isinstance(bindings, dict) else {}
         server = binding.get("read") if isinstance(binding, dict) else None
@@ -462,7 +471,7 @@ class EmailSemanticFormationService:
             if source.header_event_sequence is None:
                 raise ToolTrustRejectedError("email passage lacks its original header event")
             if source.header_session_id is not None:
-                header_session = await uow.sessions.get(source.header_session_id, self._principal)
+                header_session = await self._source_session(uow, source.header_session_id)
                 header_bindings = header_session.metadata.get("email_account_servers", {})
                 header_binding = (
                     header_bindings.get(source.account_id, {})

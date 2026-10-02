@@ -70,3 +70,27 @@ suite checks empty-database schema parity and downgrade/re-upgrade.
 failed requests and a connection change during the network response. The
 ChatViewModel journey uses the real HTTP client to prove only a loaded visible
 transcript acknowledges its replayed terminal result.
+
+## Amendment: scheduled report indicators (2026-10-01)
+
+The owner requested a subtle new-report indicator that clears across devices
+when read. Extend sync with a bounded `query_run_ids` array and additive
+`unread_run_ids` response, derived from completed runs and the existing
+principal-scoped receipts. Unknown and foreign IDs are indistinguishable.
+Queries are read-only; acknowledgements remain restricted to loaded terminal
+results. No new table, scope, notification kind or milestone gate is needed.
+
+The native scheduled row and its collapsed group display a six-point dot,
+labelled “New report” for accessibility. Active polling refreshes the history
+index and receipt state, while connection changes discard presentation state.
+Older servers retain their existing acknowledgement path. Offline devices
+converge on their next active sync; instantaneous background clearing is not
+promised. This extends ADR-0113's presentation with server-authoritative read
+state and leaves group expansion device-local.
+
+The API regression first failed because the old sync route rejected
+`query_run_ids` with HTTP 400. It covers independent clients sharing receipts,
+idempotence, a newer unread result, exclusion of noncompleted and foreign runs,
+and bounded requests. Native tests cover batching, read-state replacement,
+connection races, offline retention, older-server fallback and acknowledgement
+through the loaded-transcript path.

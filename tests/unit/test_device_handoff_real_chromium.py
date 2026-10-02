@@ -22,9 +22,11 @@ from uuid import UUID
 import httpx
 import pytest
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from agent_core.browser_control_plane.api import create_profile_service_app
 from agent_core.browser_control_plane.filesystem import FilesystemEncryptedProfileStore
@@ -83,6 +85,20 @@ class MembersSite:
         if request.cookies.get("session") != self.token:
             return RedirectResponse("/log-in", status_code=302)
         return HTMLResponse(f"<h1>{MEMBERS_TEXT}</h1>")
+
+
+def refusing_headless_browsers(app: ASGIApp) -> ASGIApp:
+    """Answer a browser that reports itself headless with an empty 403, as x.com did."""
+
+    async def guarded(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and "HeadlessChrome" in Headers(scope=scope).get(
+            "user-agent", ""
+        ):
+            await Response(status_code=403)(scope, receive, send)
+            return
+        await app(scope, receive, send)
+
+    return guarded
 
 
 @dataclass
@@ -207,8 +223,50 @@ async def test_a_handed_off_session_is_verified_sealed_and_used_by_a_lease(
     assert status.status is BrowserAuthenticationStatus.READY
     assert lesson.url == site.url("/learn")
     assert MEMBERS_TEXT in lesson.text
-    assert set(site.relay.refused) == set()
+    assert site.relay.refused_page_targets() == set()
     assert {policy.destinations[0].host for policy in site.egress_policies} == {"site.test"}
+
+
+async def test_a_site_that_refuses_headless_browsers_confirms_a_handed_off_session(
+    tmp_path: Path,
+) -> None:
+    """Production, 2026-10-01: x.com answered the headless verification with 403 (ADR-0145)."""
+    require_real_browser()
+    members = MembersSite()
+    async with (
+        local_https_site(refusing_headless_browsers(members.app)) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        response, ceremony_id = await hand_off(
+            service, cookie=await signed_in_cookie(members), confirmed_path="/learn"
+        )
+        status = await service.sessions.authentication_status(ceremony_id, OWNER)
+
+    assert response.status_code == 200, response.text
+    assert status.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_lease_reads_a_site_that_refuses_headless_browsers(tmp_path: Path) -> None:
+    require_real_browser()
+    members = MembersSite()
+    async with (
+        local_https_site(refusing_headless_browsers(members.app)) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        lease = await service.sessions.acquire(
+            PROFILE_ID,
+            OWNER,
+            PROVIDER_REF,
+            run_id=RUN_ID,
+            attempt_number=1,
+            deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        try:
+            home = await service.sessions.navigate(lease.lease_ref, site.url("/"))
+        finally:
+            await service.sessions.close(lease.lease_ref)
+
+    assert "Welcome" in home.text
 
 
 async def test_a_session_the_site_refuses_is_signed_out(tmp_path: Path) -> None:

@@ -189,7 +189,7 @@ def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
 
 
 class PythonPlaywrightRuntime:
-    """Own one Chromium process, headed only for a ceremony, and one non-persistent context."""
+    """Own one Chromium process, headed for every hosted use, and one non-persistent context."""
 
     def __init__(
         self,
@@ -226,13 +226,13 @@ class PythonPlaywrightRuntime:
         allowed_origins: tuple[str, ...],
         *,
         storage_state: dict[str, object] | None = None,
-        interactive: bool = False,
+        headed: bool = False,
     ) -> None:
         """Launch the isolated browser context with origin interception and audited egress."""
         if self._browser is not None:
             return
         self._allowed_origins = allowed_origins
-        self._headed_popup_policy = interactive
+        self._headed_popup_policy = headed
         self._temporary_home = tempfile.TemporaryDirectory(prefix="veetbot-browser-")
         temporary_home = self._temporary_home.name
         environment: dict[str, str | float | bool] = {
@@ -240,15 +240,16 @@ class PythonPlaywrightRuntime:
             "PATH": os.defpath,
             "TMPDIR": temporary_home,
         }
-        # Websites refuse a login from a browser that reports itself headless,
-        # so the user's ceremony is headed and never falls back (ADR-0106).
-        if interactive:
+        # Websites refuse a browser that reports itself headless, at login and
+        # at any page, so a hosted browser is headed and never falls back
+        # (ADR-0106, ADR-0145).
+        if headed:
             display_name = await self._start_virtual_display()
             if display_name is not None:
                 environment["DISPLAY"] = display_name
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
-            headless=not interactive,
+            headless=not headed,
             proxy={"server": proxy_url},
             args=[
                 "--proxy-bypass-list=<-loopback>",
@@ -256,7 +257,7 @@ class PythonPlaywrightRuntime:
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                 # Headless shell can deny web-created windows before they exist.
                 # Closing them later can release a pending navigation request.
-                *([] if interactive else ["--block-new-web-contents"]),
+                *([] if headed else ["--block-new-web-contents"]),
             ],
             env=environment,
         )

@@ -174,6 +174,7 @@ public final class RunStateReducer: ObservableObject {
     @Published public private(set) var runStatus: RunStatus?
     @Published public private(set) var activeRunID: UUID?
     @Published public private(set) var reasoningActive = false
+    @Published public private(set) var reasoningTitle: String?
     @Published public private(set) var failure: RunFailureView?
     /// The latest task-permission event the stream carried.
     @Published public private(set) var lastTaskGrantEvent: TaskGrantEvent?
@@ -184,6 +185,7 @@ public final class RunStateReducer: ObservableObject {
     private var toolIndex: [String: Int] = [:]
     private var pendingApprovalIDs: Set<UUID> = []
     private var activityOrder: [ConversationActivityReference] = []
+    private var summaryHeadings = ReasoningSummaryHeadings()
 
     public init() {}
 
@@ -236,6 +238,8 @@ public final class RunStateReducer: ObservableObject {
         runStatus = nil
         activeRunID = nil
         reasoningActive = false
+        reasoningTitle = nil
+        summaryHeadings = ReasoningSummaryHeadings()
         failure = nil
         persistedSequences = []
         pendingUserMessageID = nil
@@ -297,7 +301,8 @@ public final class RunStateReducer: ObservableObject {
             guard persistedSequences.insert(id).inserted else { return }
         }
         let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:))
-        if let runID { activeRunID = runID }
+        // Streamed frames arrive many times a second; publish only what changed.
+        if let runID, runID != activeRunID { activeRunID = runID }
         if let event = Self.taskGrantEvent(from: frame) { lastTaskGrantEvent = event }
 
         switch frame.event {
@@ -312,15 +317,22 @@ public final class RunStateReducer: ObservableObject {
         case "message.delta":
             appendDelta(frame.data["text"]?.stringValue)
         case "reasoning.delta", "reasoning.summary.delta":
-            // Raw reasoning text is intentionally discarded at the reducer boundary.
-            reasoningActive = true
+            // Raw reasoning text is discarded at the reducer boundary. A provider's
+            // summary contributes only the heading of its latest part (ADR-0144).
+            if !reasoningActive { reasoningActive = true }
+            if frame.data["is_summary"]?.boolValue == true,
+                let heading = summaryHeadings.consume(frame.data["text"]?.stringValue ?? ""),
+                heading != reasoningTitle
+            {
+                reasoningTitle = heading
+            }
         case "assistant.message.completed":
-            reasoningActive = false
+            endReasoning()
             if let message = frame.data["message"] {
                 reconcileAssistantMessage(message, fallbackID: frameID(frame))
             }
         case "model.response.completed":
-            reasoningActive = false
+            endReasoning()
             reduceModelResponse(frame)
         case "tool.call.proposed":
             updateTool(from: frame, status: .queued)
@@ -422,7 +434,7 @@ public final class RunStateReducer: ObservableObject {
 
     private func appendDelta(_ text: String?) {
         guard let text, !text.isEmpty else { return }
-        reasoningActive = false
+        endReasoning()
         if let streamingMessageID,
             let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
         {
@@ -655,9 +667,16 @@ public final class RunStateReducer: ObservableObject {
         )
     }
 
+    /// The answer, the end of a model response or the end of the run ends the thinking shown.
+    private func endReasoning() {
+        if reasoningActive { reasoningActive = false }
+        if reasoningTitle != nil { reasoningTitle = nil }
+        summaryHeadings = ReasoningSummaryHeadings()
+    }
+
     private func transitionToTerminal(_ status: RunStatus) {
         runStatus = status
-        reasoningActive = false
+        endReasoning()
         clarifyingQuestion = nil
         pendingApprovalIDs.removeAll()
     }
@@ -737,5 +756,65 @@ private struct ToolOutcomePayload: Decodable {
     enum CodingKeys: String, CodingKey {
         case status, retryable, remediation
         case reasonCode = "reason_code"
+    }
+}
+
+/// The one-line status a chat shows while its run is in flight.
+public enum RunActivity {
+    public static func label(
+        isSending: Bool, runStatus: RunStatus?, reasoningActive: Bool, reasoningTitle: String?
+    ) -> String? {
+        if isSending { return "Sending…" }
+        guard runStatus == .running || runStatus == .queued else { return nil }
+        if let reasoningTitle { return "Thinking: \(reasoningTitle)" }
+        return reasoningActive ? "Reasoning…" : "Working…"
+    }
+}
+
+/// Picks the part headings out of a streamed reasoning summary (ADR-0144).
+///
+/// OpenAI opens each summary part with a bold title on a line of its own,
+/// `**Title**`, and streams the parts back to back in arbitrary chunks, so a
+/// title is the bold span that ends a line. Only the end of the current line
+/// is kept; the summary itself is never stored.
+struct ReasoningSummaryHeadings {
+    static let maximumTitleLength = 80
+
+    private var lineEnd = ""
+    /// Whether white space follows `lineEnd`; at a line's end it is not part of it.
+    private var spaceFollows = false
+
+    /// The newest heading the delta completes, if any.
+    mutating func consume(_ delta: String) -> String? {
+        var heading: String?
+        for character in delta {
+            if character.isNewline {
+                heading = Self.heading(endingLine: lineEnd) ?? heading
+                lineEnd = ""
+                spaceFollows = false
+            } else if character.isWhitespace {
+                spaceFollows = true
+            } else {
+                if spaceFollows { lineEnd.append(" ") }
+                spaceFollows = false
+                lineEnd.append(character)
+                // The longest title, its four asterisks and the character before it.
+                while lineEnd.count > Self.maximumTitleLength + 5 { lineEnd.removeFirst() }
+            }
+        }
+        return heading
+    }
+
+    private static func heading(endingLine line: String) -> String? {
+        guard line.hasSuffix("**") else { return nil }
+        let body = line.dropLast(2)
+        guard let open = body.range(of: "**", options: .backwards) else { return nil }
+        // Bold after a space is emphasis inside a sentence, not a part's title.
+        if let before = body[..<open.lowerBound].last, before.isWhitespace { return nil }
+        let title = body[open.upperBound...].trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty, title.count <= maximumTitleLength, !title.contains("*") else {
+            return nil
+        }
+        return title
     }
 }

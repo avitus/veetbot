@@ -23,7 +23,7 @@ from agent_core.domain.devices import (
     PushProvider,
     push_token_fingerprint,
 )
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.notifications import (
     NOTIFICATION_TITLES,
@@ -406,7 +406,19 @@ class NotificationInboxService:
             obsolete = [
                 row.id for row in rows if await notification_obsolete(uow, row, self._clock.now())
             ]
-        return NotificationSyncResult(obsolete_notification_ids=sorted(obsolete))
+            unread = []
+            for run_id in dict.fromkeys(request.query_run_ids):
+                try:
+                    run = await uow.runs.get(run_id, principal)
+                except NotFoundError:
+                    continue
+                if run.status is RunStatus.COMPLETED and not await uow.notification_outbox.run_seen(
+                    principal, run_id
+                ):
+                    unread.append(run_id)
+        return NotificationSyncResult(
+            obsolete_notification_ids=sorted(obsolete), unread_run_ids=sorted(unread)
+        )
 
     async def list(
         self,

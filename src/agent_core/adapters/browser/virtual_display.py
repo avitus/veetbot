@@ -1,4 +1,4 @@
-"""Private virtual display for one headed authentication ceremony."""
+"""Private virtual display for one headed browser."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ SCREEN_GEOMETRY = "1280x720x24"
 
 
 class XvfbDisplay:
-    """Own one Xvfb server that a single ceremony's browser draws to."""
+    """Own one Xvfb server that a single browser draws to."""
 
     def __init__(
         self,

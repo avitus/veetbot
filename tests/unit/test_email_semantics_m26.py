@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import timedelta
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -78,6 +78,13 @@ async def test_semantic_proposal_must_be_grounded_in_the_selected_message(
     _, service, source, fact, _ = await semantic_stack()
     with pytest.raises(ToolValidationError):
         await service.form(source, [fact.model_copy(update=updates)])
+
+
+async def test_source_whose_session_was_deleted_is_unverifiable_evidence() -> None:
+    """A cached receipt can outlive its session; deletion leaves nothing to check it against."""
+    _, service, source, fact, _ = await semantic_stack()
+    with pytest.raises(ToolTrustRejectedError):
+        await service.form(source.model_copy(update={"session_id": uuid4()}), [fact])
 
 
 async def test_incomplete_mail_is_not_a_semantic_source() -> None:
@@ -363,6 +370,9 @@ async def test_body_continuation_uses_its_exact_event_and_original_header_date()
     assert formed[0].source_event_ids == [event.sequence]
     with pytest.raises(ToolTrustRejectedError):
         await service.form(passage.model_copy(update={"body_offset": offset + 1}), [fact])
+    # The original header's session can be deleted after the passage was cached.
+    with pytest.raises(ToolTrustRejectedError):
+        await service.form(passage.model_copy(update={"header_session_id": uuid4()}), [fact])
 
 
 def test_erasure_matches_account_bound_message_body_continuations_without_thread_field() -> None:

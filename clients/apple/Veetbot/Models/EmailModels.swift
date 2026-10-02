@@ -91,12 +91,15 @@ public struct EmailMessageView: Codable, Identifiable, Equatable, Sendable {
     public let cc: [String]
     public let subject: String
     public let body: String
+    /// Inert reading Markdown derived from the retained source; absent on older servers.
+    public let readerBody: String?
     public let sentAt: Date
     public let complete: Bool
     public let attachments: [EmailAttachmentView]?
     enum CodingKeys: String, CodingKey {
         case id, sender, to, cc, subject, body, complete, attachments
         case sentAt = "sent_at"
+        case readerBody = "reader_body"
     }
 }
 

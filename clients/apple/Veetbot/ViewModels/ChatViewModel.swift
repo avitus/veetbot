@@ -211,6 +211,11 @@ public final class ChatViewModel: ObservableObject {
     @Published private var loadedNotificationSessionID: UUID?
     private var observedTerminalNotificationRunID: UUID?
     private var notificationSyncInProgress = false
+    @Published private(set) var unreadScheduledRunIDs: Set<UUID> = []
+
+    func hasUnreadReport(_ entry: SessionHistoryEntry) -> Bool {
+        entry.scheduleID != nil && entry.lastRunID.map { unreadScheduledRunIDs.contains($0) } == true
+    }
 
     var visibleNotificationSessionID: UUID? {
         guard isConfigured, !isReconfiguring, errorMessage == nil, notificationAttentionEnabled,
@@ -227,7 +232,15 @@ public final class ChatViewModel: ObservableObject {
         let visible = visibleNotificationSessionID
         let seen = visible != nil && runState.runStatus?.isTerminal == true
             ? observedTerminalNotificationRunID.map { [$0] } ?? [] : []
-        await notificationAttention.synchronize(using: api, seenRunIDs: seen) { [weak self] in
+        let reportRunIDs = history.filter { $0.scheduleID != nil }.compactMap(\.lastRunID)
+        await notificationAttention.synchronize(
+            using: api, seenRunIDs: seen, queryRunIDs: reportRunIDs,
+            onReadState: { [weak self] queried, unread in
+                guard let self else { return }
+                self.unreadScheduledRunIDs.subtract(queried)
+                self.unreadScheduledRunIDs.formUnion(unread)
+            }
+        ) { [weak self] in
             guard let self else { return false }
             return self.isConfigured && self.notificationSyncActive && !self.isReconfiguring && self.connectionGeneration == generation
                 && self.visibleNotificationSessionID == visible
@@ -333,6 +346,7 @@ public final class ChatViewModel: ObservableObject {
         resetFolderState()
         isConfigured = false
         connectionGeneration = UUID()
+        unreadScheduledRunIDs = []
         composerText = ""
         clearAttachments()
         await abandonWebsiteAuthenticationCeremony()
@@ -979,6 +993,12 @@ public final class ChatViewModel: ObservableObject {
             // Background reconciliation is best effort; direct user actions
             // still surface their own failures.
         }
+    }
+
+    func refreshScheduledReportHistory() async {
+        guard isConfigured, notificationSyncActive, !isReconfiguring,
+            historyReconciliationID == nil else { return }
+        try? await reconcileHistory()
     }
 
     private func reconcileHistory() async throws {
@@ -2440,6 +2460,7 @@ public final class ChatViewModel: ObservableObject {
         isReconfiguring = true
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
+        unreadScheduledRunIDs = []
         let installedGeneration = connectionGeneration
         let retainedSessionID = selectedSessionID
         selectionRequestID = nil
@@ -2480,6 +2501,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func clearInstalledConnection() {
+        unreadScheduledRunIDs = []
         dismissCallResult()
         resetFolderState()
         activeTaskGrants = []

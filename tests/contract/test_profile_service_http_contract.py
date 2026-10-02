@@ -69,9 +69,9 @@ class FakeRuntime:
         material: bytes,
         allowed_origins: tuple[str, ...],
         *,
-        interactive: bool,
+        headed: bool,
     ) -> None:
-        del interactive
+        del headed
         self.material = material
         self.origins = allowed_origins
 

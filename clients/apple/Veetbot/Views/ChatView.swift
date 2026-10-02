@@ -164,6 +164,7 @@ public struct ChatView: View {
                     ProgressView()
                     Text(activityLabel)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                     Spacer()
                 }
                 .padding(.horizontal, Self.transcriptHorizontalPadding)
@@ -377,9 +378,12 @@ public struct ChatView: View {
     }
 
     private var activityLabel: String? {
-        if model.isSending { return "Sending…" }
-        guard state.runStatus == .running || state.runStatus == .queued else { return nil }
-        return state.reasoningActive ? "Reasoning…" : "Working…"
+        RunActivity.label(
+            isSending: model.isSending,
+            runStatus: state.runStatus,
+            reasoningActive: state.reasoningActive,
+            reasoningTitle: state.reasoningTitle
+        )
     }
 
     private var canSendDraft: Bool {

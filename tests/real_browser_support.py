@@ -48,6 +48,17 @@ from agent_core.domain.execution import EgressPolicy
 
 REQUIRE_REAL_BROWSER = "VEETBOT_REQUIRE_REAL_BROWSER"
 SYNTHETIC_HOST = "site.test"
+# Full headed Chromium asks for exactly these on its own (ADR-0145, measured
+# 2026-10-01). A CONNECT carries no provenance, so no synthetic page may name one.
+CHROMIUM_OWN_TARGETS = frozenset(
+    {
+        "accounts.google.com:443",
+        "android.clients.google.com:443",
+        "content-autofill.googleapis.com:443",
+        "www.google.com:443",
+        "http://clients2.google.com/time/1/current",
+    }
+)
 
 
 @cache
@@ -129,6 +140,15 @@ class ConnectRelay:
         assert self._server is not None
         host, port = self._server.sockets[0].getsockname()[:2]
         return f"http://{host}:{port}"
+
+    def refused_page_targets(self) -> set[str]:
+        """Refused targets, leaving out the exact ones the browser asks for on its own."""
+        # A plain-HTTP target is a whole URL; its query changes on every request.
+        return {
+            target
+            for target in self.refused
+            if target.partition("?")[0] not in CHROMIUM_OWN_TARGETS
+        }
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._accept, "127.0.0.1", 0)

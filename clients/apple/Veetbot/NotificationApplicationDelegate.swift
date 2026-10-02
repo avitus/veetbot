@@ -250,6 +250,8 @@ final class NotificationAttentionCoordinator {
     func synchronize(
         using api: any NotificationSyncAPI,
         seenRunIDs: [UUID],
+        queryRunIDs: [UUID] = [],
+        onReadState: @escaping @MainActor (Set<UUID>, Set<UUID>) -> Void = { _, _ in },
         isCurrent: @escaping @MainActor () -> Bool
     ) async {
         guard isCurrent(), !Task.isCancelled else { return }
@@ -257,17 +259,35 @@ final class NotificationAttentionCoordinator {
         guard isCurrent(), !Task.isCancelled else { return }
         let ids = Array(Set(delivered.map(\.notificationID))).sorted { $0.uuidString < $1.uuidString }
         // APNs can leave a large backlog; reconcile all entries in bounded batches.
-        let batches = max(1, (ids.count + 199) / 200)
+        let queries = Array(Set(queryRunIDs)).sorted { $0.uuidString < $1.uuidString }
+        let batches = max(1, (ids.count + 199) / 200, (queries.count + 99) / 100)
         for batch in 0..<batches {
             guard isCurrent(), !Task.isCancelled else { return }
             let lower = min(batch * 200, ids.count)
             let upper = min(lower + 200, ids.count)
+            let queryLower = min(batch * 100, queries.count)
+            let queryUpper = min(queryLower + 100, queries.count)
+            let queried = Array(queries[queryLower..<queryUpper])
             do {
-                let result = try await api.syncNotifications(NotificationSyncRequest(
+                var request = NotificationSyncRequest(
                     deliveredNotificationIDs: Array(ids[lower..<upper]),
-                    seenRunIDs: batch == 0 ? Array(Set(seenRunIDs).prefix(100)) : []
-                ))
+                    seenRunIDs: batch == 0 ? Array(Set(seenRunIDs).prefix(100)) : [],
+                    queryRunIDs: queried
+                )
+                let result: NotificationSyncResult
+                do {
+                    result = try await api.syncNotifications(request)
+                } catch HTTPTransportError.api(let error) where error.statusCode == 400 && !queried.isEmpty {
+                    // Older sync servers reject the additive query field. Keep
+                    // their existing receipt and notification cleanup working.
+                    guard isCurrent(), !Task.isCancelled else { return }
+                    request.queryRunIDs = []
+                    result = try await api.syncNotifications(request)
+                }
                 guard isCurrent(), !Task.isCancelled else { return }
+                if let unread = result.unreadRunIDs {
+                    onReadState(Set(queried), Set(unread).intersection(queried))
+                }
                 let obsolete = Set(result.obsoleteNotificationIDs).intersection(ids[lower..<upper])
                 let requests = delivered.filter { obsolete.contains($0.notificationID) }.map(\.requestIdentifier)
                 if !requests.isEmpty { store.remove(identifiers: requests) }

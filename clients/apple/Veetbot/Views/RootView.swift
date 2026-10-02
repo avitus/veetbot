@@ -118,6 +118,7 @@ public struct RootView: View {
         .task(id: "\(model.connectionGeneration)-\(model.isConfigured)-\(scenePhase == .active)") {
             guard model.isConfigured, scenePhase == .active else { return }
             while !Task.isCancelled {
+                await model.refreshScheduledReportHistory()
                 await model.synchronizeNotifications()
                 do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
             }
@@ -751,6 +752,7 @@ private struct SessionSidebar: View {
                     ScheduleGroupHeaderRow(
                         group: group,
                         isExpanded: expanded,
+                        hasUnreadReport: group.entries.contains { model.hasUnreadReport($0) },
                         onToggle: { setScheduleGroup(group.id, expanded: !expanded) }
                     )
                     if expanded {
@@ -861,9 +863,12 @@ private struct SessionSidebar: View {
 
     private func historyLabel(_ entry: SessionHistoryEntry) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(entry.title)
-                .lineLimit(2)
-                .foregroundColor(.primary)
+            HStack(spacing: 6) {
+                Text(entry.title)
+                    .lineLimit(2)
+                    .foregroundColor(.primary)
+                if model.hasUnreadReport(entry) { NewReportIndicator() }
+            }
             ConversationAgeText(updatedAt: entry.updatedAt)
                 .appFont(.caption)
                 .foregroundColor(.secondary)
