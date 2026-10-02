@@ -1636,7 +1636,9 @@ an empty `summary` array.
 OpenAI generates summaries only for verified organizations. It may reject
 the `reasoning.summary` parameter before any output. The adapter then
 repeats the request without it, as an internal retry, and stops asking for
-that model for the rest of the process.
+that model for the rest of the process. That repeat does not spend the
+internal attempt budget: a refusal on the last attempt, or with a budget of
+one, still gets the request without a summary.
 
 ## Conversation invariants the gateway enforces
 

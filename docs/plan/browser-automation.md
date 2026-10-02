@@ -430,6 +430,15 @@ resumed after its approval, reuse the lease while it outlives the call; the
 provider drops a lease the service no longer honours or does not answer for,
 and an expired lease is replaced.
 
+Every hosted browser is headed and shares one container, so the service
+admits at most three at once (ADR-0145): each lease and each remote ceremony
+counts one, and a device verification counts two from the moment its handoff
+is accepted. A new lease or remote ceremony beyond that is refused before its
+browser starts, as retryable `tool.browser.provider_unavailable`; re-attaching
+to a live lease needs no room. A handoff that finds no room for its two
+browsers still spends its capability and ends as a verification that could not
+run.
+
 A lease renews in steps of at most fifteen minutes, up to sixty minutes after
 acquisition and never past the run's deadline, only while its run is running,
 queued to resume, or parked on its own approval (ADR-0127). The run worker that

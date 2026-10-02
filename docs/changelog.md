@@ -14,7 +14,13 @@ title: Changelog
   browser still reports honestly that it is automated. ADR-0145 records the
   change.
 - The browser service needs more memory for this. Its container limit rises
-  from 1 GiB to 2 GiB, and the production host needs that memory free.
+  from 1 GiB to 3 GiB, and the production host needs that memory free. At most
+  three such browsers run at once; a fourth run or sign-in waits for one to
+  close.
+- A sender can no longer write a link into the email reading view. Only links
+  the reader builds from the message's own anchors and URLs are links.
+- A chat no longer fails when OpenAI refuses the optional reasoning summary on
+  the request's last internal attempt.
 
 ## 2026-10-01 — Chats show what the assistant is thinking about
 

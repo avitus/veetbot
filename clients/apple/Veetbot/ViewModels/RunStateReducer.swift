@@ -781,6 +781,8 @@ struct ReasoningSummaryHeadings {
     static let maximumTitleLength = 80
 
     private var lineEnd = ""
+    /// Whether white space follows `lineEnd`; at a line's end it is not part of it.
+    private var spaceFollows = false
 
     /// The newest heading the delta completes, if any.
     mutating func consume(_ delta: String) -> String? {
@@ -789,10 +791,15 @@ struct ReasoningSummaryHeadings {
             if character.isNewline {
                 heading = Self.heading(endingLine: lineEnd) ?? heading
                 lineEnd = ""
+                spaceFollows = false
+            } else if character.isWhitespace {
+                spaceFollows = true
             } else {
+                if spaceFollows { lineEnd.append(" ") }
+                spaceFollows = false
                 lineEnd.append(character)
                 // The longest title, its four asterisks and the character before it.
-                if lineEnd.count > Self.maximumTitleLength + 5 { lineEnd.removeFirst() }
+                while lineEnd.count > Self.maximumTitleLength + 5 { lineEnd.removeFirst() }
             }
         }
         return heading

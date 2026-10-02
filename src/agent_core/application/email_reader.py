@@ -32,9 +32,20 @@ def _safe_url(value: str) -> str | None:
         return None
 
 
+_LINK_SYNTAX = str.maketrans({"\\": r"\\", "[": r"\[", "]": r"\]", "<": r"\<"})
+
+
+def _inert(text: str) -> str:
+    """Escape what would let sender text author a Markdown link, image or markup.
+
+    Emphasis and list markers stay: they format text and cannot make a link.
+    """
+    return text.translate(_LINK_SYNTAX)
+
+
 def _link(label: str, url: str) -> str:
+    """Link an already inert label to a checked destination."""
     safe = _safe_url(url)
-    label = label.replace("[", r"\[").replace("]", r"\]")
     return f"[{label}]({safe})" if safe else label
 
 
@@ -107,7 +118,7 @@ class _HTMLText(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if not self.hidden:
-            self.parts.append(re.sub(r"\s+", " ", data))
+            self.parts.append(_inert(re.sub(r"\s+", " ", data)))
 
 
 def _forwarded(lines: list[str]) -> list[str]:
@@ -143,7 +154,9 @@ def _forwarded(lines: list[str]) -> list[str]:
 def reading_body(body: str, *, subject: str = "") -> str:
     """Derive safe reading Markdown from retained text, preserving substantive prose."""
     text = body.translate(_INVISIBLE).replace("\r\n", "\n").replace("\r", "\n")
-    if _HTML.search(text):
+    # Extracted HTML text is already inert and carries the reader's own links.
+    extracted = bool(_HTML.search(text))
+    if extracted:
         parser = _HTMLText()
         parser.feed(text)
         parser.close()
@@ -214,8 +227,9 @@ def reading_body(body: str, *, subject: str = "") -> str:
                     host = "Open link"
                 result.append(_link(host, url) + closing_emphasis)
         else:
-            result.append(line)
+            result.append(line if extracted else _inert(line))
         index += 1
+    title = _inert(title)
     if title:
         for index, line in enumerate(result):
             linked = re.fullmatch(r"\[([^\]]+)\]\(https?://[^\s]+\)", line)

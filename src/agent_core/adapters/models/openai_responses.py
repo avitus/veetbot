@@ -200,7 +200,10 @@ class OpenAIResponsesProvider:
         if resolved.model in self._summaries_refused:
             payload = _without_summary(payload)
 
-        for internal_attempt in range(1, self._max_internal_attempts + 1):
+        attempt_limit = self._max_internal_attempts
+        internal_attempt = 0
+        while internal_attempt < attempt_limit:
+            internal_attempt += 1
             emitted_count = 0
             retry_stream = False
             try:
@@ -211,7 +214,7 @@ class OpenAIResponsesProvider:
                         if should_retry_failure_event(
                             event,
                             internal_attempt=internal_attempt,
-                            max_internal_attempts=self._max_internal_attempts,
+                            max_internal_attempts=attempt_limit,
                         ):
                             retry_stream = True
                             break
@@ -221,7 +224,7 @@ class OpenAIResponsesProvider:
                     continue
                 return
             except (APIConnectionError, APITimeoutError):
-                if emitted_count == 0 and internal_attempt < self._max_internal_attempts:
+                if emitted_count == 0 and internal_attempt < attempt_limit:
                     continue
                 yield failed_event(
                     attempt=attempt,
@@ -242,17 +245,19 @@ class OpenAIResponsesProvider:
                 if (
                     failure.category == "transient"
                     and emitted_count == 0
-                    and internal_attempt < self._max_internal_attempts
+                    and internal_attempt < attempt_limit
                 ):
                     continue
                 if (
                     failure.provider_parameter == "reasoning.summary"
                     and "summary" in payload.get("reasoning", {})
                     and emitted_count == 0
-                    and internal_attempt < self._max_internal_attempts
                 ):
                     # OpenAI summarizes only for verified organizations. The
-                    # summary is a display nicety, so ask again without it.
+                    # summary is a display nicety, so ask again without it. The
+                    # refusal is not a failure of the answer: it gets its own
+                    # attempt, once, since the next payload has no summary.
+                    attempt_limit += 1
                     self._summaries_refused.add(resolved.model)
                     logger.warning(
                         "openai_reasoning_summary_refused model=%s code=%s",
@@ -300,7 +305,7 @@ class OpenAIResponsesProvider:
                 if (
                     failure.category == "transient"
                     and emitted_count == 0
-                    and internal_attempt < self._max_internal_attempts
+                    and internal_attempt < attempt_limit
                 ):
                     continue
                 yield failed_event(

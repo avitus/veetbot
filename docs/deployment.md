@@ -650,9 +650,11 @@ the supplied session against a second, signed-out browser concurrently; the
 former 128 MiB mount filled during these loads and crashed the browser drivers.
 Keep the two-browser capacity when changing container settings. Every hosted
 browser is headed (ADR-0145): one used about 610 MiB and 181 processes and
-threads on a light page, and a verification's two about 1.1 GiB and 370, so
-the container allows 2 GiB and 1,024 processes. The limit is a ceiling, not a
-reservation: the host needs that much memory free beside its other services.
+threads on a light page, and a verification's two about 1.1 GiB and 370. The
+service admits at most three browsers at once, and the container allows 3 GiB,
+a gibibyte for each, and 1,024 processes; change the two together. The limit
+is a ceiling, not a reservation: the host needs that much memory free beside
+its other services.
 The service still enforces one thirty-second deadline for verification,
 including browser startup, page loading and session capture; a page load has
 no shorter deadline.

@@ -22,6 +22,7 @@ from agent_core.browser_control_plane.models import (
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import (
+    MAXIMUM_LIVE_BROWSERS,
     CeremonyCapabilityRejected,
     DeviceHandoffInvalid,
     DeviceSessionRejected,
@@ -892,6 +893,104 @@ async def test_device_verification_loads_both_pages_in_headed_browsers(tmp_path:
     with_session, without_session = runtimes
     assert with_session.headed is True
     assert without_session.headed is True
+
+
+async def more_profiles(
+    sessions: HostedProfileSessionService, count: int
+) -> list[tuple[UUID, str]]:
+    """Provision further profiles for the same owner, each with its own reference."""
+    references = [f"opaque-session-reference-{index:016d}" for index in range(2, 2 + count)]
+    pending = iter(references)
+    lifecycle = HostedProfileLifecycleService(
+        sessions._store,  # noqa: SLF001 - the same store the service reads
+        reference_factory=lambda: next(pending),
+        invalidate_profile=sessions.invalidate_profile,
+    )
+    profiles = [UUID(int=0xB000 + index) for index in range(count)]
+    for profile_id in profiles:
+        await lifecycle.provision(profile_id, principal(), ("https://example.org",))
+    return list(zip(profiles, references, strict=True))
+
+
+async def lease_for(
+    sessions: HostedProfileSessionService, profile: tuple[UUID, str]
+) -> BrowserLease:
+    profile_id, reference = profile
+    return await sessions.acquire(
+        profile_id,
+        principal(),
+        reference,
+        run_id=UUID(int=profile_id.int + 0x100),
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=10),
+    )
+
+
+async def test_a_browser_beyond_the_service_limit_is_refused_until_one_closes(
+    tmp_path: Path,
+) -> None:
+    """Headed browsers share one container: a fourth would risk all of them (ADR-0145)."""
+    _lifecycle, sessions, runtimes, _times = services(tmp_path)
+    profiles = await more_profiles(sessions, MAXIMUM_LIVE_BROWSERS + 1)
+    leases = [await lease_for(sessions, profile) for profile in profiles[:MAXIMUM_LIVE_BROWSERS]]
+
+    with pytest.raises(BrowserProviderError) as refused:
+        await lease_for(sessions, profiles[-1])
+
+    assert refused.value.reason_code == "tool.browser.provider_unavailable"
+    assert refused.value.retryable is True
+    assert len(runtimes) == MAXIMUM_LIVE_BROWSERS
+
+    await sessions.close(leases[0].lease_ref)
+    await lease_for(sessions, profiles[-1])
+
+    assert len(runtimes) == MAXIMUM_LIVE_BROWSERS + 1
+
+
+async def test_a_remote_ceremony_counts_against_the_browser_limit(tmp_path: Path) -> None:
+    _lifecycle, sessions, runtimes, _times = services(tmp_path)
+    profiles = await more_profiles(sessions, MAXIMUM_LIVE_BROWSERS + 1)
+    for profile in profiles[: MAXIMUM_LIVE_BROWSERS - 1]:
+        await lease_for(sessions, profile)
+    ceremony_profile, ceremony_reference = profiles[MAXIMUM_LIVE_BROWSERS - 1]
+    await sessions.begin_authentication(
+        ceremony_profile, principal(), ceremony_reference, login_url="https://example.org/"
+    )
+
+    with pytest.raises(BrowserProviderError) as refused:
+        await sessions.begin_authentication(
+            profiles[-1][0], principal(), profiles[-1][1], login_url="https://example.org/"
+        )
+    with pytest.raises(BrowserProviderError):
+        await lease_for(sessions, profiles[-1])
+
+    assert refused.value.reason_code == "tool.browser.provider_unavailable"
+    assert len(runtimes) == MAXIMUM_LIVE_BROWSERS
+
+
+async def test_a_verification_without_room_for_both_browsers_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    profiles = await more_profiles(sessions, MAXIMUM_LIVE_BROWSERS - 1)
+    leases = [await lease_for(sessions, profile) for profile in profiles]
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(BrowserProviderError) as refused:
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert refused.value.reason_code == "tool.browser.provider_unavailable"
+    assert await ceremony_status(sessions, ceremony_id) is BrowserAuthenticationStatus.CANCELLED
+    assert len(runtimes) == MAXIMUM_LIVE_BROWSERS - 1
+    assert writes == []
+
+    await sessions.close(leases[0].lease_ref)
+    retry_id, retry_capability = await begin_device(sessions)
+    await sessions.accept_device_session(retry_id, retry_capability, device_handoff())
+
+    assert await ceremony_status(sessions, retry_id) is BrowserAuthenticationStatus.READY
 
 
 async def test_concurrent_device_handoffs_consume_the_capability_once(tmp_path: Path) -> None:

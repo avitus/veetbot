@@ -128,3 +128,42 @@ async def test_an_account_that_cannot_summarize_still_gets_its_answer(
         {"effort": "high"},
     ]
     assert caplog.text.count("openai_reasoning_summary_refused") == 1
+
+
+async def test_a_summary_refusal_on_the_last_attempt_still_gets_its_answer() -> None:
+    """The optional summary must not spend the retry budget the answer needs."""
+
+    sent: list[dict[str, Any]] = []
+
+    async def source(payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        sent.append(payload)
+        if "summary" in payload["reasoning"]:
+            raise APIStatusError(
+                "organization must be verified",
+                response=httpx.Response(
+                    400, request=httpx.Request("POST", "https://api.openai.com/v1/responses")
+                ),
+                body={"error": {"code": "unsupported_value", "param": "reasoning.summary"}},
+            )
+        for event in openai_text_events("Hello."):
+            yield event
+
+    provider = OpenAIResponsesProvider(event_source=source, max_internal_attempts=1)
+    summarizing = request().model_copy(
+        update={"reasoning_effort": ReasoningEffort.HIGH, "reasoning_summary": True}
+    )
+    try:
+        events = [
+            event
+            async for event in validated_stream(
+                provider.stream(summarizing, resolved("openai"), ATTEMPT)
+            )
+        ]
+    finally:
+        await provider.close()
+
+    assert isinstance(events[-1], ModelCompletedEvent)
+    assert [payload["reasoning"] for payload in sent] == [
+        {"effort": "high", "summary": "auto"},
+        {"effort": "high"},
+    ]

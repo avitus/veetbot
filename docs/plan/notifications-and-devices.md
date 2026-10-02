@@ -1010,8 +1010,9 @@ retain their meaning; device wake-ups and operational alerts are not delayed.
 Staleness is checked again before each target send.
 
 `POST /v1/notifications/sync`, under the new exact `notification.write` scope
-and the existing API flag, accepts `delivered_notification_ids` (at most 200)
-and `seen_run_ids` (at most 100), both UUID arrays with no extra fields.
+and the existing API flag, accepts `delivered_notification_ids` (at most 200),
+`seen_run_ids` (at most 100) and `query_run_ids` (at most 100, see scheduled
+report indicators below), all UUID arrays, with no extra fields.
 It atomically validates ownership and terminal status for every seen run,
 stores idempotent principal-scoped run receipts, and returns
 `obsolete_notification_ids`: only requested, owned notification IDs whose

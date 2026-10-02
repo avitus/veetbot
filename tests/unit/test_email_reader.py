@@ -193,3 +193,34 @@ async def test_expired_source_never_reappears_in_reader_projection() -> None:
         for message in response.json()["messages"]:
             assert message["body"] == ""
             assert message["reader_body"] == ""
+
+
+def test_sender_text_cannot_author_a_link_an_image_or_markup() -> None:
+    """Only links the reader builds, from a checked destination, are links."""
+    source = """Please [Verify account](https://attacker.example/login) today.
+
+![pixel](https://tracker.example/open.png)
+
+Call <tel:+15551234567> or <b>act now</b>.
+
+A pre-escaped \\[bracket](https://attacker.example/escaped) changes nothing.
+"""
+    result = reading_body(source)
+    assert r"\[Verify account\](https://attacker.example/login)" in result
+    assert r"!\[pixel\](https://tracker.example/open.png)" in result
+    assert r"\<tel:+15551234567>" in result
+    assert r"\\\[bracket\](https://attacker.example/escaped)" in result
+    assert "[Verify account](" not in result
+    assert "<tel:" not in result.replace(r"\<tel:", "")
+
+
+def test_html_text_cannot_author_a_link_but_an_anchor_still_can() -> None:
+    source = (
+        "<p>Please [Verify account](https://attacker.example/login) today.</p>"
+        '<p>Read the <a href="https://example.com/report">[1] report</a>.</p>'
+        "<p>Call &lt;tel:+15551234567&gt;.</p>"
+    )
+    result = reading_body(source)
+    assert r"\[Verify account\](https://attacker.example/login)" in result
+    assert r"[\[1\] report](https://example.com/report)" in result
+    assert r"\<tel:+15551234567>" in result

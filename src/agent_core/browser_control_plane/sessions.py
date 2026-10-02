@@ -53,6 +53,8 @@ MAXIMUM_LEASE_LIFETIME_SECONDS = MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS
 AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 # A device handoff's two verification loads end within this budget (ADR-0128).
 DEVICE_VERIFICATION_SECONDS = 30.0
+# Headed browsers alive at once, each budgeted a third of the container (ADR-0145).
+MAXIMUM_LIVE_BROWSERS = 3
 # Element facts beside one observation are cut to this many serialized bytes.
 MAXIMUM_FACTS_BYTES = 64 * 1024
 # Finished ceremonies kept for idempotent status reads, oldest dropped first.
@@ -252,6 +254,7 @@ class HostedProfileSessionService:
                 )
             if self._active_ceremony_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile has an active authentication ceremony")
+            self._admit_browsers_locked(1)
             identity = metadata.identity()
             material = await self._store.load(identity)
             runtime = self._runtime_factory(principal.tenant_id)
@@ -468,6 +471,7 @@ class HostedProfileSessionService:
                         f"#capability={capability}"
                     ),
                 )
+            self._admit_browsers_locked(1)
             runtime = self._runtime_factory(principal.tenant_id)
             try:
                 await runtime.start(
@@ -659,8 +663,12 @@ class HostedProfileSessionService:
                 raise CeremonyCapabilityRejected
             if not confirmed_url_in_scope(handoff, state.identity.allowed_origins):
                 raise DeviceHandoffInvalid
+            # Counted before this ceremony reserves its own two browsers.
+            room = self._live_browsers_locked() + 2 <= MAXIMUM_LIVE_BROWSERS
             state.consumed = True
         try:
+            if not room:
+                raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
             await self._verify_and_seal(state, handoff)
         finally:
             async with self._lock:
@@ -731,6 +739,19 @@ class HostedProfileSessionService:
             for runtime in (signed_in, signed_out):
                 with suppress(Exception):
                     await runtime.close()
+
+    def _live_browsers_locked(self) -> int:
+        """Browsers running or reserved: leases, remote ceremonies, a verification's two."""
+        return len(self._leases) + sum(
+            2 if state.mode is BrowserAuthenticationMode.DEVICE else 1
+            for state in self._ceremonies.values()
+            if state.runtime is not None or state.consumed
+        )
+
+    def _admit_browsers_locked(self, count: int) -> None:
+        """Refuse a browser the container has no room for, before it starts (ADR-0145)."""
+        if self._live_browsers_locked() + count > MAXIMUM_LIVE_BROWSERS:
+            raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
 
     def _accepts_handoff_locked(self, state: _CeremonyState, capability: str) -> bool:
         return (

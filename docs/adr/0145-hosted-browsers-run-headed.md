@@ -52,9 +52,15 @@ ran in the browser the website refuses.
    transport through the browser context's request client, and the closure
    guard. Headless shell's `--block-new-web-contents` switch remains only in
    the ephemeral adapter, which stays headless.
-4. The production container allows 2 GiB and 1,024 processes, from 1 GiB and
-   256.
-5. The runtime's launch flag is named `headed`, since a lease is headed
+4. The service admits at most three browsers at once, counting each lease,
+   each remote ceremony, and two for a device verification. A lease or a
+   remote ceremony that would exceed that is refused before its browser
+   starts, as retryable `tool.browser.provider_unavailable`. A handoff that
+   finds no room for its two browsers spends its capability and ends the same
+   way, as a verification that could not run.
+5. The production container allows 3 GiB, a gibibyte for each admitted
+   browser, and 1,024 processes, from 1 GiB and 256.
+6. The runtime's launch flag is named `headed`, since a lease is headed
    without being interactive.
 
 ## Consequences
@@ -65,11 +71,15 @@ ran in the browser the website refuses.
   the blank refusal page used about 200 MiB and 78. Two headed browsers, which
   one verification starts, failed to launch under the 256-process limit and
   used about 1.1 GiB and 370 processes and threads once it was raised. A
-  signed-in page will use more. The service has no cap on how many profiles
-  hold a lease at once, so the container limit is the bound.
-- The production host had 4 GiB with about 1.3 GiB available on 2026-10-01. It
-  needs more memory before this release is deployed, or a verification or two
-  concurrent runs can exhaust the host.
+  signed-in page will use more, which is why each admitted browser is
+  budgeted a gibibyte. Without the admission limit, leases for four profiles
+  could exhaust the container and end every browser in it.
+- A fourth concurrent run, sign-in or verification is refused until a browser
+  closes. One owner's use rarely reaches that; a refused run sees a retryable
+  provider failure, and a refused verification asks the owner to try again.
+- The production host had 4 GiB with about 1.3 GiB available on 2026-10-01,
+  too little for this release. It was resized the same day to 8 GiB with about
+  5.7 GiB available.
 - ADR-0138's transport limit now covers runs and verification as well: a
   website that requires the browser's own TLS fingerprint for documents may
   refuse them. The sandbox still prevents legacy `document.domain` relaxation.
@@ -113,8 +123,12 @@ ran in the browser the website refuses.
   handed-off session and serves a lease. Before the change the handoff was
   `422 session_unconfirmed` and the lease observed an empty page.
 - `tests/contract/test_hosted_profile_session_service_contract.py`: a lease
-  and both verification loads start headed.
-- `tests/unit/test_toolchain.py`: the production container limits.
-- The built service image under the new limits: two concurrent headed
-  browsers load x.com's signed-out page through the hosted runtime and the
-  browser egress proxy.
+  and both verification loads start headed; a fourth browser, a remote
+  ceremony at the limit, and a verification without room for two are refused
+  before any browser starts, and admitted once a lease closes.
+- `tests/unit/test_toolchain.py`: the production container limits, with the
+  memory limit tied to the admission limit.
+- The built service image under a 2 GiB and 1,024-process limit: two
+  concurrent headed browsers load x.com's signed-out page through the hosted
+  runtime and the browser egress proxy, at about 1.15 GiB and 350 processes
+  and threads.

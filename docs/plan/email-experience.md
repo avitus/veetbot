@@ -116,8 +116,12 @@ padding and recognizable promotional controls, collapses a forwarded envelope to
 its source attribution, embeds source URLs as labeled links, and restores article
 headings and paragraph flow. Explicit HTML advertisements and hidden/active HTML
 are omitted; ambiguous prose, author attribution, substantive disclosures, and
-postscripts remain. No link is fetched or resolved during cleanup. Native text
-renders the result at a comfortable line width, with external HTTP(S) links opened
+postscripts remain. No link is fetched or resolved during cleanup. Only the
+reader makes a link, from an HTML anchor or a source URL whose destination it
+checked: brackets, angle brackets and backslashes in the sender's own text are
+escaped, so that text cannot author a Markdown link, image or markup, while its
+emphasis and lists still format. Native text renders the result at a
+comfortable line width, with external HTTP(S) links opened
 only by a user gesture and a **Show original** toggle for the unchanged retained
 body. This is presentation, not a summary or rewrite: it makes no model call,
 stores no extra body copy, and never replaces drafting or memory evidence. The

@@ -940,6 +940,16 @@ import Testing
     }
 
     @Test
+    func testAHeadingFollowedBySpacesStillBecomesATitle() {
+        let reducer = RunStateReducer()
+        reducer.reduce(summaryFrame("**Checking sources** \t\n\nI'm reading"))
+        #expect(reducer.reasoningTitle == "Checking sources")
+        let longest = String(repeating: "a", count: 80)
+        reducer.reduce(summaryFrame("**\(longest)**" + String(repeating: " ", count: 12) + "\n"))
+        #expect(reducer.reasoningTitle == longest)
+    }
+
+    @Test
     func testRawReasoningNeverBecomesATitle() {
         let reducer = RunStateReducer()
         reducer.reduce(

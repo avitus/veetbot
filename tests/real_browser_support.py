@@ -33,7 +33,6 @@ from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import pytest
 import uvicorn
@@ -49,8 +48,17 @@ from agent_core.domain.execution import EgressPolicy
 
 REQUIRE_REAL_BROWSER = "VEETBOT_REQUIRE_REAL_BROWSER"
 SYNTHETIC_HOST = "site.test"
-# Full headed Chromium contacts its vendor's services on its own (ADR-0145).
-CHROMIUM_OWN_SERVICES = frozenset({"google.com", "googleapis.com"})
+# Full headed Chromium asks for exactly these on its own (ADR-0145, measured
+# 2026-10-01). A CONNECT carries no provenance, so no synthetic page may name one.
+CHROMIUM_OWN_TARGETS = frozenset(
+    {
+        "accounts.google.com:443",
+        "android.clients.google.com:443",
+        "content-autofill.googleapis.com:443",
+        "www.google.com:443",
+        "http://clients2.google.com/time/1/current",
+    }
+)
 
 
 @cache
@@ -134,17 +142,12 @@ class ConnectRelay:
         return f"http://{host}:{port}"
 
     def refused_page_targets(self) -> set[str]:
-        """Refused targets a page asked for, leaving out the browser's own services."""
-
-        def registrable_domain(target: str) -> str:
-            # A target is a CONNECT authority or, for plain HTTP, a whole URL.
-            host = urlsplit(target if "://" in target else f"//{target}").hostname or ""
-            return ".".join(host.split(".")[-2:])
-
+        """Refused targets, leaving out the exact ones the browser asks for on its own."""
+        # A plain-HTTP target is a whole URL; its query changes on every request.
         return {
             target
             for target in self.refused
-            if registrable_domain(target) not in CHROMIUM_OWN_SERVICES
+            if target.partition("?")[0] not in CHROMIUM_OWN_TARGETS
         }
 
     async def start(self) -> None:

@@ -11,7 +11,7 @@ services:
     user: "65532:65532"
     read_only: true
     pids_limit: 1024
-    mem_limit: 2g
+    mem_limit: 3g
     cpus: 2.0
     shm_size: 256m
     cap_drop:
