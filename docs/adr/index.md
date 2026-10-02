@@ -154,3 +154,4 @@ implementation without one.
 
 - [ADR-0143 — Notification attention and reconciliation (Proposed)](0143-notification-attention-and-reconciliation.md)
 - [ADR-0144 — Chat runs ask for reasoning summaries, and the app shows their headings (Accepted)](0144-chat-reasoning-summaries.md)
+- [ADR-0145 — Hosted browsers run headed for agent runs and sign-in verification (Accepted; amends ADR-0106, ADR-0128, ADR-0138)](0145-hosted-browsers-run-headed.md)

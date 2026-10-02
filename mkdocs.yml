@@ -270,4 +270,5 @@ nav:
       - ADR-0142 Denials record their result item: adr/0142-denials-record-their-result-item.md
       - ADR-0143 Notification attention and reconciliation: adr/0143-notification-attention-and-reconciliation.md
       - ADR-0144 Chat reasoning summaries: adr/0144-chat-reasoning-summaries.md
+      - ADR-0145 Hosted browsers run headed: adr/0145-hosted-browsers-run-headed.md
   - Changelog: changelog.md

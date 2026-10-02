@@ -5,7 +5,8 @@
 - Related: ADR-0058; ADR-0098
 - Amended by: ADR-0128 (2026-09-25), which lets the owner's own client hand one
   site's session to the isolated service, reversing this ADR's rejection of
-  session import
+  session import; ADR-0145 (2026-10-01), which makes run-attempt leases headed
+  as well
 - Design: [Browser automation](../plan/browser-automation.md)
 
 ## Context

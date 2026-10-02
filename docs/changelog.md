@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-01 — Website Access works on sites that refuse headless browsers
+
+- Some websites, x.com among them, answer a headless browser with an empty
+  "access denied" page on every page. Veetbot's sign-in check and its agent
+  runs used a headless browser, so the check could not confirm a sign-in you
+  had just completed and a run would have seen a blank page. Both now use the
+  full browser, run with a display, that the remote sign-in already used. The
+  browser still reports honestly that it is automated. ADR-0145 records the
+  change.
+- The browser service needs more memory for this. Its container limit rises
+  from 1 GiB to 2 GiB, and the production host needs that memory free.
+
 ## 2026-10-01 — Chats show what the assistant is thinking about
 
 - While the assistant reasons before it answers, the Apple app now shows the

@@ -900,9 +900,9 @@ async def test_closing_a_blank_popup_does_not_release_its_form_submission(
 
 
 @pytest.mark.parametrize("task_grant", [False, True])
-@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.parametrize("headed", [False, True])
 async def test_concurrent_popup_attempts_are_denied_before_creation(
-    task_grant: bool, interactive: bool
+    task_grant: bool, headed: bool
 ) -> None:
     """The browser denies every attempted popup before any form can be submitted."""
     html = """<!doctype html><title>Lesson</title>
@@ -918,7 +918,7 @@ async def test_concurrent_popup_attempts_are_denied_before_creation(
             w.document.forms[0].submit();
         } catch (error) { /* The popup may already have been destroyed. */ }
     }">Continue</button>"""
-    async with lesson_pages({"/lesson/1": html}, interactive=interactive) as (runtime, visit, left):
+    async with lesson_pages({"/lesson/1": html}, headed=headed) as (runtime, visit, left):
         page = await visit("/lesson/1")
         await runtime.act(
             _click_named(page, "Continue"),

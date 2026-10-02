@@ -312,4 +312,4 @@ async def test_the_live_page_decides_whether_a_task_grant_covers_an_act(tmp_path
     # Every refusal left the sequence at 1: the next act is sequence 2.
     assert approved.status_code == 200, approved.text
     assert clicks_at_end == ["start", "approved"]
-    assert set(site.relay.refused) == set()
+    assert site.relay.refused_page_targets() == set()

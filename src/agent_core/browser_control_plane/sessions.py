@@ -144,7 +144,7 @@ class BrowserSessionRuntime(Protocol):
         material: bytes,
         allowed_origins: tuple[str, ...],
         *,
-        interactive: bool,
+        headed: bool,
     ) -> None: ...
 
     async def navigate(self, url: str) -> BrowserObservation: ...
@@ -256,7 +256,8 @@ class HostedProfileSessionService:
             material = await self._store.load(identity)
             runtime = self._runtime_factory(principal.tenant_id)
             try:
-                await runtime.start(material, metadata.allowed_origins, interactive=False)
+                # A website can refuse a headless browser on any page (ADR-0145).
+                await runtime.start(material, metadata.allowed_origins, headed=True)
             except Exception:
                 await runtime.close()
                 raise
@@ -472,7 +473,7 @@ class HostedProfileSessionService:
                 await runtime.start(
                     await self._store.load(identity),
                     metadata.allowed_origins,
-                    interactive=True,
+                    headed=True,
                 )
                 await runtime.navigate(login_url)
             except BrowserProviderError:
@@ -1001,7 +1002,8 @@ async def _page_evidence(
     origins: tuple[str, ...],
     url: str,
 ) -> BrowserPageEvidence:
-    await runtime.start(material, origins, interactive=False)
+    # Both loads use the browser a lease will use, so the control is fair (ADR-0145).
+    await runtime.start(material, origins, headed=True)
     return await runtime.load_page_evidence(url)
 
 

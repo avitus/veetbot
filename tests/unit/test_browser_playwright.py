@@ -160,7 +160,7 @@ async def test_headed_document_renders_compressed_responses(encoding: str) -> No
 
     async with local_https_site(Starlette(routes=[Route("/login", document)])) as site:
         runtime = RealBrowserRuntime()
-        await runtime.start(site.proxy_url, (site.origin,), interactive=True)
+        await runtime.start(site.proxy_url, (site.origin,), headed=True)
         try:
             page = await runtime.navigate(site.url("/login"))
             assert page.title == "Compressed sign-in"
@@ -225,7 +225,7 @@ async def test_headed_popup_policy_preserves_sign_in_and_redirect_boundaries() -
     )
     async with local_https_site(app) as site:
         runtime = RealBrowserRuntime()
-        await runtime.start(site.proxy_url, (site.origin,), interactive=True)
+        await runtime.start(site.proxy_url, (site.origin,), headed=True)
         try:
             await runtime.navigate(site.url("/login"))
             page = runtime._current_page()
@@ -257,7 +257,7 @@ async def test_headed_transport_does_not_add_cookies_to_cross_site_post() -> Non
     app = Starlette(routes=[Route("/submit", submit, methods=["POST"])])
     async with local_https_site(app) as site:
         runtime = RealBrowserRuntime()
-        await runtime.start(site.proxy_url, (site.origin,), interactive=True)
+        await runtime.start(site.proxy_url, (site.origin,), headed=True)
         try:
             page = runtime._current_page()
             await page.context.add_cookies(
@@ -798,7 +798,7 @@ async def test_interactive_ceremony_launches_headed_chromium_on_its_own_display(
     display = FakeVirtualDisplay()
     runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
 
-    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=True)
 
     assert chromium.launches[0]["headless"] is False
     assert chromium.launches[0]["env"]["DISPLAY"] == ":77"
@@ -809,16 +809,16 @@ async def test_interactive_ceremony_launches_headed_chromium_on_its_own_display(
     assert display.closed
 
 
-async def test_run_attempt_lease_stays_headless_without_a_display(
+async def test_a_headless_launch_denies_new_windows_and_starts_no_display(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Agent leases deny web-created windows in headless shell without a display."""
+    """The ephemeral adapter's headless shell denies web-created windows itself."""
     chromium = FakeChromiumLaunches()
     chromium.install(monkeypatch)
     display = FakeVirtualDisplay()
     runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
 
-    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=False)
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=False)
 
     assert chromium.launches[0]["headless"] is True
     assert "--block-new-web-contents" in chromium.launches[0]["args"]
@@ -835,7 +835,7 @@ async def test_interactive_ceremony_never_falls_back_to_headless(
     runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
 
     with pytest.raises(BrowserProviderError) as raised:
-        await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+        await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=True)
 
     assert raised.value.reason_code == "tool.browser.provider_unavailable"
     assert chromium.launches == []
@@ -851,7 +851,7 @@ async def test_cancelled_ceremony_start_destroys_its_display(
     runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: display)
 
     with pytest.raises(asyncio.CancelledError):
-        await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+        await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=True)
 
     assert display.closed
     assert chromium.launches == []
@@ -865,7 +865,7 @@ async def test_interactive_ceremony_reports_its_real_browser_identity(
     chromium.install(monkeypatch)
     runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: None)
 
-    await runtime.start("http://127.0.0.1:9", ("https://site.example",), interactive=True)
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=True)
 
     assert "user_agent" not in chromium.contexts[0]
     assert "ignore_default_args" not in chromium.launches[0]
@@ -883,7 +883,7 @@ async def test_production_runtime_uses_the_platform_display_by_default(
     )
 
     await PythonPlaywrightRuntime().start(
-        "http://127.0.0.1:9", ("https://site.example",), interactive=True
+        "http://127.0.0.1:9", ("https://site.example",), headed=True
     )
 
     assert chromium.launches[0]["env"]["DISPLAY"] == ":77"
@@ -1605,7 +1605,7 @@ async def test_refusal_forgets_the_revision() -> None:
 async def lesson_pages(
     pages: dict[str, str],
     *,
-    interactive: bool = False,
+    headed: bool = False,
 ) -> AsyncIterator[
     tuple[RealBrowserRuntime, Callable[[str], Awaitable[BrowserObservation]], list[str]]
 ]:
@@ -1630,7 +1630,7 @@ async def lesson_pages(
     routes.append(Route("/{rest:path}", elsewhere, methods=["GET", "POST"]))
     async with local_https_site(Starlette(routes=routes)) as site:
         runtime = RealBrowserRuntime()
-        await runtime.start(site.proxy_url, (site.origin,), interactive=interactive)
+        await runtime.start(site.proxy_url, (site.origin,), headed=headed)
         try:
             yield runtime, lambda path: runtime.navigate(site.url(path)), left
         finally:

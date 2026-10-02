@@ -9,6 +9,8 @@
   of the direct login ceremony); `docs/plan/browser-automation.md` (trust
   model, profile generation, authentication ceremony, hard gate 9). ADR-0106
   and ADR-0058 each gain an `Amended by` header line naming this ADR.
+- Amended by: ADR-0145 (2026-10-01), which makes the two verification browsers
+  of decision 6 headed
 - Detailed design: `docs/plan/browser-automation.md` (device sign-in ceremony),
   `docs/plan/http-api-and-streaming.md` (browser profiles, authentication, and
   grants)

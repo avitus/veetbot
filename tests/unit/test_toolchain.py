@@ -334,9 +334,11 @@ def test_device_sign_in_verification_has_room_for_both_browser_processes() -> No
     profile_service = production_compose["services"]["browser-profile-service"]
 
     # Playwright's Chromium redirects shared-memory files into /tmp. Its two
-    # verification processes need this space within the existing container cap.
+    # verification processes need this space within the container cap. Headed,
+    # the pair measured about 1.1 GiB and 370 processes and threads (ADR-0145).
     assert profile_service["tmpfs"] == ["/tmp:rw,noexec,nosuid,nodev,size=512m"]
-    assert profile_service["mem_limit"] == "1g"
+    assert profile_service["mem_limit"] == "2g"
+    assert profile_service["pids_limit"] == 1024
     assert profile_service["read_only"] is True
 
 
@@ -355,8 +357,8 @@ def test_production_compose_preserves_browser_profile_isolation() -> None:
         "browser-profile-egress",
     ]
     assert profile_service["ports"] == ["127.0.0.1:${BROWSER_PROFILE_PORT:-8081}:8080"]
-    assert profile_service["pids_limit"] == 256
-    assert profile_service["mem_limit"] == "1g"
+    assert profile_service["pids_limit"] == 1024
+    assert profile_service["mem_limit"] == "2g"
     assert profile_service["cpus"] == 2.0
     assert profile_service["shm_size"] == "256m"
     assert profile_service["environment"] == {

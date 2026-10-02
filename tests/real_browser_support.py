@@ -33,6 +33,7 @@ from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 import uvicorn
@@ -48,6 +49,8 @@ from agent_core.domain.execution import EgressPolicy
 
 REQUIRE_REAL_BROWSER = "VEETBOT_REQUIRE_REAL_BROWSER"
 SYNTHETIC_HOST = "site.test"
+# Full headed Chromium contacts its vendor's services on its own (ADR-0145).
+CHROMIUM_OWN_SERVICES = frozenset({"google.com", "googleapis.com"})
 
 
 @cache
@@ -129,6 +132,20 @@ class ConnectRelay:
         assert self._server is not None
         host, port = self._server.sockets[0].getsockname()[:2]
         return f"http://{host}:{port}"
+
+    def refused_page_targets(self) -> set[str]:
+        """Refused targets a page asked for, leaving out the browser's own services."""
+
+        def registrable_domain(target: str) -> str:
+            # A target is a CONNECT authority or, for plain HTTP, a whole URL.
+            host = urlsplit(target if "://" in target else f"//{target}").hostname or ""
+            return ".".join(host.split(".")[-2:])
+
+        return {
+            target
+            for target in self.refused
+            if registrable_domain(target) not in CHROMIUM_OWN_SERVICES
+        }
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._accept, "127.0.0.1", 0)

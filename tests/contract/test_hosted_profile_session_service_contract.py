@@ -74,7 +74,7 @@ class HandoffScenario:
 class FakeSessionRuntime:
     initial_material: bytes | None = None
     allowed_origins: tuple[str, ...] = ()
-    interactive: bool = False
+    headed: bool = False
     sealed_material: bytes = b'{"format_version":1,"sealed":true}'
     authentication: BrowserAuthenticationStatus = BrowserAuthenticationStatus.READY
     closed: bool = False
@@ -99,11 +99,11 @@ class FakeSessionRuntime:
         material: bytes,
         allowed_origins: tuple[str, ...],
         *,
-        interactive: bool,
+        headed: bool,
     ) -> None:
         self.initial_material = material
         self.allowed_origins = allowed_origins
-        self.interactive = interactive
+        self.headed = headed
         scenario = self.scenario
         if scenario is not None and scenario.signed_out_start_gate is not None:
             if material == NO_SESSION:
@@ -297,6 +297,23 @@ async def test_hosted_session_lease_is_scoped_exclusive_and_seals_server_side(
     assert runtimes[0].initial_material is not None
     assert runtimes[0].closed is True
     assert PROVIDER_REF not in repr(lease)
+
+
+async def test_a_run_attempt_lease_runs_in_a_headed_browser(tmp_path: Path) -> None:
+    """A website that refuses a headless browser still serves the owner's agent (ADR-0145)."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+
+    await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(minutes=10),
+    )
+
+    assert runtimes[0].headed is True
 
 
 async def test_revocation_fences_and_closes_live_lease(tmp_path: Path) -> None:
@@ -862,6 +879,19 @@ async def test_device_handoff_is_single_use_scope_filtered_and_service_decided(
     tmp_path: Path,
 ) -> None:
     await assert_device_handoff_is_single_use_scope_filtered_and_service_decided(tmp_path)
+
+
+async def test_device_verification_loads_both_pages_in_headed_browsers(tmp_path: Path) -> None:
+    """The signed-out control must be the browser the session will be used in (ADR-0145)."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    with_session, without_session = runtimes
+    assert with_session.headed is True
+    assert without_session.headed is True
 
 
 async def test_concurrent_device_handoffs_consume_the_capability_once(tmp_path: Path) -> None:

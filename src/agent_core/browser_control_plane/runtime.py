@@ -33,7 +33,7 @@ class StatefulBrowserRuntime(Protocol):
         allowed_origins: tuple[str, ...],
         *,
         storage_state: dict[str, object],
-        interactive: bool,
+        headed: bool,
     ) -> None: ...
 
     async def navigate(self, url: str) -> BrowserObservation: ...
@@ -93,7 +93,7 @@ class HostedPlaywrightSessionRuntime:
         material: bytes,
         allowed_origins: tuple[str, ...],
         *,
-        interactive: bool,
+        headed: bool,
     ) -> None:
         if self._started:
             return
@@ -117,7 +117,7 @@ class HostedPlaywrightSessionRuntime:
                 self._proxy.url,
                 normalized,
                 storage_state=storage_state,
-                interactive=interactive,
+                headed=headed,
             )
         except Exception:
             with suppress(Exception):

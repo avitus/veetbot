@@ -4,6 +4,9 @@
 - Date: 2026-09-28
 - Related: ADR-0058, ADR-0106, ADR-0128, ADR-0129
 - Amends: no requirement; implements the existing prohibition on new windows
+- Amended by: ADR-0145 (2026-10-01), which makes every hosted browser headed,
+  so run-attempt leases and device sign-in verification use the headed policy
+  and transport below
 - Detailed design: `docs/plan/browser-automation.md`
 
 ## Context
