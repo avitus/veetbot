@@ -2187,8 +2187,10 @@ import UserNotifications
         #expect(model.folderProposals.isEmpty)
     }
 
-    @Test
-    func testNotificationAttentionRequiresVisibleLoadedTranscriptAndAcknowledgesOnlyItsResult() async throws {
+    @Test(arguments: [true, false])
+    func testNotificationAttentionRequiresVisibleLoadedTranscriptAndAcknowledgesOnlyItsResult(
+        replaysTerminal: Bool
+    ) async throws {
         let sessionID = UUID(), runID = UUID(), scheduleID = UUID()
         let sessionBody = """
         {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Result","metadata":{"schedule_id":"\(scheduleID.uuidString)"},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
@@ -2208,7 +2210,10 @@ import UserNotifications
                 {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
                 """)
             case "/v1/runs/\(runID.uuidString)/events":
-                return try response(for: request, statusCode: 200, body: "id: 3\nevent: run.completed\ndata: {\"run_id\":\"\(runID.uuidString)\"}\n\n", headers: ["Content-Type": "text/event-stream"])
+                let replay = replaysTerminal
+                    ? "id: 3\nevent: run.completed\ndata: {\"run_id\":\"\(runID.uuidString)\"}\n\n"
+                    : ": heartbeat\n\n"
+                return try response(for: request, statusCode: 200, body: replay, headers: ["Content-Type": "text/event-stream"])
             case "/v1/notifications/sync":
                 recorder.record(request)
                 let seen = recorder.matching(method: "POST", path: "/v1/notifications/sync").contains {
@@ -2251,7 +2256,7 @@ import UserNotifications
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         #expect(model.visibleNotificationSessionID == sessionID)
         #expect(recorder.matching(method: "GET", path: "/v1/sessions/\(sessionID.uuidString)").count == 2)
-        // Let replay reach its terminal event, then exercise the real HTTP wire.
+        // A loaded completed report must clear even while terminal replay is unavailable.
         for _ in 0..<100 {
             await model.synchronizeNotifications()
             let acknowledged = recorder.matching(method: "POST", path: "/v1/notifications/sync").contains {
@@ -2272,6 +2277,68 @@ import UserNotifications
         #expect(requests.allSatisfy { $0.authorization == "Bearer test-token" })
         model.newSession()
         #expect(model.visibleNotificationSessionID == nil)
+    }
+
+    @Test(arguments: ["running", "completionDuringLoad", "failedTranscript", "hiddenTranscript"])
+    func testNotificationSnapshotDoesNotAcknowledgeAnUnseenResult(scenario: String) async throws {
+        let sessionID = UUID(), runID = UUID(), scheduleID = UUID()
+        let sessionBody = """
+        {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Report","metadata":{"schedule_id":"\(scheduleID)"},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":"\(runID)"}
+        """
+        let recorder = WebsiteLoginRequestRecorder()
+        let model = try configuredModel { request in
+            switch request.url?.path {
+            case "/v1/sessions":
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}")
+            case "/v1/sessions/\(sessionID)":
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case "/v1/sessions/\(sessionID)/messages":
+                recorder.record(request)
+                if scenario == "failedTranscript" {
+                    if request.url?.query != nil {
+                        return try response(for: request, statusCode: 503, body: "{}")
+                    }
+                    return try response(for: request, statusCode: 200, body: #"{"items":[{"sequence":2,"role":"assistant","content":[{"type":"text","text":"Partial report"}]}],"next_cursor":"next"}"#)
+                }
+                return try response(for: request, statusCode: 200, body: #"{"items":[{"sequence":2,"role":"assistant","content":[{"type":"text","text":"Report"}]}],"next_cursor":null}"#)
+            case "/v1/runs/\(runID)":
+                // Completing between a transcript read and a later status read
+                // must not acknowledge a final message the transcript did not load.
+                let loaded = !recorder.matching(method: "GET", path: "/v1/sessions/\(sessionID)/messages").isEmpty
+                let active = scenario == "running" || (scenario == "completionDuringLoad" && !loaded)
+                let status = active ? "RUNNING" : "COMPLETED"
+                return try response(for: request, statusCode: 200, body: """
+                {"id":"\(runID)","session_id":"\(sessionID)","parent_run_id":null,"status":"\(status)","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                """)
+            case "/v1/runs/\(runID)/events":
+                return try response(for: request, statusCode: 200, body: ": heartbeat\n\n", headers: ["Content-Type": "text/event-stream"])
+            case "/v1/notifications/sync":
+                recorder.record(request)
+                return try response(for: request, statusCode: 200, body: #"{"obsolete_notification_ids":[],"unread_run_ids":[]}"#)
+            default:
+                return try response(for: request, statusCode: 404, body: "{}")
+            }
+        }
+        model.notificationAttention = NotificationAttentionCoordinator(store: AttentionStore(values: []))
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        model.notificationAttentionEnabled = true
+        model.notificationTranscriptVisible = scenario != "hiddenTranscript"
+        await model.selectSession(try #require(model.history.first))
+        if scenario == "failedTranscript" {
+            #expect(model.errorMessage != nil)
+            model.clearError() // Dismissing an error cannot turn a partial load into a read.
+            #expect(model.visibleNotificationSessionID == nil)
+        }
+        model.notificationSyncActive = true
+        await model.synchronizeNotifications()
+        let requests = recorder.matching(method: "POST", path: "/v1/notifications/sync")
+        #expect(!requests.isEmpty)
+        for request in requests {
+            let body = try #require(request.body)
+            let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            #expect((json["seen_run_ids"] as? [String]) == [])
+        }
+        model.newSession()
     }
 
     private func configuredModel(
