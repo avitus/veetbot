@@ -1235,7 +1235,9 @@ facts deduplicate across passages and re-reads. A passage processed successfully
 does not mark an unread remainder as assessed. Coverage remains explicit until
 all resumable work is complete. Semantic writes append a content-free current-run
 audit under the worker lease in the same transaction; cached older evidence
-keeps its original source session/date.
+keeps its original source session/date. A receipt whose source or header
+session has since been deleted has no governed event left to check, so it is
+rejected like a missing event: that passage forms nothing and the task continues.
 
 Historical import order cannot supersede newer evidence, and several supported
 facts in one source remain distinct. Source erasure also removes selected
