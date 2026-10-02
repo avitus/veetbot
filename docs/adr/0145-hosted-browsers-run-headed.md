@@ -6,6 +6,8 @@
 - Amends: ADR-0106 (run-attempt leases no longer stay headless), ADR-0128
   (the two verification browsers are headed), ADR-0138 (its headed popup
   policy and document transport apply to every hosted browser)
+- Amended by: ADR-0146 (2026-10-01), which turns off the vendor requests this
+  decision left on
 - Detailed design: `docs/plan/browser-automation.md`
 
 ## Evidence
@@ -90,7 +92,7 @@ ran in the browser the website refuses.
   which the egress proxy refuses. The remote ceremony already made these
   requests; now every run does. They carry no website cookie or page text; the
   autofill query is derived from the structure of forms the browser sees.
-  Turning them off is not part of this decision.
+  Turning them off is not part of this decision; ADR-0146 does it.
 - On a development Mac a hosted browser opens a visible window, as the remote
   ceremony already did.
 - This decision lets the runtime load a website that refuses headless

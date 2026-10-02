@@ -80,6 +80,42 @@ _POPUP_DENIAL_POLICY = (
     "allow-pointer-lock allow-presentation allow-same-origin allow-scripts "
     "allow-storage-access-by-user-activation allow-top-navigation"
 )
+# Full Chromium asks its vendor's services for things no page requested. Each
+# feature below is the switch for one of them (ADR-0146).
+_VENDOR_REQUEST_FEATURES = (
+    "AimEnabled",  # AI Mode eligibility, from www.google.com
+    "AutofillServerCommunication",  # field types, from the forms on each page
+    "NetworkTimeServiceQuerying",  # the time, from clients2.google.com
+    "PreconnectToSearch",  # an idle connection to www.google.com
+)
+# Chromium honours only its last --disable-features switch, and Playwright
+# passes one of its own first, so the runtime's switch repeats Playwright's
+# list (chromiumSwitches.ts). A test compares it with the installed driver.
+_PLAYWRIGHT_DISABLED_FEATURES = (
+    "AvoidUnnecessaryBeforeUnloadCheckSync",
+    "BoundaryEventDispatchTracksNodeRemoval",
+    "DestroyProfileOnBrowserClose",
+    "DialMediaRouteProvider",
+    "GlobalMediaControls",
+    "HttpsUpgrades",
+    "LensOverlay",
+    "MediaRouter",
+    "PaintHolding",
+    "ThirdPartyStoragePartitioning",
+    "BlockOriginHeaderModificationOnRedirect",
+    "Translate",
+    "AutoDeElevate",
+    "OptimizationHints",
+    "msForceBrowserSignIn",
+    "msEdgeUpdateLaunchServicesPreferredVersion",
+)
+_VENDOR_REQUEST_ARGUMENTS = (
+    "--disable-features=" + ",".join((*_PLAYWRIGHT_DISABLED_FEATURES, *_VENDOR_REQUEST_FEATURES)),
+    # Chromium has no switch that turns its push-messaging client off. The
+    # client registers and connects only after a check-in, and it cannot
+    # fetch this address.
+    "--gcm-checkin-url=about:blank",
+)
 _QUIET_SCRIPT = """([quietMs, timeoutMs]) => new Promise(resolve => {
     let quiet = 0;
     let limit = 0;
@@ -257,7 +293,8 @@ class PythonPlaywrightRuntime:
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                 # Headless shell can deny web-created windows before they exist.
                 # Closing them later can release a pending navigation request.
-                *([] if headed else ["--block-new-web-contents"]),
+                # It makes no vendor requests; full Chromium does.
+                *(_VENDOR_REQUEST_ARGUMENTS if headed else ["--block-new-web-contents"]),
             ],
             env=environment,
         )

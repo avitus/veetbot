@@ -89,6 +89,37 @@ async def test_the_harness_serves_the_site_through_the_production_guards() -> No
     assert set(site.relay.refused) <= {"tracker.test:443"}
 
 
+async def test_a_headed_browser_asks_its_proxy_only_for_what_the_page_loads() -> None:
+    """Full Chromium contacts its vendor's services on its own; the launch stops it (ADR-0146)."""
+
+    async def sign_in(request: Request) -> Response:
+        del request
+        return html(
+            '<form method="post" action="/session">'
+            '<label>Email <input name="email" type="email" autocomplete="username"></label>'
+            '<label>Password <input name="password" type="password"></label>'
+            '<label>Street address <input name="street" autocomplete="street-address"></label>'
+            '<label>Card number <input name="card" autocomplete="cc-number"></label>'
+            "<button>Sign in</button></form>"
+        )
+
+    require_real_browser()
+    async with local_https_site(Starlette(routes=[Route("/", sign_in)])) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,), headed=True)
+        try:
+            observation = await runtime.navigate(site.url("/"))
+            # The time, search, form and messaging requests all began within
+            # three seconds of the launch.
+            await asyncio.sleep(5)
+        finally:
+            await runtime.close()
+
+    assert "Sign in" in observation.text
+    assert f"{site.host}:443" in site.relay.tunnelled
+    assert site.relay.refused_page_targets() == set()
+
+
 async def test_the_production_runtime_still_refuses_the_harness_certificate() -> None:
     """Only the test subclass trusts the throwaway certificate."""
 

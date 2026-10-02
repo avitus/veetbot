@@ -659,6 +659,14 @@ The service still enforces one thirty-second deadline for verification,
 including browser startup, page loading and session capture; a page load has
 no shorter deadline.
 
+A hosted browser asks the egress proxy for nothing on its own except one
+connection to `accounts.google.com` as it starts (ADR-0146). The launch
+switches that stop the rest are in the service's code, and the image carries
+a Chromium managed policy for the one request no switch reaches. The switches
+name Chromium features and repeat a list from Playwright, so after raising
+the Playwright version, repeat ADR-0146's measurement in the built image
+before releasing.
+
 The release script refuses to run until the browser-profile secrets exist,
 even while `BROWSER_PROVIDER=disabled`, because the production compose file
 always starts the hardened profile service and bind-mounts these paths
