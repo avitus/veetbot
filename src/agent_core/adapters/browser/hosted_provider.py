@@ -33,10 +33,12 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
 )
 from agent_core.domain.browser_classification import classify_browser_action
+from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.tools import ToolExecutionContext
 from agent_core.ports.browser import GRANT_NOT_APPLICABLE
 from agent_core.ports.browser_sessions import BrowserSessionControlPlane, BrowserSessionPage
+from agent_core.ports.browser_upload import BrowserImageSessionUploader
 
 ProfileLoader = Callable[[Principal, UUID], Awaitable[BrowserProfile]]
 ProfileSelector = Callable[[ToolExecutionContext], Awaitable[UUID]]
@@ -218,17 +220,38 @@ class HostedBrowserProvider:
         *,
         constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
+        return await self._mutate(action, constraint=constraint)
+
+    async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
+        return await self._mutate(action, image=image)
+
+    async def _mutate(
+        self,
+        action: BrowserAction,
+        *,
+        constraint: BrowserDispatchConstraint | None = None,
+        image: BrowserImageFile | None = None,
+    ) -> BrowserObservation:
         async with self._lock:
             lease = self._required_lease()
             sequence = self._sequence + 1
             try:
-                page = (
-                    await self._sessions.act(lease.lease_ref, action, sequence=sequence)
-                    if constraint is None
-                    else await self._sessions.act(
-                        lease.lease_ref, action, sequence=sequence, constraint=constraint
+                if image is not None:
+                    if not isinstance(self._sessions, BrowserImageSessionUploader):
+                        raise BrowserProviderError(
+                            "tool.browser.action_not_allowed", retryable=False
+                        )
+                    page = await self._sessions.upload(
+                        lease.lease_ref, action, image, sequence=sequence
                     )
-                )
+                else:
+                    page = (
+                        await self._sessions.act(lease.lease_ref, action, sequence=sequence)
+                        if constraint is None
+                        else await self._sessions.act(
+                            lease.lease_ref, action, sequence=sequence, constraint=constraint
+                        )
+                    )
             except BrowserProviderError as error:
                 if error.reason_code in _ACTION_REFUSALS:
                     if error.reason_code == GRANT_NOT_APPLICABLE:
@@ -556,6 +579,9 @@ class SessionBoundHostedBrowserProvider:
 
     async def action_context(self, action: BrowserAction) -> BrowserActionContext:
         return await self._required_provider().action_context(action)
+
+    async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
+        return await self._required_provider().upload(action, image)
 
     async def snapshot_in_session(self, session_id: UUID) -> BrowserSnapshot | None:
         """One session's cached observation and facts, whichever session's call

@@ -31,6 +31,7 @@ from agent_core.domain.browser import (
     BrowserSnapshot,
     require_service_origin,
 )
+from agent_core.domain.browser_upload import BrowserImageFile, BrowserImagePayload
 from agent_core.domain.credentials import CredentialRef
 from agent_core.ports.credentials import CredentialResolver
 
@@ -226,6 +227,24 @@ class HostedBrowserSessionControlPlane:
             },
             response_model=BrowserSessionObservation,
             idempotency_key=f"browser-session:{digest}:act:{sequence}",
+        )
+        assert isinstance(result, BrowserSessionObservation)
+        return result
+
+    async def upload(
+        self, lease_ref: str, action: BrowserAction, image: BrowserImageFile, *, sequence: int
+    ) -> BrowserSessionObservation:
+        digest = _private_ref_digest(lease_ref)
+        result = await self._post(
+            "/v1/browser-sessions:upload",
+            payload={
+                "lease_ref": lease_ref,
+                "action": action.model_dump(mode="json"),
+                "sequence": sequence,
+                "image": BrowserImagePayload.encode(image).model_dump(mode="json"),
+            },
+            response_model=BrowserSessionObservation,
+            idempotency_key=f"browser-session:{digest}:upload:{sequence}",
         )
         assert isinstance(result, BrowserSessionObservation)
         return result

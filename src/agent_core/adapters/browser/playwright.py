@@ -20,6 +20,7 @@ from playwright.async_api import (
     Dialog,
     Download,
     ElementHandle,
+    FilePayload,
     Frame,
     JSHandle,
     Page,
@@ -59,9 +60,11 @@ from agent_core.domain.browser_classification import (
     path_is_sensitive,
     path_is_within_prefix,
 )
+from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
 from agent_core.domain.web import is_public_https_url
 from agent_core.execution.proxy import start_browser_egress_proxy
+from agent_core.ports.browser_upload import upload_browser_image
 
 MAXIMUM_ELEMENTS = 256
 # Candidates scanned for visibility before the element cap applies (ADR-0130).
@@ -745,8 +748,15 @@ class PythonPlaywrightRuntime:
         tag = str(await handle.evaluate("node => node.tagName.toLowerCase()"))
         input_type = (await handle.get_attribute("type") or "").lower()
         autocomplete = (await handle.get_attribute("autocomplete") or "").lower()
+        # Editable regions need individual approval; grant coverage stays native-only.
+        approved_editable = (
+            action.kind is BrowserActionKind.TYPE
+            and constraint is None
+            and tag not in {"input", "textarea"}
+            and await handle.evaluate("node => node.isContentEditable") is True
+        )
         if action.kind is BrowserActionKind.TYPE and (
-            tag not in {"input", "textarea"}
+            (tag not in {"input", "textarea"} and not approved_editable)
             or input_type == "password"
             or autocomplete in {"current-password", "new-password", "one-time-code"}
         ):
@@ -793,6 +803,49 @@ class PythonPlaywrightRuntime:
             # which never loaded; the page now shows the browser's error page.
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
+        return await self._observation(page)
+
+    async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
+        """Select approved bytes in one main-document file control (ADR-0148)."""
+        page = self._current_page()
+        if action.expected_revision != self._revision:
+            raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+        handle = self._elements.get(action.ref)
+        if handle is None or not await handle.is_visible() or not await handle.is_enabled():
+            raise BrowserProviderError("tool.browser.element_not_found", retryable=False)
+        if action.kind is not BrowserActionKind.CLICK or not _origin_allowed(
+            page.url, self._allowed_origins
+        ):
+            raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+        if await handle.owner_frame() != page.main_frame:
+            raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+        payload: FilePayload = {
+            "name": image.filename,
+            "mimeType": image.image.media_type,
+            "buffer": image.image.data,
+        }
+        documents_before = self._main_frame_navigations
+        try:
+            native_file = await handle.evaluate(
+                "node => node.localName === 'input' && node.type === 'file'"
+            )
+            if native_file:
+                await handle.set_input_files(payload, timeout=ACTION_TIMEOUT_MILLISECONDS)
+            else:
+                async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MILLISECONDS) as pending:
+                    await handle.click(timeout=ACTION_TIMEOUT_MILLISECONDS)
+                chooser = await pending.value
+                # The approved click may have navigated or opened an embedded chooser.
+                if (
+                    self._main_frame_navigations != documents_before
+                    or not _origin_allowed(page.url, self._allowed_origins)
+                    or await chooser.element.owner_frame() != page.main_frame
+                ):
+                    raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
+                await chooser.set_files(payload, timeout=ACTION_TIMEOUT_MILLISECONDS)
+        except PlaywrightError as exc:
+            raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
+        await self._settle(page, after_document=self._main_frame_navigations != documents_before)
         return await self._observation(page)
 
     async def _dispatch(
@@ -1878,6 +1931,18 @@ class PlaywrightBrowserProvider:
                 "tool.browser.outcome_unknown",
                 retryable=False,
             ) from exc
+        if not self.allows(observation.url):
+            raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+        return observation
+
+    async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
+        await self._start()
+        try:
+            observation = await upload_browser_image(self._runtime, action, image)
+        except BrowserProviderError:
+            raise
+        except Exception as exc:
+            raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
         if not self.allows(observation.url):
             raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
         return observation

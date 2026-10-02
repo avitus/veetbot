@@ -46,7 +46,9 @@ from agent_core.domain.browser import (
     browser_origin,
     require_service_origin,
 )
+from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.errors import ConflictError
+from agent_core.ports.browser_upload import upload_browser_image
 
 MAXIMUM_LEASE_SECONDS = MAXIMUM_BROWSER_LEASE_SECONDS
 MAXIMUM_LEASE_LIFETIME_SECONDS = MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS
@@ -316,6 +318,7 @@ class HostedProfileSessionService:
         *,
         sequence: int,
         constraint: BrowserDispatchConstraint | None = None,
+        image: BrowserImageFile | None = None,
     ) -> BrowserSnapshot:
         """Act once on the lease; a grant's constraint can only refuse (ADR-0129).
 
@@ -337,7 +340,13 @@ class HostedProfileSessionService:
             ):
                 raise BrowserProviderError("tool.browser.grant_not_applicable", retryable=False)
             try:
-                if constraint is None:
+                if image is not None:
+                    if constraint is not None:
+                        raise BrowserProviderError(
+                            "tool.browser.grant_not_applicable", retryable=False
+                        )
+                    observation = await upload_browser_image(state.runtime, action, image)
+                elif constraint is None:
                     observation = await state.runtime.act(action)
                 else:
                     observation = await state.runtime.act_within_grant(action, constraint, now=now)

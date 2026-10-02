@@ -39,8 +39,10 @@ from agent_core.domain.browser import (
     BrowserProviderError,
     BrowserSnapshot,
 )
+from agent_core.domain.browser_upload import MAX_BROWSER_UPLOAD_BODY_BYTES, BrowserImagePayload
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.errors import ConflictError
+from agent_core.domain.media import MediaInputError
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 
 MAX_PROFILE_SERVICE_BODY_BYTES = 64 * 1024
@@ -112,6 +114,12 @@ class _ActRequest(_LeaseRequest):
     constraint: BrowserDispatchConstraint | None = None
 
 
+class _UploadRequest(_LeaseRequest):
+    action: BrowserAction
+    sequence: int = Field(ge=1)
+    image: BrowserImagePayload
+
+
 class _BeginAuthenticationRequest(_LifecycleRequest):
     login_url: str = Field(min_length=1, max_length=4096)
     mode: BrowserAuthenticationMode = BrowserAuthenticationMode.REMOTE
@@ -173,10 +181,15 @@ class _ProfileServiceBoundary:
                 send,
             )
             return
+        maximum = (
+            MAX_BROWSER_UPLOAD_BODY_BYTES
+            if scope["path"] == "/v1/browser-sessions:upload"
+            else MAX_PROFILE_SERVICE_BODY_BYTES
+        )
         raw_length = headers.get(b"content-length")
         if raw_length is not None:
             try:
-                if int(raw_length) > MAX_PROFILE_SERVICE_BODY_BYTES:
+                if int(raw_length) > maximum:
                     raise ValueError
             except ValueError:
                 await _send_response(
@@ -189,7 +202,7 @@ class _ProfileServiceBoundary:
             if message["type"] == "http.disconnect":
                 return
             body.extend(message.get("body", b""))
-            if len(body) > MAX_PROFILE_SERVICE_BODY_BYTES:
+            if len(body) > maximum:
                 await _send_response(
                     _error(413, "payload_too_large", "request body too large"), scope, receive, send
                 )
@@ -513,6 +526,24 @@ def create_profile_service_app(
                 payload.action,
                 sequence=payload.sequence,
                 constraint=payload.constraint,
+            )
+            return _snapshot_response(result)
+
+        @app.post("/v1/browser-sessions:upload", response_model=None)
+        async def upload(
+            payload: _UploadRequest, request: Request
+        ) -> dict[str, Any] | JSONResponse:
+            digest = _private_ref_digest(payload.lease_ref)
+            expected = f"browser-session:{digest}:upload:{payload.sequence}"
+            rejected = _require_idempotency(request, expected)
+            if rejected is not None:
+                return rejected
+            try:
+                image = payload.image.decode()
+            except MediaInputError:
+                return _error(400, "invalid_request", "invalid image upload")
+            result = await sessions.act_snapshot(
+                payload.lease_ref, payload.action, sequence=payload.sequence, image=image
             )
             return _snapshot_response(result)
 

@@ -157,3 +157,4 @@ implementation without one.
 - [ADR-0145 — Hosted browsers run headed for agent runs and sign-in verification (Accepted; amends ADR-0106, ADR-0128, ADR-0138)](0145-hosted-browsers-run-headed.md)
 - [ADR-0146 — Hosted Chromium makes no vendor requests of its own (Proposed; amends ADR-0145)](0146-hosted-chromium-vendor-requests.md)
 - [ADR-0147 — Established event streams do not hold sign-in verification open (Accepted)](0147-browser-verification-event-streams.md)
+- [ADR-0148 — Approved rich-text input and image upload (Proposed)](0148-approved-browser-image-upload.md)

@@ -20,7 +20,9 @@ from agent_core.domain.browser import (
     BrowserProviderError,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
+from agent_core.ports.browser_upload import upload_browser_image
 
 MAXIMUM_PROFILE_MATERIAL_BYTES = 2 * 1024 * 1024
 MAXIMUM_INTERACTIVE_FRAME_BYTES = 4 * 1024 * 1024
@@ -146,6 +148,9 @@ class HostedPlaywrightSessionRuntime:
 
     async def act(self, action: BrowserAction) -> BrowserObservation:
         return await self._runtime.act(action)
+
+    async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
+        return await upload_browser_image(self._runtime, action, image)
 
     async def act_within_grant(
         self,

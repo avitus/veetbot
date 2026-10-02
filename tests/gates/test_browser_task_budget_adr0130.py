@@ -45,7 +45,7 @@ HOSTED_BROWSER = {
     "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
     "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
 }
-BROWSER_TOOLS = frozenset({"browser.navigate", "browser.observe", "browser.act"})
+BROWSER_TOOLS = frozenset({"browser.navigate", "browser.observe", "browser.act", "browser.upload"})
 BROWSER_TASK_LIMITS = RunLimits(
     max_steps=160,
     max_model_calls=120,
@@ -116,6 +116,7 @@ async def test_bound_production_chat_defines_every_browser_tool(tmp_path: Path) 
     assert plan.skipped_tool_names == ()
     moved = DISCOVERED_READS - defined
     assert moved == {
+        "mcp.gmail_read.search_threads",
         "mcp.gmail_work_read.get_thread",
         "mcp.gmail_work_read.list_labels",
         "mcp.gmail_work_read.search_threads",
