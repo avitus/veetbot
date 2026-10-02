@@ -709,6 +709,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let sessionID = url.pathComponents[3]
             let target = requestJSON()["folder_id"] as? String
             Self.folderLock.withLock {
+                // As on the server, a real move withdraws the open proposal
+                // naming the conversation, so no later refresh lists it again.
+                if Self.sessionFolders[sessionID] != target,
+                    ConversationNavigationUITestFixture.proposalMemberIDs.contains(sessionID)
+                {
+                    Self.proposalResolved = true
+                }
                 if let target { Self.sessionFolders[sessionID] = target } else { Self.sessionFolders.removeValue(forKey: sessionID) }
             }
             statusCode = 200
