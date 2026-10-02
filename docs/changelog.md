@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-02 — Website Access verifies sign-in while live updates stay connected
+
+- A successful x.com sign-in could still fail verification because its live
+  updates connection stays open. Verification now recognizes an established
+  event stream without waiting for it to disconnect. Ordinary session checks
+  still finish, and the site must still distinguish the imported session from
+  a signed-out browser. ADR-0147 records the approved exception.
+
 ## 2026-10-01 — The Website Access browser stops contacting Google on its own
 
 - The full browser that Website Access now uses made its own requests to

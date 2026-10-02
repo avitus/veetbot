@@ -25,6 +25,7 @@ from playwright.async_api import (
     Page,
     Playwright,
     Request,
+    Response,
     Route,
     StorageState,
     async_playwright,
@@ -1081,8 +1082,11 @@ def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]
     The five-second generic network wait may expire on passive resources.
     That is not permission to accept a shell whose session-check fetch is
     still in flight. Track documents (including frames), scripts, styles and
-    application requests until none remain for 500 ms. The service's overall
-    thirty-second deadline still bounds startup, both loads and capture.
+    finite application requests until none remain for 500 ms. An HTTP 200
+    event stream is established at its headers, as with native EventSource;
+    its continuing body is not a pending session check (ADR-0147).
+    The service's overall thirty-second deadline still bounds startup, both
+    loads and capture.
     """
     pending: set[Request] = set()
     changed = asyncio.Event()
@@ -1103,6 +1107,17 @@ def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]
             last_change = loop.time()
             changed.set()
 
+    def responded(response: Response) -> None:
+        request = response.request
+        if (
+            request in pending
+            and request.resource_type in {"xhr", "fetch"}
+            and response.status == 200
+            and response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            == "text/event-stream"
+        ):
+            ended(request)
+
     async def wait_until_quiet() -> None:
         # Also bound direct callers; the service's enclosing deadline expires
         # sooner because it includes browser startup and document navigation.
@@ -1116,12 +1131,14 @@ def _verification_requests(page: Page) -> Iterator[Callable[[], Awaitable[None]]
                     await asyncio.wait_for(changed.wait(), None if pending else quiet_left)
 
     page.on("request", began)
+    page.on("response", responded)
     page.on("requestfinished", ended)
     page.on("requestfailed", ended)
     try:
         yield wait_until_quiet
     finally:
         page.remove_listener("request", began)
+        page.remove_listener("response", responded)
         page.remove_listener("requestfinished", ended)
         page.remove_listener("requestfailed", ended)
         pending.clear()

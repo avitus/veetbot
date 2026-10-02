@@ -800,7 +800,12 @@ embedded page, does not hold verification until the full-page `load` event.
 The five-second network wait expiring does not make a pending authentication
 request safe to ignore: documents, scripts, stylesheets, XHR and fetch requests
 must finish and remain idle for 500 ms before the path and challenge evidence
-below can be positive. A visible sign-in challenge, disallowed origin, or path
+below can be positive. A fetch or XHR event stream with HTTP 200 and media
+type `text/event-stream` instead counts as established when its response
+headers arrive (ADR-0147); its continuing body does not hold the wait open.
+The media type is case-insensitive and may have parameters. An unanswered
+stream, another status or media type, and every ordinary application request
+still wait for completion. A visible sign-in challenge, disallowed origin, or path
 outside the confirmed page is already negative evidence; background work on
 that signed-out page does not hold verification open. A possible signed-in
 page whose application requests never settle fails verification at the

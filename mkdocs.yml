@@ -272,4 +272,5 @@ nav:
       - ADR-0144 Chat reasoning summaries: adr/0144-chat-reasoning-summaries.md
       - ADR-0145 Hosted browsers run headed: adr/0145-hosted-browsers-run-headed.md
       - ADR-0146 Hosted Chromium vendor requests: adr/0146-hosted-chromium-vendor-requests.md
+      - ADR-0147 Browser verification event streams: adr/0147-browser-verification-event-streams.md
   - Changelog: changelog.md
