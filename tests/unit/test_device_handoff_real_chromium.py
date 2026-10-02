@@ -24,7 +24,13 @@ import pytest
 from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -419,14 +425,18 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
     checking_session = asyncio.Event()
     answer_session = asyncio.Event()
     session_answered = asyncio.Event()
+    release_stream = asyncio.Event()
 
     class DelayedSessionSite(MembersSite):
+        """Delay the authentication decision independently of the live updates stream."""
+
         async def learn(self, request: Request) -> Response:
+            """Start live updates alongside the members-only page load."""
             response = await super().learn(request)
             if response.status_code != 200:
                 return response
             return HTMLResponse(
-                "<main>Checking session</main><script>fetch('/session-check')"
+                "<main>Checking session</main><script>fetch('/updates');fetch('/session-check')"
                 ".then(r => r.json()).then(result => {"
                 "if (result.outcome === 'redirect') {location.href = '/log-in';}"
                 "else if (result.outcome === 'challenge') {"
@@ -435,7 +445,19 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
                 "});</script>"
             )
 
+        async def updates(self, request: Request) -> Response:
+            """Establish an event stream whose body stays open until test cleanup."""
+            del request
+
+            async def events() -> AsyncIterator[bytes]:
+                """Flush an initial event-stream comment, then hold the connection open."""
+                yield b": connected\n\n"
+                await release_stream.wait()
+
+            return StreamingResponse(events(), media_type="text/event-stream")
+
         async def check_session(self, request: Request) -> Response:
+            """Return the delayed decision and rotate the session cookie on completion."""
             assert request.cookies.get("session") == self.token
             checking_session.set()
             await answer_session.wait()
@@ -451,6 +473,7 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
 
     members = DelayedSessionSite()
     members.app.routes.append(Route("/session-check", members.check_session))
+    members.app.routes.append(Route("/updates", members.updates))
     async with (
         local_https_site(members.app) as site,
         profile_service(
@@ -469,7 +492,10 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
                 response, ceremony_id = await checking
         finally:
             answer_session.set()
-            response, ceremony_id = await checking
+            try:
+                response, ceremony_id = await checking
+            finally:
+                release_stream.set()
         status = await service.sessions.authentication_status(ceremony_id, OWNER)
         if outcome == "ready":
             assert response.status_code == 200, response.text
@@ -507,3 +533,53 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
             assert response.status_code == 422, response.text
             assert response.json()["error"]["code"] == "session_signed_out"
             assert status.status is BrowserAuthenticationStatus.CANCELLED
+
+
+async def test_an_open_event_stream_does_not_prevent_session_verification(tmp_path: Path) -> None:
+    """A signed-in site's successful fetch stream stays open for live updates."""
+    require_real_browser()
+    stream_started = asyncio.Event()
+    release_stream = asyncio.Event()
+
+    class StreamingSite(MembersSite):
+        """Serve members-only content with an indefinitely open updates connection."""
+
+        async def learn(self, request: Request) -> Response:
+            """Start live updates alongside the members-only page load."""
+            response = await super().learn(request)
+            if response.status_code != 200:
+                return response
+            return HTMLResponse(
+                bytes(response.body) + b"<script>fetch('/updates').then(r => r.text());</script>"
+            )
+
+        async def updates(self, request: Request) -> Response:
+            """Establish an event stream whose body stays open until test cleanup."""
+            assert request.cookies.get("session") == self.token
+
+            async def events() -> AsyncIterator[bytes]:
+                """Flush an initial event-stream comment, then hold the connection open."""
+                yield b": connected\n\n"
+                stream_started.set()
+                await release_stream.wait()
+
+            return StreamingResponse(events(), media_type="text/event-stream")
+
+    members = StreamingSite()
+    members.app.routes.append(Route("/updates", members.updates))
+    async with (
+        local_https_site(members.app) as site,
+        profile_service(site, tmp_path / "profiles", verification_seconds=10) as service,
+    ):
+        try:
+            response, ceremony_id = await hand_off(
+                service, cookie=await signed_in_cookie(members), confirmed_path="/learn"
+            )
+            assert stream_started.is_set()
+            assert not release_stream.is_set()
+            assert response.status_code == 200, response.text
+            assert (
+                await service.sessions.authentication_status(ceremony_id, OWNER)
+            ).status is BrowserAuthenticationStatus.READY
+        finally:
+            release_stream.set()

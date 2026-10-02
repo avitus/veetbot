@@ -1238,6 +1238,7 @@ async def test_verification_cancellation_removes_its_request_listeners() -> None
     assert len(page.handlers["request"]) == 1
     assert not page.handlers["requestfinished"]
     assert not page.handlers["requestfailed"]
+    assert not page.handlers["response"]
 
 
 async def test_page_evidence_normalizes_other_load_failures() -> None:
@@ -1907,3 +1908,61 @@ async def test_an_arrow_key_on_a_radio_is_refused_before_dispatch() -> None:
 
     assert refusal.reason_code == "tool.browser.grant_not_applicable"
     assert state == [True, False]
+
+
+@pytest.mark.parametrize("resource_type", ["fetch", "xhr"])
+@pytest.mark.parametrize("content_type", ["text/event-stream", "Text/Event-Stream; charset=utf-8"])
+async def test_established_event_stream_finishes_the_verification_wait(
+    resource_type: str, content_type: str
+) -> None:
+    """A successful fetch or XHR stream need not close before verification."""
+    page = FakeEvidencePage()
+    request = FakeNavigationRequest("https://resource.test/updates", resource_type=resource_type)
+    response = SimpleNamespace(request=request, status=200, headers={"content-type": content_type})
+    with playwright_adapter._verification_requests(page) as wait:  # type: ignore[arg-type]
+        for handler in page.handlers["request"]:
+            handler(request)
+        for handler in page.handlers.get("response", ()):
+            handler(response)
+        # No requestfinished: the site's live stream stays open indefinitely.
+        async with asyncio.timeout(1.5):
+            await wait()
+    assert all(not handlers for handlers in page.handlers.values())
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "status", "content_type", "send_headers"),
+    [
+        ("fetch", 200, "application/json", True),
+        ("xhr", 200, "text/event-stream-extra", True),
+        ("fetch", 401, "text/event-stream", True),
+        ("fetch", 204, "text/event-stream", True),
+        ("fetch", 200, "text/event-stream", False),
+        ("document", 200, "text/event-stream", True),
+        ("script", 200, "text/event-stream", True),
+        ("stylesheet", 200, "text/event-stream", True),
+    ],
+)
+async def test_only_an_established_event_stream_is_exempt_from_verification(
+    resource_type: str, status: int, content_type: str, send_headers: bool
+) -> None:
+    """Other requests still block until completion, even with stream-like headers."""
+    page = FakeEvidencePage()
+    request = FakeNavigationRequest("https://resource.test/updates", resource_type=resource_type)
+    response = SimpleNamespace(
+        request=request, status=status, headers={"content-type": content_type}
+    )
+    with playwright_adapter._verification_requests(page) as wait:  # type: ignore[arg-type]
+        for handler in page.handlers["request"]:
+            handler(request)
+        if send_headers:
+            for handler in page.handlers.get("response", ()):
+                handler(response)
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.6):
+                await wait()
+        for handler in page.handlers["requestfinished"]:
+            handler(request)
+        async with asyncio.timeout(1.5):
+            await wait()
+    assert all(not handlers for handlers in page.handlers.values())
