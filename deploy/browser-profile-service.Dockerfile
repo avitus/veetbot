@@ -22,6 +22,14 @@ RUN /opt/veetbot/.venv/bin/playwright install --with-deps chromium \
     && apt-get install -y --no-install-recommends xvfb \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /root/.cache /var/lib/apt/lists/*
+# Headed Chromium downloads a spelling dictionary from its vendor once a text
+# field takes focus, and no launch switch stops it (ADR-0146). Playwright
+# installs Chrome for Testing on x86_64 and its own Chromium build on arm64,
+# and each reads managed policy from its own directory.
+RUN install -d /etc/opt/chrome_for_testing/policies/managed /etc/chromium/policies/managed \
+    && printf '%s\n' '{"SpellcheckLanguageBlocklist": ["en-US"]}' \
+        | tee /etc/opt/chrome_for_testing/policies/managed/veetbot.json \
+            > /etc/chromium/policies/managed/veetbot.json
 
 # Only the layers below are rebuilt when the application source changes.
 COPY README.md /opt/veetbot/

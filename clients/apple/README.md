@@ -34,6 +34,14 @@ The generated application property list declares
 Keychain protection and implements no non-exempt encryption. Reassess that
 declaration before adding a custom or third-party cryptographic implementation.
 
+Scheduled conversations show a New report dot until their completed result has
+been read. Opening a visible, fully loaded report acknowledges it through the
+shared notification receipt even if its activity stream is still replaying.
+The client reads run status before loading every transcript page, so a run
+that completes during loading cannot acknowledge an unseen final result.
+Hidden conversations, running results and failed transcript loads do not count
+as read; other devices pick up the receipt on their next notification sync.
+
 Files can be attached to a chat message (ADR-0120). On Mac and iPad, drop files
 anywhere on the conversation or on the message field; plain text dropped on the
 field is still inserted as text. The paperclip beside the field opens Files on

@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import re
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
+import playwright
 import pytest
 from playwright.async_api import ElementHandle, Locator, Page
 from playwright.async_api import Error as PlaywrightError
@@ -870,6 +873,86 @@ async def test_interactive_ceremony_reports_its_real_browser_identity(
     assert "user_agent" not in chromium.contexts[0]
     assert "ignore_default_args" not in chromium.launches[0]
     assert not any("AutomationControlled" in argument for argument in chromium.launches[0]["args"])
+
+
+def disabled_features(arguments: list[str]) -> list[list[str]]:
+    """The feature list of each ``--disable-features`` switch, in launch order."""
+    prefix = "--disable-features="
+    return [
+        argument.removeprefix(prefix).split(",")
+        for argument in arguments
+        if argument.startswith(prefix)
+    ]
+
+
+def playwright_disabled_features() -> set[str]:
+    """The features Playwright's own Chromium launch disables, read from its driver."""
+    library = Path(playwright.__file__).parent / "driver" / "package" / "lib"
+    features: set[str] = set()
+    for source in library.rglob("*.js"):
+        for listing in re.findall(
+            r"\bdisabledFeatures = \[(.*?)\]\.filter\(Boolean\)",
+            source.read_text(encoding="utf-8"),
+            re.DOTALL,
+        ):
+            code = [line for line in listing.splitlines() if not line.strip().startswith("//")]
+            features.update(re.findall(r'"(\w+)"', "\n".join(code)))
+    return features
+
+
+async def test_a_headed_launch_turns_off_chromiums_own_vendor_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full Chromium asks its vendor for things no page requested (ADR-0146)."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: None)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=True)
+
+    arguments = chromium.launches[0]["args"]
+    switches = disabled_features(arguments)
+    assert len(switches) == 1
+    assert {
+        "AimEnabled",
+        "AutofillServerCommunication",
+        "NetworkTimeServiceQuerying",
+        "PreconnectToSearch",
+    } <= set(switches[0])
+    assert "--gcm-checkin-url=about:blank" in arguments
+
+
+async def test_a_headed_launch_keeps_every_feature_playwright_disables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chromium honours only its last ``--disable-features``; Playwright's comes first."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: None)
+    defaults = playwright_disabled_features()
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=True)
+
+    assert {"HttpsUpgrades", "ThirdPartyStoragePartitioning"} <= defaults
+    switches = disabled_features(chromium.launches[0]["args"])
+    assert len(switches) == 1
+    assert defaults - set(switches[0]) == set()
+    assert len(switches[0]) == len(set(switches[0]))
+
+
+async def test_a_headless_launch_leaves_playwrights_feature_list_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The headless shell makes no vendor requests, so its launch adds no switch."""
+    chromium = FakeChromiumLaunches()
+    chromium.install(monkeypatch)
+    runtime = PythonPlaywrightRuntime(virtual_display_factory=lambda: None)
+
+    await runtime.start("http://127.0.0.1:9", ("https://site.example",), headed=False)
+
+    arguments = chromium.launches[0]["args"]
+    assert disabled_features(arguments) == []
+    assert not any(argument.startswith("--gcm-checkin-url") for argument in arguments)
 
 
 async def test_production_runtime_uses_the_platform_display_by_default(

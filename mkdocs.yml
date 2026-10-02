@@ -271,4 +271,5 @@ nav:
       - ADR-0143 Notification attention and reconciliation: adr/0143-notification-attention-and-reconciliation.md
       - ADR-0144 Chat reasoning summaries: adr/0144-chat-reasoning-summaries.md
       - ADR-0145 Hosted browsers run headed: adr/0145-hosted-browsers-run-headed.md
+      - ADR-0146 Hosted Chromium vendor requests: adr/0146-hosted-chromium-vendor-requests.md
   - Changelog: changelog.md

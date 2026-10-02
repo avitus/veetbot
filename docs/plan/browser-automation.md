@@ -621,6 +621,22 @@ and the runtime delivers text as one key press per character with no added
 timing; a field that fills with no keyboard events is scored as automated and
 refused.
 
+Full Chromium asks its vendor's services for things no page requested, which
+the headless shell does not. A hosted browser's launch turns off each such
+request that has a switch (ADR-0146): the query to the autofill service that
+describes the forms on a page, the network-time query, the search engine's
+AI Mode eligibility request and idle connection, and the push-messaging
+check-in with the registrations and long-lived connection that follow it.
+Chromium honours only its last feature-disabling switch and Playwright passes
+one of its own, so the runtime's switch repeats Playwright's list, and a test
+compares the two. The service image carries a managed policy, in the
+directory each Chromium flavour reads, that stops the spelling-dictionary
+download, which has no switch. One request remains: the browser lists Google
+accounts at `accounts.google.com` once as it starts, from its own empty
+profile, with no cookie. It has no switch, and the proxy does not refuse a
+host that websites load for sign-in. None of these settings changes what a
+website can observe of the browser.
+
 For a remote ceremony the trusted client presents the returned launch URL behind
 a user-initiated continue action and treats a rejected platform handoff as a
 failed setup. It cancels the ceremony and revokes and deletes the unused profile

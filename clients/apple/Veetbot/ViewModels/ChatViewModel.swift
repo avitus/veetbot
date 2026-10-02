@@ -230,7 +230,7 @@ public final class ChatViewModel: ObservableObject {
         defer { notificationSyncInProgress = false }
         let generation = connectionGeneration
         let visible = visibleNotificationSessionID
-        let seen = visible != nil && runState.runStatus?.isTerminal == true
+        let seen = visible != nil && observedTerminalNotificationRunID == runState.activeRunID
             ? observedTerminalNotificationRunID.map { [$0] } ?? [] : []
         let reportRunIDs = history.filter { $0.scheduleID != nil }.compactMap(\.lastRunID)
         await notificationAttention.synchronize(
@@ -675,6 +675,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             let session = try await api.setSessionFolder(sessionID, folderID: folderID)
             guard generation == connectionGeneration else { return }
+            // A reconciliation begun while the move was in flight may hold an
+            // index read before it; this answer is newer.
+            historyReconciliationID = nil
             let existing = history.first { $0.sessionID == sessionID }
             try await store(session: session, lastRunID: session.lastRunID ?? existing?.lastRunID)
             folderProposals.removeAll { $0.memberSessionIDs.contains(sessionID) }
@@ -909,13 +912,9 @@ public final class ChatViewModel: ObservableObject {
                 }
                 return
             }
-            let messages = try await loadSessionMessages(
-                api: api,
-                sessionID: session.id,
-                requestID: requestID
-            )
-            guard selectionRequestID == requestID else { return }
-            runState.restore(messages: messages)
+            // Read status before the transcript so a terminal snapshot guarantees
+            // the following message pages include its persisted final result.
+            let restoredRun: RunView?
             if let runID = preferredRunID
                 ?? session.activeRunID
                 ?? session.lastRunID
@@ -926,7 +925,22 @@ public final class ChatViewModel: ObservableObject {
                 guard run.sessionID == session.id else {
                     throw HTTPTransportError.invalidResponse
                 }
+                restoredRun = run
+            } else {
+                restoredRun = nil
+            }
+            let messages = try await loadSessionMessages(
+                api: api,
+                sessionID: session.id,
+                requestID: requestID
+            )
+            guard selectionRequestID == requestID else { return }
+            runState.restore(messages: messages)
+            if let run = restoredRun {
                 runState.seed(run: run)
+                // Historical reports need not wait for their activity replay to
+                // reach the terminal event before acknowledging a loaded result.
+                if run.status.isTerminal { observedTerminalNotificationRunID = run.id }
                 watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive)
             }
             loadedNotificationSessionID = session.id

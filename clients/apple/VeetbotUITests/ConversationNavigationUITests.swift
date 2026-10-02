@@ -809,6 +809,10 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(intoTravel)
         // Filed in the collapsed Travel folder, the row leaves the history.
         waitForDisappearance(of: row, timeout: 10)
+        // The move withdraws the suggestion that named the conversation.
+        let proposal = element("sidebar.proposal.\(Self.proposalID)")
+        waitForDisappearance(of: proposal)
+        let filedAt = Date()
         XCTAssertTrue(reveal(travel))
         activate(travel)
         XCTAssertTrue(waitForFolder(travel, expanded: true))
@@ -826,6 +830,13 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(waitForFolder(travel, expanded: false))
         waitForDisappearance(of: sessionRow(Self.secondSessionID))
         XCTAssertTrue(reveal(row), "An unfiled conversation returns to the history")
+        // The sidebar refreshes every ten seconds; a refresh that brought the
+        // suggestion back would shift every row beneath it.
+        let untilNextRefresh = max(0, 12 - Date().timeIntervalSince(filedAt))
+        XCTAssertFalse(
+            proposal.waitForExistence(timeout: untilNextRefresh),
+            "A withdrawn suggestion stays withdrawn across a refresh"
+        )
     }
 
     func testDecliningASuggestedFolderRemovesIt() {

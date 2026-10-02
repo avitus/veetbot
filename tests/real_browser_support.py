@@ -24,6 +24,7 @@ import asyncio
 import os
 import socket
 import ssl
+import sys
 import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -48,16 +49,14 @@ from agent_core.domain.execution import EgressPolicy
 
 REQUIRE_REAL_BROWSER = "VEETBOT_REQUIRE_REAL_BROWSER"
 SYNTHETIC_HOST = "site.test"
-# Full headed Chromium asks for exactly these on its own (ADR-0145, measured
-# 2026-10-01). A CONNECT carries no provenance, so no synthetic page may name one.
+# What full headed Chromium still asks its proxy for on its own (ADR-0146,
+# measured 2026-10-01): one account listing as it starts and, on Linux outside
+# the service image, whose managed policy stops it, a spelling dictionary once
+# a text field takes focus. A CONNECT carries no provenance, so no synthetic
+# page may name one.
 CHROMIUM_OWN_TARGETS = frozenset(
-    {
-        "accounts.google.com:443",
-        "android.clients.google.com:443",
-        "content-autofill.googleapis.com:443",
-        "www.google.com:443",
-        "http://clients2.google.com/time/1/current",
-    }
+    {"accounts.google.com:443"}
+    | ({"redirector.gvt1.com:443"} if sys.platform.startswith("linux") else set())
 )
 
 
@@ -143,12 +142,7 @@ class ConnectRelay:
 
     def refused_page_targets(self) -> set[str]:
         """Refused targets, leaving out the exact ones the browser asks for on its own."""
-        # A plain-HTTP target is a whole URL; its query changes on every request.
-        return {
-            target
-            for target in self.refused
-            if target.partition("?")[0] not in CHROMIUM_OWN_TARGETS
-        }
+        return set(self.refused) - CHROMIUM_OWN_TARGETS
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._accept, "127.0.0.1", 0)

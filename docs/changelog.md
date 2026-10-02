@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-01 — The Website Access browser stops contacting Google on its own
+
+- The full browser that Website Access now uses made its own requests to
+  Google services on every run, apart from the pages it visited. None carried
+  a website's cookies or page text, but one described the layout of the forms
+  on each page. Veetbot now turns these requests off. One remains because the
+  browser has no switch for it: a single request to accounts.google.com when
+  the browser starts, which carries no cookie and nothing about any page.
+  ADR-0146 records the change and the measurements.
+
 ## 2026-10-01 — Website Access works on sites that refuse headless browsers
 
 - Some websites, x.com among them, answer a headless browser with an empty

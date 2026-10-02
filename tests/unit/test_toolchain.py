@@ -413,6 +413,22 @@ def test_browser_profile_image_carries_the_ceremony_display_server() -> None:
     assert browser_layer < display_server < source_copy
 
 
+def test_browser_profile_image_carries_the_chromium_managed_policy() -> None:
+    """No launch switch stops the dictionary download; Chromium's flavours differ (ADR-0146)."""
+
+    profile_dockerfile = (ROOT / "deploy" / "browser-profile-service.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    policy = profile_dockerfile.index("""'{"SpellcheckLanguageBlocklist": ["en-US"]}'""")
+    browser_layer = profile_dockerfile.index("playwright install --with-deps chromium")
+    source_copy = profile_dockerfile.index("COPY src /opt/veetbot/src")
+    assert browser_layer < policy < source_copy
+    # Chrome for Testing, which Playwright installs on x86_64, and the Chromium
+    # build it installs on arm64 read managed policy from different directories.
+    for directory in ("/etc/opt/chrome_for_testing/policies", "/etc/chromium/policies"):
+        assert profile_dockerfile.count(f"{directory}/managed/veetbot.json") == 1
+
+
 def test_browser_profile_dockerfile_caches_runtime_layers_before_source() -> None:
     """Dependency and browser layers precede the source copy so releases share them."""
 
