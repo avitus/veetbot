@@ -675,6 +675,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             let session = try await api.setSessionFolder(sessionID, folderID: folderID)
             guard generation == connectionGeneration else { return }
+            // A reconciliation begun while the move was in flight may hold an
+            // index read before it; this answer is newer.
+            historyReconciliationID = nil
             let existing = history.first { $0.sessionID == sessionID }
             try await store(session: session, lastRunID: session.lastRunID ?? existing?.lastRunID)
             folderProposals.removeAll { $0.memberSessionIDs.contains(sessionID) }

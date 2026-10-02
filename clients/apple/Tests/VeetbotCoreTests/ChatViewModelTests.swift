@@ -1874,6 +1874,71 @@ import UserNotifications
         #expect(model.errorMessage == nil)
     }
 
+    /// The ten-second refresh can start while a move is in flight and read the
+    /// index as it stood before the move. The move's own answer is newer, so
+    /// that page must not put the conversation back where it was.
+    @Test
+    func testARefreshStartedDuringAMoveDoesNotRestoreTheStaleFolder() async throws {
+        let lock = NSLock()
+        var staleListing = false
+        var moveInFlight = false
+        let releaseMove = DispatchSemaphore(value: 0)
+        let releaseListing = DispatchSemaphore(value: 0)
+        // Every suite shares one loading thread, so no wait here is unbounded.
+        let patience = DispatchTimeInterval.seconds(10)
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                // Read before the move committed, answered after it.
+                if lock.withLock({ staleListing }) { _ = releaseListing.wait(timeout: .now() + patience) }
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("PUT", "/v1/sessions/\(Self.looseSessionFixtureID)/folder"):
+                lock.withLock { moveInFlight = true }
+                _ = releaseMove.wait(timeout: .now() + patience)
+                return try response(
+                    for: request, statusCode: 200,
+                    body: sessionJSON(Self.looseSessionFixtureID, title: "Loose", folderID: Self.folderFixtureID)
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        model.notificationSyncActive = true
+        lock.withLock { staleListing = true }
+        let looseID = try #require(UUID(uuidString: Self.looseSessionFixtureID))
+        let folderID = try #require(UUID(uuidString: Self.folderFixtureID))
+
+        // The move's request is being served before the refresh starts, so
+        // the refresh's listing can only be answered after it.
+        let move = Task { await model.moveSession(looseID, toFolder: folderID) }
+        for _ in 0..<5_000 where !lock.withLock({ moveInFlight }) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try #require(lock.withLock { moveInFlight })
+        // The task runs to its request before the test resumes on the main actor.
+        var refreshBegan = false
+        let refresh = Task {
+            refreshBegan = true
+            await model.refreshScheduledReportHistory()
+        }
+        while !refreshBegan { await Task.yield() }
+        releaseMove.signal()
+        await move.value
+        #expect(model.history.first { $0.sessionID == looseID }?.folderID == folderID)
+        releaseListing.signal()
+        await refresh.value
+
+        #expect(model.history.first { $0.sessionID == looseID }?.folderID == folderID)
+        #expect(model.groupedHistory.uncategorized.isEmpty)
+        #expect(model.errorMessage == nil)
+    }
+
     @Test
     func testRenameConflictKeepsTheNameAndSetsTheInlineError() async throws {
         let model = try configuredModel { request in
