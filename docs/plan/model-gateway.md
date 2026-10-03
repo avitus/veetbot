@@ -569,7 +569,12 @@ The neutral `StopReason.INCOMPLETE` is therefore produced only by the OpenAI
 adapter, from `response.incomplete`, and only when the incomplete reason is
 not one the neutral vocabulary already names. An OpenAI response that is
 incomplete because of the output cap maps to `MAX_TOKENS`, not `INCOMPLETE`,
-so that the two providers agree on the common case.
+so that the two providers agree on the common case. Both terminal event types
+finalize the accumulated output and authoritative usage exactly once, without
+an adapter retry. An incomplete status takes precedence over the presence of
+tool-call deltas, including partial arguments. A stream ending without either
+terminal event remains a protocol failure, with the fixed diagnostic code
+`missing_terminal_event` retained in the run failure details.
 
 **In-band `<think>` text.** ADR-0012 calls this "the third representation" and
 Section 10 gives it no mapping row. Here it is:
