@@ -273,4 +273,6 @@ nav:
       - ADR-0145 Hosted browsers run headed: adr/0145-hosted-browsers-run-headed.md
       - ADR-0146 Hosted Chromium vendor requests: adr/0146-hosted-chromium-vendor-requests.md
       - ADR-0147 Browser verification event streams: adr/0147-browser-verification-event-streams.md
+      - ADR-0148 Approved browser image upload: adr/0148-approved-browser-image-upload.md
+      - ADR-0149 Release-managed owner permissions: adr/0149-release-managed-owner-permissions.md
   - Changelog: changelog.md

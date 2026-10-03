@@ -548,6 +548,7 @@ from agent_core.ports.browser_sessions import (
     BrowserAuthenticationControlPlane,
     BrowserSessionControlPlane,
 )
+from agent_core.ports.browser_upload import BrowserImageUploader
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
@@ -587,6 +588,7 @@ from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import BrowserActApprovalPresenter, BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
+from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
@@ -798,7 +800,9 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "your reply automatically. Never say a file is attached unless its export or "
     "generation tool succeeded."
 )
-_BROWSER_TOOL_NAMES = frozenset({"browser.navigate", "browser.observe", "browser.act"})
+_BROWSER_TOOL_NAMES = frozenset(
+    {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}
+)
 
 
 def _session_tool_filter(
@@ -2567,6 +2571,17 @@ async def _compose(
     if browser_provider is not None:
         registry.register(BrowserNavigateTool(browser_provider))
         registry.register(BrowserObserveTool(browser_provider))
+        if isinstance(browser_provider, BrowserImageUploader):
+            registry.register(
+                BrowserUploadTool(
+                    browser_provider,
+                    image_resolver=StoredMediaInputResolver(
+                        uow_factory=uow_factory,
+                        store=FilesystemArtifactStore(artifact_root),
+                        clock=clock,
+                    ),
+                )
+            )
         # ADR-0129: the approval card describes the action whatever the flag;
         # it offers a task grant only when task grants are enabled.
         registry.register(
@@ -5070,6 +5085,15 @@ async def build(
             else []
         ),
         *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
+        *(
+            ["browser.upload"]
+            if browser_enabled
+            and (
+                browser_provider_override is None
+                or isinstance(browser_provider_override, BrowserImageUploader)
+            )
+            else []
+        ),
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(
             [DEVICE_SMS_SEND_TOOL_NAME]

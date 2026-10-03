@@ -924,3 +924,17 @@ done badly.
     The split is deliberate — configuration shape here, call site
     there — but it is the one place where two specifications describe
     one file.
+
+## Release-managed owner permissions (ADR-0149)
+
+Application deployment reconciles the reviewed `AUTH_SCOPES` in the production
+example with the host's explicit grants into the staged `.owner-scopes.env`.
+Only the API and owner worker units load it, after their host environment;
+restricted service roles keep separate scopes. Promotion and rollback select
+permissions with the release. Older rollback targets without the file use
+host grants. Scope classification tests require a deployment decision for
+every new platform scope. Feature flags, credentials and approval requirements
+remain independent. The deployment's authenticated model-settings read must
+return HTTP 200 before the release succeeds. See
+[ADR-0149](../adr/0149-release-managed-owner-permissions.md) and the
+[deployment runbook](../deployment.md) for the mechanism and operator boundary.

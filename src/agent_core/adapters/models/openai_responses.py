@@ -448,7 +448,7 @@ class OpenAIResponsesProvider:
                                 provider_payload=opaque,
                             )
                         )
-            elif event_type == "response.completed":
+            elif event_type in {"response.completed", "response.incomplete"}:
                 response = raw.get("response")
                 if not isinstance(response, dict):
                     response = {}
@@ -514,7 +514,8 @@ class OpenAIResponsesProvider:
                 model=resolved.model,
                 sequence=sequence,
                 category="protocol",
-                detail="Responses stream ended without response.completed",
+                provider_code="missing_terminal_event",
+                detail="Responses stream ended without a terminal event",
             )
 
     @staticmethod
@@ -548,14 +549,14 @@ class OpenAIResponsesProvider:
 
     @staticmethod
     def _stop_reason(response: dict[str, Any], accumulator: ModelStreamAccumulator) -> StopReason:
-        if accumulator.tools:
-            return StopReason.TOOL_USE
         status = response.get("status")
         if status == "incomplete":
             reason = nested(response, "incomplete_details", "reason")
             return StopReason.MAX_TOKENS if reason == "max_output_tokens" else StopReason.INCOMPLETE
         if status in {"failed", "cancelled"}:
             return StopReason.CANCELLED if status == "cancelled" else StopReason.INCOMPLETE
+        if accumulator.tools:
+            return StopReason.TOOL_USE
         return StopReason.END_TURN
 
     @staticmethod

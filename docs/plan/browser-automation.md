@@ -28,6 +28,9 @@ scheduling integration, downloads, uploads, and audio land in later slices of
 this tranche. Browser automation remains disabled and absent from the registry
 until a provider is explicitly bound.
 
+ADR-0148 adds individually approved rich-text typing and the separately
+classified image-upload contract below. Other file transfers remain unavailable.
+
 The following are not goals:
 
 - bypassing CAPTCHA, multi-factor authentication, paywalls, bot controls, or a
@@ -100,6 +103,7 @@ The stable builtin namespace is `browser`:
 | `browser.navigate` | Open one allowed public HTTPS URL | `NETWORK_READ` | `LOW` | `READ_ONLY` |
 | `browser.observe` | Read the current rendered page | `NETWORK_READ` | `LOW` | `READ_ONLY` |
 | `browser.act` | Click, type, select, check, press, or scroll | `EXTERNAL_WRITE` | `HIGH` | `NON_IDEMPOTENT` |
+| `browser.upload` | Select one conversation image in a file control | `EXTERNAL_WRITE` | `HIGH` | `NON_IDEMPOTENT` |
 
 The write classification is deliberately conservative. A click that appears
 local can submit a form, mark a message read, accept terms, or mutate an
@@ -121,7 +125,7 @@ origins never become profile navigation or grant authority, and a task grant's
 scope comes only from owner configuration (ADR-0129).
 
 When hosted composition resolves profiles per session, the frozen context plan
-advertises the three browser tools only if that trusted reserved metadata contains
+advertises its browser tools only if that trusted reserved metadata contains
 a selected profile, and then always defines them: they rank ahead of every other
 candidate and are never deferred (ADR-0130). Runs in such a session use the
 browser-task limits in [runtime-loop.md](runtime-loop.md). An ordinary session
@@ -130,8 +134,9 @@ without paying for or guessing unusable browser operations. A deployment-wide
 hosted profile, an explicitly injected provider, and the origin-pinned Playwright
 adapter remain globally bound runtime environments and keep their browser tools.
 
-Downloads, uploads, clipboard access, notifications, geolocation, camera,
-microphone, password-manager access, and new windows are denied until each has
+Downloads, uploads other than the image contract below, clipboard access,
+notifications, geolocation, camera, microphone, password-manager access, and
+new windows are denied until each has
 its own classified contract. Cross-origin popups are closed and reported.
 The ephemeral provider also refuses typing into password fields or controls
 whose autocomplete semantics identify a current password, new password, or
@@ -149,6 +154,45 @@ preserve snapshot order and retain the existing visibility, state, and revision
 checks. When a plan offers `browser.navigate`, each request's runtime metadata
 names the origins it accepts (never the profile id), so the model does not
 guess a bare domain.
+
+### Individually approved rich-text input and image upload
+
+Under individual approval, `browser.act` typing accepts native inputs and text
+areas and live contenteditable regions, including inherited editability and
+plain-text editing hosts. It uses the browser's normal fill operation and input
+events; it does not click a publication control. The credential restrictions
+above still apply. Standing and task grants retain their native-field-only
+typing restriction (ADR-0129).
+
+`browser.upload@1.0.0` takes exactly `image_id`, `expected_revision` and `ref`.
+The ID names an image attached to, generated in, or exported within this chat.
+The reference names either a visible native file input or a visible control
+that opens a native file chooser. One individually approved call selects one
+PNG, JPEG or WebP, at most 5 MiB, and returns the updated observation. A site can
+send the image immediately on selection; approval authorizes that transfer.
+Publishing the post remains a separate `browser.act` with its ordinary approval.
+
+Upload is a serial, high-risk, non-idempotent external write requiring
+`artifact.read`; neither kind of browser grant covers it. Its approval view
+names the image UUID and the observed page and control. After approval, the
+existing conversation image resolver checks principal, session, origin, expiry,
+size, signature and checksum. Unclaimed uploads and foreign, expired, knowledge
+or tool-output artifacts are unavailable. Arguments contain no URL, path, bytes,
+selector or script. Playwright receives an in-memory payload with a generated
+filename; only a file input in the current main document can receive it.
+
+The hosted adapter sends the image through `/v1/browser-sessions:upload`, an
+authenticated and sequence-bound service route with a 7 MiB JSON limit. It
+revalidates decoded bytes inside the isolated service. Nginx streams this exact
+route without request buffering; other control-plane routes retain 64 KiB.
+Bytes stay outside tool arguments, events, logs and results. A possibly sent
+upload or chooser click is uncertain on failure and is never blindly retried.
+
+Providers advertise upload only when they implement the optional image-upload
+port. Bound hosted chats keep it defined with the other browser tools. Existing
+frozen chats retain their roster; start a new profile-bound chat to use upload.
+Downloads, arbitrary files and videos remain unavailable. ADR-0148 records this
+owner-requested extension and its verification requirements.
 
 ## Profiles and authentication
 
@@ -464,8 +508,9 @@ service memory, compared in constant time, bounded to 128 characters, and never
 logged.
 
 The data-plane HTTP surface consists only of acquire, renew, navigate,
-observe, act, and close. It uses the same authenticate-before-buffering
-boundary, 64-KiB JSON ceiling, generic error responses, and exact idempotency
+observe, act, upload, and close. It uses the same authenticate-before-buffering
+boundary, 64-KiB JSON ceiling (7 MiB only for image upload), generic error
+responses, and exact idempotency
 rules as lifecycle. Acquire, renew, and close are idempotent for the same
 complete request. Navigate and observe are read-only. Act is sequence-bound and
 never retried after dispatch; an ambiguous response is
@@ -1045,7 +1090,7 @@ eligible run with a `READY` hosted profile.
 A task grant covers click, select, check, press, scroll, and typing into text,
 search, and multi-line fields, including `unknown`-consequence actions, and
 only in a model turn whose tool calls since the owner's newest message are all
-browser tools. Each covers only what the runtime acts on: typing into an input
+browser tools. Each grant covers typing only into an input
 or a text area, not a region the page made editable; select in a select; and
 check on a native check box or radio, not a choice control the page built.
 Typed text is covered only when it is at most 256 characters

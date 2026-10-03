@@ -1702,6 +1702,7 @@ import UserNotifications
     private static let filedSessionFixtureID = "00000000-0000-0000-0000-000000000123"
     private static let looseSessionFixtureID = "00000000-0000-0000-0000-000000000456"
     private static let proposalFixtureID = "00000000-0000-0000-0000-0000000000E1"
+    private static let newFolderFixtureID = "00000000-0000-0000-0000-0000000000F3"
 
     private func sessionJSON(_ id: String, title: String, folderID: String?) -> String {
         let folder = folderID.map { "\"\($0)\"" } ?? "null"
@@ -1936,6 +1937,195 @@ import UserNotifications
 
         #expect(model.history.first { $0.sessionID == looseID }?.folderID == folderID)
         #expect(model.groupedHistory.uncategorized.isEmpty)
+        #expect(model.errorMessage == nil)
+    }
+
+    /// The same refresh can start while a delete is in flight and read the
+    /// index and the folder list as they stood before it. The delete's own
+    /// answer is newer, so those pages must not revive the folder or refile
+    /// the conversations it held.
+    @Test
+    func testARefreshStartedDuringADeleteDoesNotReviveTheFolder() async throws {
+        let lock = NSLock()
+        var staleListing = false
+        var deleteInFlight = false
+        let releaseDelete = DispatchSemaphore(value: 0)
+        let releaseListing = DispatchSemaphore(value: 0)
+        // Every suite shares one loading thread, so no wait here is unbounded.
+        let patience = DispatchTimeInterval.seconds(10)
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                // Read before the delete committed, answered after it.
+                if lock.withLock({ staleListing }) { _ = releaseListing.wait(timeout: .now() + patience) }
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("DELETE", "/v1/folders/\(Self.folderFixtureID)"):
+                lock.withLock { deleteInFlight = true }
+                _ = releaseDelete.wait(timeout: .now() + patience)
+                return try response(for: request, statusCode: 204, body: "")
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        model.notificationSyncActive = true
+        lock.withLock { staleListing = true }
+        let folderID = try #require(UUID(uuidString: Self.folderFixtureID))
+        let filedID = try #require(UUID(uuidString: Self.filedSessionFixtureID))
+
+        // The delete's request is being served before the refresh starts, so
+        // the refresh's listing can only be answered after it.
+        let delete = Task { await model.deleteFolder(folderID) }
+        for _ in 0..<5_000 where !lock.withLock({ deleteInFlight }) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try #require(lock.withLock { deleteInFlight })
+        var refreshBegan = false
+        let refresh = Task {
+            refreshBegan = true
+            await model.refreshScheduledReportHistory()
+        }
+        while !refreshBegan { await Task.yield() }
+        releaseDelete.signal()
+        await delete.value
+        #expect(model.folders.map(\.name) == ["Work"])
+        #expect(try #require(model.history.first { $0.sessionID == filedID }).folderID == nil)
+        releaseListing.signal()
+        await refresh.value
+
+        #expect(model.folders.map(\.name) == ["Work"])
+        #expect(try #require(model.history.first { $0.sessionID == filedID }).folderID == nil)
+        #expect(model.groupedHistory.uncategorized.count == 2)
+        #expect(model.errorMessage == nil)
+    }
+
+    /// A refresh started while a rename is in flight holds a folder page that
+    /// predates it. The rename's own answer is newer, so that page must not
+    /// bring the old name back.
+    @Test
+    func testARefreshStartedDuringARenameDoesNotRestoreTheOldName() async throws {
+        let lock = NSLock()
+        var staleListing = false
+        var renameInFlight = false
+        let releaseRename = DispatchSemaphore(value: 0)
+        let releaseListing = DispatchSemaphore(value: 0)
+        // Every suite shares one loading thread, so no wait here is unbounded.
+        let patience = DispatchTimeInterval.seconds(10)
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                // Read before the rename committed, answered after it.
+                if lock.withLock({ staleListing }) { _ = releaseListing.wait(timeout: .now() + patience) }
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("PATCH", "/v1/folders/\(Self.folderFixtureID)"):
+                lock.withLock { renameInFlight = true }
+                _ = releaseRename.wait(timeout: .now() + patience)
+                return try response(
+                    for: request, statusCode: 200,
+                    body: folderJSON(Self.folderFixtureID, name: "Trips", count: 1)
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        model.notificationSyncActive = true
+        lock.withLock { staleListing = true }
+        let folderID = try #require(UUID(uuidString: Self.folderFixtureID))
+
+        // The rename's request is being served before the refresh starts, so
+        // the refresh's folder page can only be answered after it.
+        let rename = Task { await model.renameFolder(folderID, to: "Trips") }
+        for _ in 0..<5_000 where !lock.withLock({ renameInFlight }) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try #require(lock.withLock { renameInFlight })
+        var refreshBegan = false
+        let refresh = Task {
+            refreshBegan = true
+            await model.refreshScheduledReportHistory()
+        }
+        while !refreshBegan { await Task.yield() }
+        releaseRename.signal()
+        #expect(await rename.value)
+        #expect(model.folders.map(\.name) == ["Trips", "Work"])
+        releaseListing.signal()
+        await refresh.value
+
+        #expect(model.folders.map(\.name) == ["Trips", "Work"])
+        #expect(model.folderEditorError == nil)
+        #expect(model.errorMessage == nil)
+    }
+
+    /// A refresh started while a create is in flight holds a folder page from
+    /// before it. The create's own answer is newer, so that page must not
+    /// drop the new folder.
+    @Test
+    func testARefreshStartedDuringACreateDoesNotDropTheNewFolder() async throws {
+        let lock = NSLock()
+        var staleListing = false
+        var createInFlight = false
+        let releaseCreate = DispatchSemaphore(value: 0)
+        let releaseListing = DispatchSemaphore(value: 0)
+        // Every suite shares one loading thread, so no wait here is unbounded.
+        let patience = DispatchTimeInterval.seconds(10)
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: sessionsPageJSON())
+            case ("GET", "/v1/folders"):
+                // Read before the create committed, answered after it.
+                if lock.withLock({ staleListing }) { _ = releaseListing.wait(timeout: .now() + patience) }
+                return try response(for: request, statusCode: 200, body: folderPageJSON())
+            case ("GET", "/v1/folders/proposals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("POST", "/v1/folders"):
+                lock.withLock { createInFlight = true }
+                _ = releaseCreate.wait(timeout: .now() + patience)
+                return try response(
+                    for: request, statusCode: 201,
+                    body: folderJSON(Self.newFolderFixtureID, name: "Lisbon", count: 0)
+                )
+            default:
+                Issue.record("Unexpected request \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        model.notificationSyncActive = true
+        lock.withLock { staleListing = true }
+
+        // The create's request is being served before the refresh starts, so
+        // the refresh's folder page can only be answered after it.
+        let create = Task { await model.createFolder(named: "Lisbon") }
+        for _ in 0..<5_000 where !lock.withLock({ createInFlight }) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try #require(lock.withLock { createInFlight })
+        var refreshBegan = false
+        let refresh = Task {
+            refreshBegan = true
+            await model.refreshScheduledReportHistory()
+        }
+        while !refreshBegan { await Task.yield() }
+        releaseCreate.signal()
+        #expect(await create.value?.name == "Lisbon")
+        #expect(model.folders.map(\.name) == ["Lisbon", "Travel", "Work"])
+        releaseListing.signal()
+        await refresh.value
+
+        #expect(model.folders.map(\.name) == ["Lisbon", "Travel", "Work"])
+        #expect(model.folderEditorError == nil)
         #expect(model.errorMessage == nil)
     }
 

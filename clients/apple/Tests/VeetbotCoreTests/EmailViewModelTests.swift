@@ -1956,6 +1956,37 @@ import SwiftUI
         #expect(model.feedbackID == nil)
     }
 
+    /// Foreground arrivals appear immediately without reordering surviving rows or disturbing edits.
+    @Test func testRefreshInsertsNewThreadsWithoutChangingSelection() async throws {
+        let requests = EmailRequestRecorder()
+        let second = UUID()
+        let arrival = UUID()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") {
+                let reads = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+                let ids = reads == 1 ? [self.threadID, second] : [arrival, second, self.threadID]
+                let rows = ids.map { id in
+                    self.threadJSON().replacingOccurrences(of: self.threadID.uuidString, with: id.uuidString)
+                }.joined(separator: ",")
+                return (200, "{\"items\":[\(rows)],\"next_cursor\":null}")
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Keep my reply")
+        await model.reload(preserveOrder: true)
+        #expect(model.items.map(\.id) == [threadID, second, arrival])
+        #expect(model.selectedThreadID == threadID)
+        #expect(model.thread?.id == threadID)
+        #expect(model.edits[draftID]?.body == "Keep my reply")
+        await model.reload(preserveOrder: true)
+        #expect(model.items.map(\.id) == [threadID, second, arrival], "Repeated refreshes must not duplicate or reorder arrivals")
+    }
+
     @Test func testExpandedInboxRefreshHonorsTheServerPageLimit() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }

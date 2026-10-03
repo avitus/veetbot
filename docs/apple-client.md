@@ -273,9 +273,11 @@ shown inline, never in the global error banner; deleting a folder uses the
 same confirmation idiom as deleting a conversation and says that the
 conversations return to history.
 Unfiling sends an explicit null, so an omitted field can never unfile a
-conversation. A move fences reconciliation when it starts and again when its
-answer arrives, so an index read while the move was in flight cannot put the
-conversation back. Against a server whose index lacks the key, or that answers 404
+conversation. Every folder mutation — a move, a create, a rename, or a delete —
+fences reconciliation when its answer arrives, and a move or a delete also when
+it starts, so an index or folder page read while the mutation was in flight
+cannot put the conversation back, revive the folder, restore the old name, or
+drop the new one. Against a server whose index lacks the key, or that answers 404
 or 405 on the folder list, the client makes no further folder request, keeps
 every folder control hidden, and renders the history without folders; that unavailability
 is contained in reconciliation and never surfaces as an error.

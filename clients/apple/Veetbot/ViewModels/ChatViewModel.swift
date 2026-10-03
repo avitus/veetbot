@@ -618,6 +618,9 @@ public final class ChatViewModel: ObservableObject {
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             guard generation == connectionGeneration else { return nil }
+            // A reconciliation begun while the create was in flight may hold a
+            // folder page read before it; this answer is newer.
+            historyReconciliationID = nil
             upsertFolder(folder)
             if let sessionID {
                 await moveSession(sessionID, toFolder: folder.id)
@@ -640,6 +643,9 @@ public final class ChatViewModel: ObservableObject {
                 folderID, name: name.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             guard generation == connectionGeneration else { return false }
+            // A reconciliation begun while the rename was in flight may hold a
+            // folder page read before it; this answer is newer.
+            historyReconciliationID = nil
             upsertFolder(folder)
             return true
         } catch {
@@ -657,6 +663,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             try await api.deleteFolder(folderID)
             guard generation == connectionGeneration else { return }
+            // A reconciliation begun while the delete was in flight may hold an
+            // index read before it; this answer is newer.
+            historyReconciliationID = nil
             folders.removeAll { $0.id == folderID }
             folderProposals.removeAll { $0.targetFolderID == folderID }
             let members = history.filter { $0.folderID == folderID }.map(\.sessionID)

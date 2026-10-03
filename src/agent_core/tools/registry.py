@@ -175,7 +175,7 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
             and not spec.allow_parallel
         )
         browser_write = (
-            spec.name == "browser.act"
+            spec.name in {"browser.act", "browser.upload"}
             and spec.side_effect is SideEffectClass.EXTERNAL_WRITE
             and spec.risk is RiskLevel.HIGH
             and spec.idempotency is IdempotencyClass.NON_IDEMPOTENT

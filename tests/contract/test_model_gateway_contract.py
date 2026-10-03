@@ -1750,3 +1750,45 @@ async def test_svg_source_reaches_each_provider_as_untrusted_text(provider_name:
     assert svg.decode() in text
     assert '<untrusted trust="external_untrusted"' in text
     assert "garden.svg" in text
+
+
+@pytest.mark.parametrize("reason", ["max_output_tokens", "content_filter"])
+@pytest.mark.parametrize("output", ["text", "tool", "none"])
+async def test_openai_incomplete_is_terminal_with_usage(reason: str, output: str) -> None:
+    raw = openai_tool_events('{"expression":') if output == "tool" else openai_text_events()
+    terminal = raw[-1]
+    terminal["type"] = "response.incomplete"
+    terminal["response"]["status"] = "incomplete"
+    terminal["response"]["incomplete_details"] = {"reason": reason}
+    if output == "none":
+        raw = [terminal]
+    source = ScriptedRawSource([raw])
+    provider = OpenAIResponsesProvider(event_source=source)
+    events = [
+        event
+        async for event in validated_stream(provider.stream(request(), resolved("openai"), ATTEMPT))
+    ]
+    assert isinstance(events[-1], ModelCompletedEvent)
+    completed = events[-1]
+    expected = StopReason.MAX_TOKENS if reason == "max_output_tokens" else StopReason.INCOMPLETE
+    assert completed.stop_reason == expected
+    assert completed.turn.stop_reason == expected
+    assert completed.turn.usage.output_tokens == terminal["response"]["usage"]["output_tokens"]
+    assert completed.turn.provider_metadata is not None
+    assert completed.turn.provider_metadata.response_id == terminal["response"]["id"]
+    assert len(source.requests) == 1
+    assert [event.sequence for event in events] == list(range(len(events)))
+    assert sum(isinstance(event, (ModelCompletedEvent, ModelFailedEvent)) for event in events) == 1
+    if output == "tool":
+        assert completed.turn.tool_calls[0].raw_arguments == '{"expression":'
+    await provider.close()
+
+
+async def test_openai_missing_terminal_has_safe_diagnostic_code() -> None:
+    source = ScriptedRawSource([openai_text_events()[:-1]])
+    provider = OpenAIResponsesProvider(event_source=source)
+    events = [event async for event in provider.stream(request(), resolved("openai"), ATTEMPT)]
+    assert isinstance(events[-1], ModelFailedEvent)
+    assert events[-1].error.provider_code == "missing_terminal_event"
+    assert len(source.requests) == 1
+    await provider.close()
