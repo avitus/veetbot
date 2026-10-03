@@ -439,6 +439,43 @@ async def test_disposal_failures_never_fail_an_observation() -> None:
     assert [element.name for element in observation.elements] == ["Check"]
 
 
+def removed_during_read(name: str, *, connected: bool) -> AsyncMock:
+    """A control whose state read fails; ``connected`` is whether it is still on the page."""
+
+    handle = control(name)
+    handle.is_disabled.side_effect = PlaywrightError(
+        "ElementHandle.is_disabled: Element is not attached to the DOM"
+    )
+    metadata = handle.evaluate.return_value
+    handle.evaluate.side_effect = lambda expression: (
+        connected if "isConnected" in expression else metadata
+    )
+    return handle
+
+
+async def test_a_control_the_page_removes_during_observation_takes_no_slot() -> None:
+    """A re-rendering page, such as a live timeline, can remove a control after
+    its visibility check; like a hidden control, it takes no element slot
+    instead of failing the whole observation."""
+
+    removed = removed_during_read("Reply", connected=False)
+
+    observation = await PythonPlaywrightRuntime()._observation(
+        observed_page([control("Post"), removed, control("Like")], [True, True, True])
+    )
+
+    assert [element.name for element in observation.elements] == ["Post", "Like"]
+
+
+async def test_a_state_read_failure_on_a_control_still_on_the_page_fails_the_observation() -> None:
+    still_there = removed_during_read("Reply", connected=True)
+
+    with pytest.raises(PlaywrightError):
+        await PythonPlaywrightRuntime()._observation(
+            observed_page([control("Post"), still_there], [True, True])
+        )
+
+
 async def test_observation_scans_at_most_4096_candidates() -> None:
     handles = [control(f"Hidden {index}", visible=False) for index in range(4100)]
     page = observed_page(handles, [False] * 4096)

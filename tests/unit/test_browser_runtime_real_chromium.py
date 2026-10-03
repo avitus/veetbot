@@ -239,6 +239,21 @@ async def _restless_page(request: Request) -> Response:
     )
 
 
+async def _fleeting_page(request: Request) -> Response:
+    """A page that removes one control as soon as the runtime reads it, the way
+    a live timeline replaces the nodes it renders."""
+    del request
+    return html(
+        '<button id="fleeting">Fleeting</button><button>Stay</button>',
+        script=(
+            "const read=Element.prototype.getAttribute;"
+            "Element.prototype.getAttribute=function(name){"
+            "if(this.id==='fleeting'){queueMicrotask(()=>this.remove());}"
+            "return read.call(this,name);};"
+        ),
+    )
+
+
 async def _linking_page(request: Request) -> Response:
     del request
     return html('<h1>Page one</h1><a href="/two">Next</a>')
@@ -258,6 +273,7 @@ LESSON_ROUTES = [
     Route("/contents", _contents_page),
     Route("/collapsed", _collapsed_page),
     Route("/restless", _restless_page),
+    Route("/fleeting", _fleeting_page),
     Route("/one", _linking_page),
     Route("/two", _second_document),
 ]
@@ -350,6 +366,13 @@ async def test_a_page_that_never_settles_is_observed_at_the_bound() -> None:
         elapsed = asyncio.get_running_loop().time() - started
 
     assert elapsed < 3
+    assert [element.name for element in observation.elements] == ["Stay"]
+
+
+async def test_a_control_removed_while_it_is_read_takes_no_slot_in_chromium() -> None:
+    async with browsing(LESSON_ROUTES) as (site, runtime):
+        observation = await runtime.navigate(site.url("/fleeting"))
+
     assert [element.name for element in observation.elements] == ["Stay"]
 
 

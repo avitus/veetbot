@@ -151,7 +151,9 @@ It then reads bounded metadata from each kept handle in one browser call,
 avoiding repeated selector resolution and excessive round trips while a login
 form is changing. At most eight elements are inspected concurrently; results
 preserve snapshot order and retain the existing visibility, state, and revision
-checks. When a plan offers `browser.navigate`, each request's runtime metadata
+checks. A control the page removes between its visibility check and its state
+read, as a re-rendering timeline does, takes no slot, like a hidden one; any
+other failed read still fails the observation. When a plan offers `browser.navigate`, each request's runtime metadata
 names the origins it accepts (never the profile id), so the model does not
 guess a bare domain.
 

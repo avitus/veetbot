@@ -707,14 +707,23 @@ class PythonPlaywrightRuntime:
         tag = str(metadata["tag"])
         input_type = metadata["inputType"]
         checked: bool | None = None
-        if tag == "input" and input_type in {"checkbox", "radio"}:
-            checked = await handle.is_checked()
+        try:
+            if tag == "input" and input_type in {"checkbox", "radio"}:
+                checked = await handle.is_checked()
+            disabled = await handle.is_disabled()
+        except PlaywrightError:
+            # A re-rendering page can remove the node after its visibility
+            # check; like a hidden one, it takes no slot. Any other failure
+            # still fails the observation.
+            if await handle.evaluate("node => node.isConnected"):
+                raise
+            return None
         role = metadata["role"] or _default_role(tag, input_type)
         element = BrowserElement(
             ref=ref,
             role=role,
             name=str(metadata["name"])[:1024],
-            disabled=await handle.is_disabled(),
+            disabled=disabled,
             checked=checked,
         )
         return element, _element_facts(metadata, name=element.name, page_url=page_url)
