@@ -11,6 +11,7 @@ public struct EmailModeView: View {
     var viewportHeight: CGFloat? = nil
     let discussInChat: () async -> Void
     @Environment(\.activeClientMode) private var activeMode
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingLearning = false
     @State private var showingSubscriptions = false
     @State private var navigationPath: [UUID] = []
@@ -162,17 +163,6 @@ public struct EmailModeView: View {
                             .buttonStyle(.bordered)
                     }.padding(.vertical, 12).emailHideSeparator()
                 }
-                if model.newImportantCount > 0 {
-                    Button {
-                        model.showNewItems()
-                    } label: {
-                        Label(
-                            "Show \(model.newImportantCount) new important \(model.newImportantCount == 1 ? "thread" : "threads")",
-                            systemImage: "arrow.up.circle.fill"
-                        )
-                        .appFont(.callout, weight: .semibold)
-                    }.emailHideSeparator()
-                }
                 if model.isLoading && model.items.isEmpty {
                     ProgressView("Finding your mail…").padding(.vertical, 32)
                         .frame(maxWidth: .infinity).emailHideSeparator()
@@ -187,6 +177,7 @@ public struct EmailModeView: View {
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.plain)
+                    .transition(.opacity)
                     .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                     .listRowBackground(
                         thread.id == model.selectedThreadID ? EmailSurface.accent.opacity(0.10) : Color.clear)
@@ -198,6 +189,7 @@ public struct EmailModeView: View {
                     .disabled(model.isLoading).padding(.vertical, 12)
                 }
             }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.items.map(\.id))
             .listStyle(.plain)
             .frame(minHeight: 0, maxHeight: .infinity)
             if !visibleAccounts.isEmpty {

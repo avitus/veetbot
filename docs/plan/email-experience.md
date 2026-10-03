@@ -67,8 +67,11 @@ The list is a selection, not a quota. There is no obligation to fill five slots.
 If more threads clear the threshold, a More important action expands the view
 to ten, then provides pagination over the remaining qualifying threads. Find
 mail and Review other mail make false negatives discoverable without cluttering
-the default list. New qualifying mail is announced in place rather than moving
-the selected row beneath the owner.
+the default list. On foreground refresh, new qualifying threads appear automatically
+after surviving visible rows, which retain their relative order. Preserve the open
+conversation and unsent edits; no reveal action or automatic scroll is required.
+Use a subtle insertion animation, disabled when Reduce Motion is enabled. This
+owner-approved behavior (2026-10-03) replaces the new-mail announcement button.
 
 Viewing a thread does not automatically mark it read in Gmail. On servers
 advertising archive support, the checkbox on each row and in thread detail

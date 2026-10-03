@@ -64,7 +64,6 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var styleExampleMessage: String?
     @Published public private(set) var feedbackID: UUID?
     @Published public private(set) var hasMore = false
-    @Published public private(set) var newImportantCount = 0
     @Published public private(set) var selectedAccountID: String?
     @Published public private(set) var listView = "priority"
     @Published public private(set) var searchText = ""
@@ -99,7 +98,6 @@ public final class EmailViewModel: ObservableObject {
     private var refreshFailure: String?
     /// Per-account freshness observed before the recorded failure, absent while never read.
     private var syncedBaseline: [String: Date?] = [:]
-    private var pendingNewItems: [EmailThreadView]?
     private var saveKeys: [UUID: (EmailDraftEdit, String)] = [:]
     private var sendKeys: [UUID: (Int, String)] = [:]
     private struct ArchiveRequest {
@@ -251,8 +249,6 @@ public final class EmailViewModel: ObservableObject {
         isLoadingThread = false
         isSaving = false
         isPerformingAction = false
-        pendingNewItems = nil
-        newImportantCount = 0
     }
 
     /// Clears thread selection and reloads the chosen account within the current foreground visit.
@@ -303,8 +299,6 @@ public final class EmailViewModel: ObservableObject {
             inboxItems = []
             nextCursor = nil
             hasMore = false
-            pendingNewItems = nil
-            newImportantCount = 0
         }
         errorMessage = refreshFailure
         defer { if listRequest == requestID { isLoading = false } }
@@ -326,19 +320,11 @@ public final class EmailViewModel: ObservableObject {
             if preserveOrder && !inboxItems.isEmpty {
                 let oldIDs = Set(inboxItems.map(\.id))
                 let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
-                if !additions.isEmpty {
-                    pendingNewItems = loadedThreads
-                    newImportantCount = additions.count
-                    let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-                    inboxItems = inboxItems.compactMap { current[$0.id] }
-                } else {
-                    let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-                    inboxItems = inboxItems.compactMap { current[$0.id] }
-                }
+                let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+                // Keep surviving rows in place and reveal arrivals without a second gesture.
+                inboxItems = inboxItems.compactMap { current[$0.id] } + additions
             } else {
                 inboxItems = loadedThreads
-                pendingNewItems = nil
-                newImportantCount = 0
             }
             for value in loadedThreads { observeArchive(value) }
         } catch {
@@ -367,13 +353,6 @@ public final class EmailViewModel: ObservableObject {
             cursor = try nextPageCursor(page.nextCursor, seen: &cursors)
         } while count > 100 && rows.count < count && cursor != nil
         return Page(items: rows, nextCursor: cursor)
-    }
-
-    /// Apply the queued inbox ordering only after the owner chooses to reveal new items.
-    public func showNewItems() {
-        if let pendingNewItems { inboxItems = pendingNewItems }
-        pendingNewItems = nil
-        newImportantCount = 0
     }
 
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
