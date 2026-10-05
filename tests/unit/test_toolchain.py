@@ -523,6 +523,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "GMAIL_READ_CREDENTIAL_FILE",
         "GMAIL_WRITE_CREDENTIAL_FILE",
         "GMAIL_SEND_CREDENTIAL_FILE",
+        "SVP_CREDENTIAL_FILE",
     } & {line.partition("=")[0] for line in schedule_environment.splitlines()}
     assert "agent worker --role notify" in notify
     assert "EnvironmentFile=/etc/veetbot/veetbot-notify.env" in notify
@@ -1572,6 +1573,7 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
         "src/agent_core",
         "src/gmail_mcp",
         "src/bland_mcp",
+        "src/svp_mcp",
     ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"

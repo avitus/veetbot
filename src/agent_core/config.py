@@ -156,6 +156,7 @@ class Settings:
     call_notifications_enabled: bool = False
     call_configuration: CallConfiguration | None = None
     call_webhook_secret: SecretStr | None = None
+    svp_enabled: bool = False
     email_enabled: bool = False
     email_mode_enabled: bool = False
     email_unsubscribe_enabled: bool = False
@@ -558,6 +559,7 @@ _PROVIDER_CREDENTIAL_VARIABLES = frozenset(
         "VEETBOT_OPENAI_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
         "BLAND_API_KEY_FILE",
+        "SVP_CREDENTIAL_FILE",
     }
 )
 
@@ -695,6 +697,23 @@ def _read_private_surface_secret_file(raw_path: str, name: str) -> str:
     if not 16 <= len(value) <= 4096 or any(character.isspace() for character in value):
         raise ConfigurationError(f"{name} must contain one non-whitespace ASCII secret")
     return value
+
+
+def _svp_credential_path(raw_path: str) -> str:
+    """Validate where the Scale VP grant lives without reading the grant (ADR-0152)."""
+
+    if not raw_path:
+        raise ConfigurationError("AGENT_SVP_ENABLED=1 requires SVP_CREDENTIAL_FILE")
+    path = Path(raw_path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError("SVP_CREDENTIAL_FILE must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+    except OSError as exc:
+        raise ConfigurationError("SVP_CREDENTIAL_FILE is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise ConfigurationError("SVP_CREDENTIAL_FILE must be a 0600 regular file")
+    return str(path)
 
 
 _GMAIL_CREDENTIAL_FILES = {
@@ -1731,6 +1750,16 @@ def _load_settings(
         or values.get("BLAND_WEBHOOK_SECRET_FILE")
     ):
         raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
+    svp_enabled = _parse_flag(values, "AGENT_SVP_ENABLED")
+    raw_svp_credential_file = values.get("SVP_CREDENTIAL_FILE", "").strip()
+    if svp_enabled and load_provider_credentials:
+        # The platform holds the grant's path; only the bridge reads or rewrites
+        # the rotating grant itself (ADR-0152).
+        if "svp_read" in credentials:
+            raise ConfigurationError("duplicate Scale VP credential source")
+        credentials["svp_read"] = SecretStr(_svp_credential_path(raw_svp_credential_file))
+    elif raw_svp_credential_file and not svp_enabled:
+        raise ConfigurationError("SVP_CREDENTIAL_FILE requires AGENT_SVP_ENABLED=1")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     email_mode_enabled = _parse_flag(values, "AGENT_EMAIL_MODE_ENABLED")
     email_unsubscribe_enabled = _parse_flag(values, "AGENT_EMAIL_UNSUBSCRIBE_ENABLED")
@@ -1942,6 +1971,7 @@ def _load_settings(
         call_notifications_enabled=call_notifications_enabled,
         call_configuration=call_configuration,
         call_webhook_secret=call_webhook_secret,
+        svp_enabled=svp_enabled,
         email_enabled=email_enabled,
         email_mode_enabled=email_mode_enabled,
         email_unsubscribe_enabled=email_unsubscribe_enabled,

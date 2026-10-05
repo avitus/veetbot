@@ -187,3 +187,25 @@ def calling_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MCP
         )
         for mode in ("read", "call")
     )
+
+
+def svp_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MCPServerConfig, ...]:
+    """Compose the one read-only Scale VP row; its credential is a file path (ADR-0152)."""
+    if not enabled:
+        return ()
+    return (
+        MCPServerConfig(
+            tenant_id=tenant_id,
+            server_id="svp_read",
+            transport=MCPTransport.STDIO,
+            endpoint=shlex.join([sys.executable, "-m", "svp_mcp", "--mode", "read"]),
+            operator_configured=True,
+            auth_scheme=MCPAuthScheme.ENV,
+            auth_name="SVP_MCP_CREDENTIAL_FILE",
+            credential_ref="svp_read",
+            side_effect=SideEffectClass.NETWORK_READ,
+            risk=RiskLevel.LOW,
+            idempotency=IdempotencyClass.READ_ONLY,
+            required_scopes=frozenset({"mcp.svp_read.use"}),
+        ),
+    )

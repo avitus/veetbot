@@ -13,6 +13,16 @@ title: Changelog
   that check. It runs again whenever the browser version, the image or those
   settings change, and is skipped otherwise (ADR-0152).
 
+## 2026-10-05 — Scale VP data access, built and off by default
+
+- Chat can read the Scale VP data service through its REST API once the
+  owner signs in. A one-time command signs in through the browser and saves
+  the grant to a private file; a small bridge then offers three read tools
+  that list, describe and call the service's published read operations.
+  Nothing is written to the service, and scheduled runs are not offered the
+  tools. It stays off until `AGENT_SVP_ENABLED=1` names that file, and it has
+  not yet been exercised against the real service (ADR-0152).
+
 ## 2026-10-05 — Website bindings for scheduled briefings
 
 - A schedule can explicitly retain its authenticated website profile through

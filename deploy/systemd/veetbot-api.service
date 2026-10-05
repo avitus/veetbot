@@ -22,6 +22,8 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/veetbot/artifacts
+# The Scale VP bridge rewrites its rotating grant here (ADR-0152); optional.
+ReadWritePaths=-/var/lib/veetbot/svp
 UMask=0077
 
 [Install]

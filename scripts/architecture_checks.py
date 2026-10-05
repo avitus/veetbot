@@ -451,7 +451,7 @@ def architecture_errors(root: Path) -> list[str]:
                             )
 
     # First-party provider servers are sibling processes, never core dependencies.
-    for isolated in ("gmail_mcp", "bland_mcp"):
+    for isolated in ("gmail_mcp", "bland_mcp", "svp_mcp"):
         for _module, (path, _tree, imports) in modules.items():
             for imported in imports:
                 if imported == isolated or imported.startswith(isolated + "."):

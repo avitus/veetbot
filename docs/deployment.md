@@ -1372,6 +1372,39 @@ the Nginx TLS hostname. A firewall is still recommended to contain any unrelated
 service that is accidentally bound to a public interface.
 
 
+## Optional Scale VP data access
+
+[ADR-0152](adr/0152-scale-vp-api-bridge.md) is off by default. To enable it:
+
+1. On a machine with a browser, from a checkout of the release, run the
+   sign-in once and complete the Scale VP page it opens:
+
+   ```bash
+   uv run python -m svp_mcp bootstrap --output-file "$HOME/.config/veetbot/svp/credential.json"
+   ```
+
+   It prints how many read operations the API published to the new grant. If
+   it fails, no file is written.
+2. Move that file to the host; do not copy it. The grant has one holder, and a
+   second copy in use ends it. Install it in a directory the service user owns:
+
+   ```bash
+   sudo install -d -o veetbot -g veetbot -m 0700 /var/lib/veetbot/svp
+   sudo install -o veetbot -g veetbot -m 0600 credential.json /var/lib/veetbot/svp/credential.json
+   ```
+
+3. Set `AGENT_SVP_ENABLED=1` and
+   `SVP_CREDENTIAL_FILE=/var/lib/veetbot/svp/credential.json` in
+   `/etc/veetbot/veetbot.env` only, then restart the API and the three
+   workers. Their units allow writes to that directory when it exists.
+
+New chats are then offered `mcp.svp_read.list_operations`,
+`describe_operation` and `call_operation`; scheduled runs are not. Before
+production enables the flag, add it to the two production-roster gates
+(ADR-0124). A call that returns `svp.credential_rejected` after the grant
+was working means the grant has ended: repeat steps 1 and 2 with a new file.
+
+
 ## Optional Bland calling services
 
 [Bland setup](bland-setup.md) defines the private configuration, distinct database

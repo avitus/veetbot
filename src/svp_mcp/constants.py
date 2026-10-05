@@ -1,0 +1,47 @@
+"""Fixed endpoints, limits and failure codes; nothing here is configurable."""
+
+from __future__ import annotations
+
+from typing import Final
+
+ORIGIN: Final = "https://scalevp-mcp.com"
+API_ROOT: Final = ORIGIN + "/api/v1/"
+DOCUMENT_URL: Final = API_ROOT + "openapi.json"
+AUTHORIZATION_ENDPOINT: Final = ORIGIN + "/authorize"
+TOKEN_ENDPOINT: Final = ORIGIN + "/token"
+REGISTRATION_ENDPOINT: Final = ORIGIN + "/register"
+RESOURCE: Final = ORIGIN + "/"
+SCOPES: Final = (
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+)
+CLIENT_NAME: Final = "Veetbot"
+LOOPBACK_REDIRECT_HOST: Final = "127.0.0.1"
+LOOPBACK_REDIRECT_PORT: Final = 8791
+LOOPBACK_REDIRECT_URI: Final = f"http://{LOOPBACK_REDIRECT_HOST}:{LOOPBACK_REDIRECT_PORT}/callback"
+CREDENTIAL_VARIABLE: Final = "SVP_MCP_CREDENTIAL_FILE"
+
+EXPIRY_SKEW_SECONDS: Final = 60
+DEFAULT_EXPIRY_SECONDS: Final = 300
+MAXIMUM_TOKEN_BYTES: Final = 65_536
+MAXIMUM_STATE_BYTES: Final = 65_536
+MAXIMUM_RESULT_BYTES: Final = 524_288
+MAXIMUM_DOCUMENT_BYTES: Final = 4_194_304
+MAXIMUM_DESCRIPTION_BYTES: Final = 65_536
+MAXIMUM_LISTED_OPERATIONS: Final = 500
+
+STABLE_FAILURE_CODES: Final = frozenset(
+    {
+        "svp.arguments_invalid",
+        "svp.credential_invalid",
+        "svp.credential_rejected",
+        "svp.operation_unknown",
+        "svp.provider_rejected",
+        "svp.provider_unavailable",
+        "svp.rate_limited",
+        "svp.response_invalid",
+        "svp.response_too_large",
+        "svp.specification_invalid",
+    }
+)

@@ -77,6 +77,19 @@ def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None
     assert len(boundary_errors) == 2
 
 
+def test_svp_package_isolation_is_enforced(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='fixture'\n")
+    for relative, content in {
+        "src/agent_core/adapters/bad.py": "import svp_mcp.client\n",
+        "src/svp_mcp/bad.py": "import agent_core.bootstrap\n",
+    }.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    errors = architecture_errors(tmp_path)
+    assert len([error for error in errors if "isolated package" in error]) == 2
+
+
 def test_bland_package_isolation_is_enforced(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname='fixture'\n")
     for relative, content in {

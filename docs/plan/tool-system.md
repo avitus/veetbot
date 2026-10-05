@@ -2209,3 +2209,93 @@ target is valid only for the builtin named `email.unsubscribe` with
 `EXTERNAL_WRITE`, `MEDIUM`, `IDEMPOTENT` and no parallelism, and that name is
 valid only with that target, so no other tool can claim the public-HTTPS
 unsubscribe transport ([ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md)).
+
+
+## The Scale VP data API bridge (ADR-0152)
+
+[ADR-0152](../adr/0152-scale-vp-api-bridge.md) adds one more first-party stdio
+server, `svp_read`, as a default-off, non-milestone extension. It reads the
+Scale VP data service's REST API under `https://scalevp-mcp.com/api/v1/`. The
+service accepts only an authorization-code grant, which the adapter does not
+perform: the deferral of user-delegated flows under *Authentication, and what
+the reference resolves to* stands, and the package carries the grant itself,
+as the Gmail servers do ([email-integration.md](email-integration.md)).
+Nothing in the adapter, the runtime or the policy profile changes.
+
+**The row.** `AGENT_SVP_ENABLED=1` composes one operator-configured stdio row
+whose command is `python -m svp_mcp --mode read`, classified `NETWORK_READ`,
+`LOW`, `READ_ONLY`, requiring `mcp.svp_read.use`, which composition adds to
+the owner's principal. A supplied row with that id is refused. The schedule
+role composes no such scope, so a scheduled run is not offered the tools.
+
+**The credential is a path.** The row uses the `env` scheme with `auth_name`
+`SVP_MCP_CREDENTIAL_FILE`, and the credential resolver maps `svp_read` to the
+value of `SVP_CREDENTIAL_FILE`: the absolute path of an owner-only (`0600`)
+regular file that is not a symbolic link, checked at startup without being
+read. The platform never holds the grant. The reason is rotation: the service
+may replace the refresh token on every use, and a replaced token has to be
+written by the process that received it. A role that refuses provider
+credentials refuses `SVP_CREDENTIAL_FILE`.
+
+**The state file.** One JSON object with exactly `version` (1), `client_id`,
+`client_secret`, `refresh_token`, `access_token` and `expires_at`. The package
+refuses a file that is linked, readable by group or other, larger than 64 KiB,
+or shaped differently, with `svp.credential_invalid`. Its directory must be
+writable by the service user, because the package creates a lock file and a
+replacement file beside it.
+
+**Refresh at use, under a lock.** A token is used while it has more than
+sixty seconds left. Otherwise the package takes an exclusive advisory lock on
+`<file>.lock`, reads the file again, and uses its token if another process
+has already refreshed. If not, it reserves the replacement file, exchanges
+the refresh token at the fixed token endpoint, writes and syncs the new state,
+renames it over the old one, and only then uses the new token. A refresh that
+cannot be saved is never attempted, and a failed refresh leaves the file
+unchanged. There is no timer. An API response of 401 asks for a token other
+than the rejected one, which adopts another process's rotation or forces one
+refresh, and the request is retried once.
+
+**The tools.** Three fixed declarations ship with the release:
+
+| Tool | Reads |
+| --- | --- |
+| `list_operations` | the id, path and summary of each published `GET` operation |
+| `describe_operation` | one operation's path and query parameters and its response schema |
+| `call_operation` | one operation, given its declared path and query arguments |
+
+The package fetches the service's OpenAPI document from
+`/api/v1/openapi.json` once per server process. Only `GET` operations are
+indexed. An operation id is the document's `operationId` when it is unique
+and plain, and otherwise derived from the path. Header and cookie parameters
+are dropped. A call must supply every path placeholder and every required
+query parameter, and may name no other query parameter.
+
+**Confinement.** The origin, the API root, the document URL and the three
+OAuth endpoints are constants. A document path is read as relative to the API
+root unless it already begins with `/api/v1/`, and one that carries a dot
+segment, a query, a fragment, whitespace or a second leading slash is not
+indexed. Every request URL is rebuilt from the
+document path with each path value percent-encoded as one segment, and is
+refused unless it is HTTPS to the fixed host on the default port, under
+`/api/v1/`, with no user information, dot segment, query or fragment of its
+own. Redirects are not followed and ambient proxy settings are not read.
+
+**Bounds and failures.** A result is at most 512 KiB, the document 4 MiB, a
+description 64 KiB with its response schema dropped first, and a listing five
+hundred operations. Failures cross the pipe as an error result holding one
+fixed code and `effect_status: not_applied`: `svp.arguments_invalid`,
+`svp.operation_unknown`, `svp.credential_invalid`, `svp.credential_rejected`,
+`svp.rate_limited`, `svp.provider_rejected`, `svp.provider_unavailable`,
+`svp.response_invalid`, `svp.response_too_large` and
+`svp.specification_invalid`. Upstream bodies, tokens and the client secret are
+never included, and request lines are kept out of the child's standard error.
+
+**The ceremony.** `python -m svp_mcp bootstrap --output-file <new absolute
+path>` prints a data-use notice and continues only on the exact input
+`CONTINUE`. It registers a confidential client for the loopback redirect
+`http://127.0.0.1:8791/callback`, opens the authorization page with a PKCE
+S256 challenge, a random state and the service's resource indicator, and
+exchanges the code. It then fetches the OpenAPI document with the new token,
+and writes the state file, owner-only and never over an existing path, only
+if the service issued a refresh token and the API accepted the token. It
+prints the path and the number of read operations, and nothing secret.
