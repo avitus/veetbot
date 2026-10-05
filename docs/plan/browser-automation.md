@@ -94,6 +94,28 @@ taken once the page has settled (see "Bounds and stable failures"), so its
 revision and references are current and the model can act on them without
 calling `observe` first.
 
+`browser.observe@1.1.0` can recover controls and text omitted from another
+browser tool's head/tail excerpt (ADR-0151). Its optional `element_offset`
+(0–256) and `text_offset` (0–262,144 Unicode characters) default to zero. It
+returns a fresh observation in complete JSON that fits the configured serialized
+inline output budget, including escaping, instead of an unreadable partial
+object. Each page carries its current revision, complete element references
+and states, `total_elements`, `total_text_characters`, the applied offsets,
+and nullable `next_element_offset` and `next_text_offset`. Set the element
+offset to `total_elements` to read text alone. Offsets beyond a shorter live
+page return an empty terminal slice. Each read refreshes the page; controls
+may move between reads, and only the newest revision and references may be
+used for an action.
+
+The displayed title is limited to 128 UTF-8 bytes and each element name to
+256, with an ellipsis and explicit `title_truncated` or `name_truncated` flag.
+Provider observations and full approval facts stay unchanged. Metadata or a
+single complete reference that cannot fit produces `tool.browser.output_invalid`.
+Pagination is read-only, stays under the same profile and origin authority,
+and changes neither the generic output admission cap nor artifact access.
+Version 1.0.0 remains registered for pinned chats; a new profile-bound chat
+selects the new schema. Navigate, act and upload keep their existing versions.
+
 ## Tool contract
 
 The stable builtin namespace is `browser`:
@@ -1200,6 +1222,7 @@ The stable reason-code family includes:
 
 - `tool.browser.url_disallowed`
 - `tool.browser.provider_unavailable`
+- `tool.browser.navigation_cancelled`
 - `tool.browser.profile_unavailable`
 - `tool.browser.authentication_required`
 - `tool.browser.needs_user`
@@ -1209,6 +1232,18 @@ The stable reason-code family includes:
 - `tool.browser.grant_not_applicable`
 - `tool.browser.output_invalid`
 - `tool.browser.outcome_unknown`
+
+When the runtime dismisses a beforeunload dialog and Chromium aborts navigation
+while the same allowed page remains open, navigation returns
+`tool.browser.navigation_cancelled`, without retry, and retains the page and
+lease. The model can observe the existing draft and continue under ordinary
+action approval. This does not accept the dialog, classify other transport
+failures as cancellations, or change uncertain-write handling (ADR-0151).
+The ephemeral Playwright provider serializes navigation, observation, actions,
+uploads, and closure on one operation lock, including startup and result
+validation. A concurrent dispatch cannot consume another navigation's dialog
+state or mutate its page before the navigation finishes. The hosted provider
+retains its existing lease-operation serialization.
 
 ## Delivery plan
 

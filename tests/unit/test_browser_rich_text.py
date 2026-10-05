@@ -27,6 +27,40 @@ document.addEventListener('input', () => window.inputs.push(
 </script>"""
 
 
+@pytest.mark.parametrize("headed", [False, True])
+async def test_cancelled_navigation_keeps_the_unsaved_composer(headed: bool) -> None:
+    """Preserve the draft after dismissed beforeunload navigation in both browser modes."""
+    page = (
+        COMPOSER.format(
+            editor='<div contenteditable="true" role="textbox" aria-label="Post text"></div>'
+        )
+        + """<script>
+    window.addEventListener('beforeunload', event => {
+        event.preventDefault(); event.returnValue = '';
+    });
+    </script>"""
+    )
+    async with lesson_pages({"/compose/post": page}, headed=headed) as (runtime, visit, left):
+        before = await visit("/compose/post")
+        after = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.TYPE,
+                expected_revision=before.revision,
+                ref=_ref(before, "Post text"),
+                value="An unsaved draft",
+            )
+        )
+        with pytest.raises(BrowserProviderError) as cancelled:
+            await visit("/intent/post")
+        assert cancelled.value.reason_code == "tool.browser.navigation_cancelled"
+        assert not cancelled.value.retryable
+        current = await runtime.observe()
+        assert current.url == after.url
+        assert "An unsaved draft" in current.text
+        assert any(element.name == "Post" for element in current.elements)
+        assert left == []
+
+
 @pytest.mark.parametrize(
     "editor",
     [

@@ -404,6 +404,30 @@ class SettledPageSessions(FakeSessions):
         )
 
 
+async def test_cancelled_navigation_does_not_retire_the_hosted_lease() -> None:
+    """Reuse the same hosted lease and action sequence after cancelled navigation."""
+
+    class CancelledNavigationSessions(FakeSessions):
+        """Simulate navigation cancelled by an unsaved-draft dialog."""
+
+        async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
+            """Return the non-retryable cancellation without invalidating the session."""
+            raise BrowserProviderError("tool.browser.navigation_cancelled", retryable=False)
+
+    sessions = CancelledNavigationSessions()
+    provider = ready_provider(sessions)
+    await provider.bind_execution(call_at(NOW))
+    with pytest.raises(BrowserProviderError) as cancelled:
+        await provider.navigate("https://example.org/intent/post")
+    assert cancelled.value.reason_code == "tool.browser.navigation_cancelled"
+    await provider.bind_execution(call_at(NOW + timedelta(seconds=10)))
+    assert (await provider.observe()).revision == "revision-1"
+    await provider.act(CLICK)
+    assert sessions.acquisitions == [(PROFILE_ID, RUN_ID, 1)]
+    assert sessions.closes == []
+    assert sessions.sequence == [1]
+
+
 async def test_an_act_can_follow_an_act_on_its_returned_revision() -> None:
     """ADR-0130 decision 6 in hosted mode: act on the page act returned, no observe."""
 

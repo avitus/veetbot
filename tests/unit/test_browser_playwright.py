@@ -727,6 +727,7 @@ class FakeRedirectingPage:
     def __init__(self, hops: list[str]) -> None:
         """Initialize the fake navigation event state for this regression."""
         self.hops = hops
+        self.url = "about:blank"
         self.handlers: dict[str, list[Callable[[Any], None]]] = {}
 
     def on(self, event: str, handler: Callable[[Any], None]) -> None:
@@ -1393,6 +1394,44 @@ def settling_runtime(page: FakeSettlingPage) -> PythonPlaywrightRuntime:
     runtime._allowed_origins = ("https://site.example",)
     runtime._attach_page(page)  # type: ignore[arg-type]
     return runtime
+
+
+@pytest.mark.parametrize(
+    ("dialog_type", "error", "changed_url", "closed", "disallowed"),
+    [
+        ("confirm", "net::ERR_ABORTED", False, False, False),
+        ("beforeunload", "net::ERR_CONNECTION_RESET", False, False, False),
+        ("beforeunload", "net::ERR_ABORTED", True, False, False),
+        ("beforeunload", "net::ERR_ABORTED", False, True, False),
+        ("beforeunload", "net::ERR_ABORTED", False, False, True),
+    ],
+)
+async def test_other_navigation_failures_are_not_mistaken_for_a_cancelled_dialog(
+    dialog_type: str, error: str, changed_url: bool, closed: bool, disallowed: bool
+) -> None:
+    """Keep transport, origin, and unrelated dialog failures out of cancellation recovery."""
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://example.org",)
+    page = Mock(spec=Page)
+    page.url = "https://example.org/compose"
+    page.is_closed.return_value = closed
+    runtime._page = page
+
+    async def failing_goto(*args: object, **kwargs: object) -> None:
+        """Inject the selected dialog and page state before failing navigation."""
+        dialog = Mock(type=dialog_type, dismiss=AsyncMock())
+        await runtime._dismiss_dialog(dialog)
+        if changed_url:
+            page.url = "https://example.org/elsewhere"
+        runtime._disallowed_navigation = disallowed
+        raise PlaywrightError(error)
+
+    page.goto.side_effect = failing_goto
+    with pytest.raises(BrowserProviderError) as failed:
+        await runtime.navigate("https://example.org/intent/post")
+    assert failed.value.reason_code == (
+        "tool.browser.url_disallowed" if disallowed else "tool.browser.provider_unavailable"
+    )
 
 
 @pytest.fixture

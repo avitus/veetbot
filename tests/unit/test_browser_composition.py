@@ -72,7 +72,7 @@ from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.browser import browser_lease_upkeep
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
-from agent_core.tools.browser_observe import BrowserObserveTool
+from agent_core.tools.browser_observe import BrowserObserveTool, LegacyBrowserObserveTool
 from agent_core.tools.registry import RegisteredTool
 from tests.contract.support import principal as contract_principal
 from tests.contract.test_hosted_profile_session_service_contract import FakeSessionRuntime
@@ -160,6 +160,7 @@ async def test_browser_capabilities_are_absent_without_bound_provider() -> None:
 
 
 async def test_configured_playwright_provider_registers_browser_tools() -> None:
+    """Keep pinned observation tools available while wiring paging to the model budget."""
     settings = load_settings(
         {
             **base_environment(),
@@ -176,6 +177,14 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         act = cast(RegisteredTool, registry.get("browser.act"))
         assert isinstance(navigate.implementation, BrowserNavigateTool)
         assert isinstance(observe.implementation, BrowserObserveTool)
+        assert observe.spec.version == "1.1.0"
+        legacy = cast(RegisteredTool, registry.get("browser.observe", version="1.0.0"))
+        assert isinstance(legacy.implementation, LegacyBrowserObserveTool)
+        assert legacy.spec.input_schema["properties"] == {}
+        assert (
+            observe.implementation._inline_output_bytes
+            == composition.tool_pipeline._inline_output_bytes
+        )
         assert isinstance(act.implementation, BrowserActTool)
         assert isinstance(navigate.implementation._provider, PlaywrightBrowserProvider)
 

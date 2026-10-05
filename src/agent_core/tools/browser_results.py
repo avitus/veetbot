@@ -52,6 +52,7 @@ _FAILURE_KINDS = {
     "tool.browser.outcome_unknown": ToolFailureKind.OUTCOME_UNKNOWN,
     "tool.browser.element_not_found": ToolFailureKind.NOT_FOUND,
     "tool.browser.page_changed": ToolFailureKind.INVALID_ARGUMENTS,
+    "tool.browser.navigation_cancelled": ToolFailureKind.INVALID_ARGUMENTS,
     "tool.browser.action_not_allowed": ToolFailureKind.INVALID_ARGUMENTS,
     # ADR-0129: the runtime refused before dispatch; nothing happened, and the
     # model observes again, so the outcome is failed, never uncertain.

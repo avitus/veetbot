@@ -31,7 +31,7 @@ from agent_core.domain.tools import ToolFailureKind
 from agent_core.ports.browser import BrowserProvider
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
-from agent_core.tools.browser_observe import BrowserObserveTool
+from agent_core.tools.browser_observe import BrowserObserveTool, LegacyBrowserObserveTool
 from agent_core.tools.browser_results import bounded_observation_payload
 from tests.contract.support import tool_context
 
@@ -478,7 +478,7 @@ def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
         "Use a full https:// URL on an origin listed as browser_origins in the runtime "
         "metadata."
     )
-    assert BrowserObserveTool(provider).spec.description == (
+    assert LegacyBrowserObserveTool(provider).spec.description == (
         "Read the current page of this chat's website profile again. navigate and act "
         "already return the settled page, so observe only to refresh a page that changes "
         "on its own."
@@ -492,7 +492,7 @@ def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
         tool.spec.version
         for tool in (
             BrowserNavigateTool(provider),
-            BrowserObserveTool(provider),
+            LegacyBrowserObserveTool(provider),
             BrowserActTool(provider),
         )
     } == {"1.0.0"}
