@@ -6,6 +6,58 @@ import UserNotifications
 @testable import VeetbotCore
 
 @Suite(.serialized) @MainActor struct ChatViewModelTests {
+    @Test(arguments: [true, false], [true, false])
+    func testStartupFinishesWithSavedConnectionOrSetup(
+        savedConfiguration: Bool, savedToken: Bool
+    ) async throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configurationStore = ConnectionConfigurationStore(defaults: defaults)
+        if savedConfiguration {
+            await configurationStore.save(try ConnectionConfiguration(baseURLString: "https://veetbot.test"))
+        }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: savedToken ? "saved-token" : nil),
+            configurationStore: configurationStore,
+            historyStore: VolatileSessionHistoryStore(),
+            urlSession: urlSession { request in
+                #expect(savedConfiguration && savedToken)
+                #expect(request.url?.path == "/v1/sessions")
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            }
+        )
+        #expect(model.isBootstrapping)
+        #expect(!model.isConfigured)
+        #expect(AppCoordinator(chat: model).mode == .chat)
+        for await restoring in model.$isBootstrapping.values {
+            if !restoring { break }
+        }
+        #expect(model.isConfigured == (savedConfiguration && savedToken))
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testFailedStartupLeavesSetupAvailable() async throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configurationStore = ConnectionConfigurationStore(defaults: defaults)
+        await configurationStore.save(try ConnectionConfiguration(baseURLString: "https://veetbot.test"))
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: "saved-token"),
+            configurationStore: configurationStore,
+            historyStore: VolatileSessionHistoryStore(),
+            urlSession: urlSession { _ in throw URLError(.notConnectedToInternet) }
+        )
+        #expect(model.isBootstrapping)
+        for await restoring in model.$isBootstrapping.values {
+            if !restoring { break }
+        }
+        #expect(!model.isConfigured)
+        #expect(model.errorMessage != nil)
+    }
+
     @Test
     func testDeletingCallClearsDerivedChatPresentation() async throws {
         let callID = UUID()

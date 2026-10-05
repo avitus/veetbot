@@ -123,6 +123,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var history: [SessionHistoryEntry] = []
     @Published public private(set) var selectedSessionID: UUID?
     @Published public private(set) var baseURL: URL?
+    /// Keep Chat visible until saved credentials and connection restoration settle.
+    @Published public private(set) var isBootstrapping = true
     @Published public private(set) var isConfigured = false
     @Published public private(set) var requiresReauthentication = false
     @Published public private(set) var isSending = false
@@ -2449,6 +2451,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func bootstrap() async {
+        defer { isBootstrapping = false }
         do {
             history = try await historyStore.list()
         } catch {

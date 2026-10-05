@@ -1,9 +1,36 @@
 import Foundation
 import Testing
+#if os(macOS)
+import SwiftUI
+#endif
 
 @testable import VeetbotCore
 
 @Suite struct SessionSidebarNavigationTests {
+    #if os(macOS)
+    @Test @MainActor
+    func testLaunchShowsChatWhileTheSavedConnectionIsRestoring() throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore()
+        )
+        let host = NSHostingView(rootView: RootView(model: model)
+            .environmentObject(AppearancePreferences(defaults: defaults))
+            .environmentObject(FolderSidebarPreferences(defaults: defaults)))
+        host.frame = NSRect(x: 0, y: 0, width: 1000, height: 700)
+        host.layoutSubtreeIfNeeded()
+        func containsComposer(_ view: NSView) -> Bool {
+            view is ComposerNSTextView || view.subviews.contains(where: containsComposer)
+        }
+        // Check the first rendered frame before yielding to asynchronous restoration.
+        #expect(containsComposer(host), "Launch should render Chat, not the connection form")
+    }
+    #endif
+
     @Test
     func testCompactNavigationTracksNewAndExistingConversationDestinations() throws {
         let sessionID = try #require(

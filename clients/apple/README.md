@@ -11,6 +11,11 @@ no third-party dependencies. On first launch, enter an HTTPS API base URL and a
 static bearer token. The base URL is stored as a preference; the token is stored
 only in Keychain.
 
+On subsequent launches, Chat appears immediately while saved credentials and
+conversation history load. Settings appears only after startup determines that
+the connection is missing or cannot be restored. Chat actions remain disabled
+until the connection is ready; Settings is also available from the sidebar.
+
 After a connection is configured, the application delegate requests notification
 permission and registers with APNs. A client-minted installation identifier is
 stored once in the local, nonsynchronizing Data Protection Keychain beside the

@@ -87,7 +87,7 @@ public struct RootView: View {
 
     public var body: some View {
         Group {
-            if model.isConfigured {
+            if model.isBootstrapping || model.isConfigured {
                 configuredContent
             } else {
                 ConnectionSettingsView(model: model, embedded: true)
