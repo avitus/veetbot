@@ -21,6 +21,7 @@ from svp_mcp.bootstrap import BootstrapError, bootstrap_credential
 from svp_mcp.client import SvpClient
 from svp_mcp.constants import (
     CREDENTIAL_VARIABLE,
+    DOCUMENT_URL,
     LOOPBACK_REDIRECT_HOST,
     LOOPBACK_REDIRECT_PORT,
     LOOPBACK_REDIRECT_URI,
@@ -101,18 +102,15 @@ def _authorize_via_loopback(authorization_url: str) -> str:
     return code
 
 
-def _authorize_with_disclosure(
-    authorization_url: str,
+def _confirm_disclosure(
     *,
     read_input: Callable[[str], str] | None = None,
     output: TextIO | None = None,
-    authorize: Callable[[str], str] | None = None,
-) -> str:
-    """Present the data-use notice before the sign-in page opens."""
+) -> None:
+    """Present the data-use notice; anything but the exact word cancels the ceremony."""
 
     reader = input if read_input is None else read_input
     stream = sys.stdout if output is None else output
-    open_authorization = _authorize_via_loopback if authorize is None else authorize
     print(
         "\n".join(
             (
@@ -133,9 +131,11 @@ def _authorize_with_disclosure(
         file=stream,
         flush=True,
     )
-    if reader("Type CONTINUE to open the Scale VP sign-in page: ") != "CONTINUE":
-        raise BootstrapError("sign-in cancelled before the browser opened")
-    return open_authorization(authorization_url)
+    if reader("Type CONTINUE in capitals to open the Scale VP sign-in page: ") != "CONTINUE":
+        raise BootstrapError(
+            "sign-in cancelled before anything was sent; the confirmation is the exact "
+            "word CONTINUE"
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -157,16 +157,23 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit("bootstrap requires a new absolute private-file path")
         try:
             with _http_client() as http:
-                operations = bootstrap_credential(
+                outcome = bootstrap_credential(
                     output_file=output_file,
-                    authorize=_authorize_with_disclosure,
+                    confirm=_confirm_disclosure,
+                    authorize=_authorize_via_loopback,
                     http_client=http,
                 )
         except BootstrapError as exc:
             raise SystemExit(f"sign-in did not complete: {exc}") from None
         print(f"Saved the private grant to {output_file}")
-        print(f"The API answered with {operations} read operations.")
         print("This file has one holder: move it to the deployment rather than copying it.")
+        if outcome.operations is None:
+            raise SystemExit(
+                "The API accepted the sign-in, but no usable API document was found at "
+                f"{DOCUMENT_URL} (HTTP {outcome.document_status}). The grant is saved; the "
+                "bridge cannot list operations until that location is corrected."
+            )
+        print(f"The API answered with {outcome.operations} read operations.")
         return
     if arguments.mode is None:
         parser.error("choose --mode or bootstrap")

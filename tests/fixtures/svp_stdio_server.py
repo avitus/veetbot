@@ -17,7 +17,7 @@ from svp_mcp.credential import CredentialStore
 
 DOCUMENT = {
     "paths": {
-        "/companies": {
+        "/v1/companies": {
             "get": {
                 "operationId": "list_companies",
                 "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer"}}],

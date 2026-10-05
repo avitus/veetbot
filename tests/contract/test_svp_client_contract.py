@@ -119,6 +119,8 @@ async def test_an_unreachable_service_is_reported_as_unavailable() -> None:
         "http://scalevp-mcp.com/api/v1/companies",
         "https://scalevp-mcp.com.evil.example/api/v1/companies",
         "https://scalevp-mcp.com/token",
+        "https://scalevp-mcp.com/api/openapi.json",
+        "https://scalevp-mcp.com/api/v2/companies",
         "https://scalevp-mcp.com/api/v1/../token",
         "https://user@scalevp-mcp.com/api/v1/companies",
         "https://scalevp-mcp.com:8443/api/v1/companies",
@@ -166,3 +168,8 @@ async def test_the_published_document_is_fetched_once() -> None:
 async def test_a_document_that_is_not_an_object_is_refused() -> None:
     with pytest.raises(SvpError, match=r"^svp\.specification_invalid$"):
         await _client(lambda _request: httpx.Response(200, json=[1])).document()
+
+
+def test_the_document_is_one_fixed_location_beside_the_callable_root() -> None:
+    assert DOCUMENT_URL == "https://scalevp-mcp.com/api/openapi.json"
+    assert API_ROOT == "https://scalevp-mcp.com/api/v1/"

@@ -6,6 +6,7 @@ import json
 import secrets
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -21,8 +22,16 @@ class BootstrapError(RuntimeError):
     """A content-free sign-in ceremony failure."""
 
 
-def _read_operations(http: httpx.Client, access_token: str) -> int:
-    """Count the read operations the API publishes to this grant."""
+@dataclass(frozen=True)
+class Outcome:
+    """What the API answered when the new grant asked for its document."""
+
+    operations: int | None
+    document_status: int
+
+
+def _probe(http: httpx.Client, access_token: str) -> Outcome:
+    """Prove the API accepts the grant, and count the read operations it publishes."""
 
     try:
         with http.stream(
@@ -31,34 +40,41 @@ def _read_operations(http: httpx.Client, access_token: str) -> int:
             headers={"authorization": f"Bearer {access_token}", "accept": "application/json"},
             follow_redirects=False,
         ) as response:
-            if response.status_code in {401, 403}:
+            status = response.status_code
+            if status in {401, 403}:
                 raise BootstrapError("the API did not accept the sign-in")
-            if response.status_code != 200:
-                raise BootstrapError("the API document was unavailable")
+            if status >= 500:
+                raise BootstrapError("the API was unavailable")
+            if status != 200:
+                # The grant works; only the document is not where it was expected.
+                return Outcome(None, status)
             raw = bytearray()
             for chunk in response.iter_bytes():
                 if len(raw) + len(chunk) > MAXIMUM_DOCUMENT_BYTES:
-                    raise BootstrapError("the API document was too large")
+                    return Outcome(None, status)
                 raw.extend(chunk)
     except httpx.HTTPError:
-        raise BootstrapError("the API document was unavailable") from None
+        raise BootstrapError("the API was unavailable") from None
     try:
-        return len(load_operations(json.loads(raw)))
+        return Outcome(len(load_operations(json.loads(raw))), status)
     except (ValueError, UnicodeError, SvpError):
-        raise BootstrapError("the API document was invalid") from None
+        return Outcome(None, status)
 
 
 def bootstrap_credential(
     *,
     output_file: Path,
+    confirm: Callable[[], None],
     authorize: Callable[[str], str],
     http_client: httpx.Client | None = None,
     clock: Callable[[], float] = time.time,
-) -> int:
-    """Sign in once and publish the owner-only grant; return the API's read-operation count."""
+) -> Outcome:
+    """Sign in once and publish the owner-only grant once the API has accepted it."""
 
     if not output_file.is_absolute() or output_file.is_symlink() or output_file.exists():
         raise BootstrapError("credential output must be a new absolute path")
+    # Registration already writes to the service, so consent comes first.
+    confirm()
     client = http_client or httpx.Client(
         timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=False, trust_env=False
     )
@@ -80,7 +96,7 @@ def bootstrap_credential(
             raise BootstrapError("the service issued no refresh token")
         expires_at = clock() + grant.expires_in
         # The grant is written only once the REST API has accepted it.
-        operations = _read_operations(client, grant.access_token)
+        outcome = _probe(client, grant.access_token)
     finally:
         if http_client is None:
             client.close()
@@ -98,4 +114,4 @@ def bootstrap_credential(
         )
     except SvpError:
         raise BootstrapError("could not create the private credential file") from None
-    return operations
+    return outcome

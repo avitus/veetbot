@@ -2264,17 +2264,19 @@ refresh, and the request is retried once.
 | `call_operation` | one operation, given its declared path and query arguments |
 
 The package fetches the service's OpenAPI document from
-`/api/v1/openapi.json` once per server process. Only `GET` operations are
+`/api/openapi.json` once per server process. Only `GET` operations are
 indexed. An operation id is the document's `operationId` when it is unique
 and plain, and otherwise derived from the path. Header and cookie parameters
 are dropped. A call must supply every path placeholder and every required
 query parameter, and may name no other query parameter.
 
-**Confinement.** The origin, the API root, the document URL and the three
-OAuth endpoints are constants. A document path is read as relative to the API
-root unless it already begins with `/api/v1/`, and one that carries a dot
-segment, a query, a fragment, whitespace or a second leading slash is not
-indexed. Every request URL is rebuilt from the
+**Confinement.** The origin, the `/api` mount the document's paths are
+relative to, the `/api/v1/` root, the document URL and the three OAuth
+endpoints are constants. A document path is joined to the mount, and one that
+does not then fall under the root, or that carries a dot segment, a query, a
+fragment, whitespace or a second leading slash, is not indexed. The document
+URL itself is fetched only by the package and is not a callable target.
+Every request URL is rebuilt from the
 document path with each path value percent-encoded as one segment, and is
 refused unless it is HTTPS to the fixed host on the default port, under
 `/api/v1/`, with no user information, dot segment, query or fragment of its
@@ -2292,10 +2294,13 @@ never included, and request lines are kept out of the child's standard error.
 
 **The ceremony.** `python -m svp_mcp bootstrap --output-file <new absolute
 path>` prints a data-use notice and continues only on the exact input
-`CONTINUE`. It registers a confidential client for the loopback redirect
+`CONTINUE`; until then nothing is sent to the service. It then registers a
+confidential client for the loopback redirect
 `http://127.0.0.1:8791/callback`, opens the authorization page with a PKCE
 S256 challenge, a random state and the service's resource indicator, and
 exchanges the code. It then fetches the OpenAPI document with the new token,
 and writes the state file, owner-only and never over an existing path, only
-if the service issued a refresh token and the API accepted the token. It
-prints the path and the number of read operations, and nothing secret.
+if the service issued a refresh token and the API neither refused the token
+nor failed. It prints the path and the number of read operations, and nothing
+secret. A document that is missing or unusable is reported with its HTTP
+status after the grant is saved.

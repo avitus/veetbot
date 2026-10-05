@@ -9,7 +9,8 @@
 
 The owner wants Chat to read the Scale VP data service at
 `https://scalevp-mcp.com`. The service offers a hosted MCP endpoint and a REST
-API under `/api/v1/` that publishes an OpenAPI document. Both accept only a
+API under `/api/v1/` whose OpenAPI document is published at
+`/api/openapi.json`. Both accept only a
 bearer token from the service's own OAuth authorization server, which offers
 the authorization-code grant with PKCE and dynamic client registration and
 nothing else: no client-credentials grant and no static key (its published
@@ -57,10 +58,12 @@ upstream error text never crosses the pipe: failures are fixed `svp.*` codes.
 **Sign-in is a one-time operator ceremony.** `python -m svp_mcp bootstrap`
 registers a client, runs the authorization-code grant with PKCE (S256)
 through an installed-app loopback redirect on the operator's machine after an
-explicit data-use confirmation, proves the grant against the API by fetching
-the document, and writes one owner-only file. The platform's deferral of
-user-delegated flows stands; no route, callback or token store is added to
-the API.
+explicit data-use confirmation that precedes any request, proves the grant
+against the API by fetching the document, and writes one owner-only file once
+the API has accepted the token. A document that is missing or unusable is
+reported after the grant is saved, so a wrong location never costs a second
+sign-in. The platform's deferral of user-delegated flows stands; no route,
+callback or token store is added to the API.
 
 **The package owns its grant as a file, and that is the difference from
 Gmail.** Google's refresh tokens do not rotate, so ADR-0071 passes a read-only
@@ -115,15 +118,23 @@ and the durable write, or a copy of the file left in use on a second machine,
 breaks the chain, and the fix is to run the ceremony again. The file is moved
 to the deployment, not copied.
 
-Generic tools cost the model a lookup that typed tools would not, and an
-endpoint that reads through `POST` is unreachable. Both are revisited once the
-document can be read.
+Generic tools cost the model a lookup that typed tools would not. The
+document read on 2026-10-05 publishes eighty-six paths: seventy `GET`
+operations, which the bridge offers, and twenty-eight others. Some of those
+others are reads that take a request body, among them semantic company
+search, contact and deal search, company lookup and investor portfolios. They
+stay unreachable. Admitting them means a fixed allowlist of `POST`
+operations and request bodies under a read-only classification, which is the
+owner's decision and a separate change.
 
-Three facts are unverified until the first sign-in, because the service
-answers nothing without a token: that the document is served at
-`/api/v1/openapi.json`, that the authorization server's tokens are the ones
-the REST API accepts, and whether refresh tokens rotate. The ceremony tests
-the first two before it writes anything; the design is correct either way on
-the third. Offline tests cover the grant, rotation, confinement and tool
-behaviour against a scripted transport. A real-service smoke by the owner
-remains, and acceptance of this record waits on it.
+The owner signed in on 2026-10-05 and three open facts were settled against
+the real service. The document is at `/api/openapi.json` with its paths
+relative to `/api`, not at the location first assumed, and the constants
+were corrected. The REST API accepts the authorization server's tokens,
+which last twenty-four hours. Refresh tokens rotate on every use, so the
+file-holding design above is required rather than precautionary. A live
+smoke through the platform's adapter and the real child process listed the
+seventy operations, described and called three of them, refused an
+undeclared query and a `POST` operation, and kept working after a forced
+rotation. Offline tests cover the grant, rotation, confinement and tool
+behaviour against a scripted transport. Production enablement remains.

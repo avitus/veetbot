@@ -27,7 +27,7 @@ from svp_mcp.credential import read_state
 NOW = 1_800_000_000.0
 SECRET = "-".join(("client", "value"))
 DOCUMENT: dict[str, Any] = {
-    "paths": {"/a": {"get": {}}, "/b": {"get": {}, "post": {}}, "/c": {"post": {}}}
+    "paths": {"/v1/a": {"get": {}}, "/v1/b": {"get": {}, "post": {}}, "/v1/c": {"post": {}}}
 }
 
 
@@ -77,9 +77,10 @@ class Browser:
         return self.code
 
 
-def _run(output: Path, service: Service, browser: Browser) -> int:
+def _run(output: Path, service: Service, browser: Browser) -> Any:
     return bootstrap_credential(
         output_file=output,
+        confirm=lambda: None,
         authorize=browser,
         http_client=httpx.Client(transport=httpx.MockTransport(service)),
         clock=lambda: NOW,
@@ -90,7 +91,9 @@ def test_the_ceremony_registers_signs_in_proves_the_grant_then_writes_it(tmp_pat
     service, browser = Service(), Browser()
     output = tmp_path / "private" / "svp.json"
 
-    assert _run(output, service, browser) == 2
+    outcome = _run(output, service, browser)
+
+    assert (outcome.operations, outcome.document_status) == (2, 200)
 
     assert service.urls == [REGISTRATION_ENDPOINT, TOKEN_ENDPOINT, DOCUMENT_URL]
     authorization = {
@@ -122,12 +125,12 @@ def test_the_ceremony_registers_signs_in_proves_the_grant_then_writes_it(tmp_pat
     [
         Service(refresh_token=None),
         Service(document_status=401),
-        Service(document_status=404),
-        Service(document=[1]),
+        Service(document_status=403),
+        Service(document_status=503),
     ],
-    ids=["no-refresh-token", "api-rejects-the-token", "no-document", "not-a-document"],
+    ids=["no-refresh-token", "api-rejects-the-token", "api-forbids-the-token", "api-unavailable"],
 )
-def test_a_grant_the_api_cannot_use_unattended_is_never_written(
+def test_a_grant_the_api_has_not_accepted_is_never_written(
     tmp_path: Path, service: Service
 ) -> None:
     output = tmp_path / "svp.json"
@@ -136,6 +139,44 @@ def test_a_grant_the_api_cannot_use_unattended_is_never_written(
         _run(output, service, Browser())
 
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("service", "status"),
+    [(Service(document_status=404), 404), (Service(document=[1]), 200)],
+    ids=["no-document-there", "not-a-document"],
+)
+def test_an_accepted_grant_is_kept_when_the_document_is_not_where_expected(
+    tmp_path: Path, service: Service, status: int
+) -> None:
+    """The sign-in is not spent again just because the document path was wrong."""
+    output = tmp_path / "svp.json"
+
+    outcome = _run(output, service, Browser())
+
+    assert (outcome.operations, outcome.document_status) == (None, status)
+    assert read_state(output)["refresh_token"] == "refresh-1"
+
+
+def test_the_command_says_the_grant_is_saved_when_the_document_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    service = Service(document_status=404)
+    output = tmp_path / "svp.json"
+    monkeypatch.setattr(
+        svp_main,
+        "_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(service)),
+    )
+    monkeypatch.setattr(svp_main, "_confirm_disclosure", lambda: None)
+    monkeypatch.setattr(svp_main, "_authorize_via_loopback", lambda _url: "code-1")
+
+    with pytest.raises(SystemExit) as stopped:
+        svp_main.main(["bootstrap", "--output-file", str(output)])
+
+    assert "HTTP 404" in str(stopped.value.code)
+    assert str(output) in capsys.readouterr().out
+    assert output.exists()
 
 
 @pytest.mark.parametrize("code", ["", "x" * 5000])
@@ -165,34 +206,34 @@ def test_an_existing_relative_or_linked_output_is_refused_before_any_request(
     assert existing.read_text(encoding="utf-8") == "{}"
 
 
-def test_the_browser_opens_only_after_an_explicit_confirmation() -> None:
-    opened: list[str] = []
+@pytest.mark.parametrize("answer", ["", "yes", "Continue", "continue", " CONTINUE"])
+def test_only_the_exact_confirmation_lets_the_ceremony_proceed(answer: str) -> None:
     output = io.StringIO()
 
-    def authorize(url: str) -> str:
-        opened.append(url)
-        return "code-1"
+    with pytest.raises(BootstrapError, match="CONTINUE"):
+        svp_main._confirm_disclosure(read_input=lambda _prompt: answer, output=output)
 
-    with pytest.raises(BootstrapError):
-        svp_main._authorize_with_disclosure(
-            "https://scalevp-mcp.com/authorize?state=s",
-            read_input=lambda _prompt: "yes",
-            output=output,
-            authorize=authorize,
-        )
-    assert opened == []
-
-    code = svp_main._authorize_with_disclosure(
-        "https://scalevp-mcp.com/authorize?state=s",
-        read_input=lambda _prompt: "CONTINUE",
-        output=output,
-        authorize=authorize,
-    )
-
-    assert code == "code-1" and len(opened) == 1
+    svp_main._confirm_disclosure(read_input=lambda _prompt: "CONTINUE", output=output)
     disclosure = output.getvalue()
     assert "hosted model provider" in disclosure
     assert "one sign-in" in disclosure
+
+
+def test_nothing_is_requested_or_opened_before_the_operator_confirms(tmp_path: Path) -> None:
+    service, browser = Service(), Browser()
+
+    def decline() -> None:
+        raise BootstrapError("declined")
+
+    with pytest.raises(BootstrapError, match="declined"):
+        bootstrap_credential(
+            output_file=tmp_path / "svp.json",
+            confirm=decline,
+            authorize=browser,
+            http_client=httpx.Client(transport=httpx.MockTransport(service)),
+        )
+
+    assert service.requests == [] and browser.urls == []
 
 
 def test_the_bootstrap_command_prints_no_secret(
@@ -205,7 +246,8 @@ def test_the_bootstrap_command_prints_no_secret(
         "_http_client",
         lambda: httpx.Client(transport=httpx.MockTransport(service)),
     )
-    monkeypatch.setattr(svp_main, "_authorize_with_disclosure", lambda _url: "code-1")
+    monkeypatch.setattr(svp_main, "_confirm_disclosure", lambda: None)
+    monkeypatch.setattr(svp_main, "_authorize_via_loopback", lambda _url: "code-1")
 
     svp_main.main(["bootstrap", "--output-file", str(output)])
 
@@ -226,3 +268,32 @@ def test_the_loopback_accepts_only_the_callback_that_carries_its_state() -> None
         "/callback?error=access_denied&state=state-1",
     ):
         assert svp_main._callback_code(target, "state-1") is None
+
+
+def test_declining_the_disclosure_sends_nothing_to_the_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A near-miss such as `Continue` cancels before a client is even registered."""
+    service = Service()
+    opened: list[str] = []
+    output = tmp_path / "svp.json"
+    monkeypatch.setattr(
+        svp_main,
+        "_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(service)),
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "Continue")
+
+    def loopback(url: str) -> str:
+        opened.append(url)
+        return "code-1"
+
+    monkeypatch.setattr(svp_main, "_authorize_via_loopback", loopback)
+
+    with pytest.raises(SystemExit) as stopped:
+        svp_main.main(["bootstrap", "--output-file", str(output)])
+
+    assert "cancelled" in str(stopped.value.code)
+    assert service.requests == []
+    assert opened == []
+    assert not output.exists()

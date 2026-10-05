@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
-from svp_mcp.constants import API_ROOT, MAXIMUM_DESCRIPTION_BYTES, ORIGIN
+from svp_mcp.constants import API_BASE, API_ROOT, MAXIMUM_DESCRIPTION_BYTES, ORIGIN
 from svp_mcp.errors import SvpError
 
 _OPERATION_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -64,7 +64,7 @@ def is_confined(url: str) -> bool:
 
 
 def _url(path: str) -> str:
-    return ORIGIN + path if path.startswith(_API_PATH) else API_ROOT + path.lstrip("/")
+    return API_BASE + path
 
 
 def _text(value: object, limit: int) -> str:

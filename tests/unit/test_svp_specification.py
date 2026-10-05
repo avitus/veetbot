@@ -14,7 +14,7 @@ def document() -> dict[str, Any]:
     return {
         "openapi": "3.1.0",
         "paths": {
-            "/companies": {
+            "/v1/companies": {
                 "get": {
                     "operationId": "list_companies",
                     "summary": "List companies",
@@ -35,14 +35,16 @@ def document() -> dict[str, Any]:
                 },
                 "post": {"operationId": "create_company"},
             },
-            "/api/v1/companies/{company_id}": {
+            "/v1/companies/{company_id}": {
                 "parameters": [
                     {"$ref": "#/components/parameters/CompanyId"},
                 ],
                 "get": {"summary": "Read one company"},
                 "delete": {"operationId": "delete_company"},
             },
-            "/notes": {"post": {"operationId": "create_note"}},
+            "/v1/notes": {"post": {"operationId": "create_note"}},
+            "/v2/companies": {"get": {"operationId": "other_version"}},
+            "/openapi.json": {"get": {"operationId": "the_document"}},
         },
         "components": {
             "parameters": {
@@ -72,7 +74,7 @@ def document() -> dict[str, Any]:
 def test_only_get_operations_are_indexed() -> None:
     operations = load_operations(document())
 
-    assert sorted(operations) == ["get_api_v1_companies_company_id", "list_companies"]
+    assert sorted(operations) == ["get_v1_companies_company_id", "list_companies"]
     assert operations["list_companies"].summary == "List companies"
 
 
@@ -86,7 +88,7 @@ def test_header_and_cookie_parameters_are_never_request_inputs() -> None:
 
 
 def test_path_level_parameter_references_are_resolved() -> None:
-    operation = load_operations(document())["get_api_v1_companies_company_id"]
+    operation = load_operations(document())["get_v1_companies_company_id"]
 
     assert [(item.name, item.location, item.required) for item in operation.parameters] == [
         ("company_id", "path", True)
@@ -107,13 +109,13 @@ def test_targets_stay_under_the_api_root_whichever_way_the_document_spells_paths
         [("limit", "5"), ("tag", "a"), ("tag", "b")],
     )
     assert request_target(
-        operations["get_api_v1_companies_company_id"], {"company_id": "acme/1 ?"}, {}
+        operations["get_v1_companies_company_id"], {"company_id": "acme/1 ?"}, {}
     ) == ("https://scalevp-mcp.com/api/v1/companies/acme%2F1%20%3F", [])
 
 
 @pytest.mark.parametrize("value", ["", ".", "..", 1.5, True, None, ["a"]])
 def test_a_path_value_that_could_leave_its_segment_is_refused(value: object) -> None:
-    operation = load_operations(document())["get_api_v1_companies_company_id"]
+    operation = load_operations(document())["get_v1_companies_company_id"]
 
     with pytest.raises(SvpError, match=r"^svp\.arguments_invalid$"):
         request_target(operation, {"company_id": value}, {})
@@ -136,7 +138,7 @@ def test_undeclared_or_missing_arguments_are_refused(
     operation = (
         operations["list_companies"]
         if "limit" in query
-        else operations["get_api_v1_companies_company_id"]
+        else operations["get_v1_companies_company_id"]
     )
 
     with pytest.raises(SvpError, match=r"^svp\.arguments_invalid$"):
@@ -145,7 +147,7 @@ def test_undeclared_or_missing_arguments_are_refused(
 
 def test_a_missing_required_query_parameter_is_refused() -> None:
     spec = document()
-    spec["paths"]["/companies"]["get"]["parameters"][0]["required"] = True
+    spec["paths"]["/v1/companies"]["get"]["parameters"][0]["required"] = True
     operation = load_operations(spec)["list_companies"]
 
     with pytest.raises(SvpError, match=r"^svp\.arguments_invalid$"):
@@ -154,7 +156,16 @@ def test_a_missing_required_query_parameter_is_refused() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["//evil.example/api/v1/x", "/api/v1/../register", "companies", "/a b", "/x#y", "/x?y=1"],
+    [
+        "//evil.example/v1/x",
+        "/v1/../openapi.json",
+        "v1/companies",
+        "/companies",
+        "/v1",
+        "/v1/a b",
+        "/v1/x#y",
+        "/v1/x?y=1",
+    ],
 )
 def test_a_document_path_that_escapes_the_api_root_is_not_indexed(path: str) -> None:
     spec = {"paths": {path: {"get": {"operationId": "escape"}}}}
@@ -165,13 +176,13 @@ def test_a_document_path_that_escapes_the_api_root_is_not_indexed(path: str) -> 
 def test_duplicate_or_unusable_operation_ids_fall_back_to_the_path() -> None:
     spec = {
         "paths": {
-            "/a": {"get": {"operationId": "same"}},
-            "/b": {"get": {"operationId": "same"}},
-            "/c": {"get": {"operationId": "not usable!"}},
+            "/v1/a": {"get": {"operationId": "same"}},
+            "/v1/b": {"get": {"operationId": "same"}},
+            "/v1/c": {"get": {"operationId": "not usable!"}},
         }
     }
 
-    assert sorted(load_operations(spec)) == ["get_b", "get_c", "same"]
+    assert sorted(load_operations(spec)) == ["get_v1_b", "get_v1_c", "same"]
 
 
 def test_description_resolves_local_references_and_stops_at_cycles() -> None:
@@ -179,7 +190,7 @@ def test_description_resolves_local_references_and_stops_at_cycles() -> None:
     described = describe(spec, load_operations(spec)["list_companies"])
 
     assert described["method"] == "GET"
-    assert described["path"] == "/companies"
+    assert described["path"] == "/v1/companies"
     assert [item["name"] for item in described["parameters"]] == ["limit", "tag"]
     items = described["response_schema"]["properties"]["items"]["items"]
     assert items["properties"]["parent"] == {"$ref": "#/components/schemas/Co"}

@@ -73,6 +73,9 @@ class SvpClient:
 
         if not is_confined(url):
             raise SvpError("svp.arguments_invalid")
+        return await self._read(url, query, maximum_bytes)
+
+    async def _read(self, url: str, query: Sequence[tuple[str, str]], maximum_bytes: int) -> object:
         token = await self._token(None)
         status, body = await self._send(url, query, token, maximum_bytes)
         if status == 401:
@@ -99,7 +102,8 @@ class SvpClient:
         async with self._document_lock:
             if self._document is None:
                 try:
-                    payload = await self.get(DOCUMENT_URL, maximum_bytes=MAXIMUM_DOCUMENT_BYTES)
+                    # The document's own location is fixed and is not a callable target.
+                    payload = await self._read(DOCUMENT_URL, (), MAXIMUM_DOCUMENT_BYTES)
                 except SvpError as exc:
                     if exc.code in {"svp.response_too_large", "svp.response_invalid"}:
                         raise SvpError("svp.specification_invalid") from None

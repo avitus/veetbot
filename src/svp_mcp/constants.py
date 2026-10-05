@@ -5,8 +5,11 @@ from __future__ import annotations
 from typing import Final
 
 ORIGIN: Final = "https://scalevp-mcp.com"
-API_ROOT: Final = ORIGIN + "/api/v1/"
-DOCUMENT_URL: Final = API_ROOT + "openapi.json"
+# The published document sits at the API mount and spells its paths relative to
+# it (`/v1/...`); only URLs under the version root are ever requested.
+API_BASE: Final = ORIGIN + "/api"
+API_ROOT: Final = API_BASE + "/v1/"
+DOCUMENT_URL: Final = API_BASE + "/openapi.json"
 AUTHORIZATION_ENDPOINT: Final = ORIGIN + "/authorize"
 TOKEN_ENDPOINT: Final = ORIGIN + "/token"
 REGISTRATION_ENDPOINT: Final = ORIGIN + "/register"

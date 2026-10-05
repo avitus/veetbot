@@ -170,8 +170,9 @@ project:
   # ADR-0152 (Proposed, 2026-10-05) records the owner-requested non-milestone
   # extension: a default-off first-party stdio bridge, svp_mcp, reads the
   # Scale VP data service's REST API with a grant it holds as a private
-  # file, after a one-time operator sign-in; the gate count is unchanged and
-  # the owner's real-service sign-in and smoke remain.
+  # file, after a one-time operator sign-in; the gate count is unchanged. The
+  # owner's sign-in and a live read smoke passed on 2026-10-05; production
+  # enablement remains.
   authorized_milestones:
     - 0
     - 1

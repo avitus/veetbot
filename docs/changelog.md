@@ -20,8 +20,9 @@ title: Changelog
   the grant to a private file; a small bridge then offers three read tools
   that list, describe and call the service's published read operations.
   Nothing is written to the service, and scheduled runs are not offered the
-  tools. It stays off until `AGENT_SVP_ENABLED=1` names that file, and it has
-  not yet been exercised against the real service (ADR-0152).
+  tools. It stays off until `AGENT_SVP_ENABLED=1` names that file. A first
+  sign-in and live read against the real service succeeded the same day
+  (ADR-0152).
 
 ## 2026-10-05 — Website bindings for scheduled briefings
 

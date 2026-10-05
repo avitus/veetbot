@@ -14,7 +14,7 @@ from svp_mcp.server import create_server
 
 DOCUMENT = {
     "paths": {
-        "/companies": {
+        "/v1/companies": {
             "get": {
                 "operationId": "list_companies",
                 "summary": "List companies",
@@ -22,7 +22,7 @@ DOCUMENT = {
             },
             "post": {"operationId": "create_company"},
         },
-        "/companies/{company_id}": {
+        "/v1/companies/{company_id}": {
             "get": {
                 "operationId": "get_company",
                 "parameters": [{"name": "company_id", "in": "path", "required": True}],
@@ -79,8 +79,8 @@ async def test_listing_offers_only_read_operations() -> None:
 
     assert json.loads(_text(result)) == {
         "operations": [
-            {"id": "get_company", "path": "/companies/{company_id}", "summary": ""},
-            {"id": "list_companies", "path": "/companies", "summary": "List companies"},
+            {"id": "get_company", "path": "/v1/companies/{company_id}", "summary": ""},
+            {"id": "list_companies", "path": "/v1/companies", "summary": "List companies"},
         ],
         "truncated": False,
     }
