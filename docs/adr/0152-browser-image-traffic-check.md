@@ -1,6 +1,7 @@
 # ADR-0152: Hosted CI measures the browser image's own requests
 
-- Status: Proposed; implements the owner's 2026-10-03 direction
+- Status: Accepted (authorized by the repository owner, 2026-10-05); implements
+  the owner's 2026-10-03 direction
 - Date: 2026-10-05
 - Related: ADR-0107, ADR-0114, ADR-0145
 - Amends: ADR-0146 (the measurement it asked a person to repeat after raising

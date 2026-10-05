@@ -163,7 +163,7 @@ project:
   # headed hosted browser no longer asks its vendor's services for anything
   # on its own, except one account listing as it starts, which has no
   # switch; the gate count is unchanged.
-  # ADR-0152 (Proposed, 2026-10-05) records the owner-requested CI check that
+  # ADR-0152 (Accepted, 2026-10-05) records the owner-requested CI check that
   # follows it: hosted CI measures the built browser image's own requests on
   # x86_64 and arm64 whenever the image, its limits, the Playwright version or
   # the vendor-request switches change; the gate count is unchanged.
@@ -1733,12 +1733,19 @@ open_items_outside_milestones:
 - 'HTTP API: event-log-and-persistence.md and ADR-0032 decision 9 require `POST /v1/runs/{run_id}/export`, but no such route is mounted and only `agent run export` exists; mount it or propose an ADR that drops it (found in the 2026-09-28 documentation audit)'
 - 'Owner: accept or reject ADR-0104, ADR-0105, ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138, which are still Proposed although their mechanisms are implemented, specified and on main'
 - 'Owner: accept or reject ADR-0146, which is Proposed and implemented: a hosted browser launch repeats the Playwright disabled-feature list, gives push messaging a check-in address it cannot fetch, and leaves one account request to accounts.google.com on'
-- 'Owner: accept or reject ADR-0152, which is Proposed and implemented: hosted CI measures the built browser image''s own requests on x86_64 and arm64 when its inputs change, and release packaging waits for it; decide whether branch protection also requires browser-image-x86_64 and browser-image-arm64'
+- 'Owner decision: whether branch protection also requires browser-image-x86_64 and browser-image-arm64 (ADR-0152); release packaging already waits for both, so a failure stops delivery but not a merge'
 - 'Owner decision: the hardline protected_host_path rule blocks .git/config only at the workspace root, so sub/.git/config is not blocked, while .env and ~/.ssh already match at any depth; decide whether it should, knowing that a change to the matcher in policy/hardline.py leaves policy_version unchanged but an edit to hardline.yaml moves it and unbinds the memory-formation release evidence (found in the 2026-09-28 test audit)'
 
 # Evidence behind changes to the list above: a closed item, or the check that
 # confirmed a newly recorded gap.
 outside_milestone_evidence:
+- check: owner acceptance of ADR-0152
+  outcome: accepted
+  detail: >-
+    The owner accepted ADR-0152 on 2026-10-05, after its implementation
+    reached dev as 2383d73b. This closes the acceptance half of its open
+    item; whether branch protection also requires the two browser-image
+    contexts remains the owner's decision.
 - check: deploy of the main pull request carrying ADR-0127 to ADR-0130
   outcome: passed
   detail: >-
