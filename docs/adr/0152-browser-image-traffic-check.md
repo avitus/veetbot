@@ -87,11 +87,13 @@ silicon, for x86_64, through a refusing relay, on an internal network:
   measures the shipped image on both architectures before it can be released.
   The manual measurement step in the deployment guide is gone.
 - Most pipelines pay only for two machine executors to check out and halt. A
-  measured run builds the image without a layer cache, then measures for about
-  two and a half minutes; the build's hosted duration is not yet measured.
-- Branch protection does not require the two contexts yet; release packaging
-  does, so a failure still stops delivery. Requiring them for a merge is the
-  owner's setting.
+  measured run builds the image without a layer cache and measures it in about
+  four minutes: the first hosted run, pipeline 986 on 2026-10-05, took 3 min 50 s
+  on x86_64 and 3 min 57 s on arm64.
+- After that first hosted run passed on both architectures, the owner made
+  `ci/circleci: browser-image-x86_64` and `ci/circleci: browser-image-arm64`
+  required status checks on `main` (2026-10-05), so a failure stops a merge as
+  well as delivery.
 - The check sees what reaches the proxy. A request that bypassed it would not
   be counted; ADR-0146 found none, and the internal network gives one nowhere
   to go. A request that starts after two idle minutes is outside the window.
@@ -105,7 +107,7 @@ silicon, for x86_64, through a refusing relay, on an internal network:
 ## Alternatives rejected
 
 - **Running the lane in every pipeline.** It would add two machine executors
-  and about ten minutes to each, while the browser's requests change only with
+  and about four minutes to each, while the browser's requests change only with
   the inputs above.
 - **CircleCI path filtering.** It needs a dynamic setup workflow for the whole
   configuration and compares commits, not contents. A content key also lets the
