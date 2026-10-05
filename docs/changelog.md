@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-05 — Website bindings for scheduled briefings
+
+- A schedule can explicitly retain its authenticated website profile through
+  the schedule API. Each occurrence receives that binding and its browser
+  tools; an unavailable profile fails before spending a model call. Existing
+  schedules need a full-definition update selecting the profile and requesting
+  `browser.profile.read`. Chat creation continues to bind no website, and
+  browser actions keep their ordinary approval requirements (ADR-0150).
+
 ## 2026-10-02 — Website Access verifies sign-in while live updates stay connected
 
 - A successful x.com sign-in could still fail verification because its live

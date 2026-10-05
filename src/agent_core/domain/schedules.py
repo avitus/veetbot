@@ -278,6 +278,7 @@ class ScheduleRevision(BaseModel):
     agent_version: str = Field(min_length=1)
     policy_profile: str = Field(min_length=1)
     requested_scopes: frozenset[str]
+    browser_profile_id: UUID | None = None
     limits: RunLimits
     run_timeout_seconds: int = Field(gt=0)
     cadence: Cadence
@@ -325,6 +326,7 @@ class ScheduleDefinition(BaseModel):
     agent_version: str = Field(min_length=1)
     policy_profile: str = Field(min_length=1)
     requested_scopes: frozenset[str]
+    browser_profile_id: UUID | None = None
     limits: RunLimits
     run_timeout_seconds: int = Field(gt=0)
     cadence: Cadence

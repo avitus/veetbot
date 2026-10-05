@@ -12,6 +12,33 @@ import UniformTypeIdentifiers
 
     // MARK: Transport and client
 
+    @Test(arguments: [true, false])
+    func testAttachmentDropsWaitForConnection(useItemProvider: Bool) async throws {
+        let model = try makeModel { _ in
+            Issue.record("An unconfigured attachment must not make a request")
+            throw URLError(.badServerResponse)
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("startup drop".utf8).write(to: url)
+        #expect(!model.isConfigured)
+        if useItemProvider {
+            let provider = NSItemProvider()
+            provider.suggestedName = "startup.txt"
+            provider.registerDataRepresentation(forTypeIdentifier: UTType.plainText.identifier, visibility: .all) {
+                completion in
+                Issue.record("An unconfigured drop must not read the provider")
+                completion(Data("startup drop".utf8), nil)
+                return nil
+            }
+            await model.attach(itemProviders: [provider])
+        } else {
+            await model.attach(fileURLs: [url])
+        }
+        #expect(model.attachments.isEmpty)
+        #expect(model.errorMessage == nil)
+    }
+
     @Test
     func testUploadSendsTheFileWithItsTypeNameAndKey() async throws {
         let recorder = AttachmentRequestRecorder()

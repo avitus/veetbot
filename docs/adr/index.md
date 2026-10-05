@@ -160,3 +160,5 @@ implementation without one.
 - [ADR-0148 — Approved rich-text input and image upload (Proposed)](0148-approved-browser-image-upload.md)
 
 - [ADR-0149 — Deployment provisions the owner permission set](0149-release-managed-owner-permissions.md)
+
+- [ADR-0150 — Scheduled website reads pin an owned browser profile (Proposed)](0150-scheduled-browser-profile-binding.md)

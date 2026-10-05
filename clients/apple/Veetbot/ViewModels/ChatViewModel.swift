@@ -123,6 +123,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var history: [SessionHistoryEntry] = []
     @Published public private(set) var selectedSessionID: UUID?
     @Published public private(set) var baseURL: URL?
+    /// Keep Chat visible until saved credentials and connection restoration settle.
+    @Published public private(set) var isBootstrapping = true
     @Published public private(set) var isConfigured = false
     @Published public private(set) var requiresReauthentication = false
     @Published public private(set) var isSending = false
@@ -1129,7 +1131,7 @@ public final class ChatViewModel: ObservableObject {
     @discardableResult
     public func send(_ rawText: String) async -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty, let api else { return false }
+        guard !text.isEmpty || !attachments.isEmpty, isConfigured, let api else { return false }
         guard !isSending else { return false }
 
         if runState.isRunActive {
@@ -1248,6 +1250,7 @@ public final class ChatViewModel: ObservableObject {
 
     /// Stage files picked or dropped by URL and start uploading each.
     public func attach(fileURLs: [URL]) async {
+        guard isConfigured else { return }
         for url in fileURLs {
             guard reserveAttachmentSlot() else { return }
             do {
@@ -1263,6 +1266,7 @@ public final class ChatViewModel: ObservableObject {
 
     /// Stage what a drag or the photo picker carries and start uploading each.
     public func attach(itemProviders: [NSItemProvider]) async {
+        guard isConfigured else { return }
         for provider in itemProviders {
             guard reserveAttachmentSlot() else { return }
             do {
@@ -2449,6 +2453,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func bootstrap() async {
+        defer { isBootstrapping = false }
         do {
             history = try await historyStore.list()
         } catch {
