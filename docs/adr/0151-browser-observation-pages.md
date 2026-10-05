@@ -44,6 +44,12 @@ existing page and lease. Do not accept the dialog or retry navigation. Other
 browser, transport and origin failures keep their existing classifications.
 Action dispatch failures retain uncertain-write handling.
 
+The ephemeral Playwright provider serializes all page operations and closure,
+including startup and result validation, on one provider operation lock. This
+prevents concurrent dispatches from sharing beforeunload cancellation state;
+reads, actions, uploads, and shutdown cannot mutate an in-flight navigation.
+The hosted provider retains its existing lease-operation serialization.
+
 ## Validation
 
 Reproduce a large composer result with its publication control in the omitted
@@ -53,6 +59,9 @@ limits, escaping, Unicode text continuation, invalid offsets, foreign origins,
 long labels, pinned versions, and full approval facts. A real Chromium composer
 with an unsaved-change dialog must retain its draft after cancelled navigation;
 the hosted provider must retain the same lease. No live publication is required.
+Concurrent-navigation regressions must classify only the navigation that
+dismissed its dialog as cancelled, and keep every other page operation outside
+that navigation until it finishes.
 
 No engineering-plan requirement, approval rule or context limit changes. The
 browser gate count and milestone status do not move.

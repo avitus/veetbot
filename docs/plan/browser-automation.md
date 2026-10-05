@@ -1239,6 +1239,11 @@ while the same allowed page remains open, navigation returns
 lease. The model can observe the existing draft and continue under ordinary
 action approval. This does not accept the dialog, classify other transport
 failures as cancellations, or change uncertain-write handling (ADR-0151).
+The ephemeral Playwright provider serializes navigation, observation, actions,
+uploads, and closure on one operation lock, including startup and result
+validation. A concurrent dispatch cannot consume another navigation's dialog
+state or mutate its page before the navigation finishes. The hosted provider
+retains its existing lease-operation serialization.
 
 ## Delivery plan
 

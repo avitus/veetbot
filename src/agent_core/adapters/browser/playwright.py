@@ -1841,6 +1841,8 @@ def _default_role(tag: str, input_type: str | None) -> str:
 
 
 class PlaywrightBrowserProvider:
+    """Serialize access to one ephemeral browser and its mutable page state."""
+
     name = "playwright"
 
     def __init__(
@@ -1852,6 +1854,7 @@ class PlaywrightBrowserProvider:
         proxy_factory: ProxyFactory = start_browser_egress_proxy,
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        """Bind an isolated runtime, its origin policy, and operation serialization."""
         if not tenant_id:
             raise ValueError("browser provider requires a tenant")
         normalized = tuple(normalize_browser_origin(value) for value in allowed_origins)
@@ -1865,6 +1868,7 @@ class PlaywrightBrowserProvider:
         self._proxy: BrowserProxy | None = None
         self._started = False
         self._start_lock = asyncio.Lock()
+        self._operation_lock = asyncio.Lock()
 
     def allows(self, url: str) -> bool:
         return _origin_allowed(url, self._allowed_origins)
@@ -1902,36 +1906,40 @@ class PlaywrightBrowserProvider:
             self._started = True
 
     async def navigate(self, url: str) -> BrowserObservation:
+        """Navigate serially so another dispatch cannot consume cancellation state."""
         if not self.allows(url):
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
-        await self._start()
-        try:
-            observation = await self._runtime.navigate(url)
-        except BrowserProviderError:
-            raise
-        except Exception as exc:
-            raise BrowserProviderError(
-                "tool.browser.provider_unavailable",
-                retryable=True,
-            ) from exc
-        if not self.allows(observation.url):
-            raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
-        return observation
+        async with self._operation_lock:
+            await self._start()
+            try:
+                observation = await self._runtime.navigate(url)
+            except BrowserProviderError:
+                raise
+            except Exception as exc:
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable",
+                    retryable=True,
+                ) from exc
+            if not self.allows(observation.url):
+                raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            return observation
 
     async def observe(self) -> BrowserObservation:
-        await self._start()
-        try:
-            observation = await self._runtime.observe()
-        except BrowserProviderError:
-            raise
-        except Exception as exc:
-            raise BrowserProviderError(
-                "tool.browser.provider_unavailable",
-                retryable=True,
-            ) from exc
-        if not self.allows(observation.url):
-            raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
-        return observation
+        """Refresh the page only after the preceding browser operation finishes."""
+        async with self._operation_lock:
+            await self._start()
+            try:
+                observation = await self._runtime.observe()
+            except BrowserProviderError:
+                raise
+            except Exception as exc:
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable",
+                    retryable=True,
+                ) from exc
+            if not self.allows(observation.url):
+                raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            return observation
 
     async def act(
         self,
@@ -1939,46 +1947,52 @@ class PlaywrightBrowserProvider:
         *,
         constraint: BrowserDispatchConstraint | None = None,
     ) -> BrowserObservation:
-        await self._start()
-        try:
-            if constraint is None:
-                observation = await self._runtime.act(action)
-            else:
-                # Without a clock the runtime cannot check the grant's expiry,
-                # so it refuses the act.
-                observation = await self._runtime.act(
-                    action,
-                    constraint=constraint,
-                    now=None if self._now is None else self._now(),
-                )
-        except BrowserProviderError:
-            raise
-        except Exception as exc:
-            raise BrowserProviderError(
-                "tool.browser.outcome_unknown",
-                retryable=False,
-            ) from exc
-        if not self.allows(observation.url):
-            raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
-        return observation
+        """Dispatch one revision-bound action without concurrent page mutation."""
+        async with self._operation_lock:
+            await self._start()
+            try:
+                if constraint is None:
+                    observation = await self._runtime.act(action)
+                else:
+                    # Without a clock the runtime cannot check the grant's expiry,
+                    # so it refuses the act.
+                    observation = await self._runtime.act(
+                        action,
+                        constraint=constraint,
+                        now=None if self._now is None else self._now(),
+                    )
+            except BrowserProviderError:
+                raise
+            except Exception as exc:
+                raise BrowserProviderError(
+                    "tool.browser.outcome_unknown",
+                    retryable=False,
+                ) from exc
+            if not self.allows(observation.url):
+                raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            return observation
 
     async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
-        await self._start()
-        try:
-            observation = await upload_browser_image(self._runtime, action, image)
-        except BrowserProviderError:
-            raise
-        except Exception as exc:
-            raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
-        if not self.allows(observation.url):
-            raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
-        return observation
+        """Transfer an approved image while exclusively holding the browser page."""
+        async with self._operation_lock:
+            await self._start()
+            try:
+                observation = await upload_browser_image(self._runtime, action, image)
+            except BrowserProviderError:
+                raise
+            except Exception as exc:
+                raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
+            if not self.allows(observation.url):
+                raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            return observation
 
     async def close(self) -> None:
-        try:
-            await self._runtime.close()
-        finally:
-            if self._proxy is not None:
-                await self._proxy.close()
-            self._proxy = None
-            self._started = False
+        """Wait for the active operation before releasing runtime and proxy resources."""
+        async with self._operation_lock:
+            try:
+                await self._runtime.close()
+            finally:
+                if self._proxy is not None:
+                    await self._proxy.close()
+                self._proxy = None
+                self._started = False
