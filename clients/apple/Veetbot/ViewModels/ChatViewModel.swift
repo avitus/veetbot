@@ -1250,6 +1250,7 @@ public final class ChatViewModel: ObservableObject {
 
     /// Stage files picked or dropped by URL and start uploading each.
     public func attach(fileURLs: [URL]) async {
+        guard isConfigured else { return }
         for url in fileURLs {
             guard reserveAttachmentSlot() else { return }
             do {
@@ -1265,6 +1266,7 @@ public final class ChatViewModel: ObservableObject {
 
     /// Stage what a drag or the photo picker carries and start uploading each.
     public func attach(itemProviders: [NSItemProvider]) async {
+        guard isConfigured else { return }
         for provider in itemProviders {
             guard reserveAttachmentSlot() else { return }
             do {
