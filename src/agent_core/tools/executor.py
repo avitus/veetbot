@@ -779,6 +779,7 @@ class ToolPipeline:
         prepared_decision: PolicyDecision | None = None,
         lock_acquired: bool = False,
     ) -> ToolResultItem:
+        """Authorize, dispatch, and persist one invocation with effect accounting."""
         decision = prepared_decision
         candidate = prepared_candidate
         if candidate is None:

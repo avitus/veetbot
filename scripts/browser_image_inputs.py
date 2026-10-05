@@ -3,8 +3,8 @@
 The `browser-image` job keys its record of a passed measurement on this
 output and halts when it finds one. The inputs are the image, its production
 limits, the Playwright version, which fixes the Chromium build, the runtime's
-vendor-request launch switches, and the check's own code. The rest of the
-runtime and of the lock file change often and decide none of these.
+vendor-request launch switches, startup/context configuration, and the check's
+own code. Unrelated runtime operations and locked packages are not inputs.
 
 CI runs this module with the machine executor's Python before installing the
 project, so it imports only the standard library.
@@ -32,18 +32,22 @@ LAUNCH_SWITCHES = (
     "_PLAYWRIGHT_DISABLED_FEATURES",
     "_VENDOR_REQUEST_ARGUMENTS",
 )
+CONFIGURATION_METHODS = ("start", "_context_options")
 
 
 def _digest(data: bytes) -> str:
+    """Return the stable SHA-256 identity of one measurement input."""
     return hashlib.sha256(data).hexdigest()
 
 
 def _locked_version(lock: Path, name: str) -> str:
+    """Read the named package version without importing project dependencies."""
     packages = tomllib.loads(lock.read_text(encoding="utf-8"))["package"]
     return str(next(package["version"] for package in packages if package["name"] == name))
 
 
 def _launch_switches(runtime: Path) -> str:
+    """Hash the required vendor-request assignments, failing on missing inputs."""
     source = runtime.read_text(encoding="utf-8")
     assignments = {
         target.id: ast.get_source_segment(source, node)
@@ -58,15 +62,40 @@ def _launch_switches(runtime: Path) -> str:
     return _digest("\n".join(str(assignments[name]) for name in LAUNCH_SWITCHES).encode())
 
 
+def _runtime_configuration(runtime: Path) -> str:
+    """Hash startup and context settings, ignoring prose and unrelated operations."""
+    tree = ast.parse(runtime.read_text(encoding="utf-8"))
+    methods = {
+        method.name: method
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "PythonPlaywrightRuntime"
+        for method in node.body
+        if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef)
+        and method.name in CONFIGURATION_METHODS
+    }
+    missing = set(CONFIGURATION_METHODS) - methods.keys()
+    if missing:
+        raise LookupError(f"{RUNTIME} no longer defines configuration methods {sorted(missing)}")
+    normalized = []
+    for name in CONFIGURATION_METHODS:
+        method = methods[name]
+        if ast.get_docstring(method) is not None:
+            method.body = method.body[1:]
+        normalized.append(ast.dump(method, include_attributes=False))
+    return _digest("\n".join(normalized).encode())
+
+
 def browser_image_inputs(root: Path = ROOT) -> dict[str, str]:
     """Each input of the browser image check, named, with its digest or version."""
     inputs = {name: _digest((root / name).read_bytes()) for name in FILES}
     inputs["playwright"] = _locked_version(root / "uv.lock", "playwright")
     inputs["launch switches"] = _launch_switches(root / RUNTIME)
+    inputs["runtime configuration"] = _runtime_configuration(root / RUNTIME)
     return inputs
 
 
 def main() -> None:
+    """Print sorted measurement inputs for the architecture-specific CI cache."""
     inputs = browser_image_inputs()
     for name in sorted(inputs):
         print(f"{name} {inputs[name]}")

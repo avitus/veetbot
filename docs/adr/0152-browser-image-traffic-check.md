@@ -73,13 +73,13 @@ silicon, for x86_64, through a refusing relay, on an internal network:
 5. Each job writes a CircleCI cache record, after the lane passes, keyed by
    architecture and by its inputs: the image's Dockerfile, the production
    compose file, the Playwright version in `uv.lock`, the runtime's
-   vendor-request launch arguments, and the check's own code. A job that finds
+   vendor-request launch arguments, startup/context configuration, and check code. A job that finds
    its record halts successfully after checkout, on every branch. Any change to
    the inputs runs the lane in full. The record's key carries a version prefix;
    raising it forces a new measurement.
-6. The rest of the runtime and of the lock file are not inputs. Both change
-   often and decide neither the browser build nor its launch switches. The
-   static launch tests keep guarding the switches in code.
+6. Startup and context configuration are the semantic bodies of `start` and
+   `_context_options`; prose, unrelated runtime operations and other locked
+   packages are excluded. Static launch tests keep guarding the switches.
 
 ## Consequences
 

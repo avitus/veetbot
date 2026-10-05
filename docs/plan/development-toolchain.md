@@ -276,7 +276,7 @@ been manually modified; force an install when repairing such modifications.
 
 `make test` and `make test-fast` differ, and the difference is
 deliberate. `test` is what a developer runs when they want the whole
-suite that can run locally, including integration if a database is up;
+suite that can run locally, including database integration but excluding live and browser-image tests;
 `test-fast` is what gates. Naming them apart is what stops the
 integration suite from being quietly deleted from `check` the first
 time a laptop has no Docker.
@@ -495,7 +495,7 @@ refuses and records every request but the site's. The job fails if the
 browser asked for anything except the page and the one account request
 ADR-0146 leaves. Before installing anything, the job reads its inputs with
 `python3 -m scripts.browser_image_inputs`: the Dockerfile, the production
-compose file, the Playwright version in `uv.lock`, the runtime's
+compose file, the Playwright version in `uv.lock`, runtime startup/context configuration,
 vendor-request launch switches and the check's own code. It writes a CircleCI
 cache record keyed by architecture and those inputs after the lane passes, and
 a later job that finds its record halts successfully, on any branch. Most

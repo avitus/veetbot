@@ -25,6 +25,7 @@ CHECK_FILES = (
 
 
 def _checkout(tmp_path: Path) -> Path:
+    """Copy the declared image inputs into an isolated editable fixture."""
     for name in (DOCKERFILE, COMPOSE, RUNTIME, "uv.lock", *CHECK_FILES):
         target = tmp_path / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -33,17 +34,26 @@ def _checkout(tmp_path: Path) -> Path:
 
 
 def _edit(path: Path, old: str, new: str) -> None:
+    """Replace exactly one fixture fragment so each mutation tests its premise."""
     text = path.read_text(encoding="utf-8")
     assert text.count(old) == 1, old
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
 def test_the_inputs_name_the_image_its_limits_playwright_the_switches_and_the_check() -> None:
+    """Require the complete named measurement inputs and locked browser version."""
     inputs = browser_image_inputs()
 
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
     playwright = next(package for package in lock["package"] if package["name"] == "playwright")
-    assert set(inputs) == {DOCKERFILE, COMPOSE, "playwright", "launch switches", *CHECK_FILES}
+    assert set(inputs) == {
+        DOCKERFILE,
+        COMPOSE,
+        "playwright",
+        "launch switches",
+        "runtime configuration",
+        *CHECK_FILES,
+    }
     assert inputs["playwright"] == playwright["version"]
 
 
@@ -54,12 +64,16 @@ def test_the_inputs_name_the_image_its_limits_playwright_the_switches_and_the_ch
         (COMPOSE, "mem_limit: 3g", "mem_limit: 4g"),
         (RUNTIME, '"AimEnabled",', '"AimEnabledRenamed",'),
         (RUNTIME, '"--gcm-checkin-url=about:blank"', '"--gcm-checkin-url=about:srcdoc"'),
+        (RUNTIME, '"service_workers": "block",', '"service_workers": "block", "locale": "fr-FR",'),
+        (RUNTIME, '"service_workers": "block",', '"service_workers": "allow",'),
+        (RUNTIME, '"--disable-quic",', '"--disable-quic", "--lang=fr-FR",'),
         ("tests/browser_image_probe.py", "IDLE_SECONDS = 120", "IDLE_SECONDS = 60"),
     ],
 )
 def test_the_inputs_change_with_what_decides_the_requests(
     tmp_path: Path, name: str, old: str, new: str
 ) -> None:
+    """Invalidate cached measurements when request-affecting inputs change."""
     checkout = _checkout(tmp_path)
     before = browser_image_inputs(checkout)
 
@@ -69,6 +83,7 @@ def test_the_inputs_change_with_what_decides_the_requests(
 
 
 def test_the_inputs_change_with_the_playwright_version(tmp_path: Path) -> None:
+    """Remeasure whenever the locked Chromium-bearing package changes."""
     checkout = _checkout(tmp_path)
     before = browser_image_inputs(checkout)
 
@@ -85,8 +100,9 @@ def test_the_inputs_change_with_the_playwright_version(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("name", "old", "new"),
     [
-        # The runtime changes often; only its vendor-request switches count.
+        # Prose and unrelated operations do not change browser configuration.
         (RUNTIME, '"""Launch the isolated browser', '"""Start the isolated browser'),
+        (RUNTIME, "MAXIMUM_ELEMENTS = 256", "MAXIMUM_ELEMENTS = 128"),
         # Another locked package leaves the browser build alone.
         ("uv.lock", 'name = "pyyaml"\nversion = "', 'name = "pyyaml"\nversion = "0'),
     ],
@@ -94,6 +110,7 @@ def test_the_inputs_change_with_the_playwright_version(tmp_path: Path) -> None:
 def test_the_inputs_ignore_the_rest_of_the_runtime_and_the_lock(
     tmp_path: Path, name: str, old: str, new: str
 ) -> None:
+    """Keep unrelated prose, operations, and packages out of the cache key."""
     checkout = _checkout(tmp_path)
     before = browser_image_inputs(checkout)
 
@@ -103,10 +120,19 @@ def test_the_inputs_ignore_the_rest_of_the_runtime_and_the_lock(
 
 
 def test_a_renamed_switch_constant_fails_instead_of_dropping_out(tmp_path: Path) -> None:
+    """Refuse a missing launch input instead of silently reusing old evidence."""
     checkout = _checkout(tmp_path)
     _edit(checkout / RUNTIME, "_VENDOR_REQUEST_ARGUMENTS = (", "_VENDOR_ARGUMENTS = (")
 
     with pytest.raises(LookupError, match="_VENDOR_REQUEST_ARGUMENTS"):
+        browser_image_inputs(checkout)
+
+
+def test_missing_context_configuration_fails_closed(tmp_path: Path) -> None:
+    """Require the declared context hook instead of dropping it from the key."""
+    checkout = _checkout(tmp_path)
+    _edit(checkout / RUNTIME, "def _context_options(", "def _renamed_context_options(")
+    with pytest.raises(LookupError, match="_context_options"):
         browser_image_inputs(checkout)
 
 

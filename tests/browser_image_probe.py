@@ -55,6 +55,7 @@ _NOTE = (
 def _action(
     observation: BrowserObservation, name: str, kind: BrowserActionKind, value: str | None = None
 ) -> BrowserAction:
+    """Bind a named observed control to the current page revision."""
     element = next(element for element in observation.elements if element.name == name)
     return BrowserAction(
         kind=kind, expected_revision=observation.revision, ref=element.ref, value=value
@@ -67,6 +68,7 @@ async def measure(idle_seconds: float) -> dict[str, object]:
     user_agents: set[str] = set()
 
     async def serve(request: Request) -> Response:
+        """Serve synthetic forms while recording page requests and user agents."""
         page_loads.append(f"{request.method} {request.url.path}")
         user_agents.add(request.headers.get("user-agent", ""))
         return HTMLResponse(_NOTE if request.url.path == "/note" else _FORMS)
@@ -100,11 +102,13 @@ async def _click_and_type(
     runtime: RealBrowserRuntime, page: BrowserObservation, name: str, value: str
 ) -> BrowserObservation:
     # Typing alone, with no click into the field first, fetched no dictionary.
+    """Focus the field before typing so the probe exercises dictionary requests."""
     page = await runtime.act(_action(page, name, BrowserActionKind.CLICK))
     return await runtime.act(_action(page, name, BrowserActionKind.TYPE, value))
 
 
 def main() -> None:
+    """Run the requested idle scenario and emit its traffic report as JSON."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--idle-seconds", type=float, default=IDLE_SECONDS)
     arguments = parser.parse_args()

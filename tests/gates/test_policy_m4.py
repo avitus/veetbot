@@ -592,6 +592,7 @@ async def test_timeout_after_dispatch_preserves_write_uncertainty(
         async def execute(
             self, arguments: dict[str, object], context: ToolExecutionContext
         ) -> ToolResult:
+            """Remain in flight until the executor cancels the dispatched invocation."""
             self.started += 1
             await asyncio.sleep(10)
             raise AssertionError("the deadline must cancel execution")

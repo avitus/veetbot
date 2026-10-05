@@ -68,6 +68,7 @@ def container_options(service: Mapping[str, Any]) -> list[str]:
 
 
 def _docker(*arguments: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
+    """Run one bounded Docker command and retain diagnostics for assertions."""
     return subprocess.run(
         ["docker", *arguments], capture_output=True, text=True, timeout=timeout, check=False
     )
@@ -75,6 +76,7 @@ def _docker(*arguments: str, timeout: float = 60) -> subprocess.CompletedProcess
 
 @contextmanager
 def _internal_network() -> Iterator[str]:
+    """Create an isolated measurement network and remove it after the probe."""
     name = f"veetbot-browser-traffic-{secrets.token_hex(4)}"
     created = _docker("network", "create", "--internal", name)
     assert created.returncode == 0, created.stderr
@@ -85,6 +87,7 @@ def _internal_network() -> Iterator[str]:
 
 
 def _measure() -> dict[str, Any]:
+    """Run the installed browser in its production limits and read its report."""
     if _docker("image", "inspect", IMAGE).returncode != 0:
         pytest.fail(f"{IMAGE} is not built; run make browser-image", pytrace=False)
     compose = yaml.safe_load(
@@ -136,6 +139,7 @@ def test_the_service_image_asks_its_proxy_only_for_what_the_page_loads() -> None
 
 
 def test_every_production_limit_reaches_the_measurement() -> None:
+    """Require every production container limit to be translated or rejected."""
     compose = yaml.safe_load(
         (ROOT / "deploy" / "docker-compose.production.yml").read_text(encoding="utf-8")
     )

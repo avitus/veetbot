@@ -82,6 +82,7 @@ def test_integration_mode_permits_only_configured_database_endpoint(
 
 
 def test_required_make_targets_exist() -> None:
+    """Keep every documented development and verification target available."""
     text = (ROOT / "Makefile").read_text(encoding="utf-8")
     for target in (
         "install",
@@ -933,6 +934,7 @@ def test_only_the_ci_integration_job_marks_its_database_disposable() -> None:
 
 
 def test_ci_has_the_required_partitions() -> None:
+    """Require the hosted jobs and dependency structure owned by CircleCI."""
     workflow_directory = ROOT / ".github" / "workflows"
     assert not list(workflow_directory.glob("*.yml"))
     assert not list(workflow_directory.glob("*.yaml"))

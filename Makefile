@@ -56,7 +56,7 @@ client-build:
 	uv run $(PYTHON) scripts/build_client.py
 
 test:
-	uv run pytest -m "not live"
+	uv run pytest -m "not live and not browser_image"
 
 test-static:
 	uv run pytest -n $(STATIC_TEST_WORKERS) --dist loadscope -m static
