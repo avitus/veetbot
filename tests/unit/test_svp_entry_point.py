@@ -1,4 +1,4 @@
-"""The bridge entry point takes its grant only as a private file path (ADR-0152)."""
+"""The bridge entry point takes its grant only as a private file path (ADR-0153)."""
 
 from __future__ import annotations
 

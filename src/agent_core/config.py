@@ -700,7 +700,7 @@ def _read_private_surface_secret_file(raw_path: str, name: str) -> str:
 
 
 def _svp_credential_path(raw_path: str) -> str:
-    """Validate where the Scale VP grant lives without reading the grant (ADR-0152)."""
+    """Validate where the Scale VP grant lives without reading the grant (ADR-0153)."""
 
     if not raw_path:
         raise ConfigurationError("AGENT_SVP_ENABLED=1 requires SVP_CREDENTIAL_FILE")
@@ -1754,7 +1754,7 @@ def _load_settings(
     raw_svp_credential_file = values.get("SVP_CREDENTIAL_FILE", "").strip()
     if svp_enabled and load_provider_credentials:
         # The platform holds the grant's path; only the bridge reads or rewrites
-        # the rotating grant itself (ADR-0152).
+        # the rotating grant itself (ADR-0153).
         if "svp_read" in credentials:
             raise ConfigurationError("duplicate Scale VP credential source")
         credentials["svp_read"] = SecretStr(_svp_credential_path(raw_svp_credential_file))

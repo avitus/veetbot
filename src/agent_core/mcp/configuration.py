@@ -190,7 +190,7 @@ def calling_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MCP
 
 
 def svp_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MCPServerConfig, ...]:
-    """Compose the one read-only Scale VP row; its credential is a file path (ADR-0152)."""
+    """Compose the one read-only Scale VP row; its credential is a file path (ADR-0153)."""
     if not enabled:
         return ()
     return (

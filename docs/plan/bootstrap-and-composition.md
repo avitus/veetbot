@@ -1477,7 +1477,7 @@ See [setup](../bland-setup.md) for the complete configuration and role inventory
 
 ## Scale VP bridge composition
 
-[ADR-0152](../adr/0152-scale-vp-api-bridge.md) adds default-off
+[ADR-0153](../adr/0153-scale-vp-api-bridge.md) adds default-off
 `AGENT_SVP_ENABLED` and `SVP_CREDENTIAL_FILE`, the absolute path of the
 owner-only grant file. Enabled without that path, or with a path that is
 relative, linked, missing or not `0600`, startup fails closed; the path

@@ -1,4 +1,4 @@
-"""The package keeps a rotating grant durable and shared across processes (ADR-0152)."""
+"""The package keeps a rotating grant durable and shared across processes (ADR-0153)."""
 
 from __future__ import annotations
 

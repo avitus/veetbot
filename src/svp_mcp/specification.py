@@ -10,7 +10,14 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
-from svp_mcp.constants import API_BASE, API_ROOT, MAXIMUM_DESCRIPTION_BYTES, ORIGIN
+from svp_mcp.constants import (
+    API_BASE,
+    API_ROOT,
+    MAXIMUM_BODY_BYTES,
+    MAXIMUM_DESCRIPTION_BYTES,
+    ORIGIN,
+    READ_POST_PATHS,
+)
 from svp_mcp.errors import SvpError
 
 _OPERATION_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -37,11 +44,15 @@ class Parameter:
 @dataclass(frozen=True)
 class Operation:
     operation_id: str
+    method: str
     path: str
     summary: str
     description: str
     parameters: tuple[Parameter, ...]
     response_schema: Any
+    body_schema: Any = None
+    body_properties: frozenset[str] | None = None
+    body_required: frozenset[str] = frozenset()
 
 
 def is_confined(url: str) -> bool:
@@ -67,16 +78,24 @@ def _url(path: str) -> str:
     return API_BASE + path
 
 
+def is_read_post(url: str) -> bool:
+    """Accept a `POST` only to one of the reviewed read operations, spelled exactly."""
+
+    return is_confined(url) and url.removeprefix(API_BASE) in READ_POST_PATHS
+
+
 def _text(value: object, limit: int) -> str:
     return value[:limit] if isinstance(value, str) else ""
 
 
-def _parameters(document: Mapping[str, Any], item: Mapping[str, Any], path: str) -> list[Parameter]:
+def _parameters(
+    document: Mapping[str, Any], item: Mapping[str, Any], operation: Mapping[str, Any], path: str
+) -> list[Parameter]:
     components = document.get("components")
     shared = components.get("parameters") if isinstance(components, dict) else None
     merged: dict[tuple[str, str], Parameter] = {}
     placeholders = _PLACEHOLDER.findall(path)
-    for source in (item.get("parameters"), item["get"].get("parameters")):
+    for source in (item.get("parameters"), operation.get("parameters")):
         for declared in source if isinstance(source, list) else ():
             reference = declared.get("$ref") if isinstance(declared, dict) else None
             if isinstance(reference, str) and reference.startswith(_PARAMETER_REFERENCE):
@@ -109,8 +128,26 @@ def _response_schema(operation: Mapping[str, Any]) -> Any:
     return value if isinstance(value, dict) else None
 
 
+def _body(document: Mapping[str, Any], operation: Mapping[str, Any]) -> dict[str, Any]:
+    value: Any = operation
+    for key in ("requestBody", "content", "application/json", "schema"):
+        value = value.get(key) if isinstance(value, dict) else None
+    schema = _resolved(document, value, frozenset(), 0) if isinstance(value, dict) else {}
+    properties = schema.get("properties")
+    required = schema.get("required")
+    return {
+        "body_schema": schema,
+        "body_properties": frozenset(properties) if isinstance(properties, dict) else None,
+        "body_required": frozenset(
+            name
+            for name in (required if isinstance(required, list) else ())
+            if isinstance(name, str)
+        ),
+    }
+
+
 def load_operations(document: object) -> dict[str, Operation]:
-    """Index the document's `GET` operations whose paths stay under the API root."""
+    """Index the `GET` operations and the reviewed read `POST`s under the API root."""
 
     paths = document.get("paths") if isinstance(document, dict) else None
     if not isinstance(document, dict) or not isinstance(paths, dict):
@@ -118,29 +155,36 @@ def load_operations(document: object) -> dict[str, Operation]:
     operations: dict[str, Operation] = {}
     for path in sorted(key for key in paths if isinstance(key, str)):
         item = paths[path]
-        operation = item.get("get") if isinstance(item, dict) else None
-        if not isinstance(operation, dict) or not path.startswith("/") or path.startswith("//"):
+        if not isinstance(item, dict) or not path.startswith("/") or path.startswith("//"):
             continue
         if not is_confined(_url(_PLACEHOLDER.sub("x", path))):
             continue
-        identifier = operation.get("operationId")
-        if (
-            not isinstance(identifier, str)
-            or _OPERATION_ID.fullmatch(identifier) is None
-            or identifier in operations
-        ):
-            base = "get_" + re.sub(r"[^A-Za-z0-9]+", "_", path).strip("_")
-            identifier, suffix = base, 2
-            while identifier in operations:
-                identifier, suffix = f"{base}_{suffix}", suffix + 1
-        operations[identifier] = Operation(
-            operation_id=identifier,
-            path=path,
-            summary=_text(operation.get("summary"), _SUMMARY_CHARACTERS),
-            description=_text(operation.get("description"), _DESCRIPTION_CHARACTERS),
-            parameters=tuple(_parameters(document, item, path)),
-            response_schema=_response_schema(operation),
-        )
+        for method in ("get", "post"):
+            operation = item.get(method)
+            if not isinstance(operation, dict) or (
+                method == "post" and path not in READ_POST_PATHS
+            ):
+                continue
+            identifier = operation.get("operationId")
+            if (
+                not isinstance(identifier, str)
+                or _OPERATION_ID.fullmatch(identifier) is None
+                or identifier in operations
+            ):
+                base = f"{method}_" + re.sub(r"[^A-Za-z0-9]+", "_", path).strip("_")
+                identifier, suffix = base, 2
+                while identifier in operations:
+                    identifier, suffix = f"{base}_{suffix}", suffix + 1
+            operations[identifier] = Operation(
+                operation_id=identifier,
+                method=method.upper(),
+                path=path,
+                summary=_text(operation.get("summary"), _SUMMARY_CHARACTERS),
+                description=_text(operation.get("description"), _DESCRIPTION_CHARACTERS),
+                parameters=tuple(_parameters(document, item, operation, path)),
+                response_schema=_response_schema(operation),
+                **(_body(document, operation) if method == "post" else {}),
+            )
     return operations
 
 
@@ -195,6 +239,30 @@ def request_target(
     return url, pairs
 
 
+def request_body(operation: Operation, body: object) -> dict[str, Any] | None:
+    """Return the JSON body a read `POST` may send, or refuse it; a `GET` takes none."""
+
+    if operation.method != "POST":
+        if body:
+            raise SvpError("svp.arguments_invalid")
+        return None
+    if body is None:
+        body = {}
+    if not isinstance(body, dict) or not all(isinstance(key, str) for key in body):
+        raise SvpError("svp.arguments_invalid")
+    if operation.body_properties is not None and not set(body) <= operation.body_properties:
+        raise SvpError("svp.arguments_invalid")
+    if not operation.body_required <= set(body):
+        raise SvpError("svp.arguments_invalid")
+    try:
+        encoded = json.dumps(body, allow_nan=False)
+    except (TypeError, ValueError):
+        raise SvpError("svp.arguments_invalid") from None
+    if len(encoded.encode("utf-8")) > MAXIMUM_BODY_BYTES:
+        raise SvpError("svp.arguments_invalid")
+    return dict(body)
+
+
 def _resolved(document: Mapping[str, Any], value: Any, seen: frozenset[str], depth: int) -> Any:
     if isinstance(value, list):
         return [_resolved(document, item, seen, depth) for item in value]
@@ -220,7 +288,7 @@ def describe(document: Mapping[str, Any], operation: Operation) -> dict[str, Any
 
     described: dict[str, Any] = {
         "id": operation.operation_id,
-        "method": "GET",
+        "method": operation.method,
         "path": operation.path,
         "summary": operation.summary,
         "description": operation.description,
@@ -234,6 +302,7 @@ def describe(document: Mapping[str, Any], operation: Operation) -> dict[str, Any
             }
             for item in operation.parameters
         ],
+        "request_body": operation.body_schema if operation.method == "POST" else None,
         "response_schema": _resolved(document, operation.response_schema, frozenset(), 0),
         "response_schema_omitted": False,
     }

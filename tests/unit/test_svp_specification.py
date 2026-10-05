@@ -1,4 +1,4 @@
-"""The published document yields only confined, read-only operations (ADR-0152)."""
+"""The published document yields only confined, read-only operations (ADR-0153)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from svp_mcp import constants, specification
 from svp_mcp.errors import SvpError
 from svp_mcp.specification import describe, load_operations, request_target
 
@@ -203,3 +204,120 @@ def test_an_oversized_description_drops_the_response_schema() -> None:
 
     assert described["response_schema"] is None
     assert described["response_schema_omitted"] is True
+
+
+def search_document() -> dict[str, Any]:
+    return {
+        "paths": {
+            "/v1/companies/_search": {
+                "post": {
+                    "operationId": "search_companies",
+                    "summary": "Search companies",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/Search"}}
+                        },
+                    },
+                }
+            },
+            "/v1/contacts/_search": {
+                "post": {
+                    "operationId": "search_contacts",
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {"contact_name": {"type": "string"}},
+                                }
+                            }
+                        }
+                    },
+                }
+            },
+            "/v1/companies": {
+                "get": {"operationId": "browse_companies"},
+                "post": {"operationId": "create_company"},
+            },
+            "/v1/web-cache/_search": {"post": {"operationId": "web_search"}},
+            "/v1/tasks": {"post": {"operationId": "create_task"}},
+        },
+        "components": {
+            "schemas": {
+                "Search": {
+                    "type": "object",
+                    "required": ["query"],
+                    "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
+                }
+            }
+        },
+    }
+
+
+def test_the_post_allowlist_is_exactly_the_reviewed_read_operations() -> None:
+    assert getattr(constants, "READ_POST_PATHS", None) == frozenset(
+        {
+            "/v1/companies/_lookup",
+            "/v1/companies/_search",
+            "/v1/contacts/_search",
+            "/v1/deals/_search",
+            "/v1/investors/_coinvestors",
+            "/v1/investors/_portfolio",
+            "/v1/search",
+        }
+    )
+
+
+def test_only_allowlisted_posts_are_indexed_beside_the_gets() -> None:
+    operations = load_operations(search_document())
+
+    assert {name: getattr(item, "method", None) for name, item in operations.items()} == {
+        "browse_companies": "GET",
+        "search_companies": "POST",
+        "search_contacts": "POST",
+    }
+
+
+def test_a_read_post_body_is_checked_against_its_declared_properties() -> None:
+    request_body = getattr(specification, "request_body", None)
+    assert callable(request_body), "read-post bodies must be validated"
+    operations = load_operations(search_document())
+    search = operations["search_companies"]
+
+    assert request_body(search, {"query": "robotics", "limit": 5}) == {
+        "query": "robotics",
+        "limit": 5,
+    }
+    assert request_body(operations["search_contacts"], None) == {}
+    for body in (
+        None,
+        {},
+        {"limit": 5},
+        {"query": "robotics", "undeclared": 1},
+        ["robotics"],
+        "robotics",
+        {"query": float("nan")},
+        {"query": "x" * 20_000},
+    ):
+        with pytest.raises(SvpError, match=r"^svp\.arguments_invalid$"):
+            request_body(search, body)
+
+
+def test_a_get_operation_takes_no_body() -> None:
+    request_body = getattr(specification, "request_body", None)
+    assert callable(request_body), "read-post bodies must be validated"
+    browse = load_operations(search_document())["browse_companies"]
+
+    assert request_body(browse, None) is None
+    with pytest.raises(SvpError, match=r"^svp\.arguments_invalid$"):
+        request_body(browse, {"query": "robotics"})
+
+
+def test_description_carries_the_method_and_resolved_request_body() -> None:
+    spec = search_document()
+    described = describe(spec, load_operations(spec)["search_companies"])
+
+    assert described["method"] == "POST"
+    assert described["request_body"]["required"] == ["query"]
+    assert sorted(described["request_body"]["properties"]) == ["limit", "query"]

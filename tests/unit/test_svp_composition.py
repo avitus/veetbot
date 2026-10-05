@@ -1,4 +1,4 @@
-"""Composition admits the Scale VP bridge only through its flag (ADR-0152)."""
+"""Composition admits the Scale VP bridge only through its flag (ADR-0153)."""
 
 from __future__ import annotations
 

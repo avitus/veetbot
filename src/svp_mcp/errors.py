@@ -13,3 +13,12 @@ class SvpError(RuntimeError):
             raise ValueError("unknown Scale VP failure code")
         self.code = code
         super().__init__(code)
+
+
+class SvpRejectionError(SvpError):
+    """The service's own client-error answer; its message stays out of the string form."""
+
+    def __init__(self, status: int, problem: str) -> None:
+        super().__init__("svp.provider_rejected")
+        self.status = status
+        self.problem = problem

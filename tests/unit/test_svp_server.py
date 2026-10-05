@@ -1,4 +1,4 @@
-"""The bridge advertises three fixed read tools over the published document (ADR-0152)."""
+"""The bridge advertises three fixed read tools over the published document (ADR-0153)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 import httpx
+import pytest
 from mcp.types import CallToolResult, TextContent
 
 from svp_mcp.client import SvpClient
@@ -28,6 +29,25 @@ DOCUMENT = {
                 "parameters": [{"name": "company_id", "in": "path", "required": True}],
             }
         },
+        "/v1/companies/_search": {
+            "post": {
+                "operationId": "search_companies",
+                "summary": "Search companies",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["query"],
+                                "properties": {"query": {"type": "string"}},
+                            }
+                        }
+                    },
+                },
+            }
+        },
+        "/v1/tasks": {"post": {"operationId": "create_task"}},
     }
 }
 
@@ -79,8 +99,24 @@ async def test_listing_offers_only_read_operations() -> None:
 
     assert json.loads(_text(result)) == {
         "operations": [
-            {"id": "get_company", "path": "/v1/companies/{company_id}", "summary": ""},
-            {"id": "list_companies", "path": "/v1/companies", "summary": "List companies"},
+            {
+                "id": "get_company",
+                "method": "GET",
+                "path": "/v1/companies/{company_id}",
+                "summary": "",
+            },
+            {
+                "id": "list_companies",
+                "method": "GET",
+                "path": "/v1/companies",
+                "summary": "List companies",
+            },
+            {
+                "id": "search_companies",
+                "method": "POST",
+                "path": "/v1/companies/_search",
+                "summary": "Search companies",
+            },
         ],
         "truncated": False,
     }
@@ -120,22 +156,85 @@ async def test_an_operation_that_is_not_a_read_cannot_be_called() -> None:
 
     for tool in ("describe_operation", "call_operation"):
         result = await _server(service).call_tool(tool, {"operation_id": "create_company"})
-        assert _text(result) == "svp.operation_unknown"
-        assert result.is_error is True
+        assert json.loads(_text(result))["refused"] == "svp.operation_unknown"
+        assert result.is_error is not True
 
     assert {request.method for request in service.requests} == {"GET"}
     assert {str(request.url) for request in service.requests} == {DOCUMENT_URL}
 
 
-async def test_refused_arguments_and_upstream_failures_are_content_free() -> None:
+async def test_a_refusal_tells_the_model_how_to_correct_the_call() -> None:
+    """The platform hides failure text, so a refusal the model can fix is an answer."""
     refused = await _server(Service()).call_tool(
         "call_operation", {"operation_id": "list_companies", "query": {"undeclared": "1"}}
     )
-    failed = await _server(Service(status=422)).call_tool(
+
+    answer = json.loads(_text(refused))
+    assert refused.is_error is not True
+    assert answer["refused"] == "svp.arguments_invalid"
+    assert "describe_operation" in answer["hint"]
+
+
+@pytest.mark.parametrize("status", [400, 404, 409, 422])
+async def test_the_services_own_refusal_is_returned_with_its_bounded_message(status: int) -> None:
+    answered = await _server(Service(status=status)).call_tool(
         "call_operation", {"operation_id": "list_companies", "query": {"limit": 5}}
     )
 
-    assert _text(refused) == "svp.arguments_invalid"
-    assert _text(failed) == "svp.provider_rejected"
-    assert refused.is_error is True and failed.is_error is True
+    assert answered.is_error is not True
+    assert json.loads(_text(answered)) == {"status": status, "problem": "private diagnostic"}
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (302, "svp.provider_rejected"),
+        (401, "svp.credential_rejected"),
+        (403, "svp.credential_rejected"),
+        (429, "svp.rate_limited"),
+        (500, "svp.provider_unavailable"),
+    ],
+)
+async def test_failures_the_model_cannot_fix_stay_content_free(status: int, code: str) -> None:
+    failed = await _server(Service(status=status)).call_tool(
+        "call_operation", {"operation_id": "list_companies", "query": {"limit": 5}}
+    )
+
+    assert failed.is_error is True
+    assert _text(failed) == code
     assert failed.structured_content == {"effect_status": "not_applied"}
+
+
+async def test_a_search_is_posted_with_its_declared_body() -> None:
+    service = Service()
+
+    result = await _server(service).call_tool(
+        "call_operation", {"operation_id": "search_companies", "body": {"query": "robotics"}}
+    )
+
+    assert result.is_error is not True
+    assert json.loads(_text(result))["data"]["name"] == "Acme"
+    search = service.requests[-1]
+    assert (search.method, str(search.url)) == ("POST", API_ROOT + "companies/_search")
+    assert json.loads(search.content) == {"query": "robotics"}
+
+
+async def test_a_body_is_refused_where_it_is_not_declared() -> None:
+    service = Service()
+
+    for arguments in (
+        {"operation_id": "list_companies", "body": {"query": "robotics"}},
+        {"operation_id": "search_companies", "body": {"query": "robotics", "undeclared": 1}},
+        {"operation_id": "search_companies"},
+        {"operation_id": "create_task", "body": {"title": "x"}},
+    ):
+        result = await _server(service).call_tool("call_operation", arguments)
+        assert result.is_error is not True
+        assert json.loads(_text(result))["refused"] in {
+            "svp.arguments_invalid",
+            "svp.operation_unknown",
+        }
+
+    assert {(request.method, str(request.url)) for request in service.requests} == {
+        ("GET", DOCUMENT_URL)
+    }

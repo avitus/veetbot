@@ -18,11 +18,12 @@ title: Changelog
 - Chat can read the Scale VP data service through its REST API once the
   owner signs in. A one-time command signs in through the browser and saves
   the grant to a private file; a small bridge then offers three read tools
-  that list, describe and call the service's published read operations.
-  Nothing is written to the service, and scheduled runs are not offered the
+  that list, describe and call the service's published read operations,
+  including its company, contact, deal and investor searches. Nothing is
+  written to the service, and scheduled runs are not offered the
   tools. It stays off until `AGENT_SVP_ENABLED=1` names that file. A first
   sign-in and live read against the real service succeeded the same day
-  (ADR-0152).
+  (ADR-0153).
 
 ## 2026-10-05 — Website bindings for scheduled briefings
 

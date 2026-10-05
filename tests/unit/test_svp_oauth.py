@@ -1,4 +1,4 @@
-"""The grant requests carry exactly what the authorization server needs (ADR-0152)."""
+"""The grant requests carry exactly what the authorization server needs (ADR-0153)."""
 
 from __future__ import annotations
 

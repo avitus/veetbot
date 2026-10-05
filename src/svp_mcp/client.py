@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from functools import partial
 from typing import Any, Protocol
 
@@ -11,9 +11,30 @@ import anyio
 import anyio.to_thread
 import httpx
 
-from svp_mcp.constants import DOCUMENT_URL, MAXIMUM_DOCUMENT_BYTES, MAXIMUM_RESULT_BYTES
-from svp_mcp.errors import SvpError
-from svp_mcp.specification import is_confined
+from svp_mcp.constants import (
+    ANSWERED_STATUSES,
+    DOCUMENT_URL,
+    MAXIMUM_DOCUMENT_BYTES,
+    MAXIMUM_PROBLEM_BYTES,
+    MAXIMUM_PROBLEM_CHARACTERS,
+    MAXIMUM_RESULT_BYTES,
+)
+from svp_mcp.errors import SvpError, SvpRejectionError
+from svp_mcp.specification import is_confined, is_read_post
+
+
+def _problem(raw: bytes) -> str:
+    """Reduce a client-error body to the service's own bounded `detail` text."""
+
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return ""
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if detail is None:
+        return ""
+    text = detail if isinstance(detail, str) else json.dumps(detail)
+    return text[:MAXIMUM_PROBLEM_CHARACTERS]
 
 
 class TokenSource(Protocol):
@@ -41,24 +62,38 @@ class SvpClient:
         return await anyio.to_thread.run_sync(partial(self._tokens.access_token, rejected=rejected))
 
     async def _send(
-        self, url: str, query: Sequence[tuple[str, str]], token: str, maximum_bytes: int
+        self,
+        method: str,
+        url: str,
+        query: Sequence[tuple[str, str]],
+        body: Mapping[str, Any] | None,
+        token: str,
+        maximum_bytes: int,
     ) -> tuple[int, bytes]:
         try:
             async with self._http.stream(
-                "GET",
+                method,
                 url,
                 params=list(query) or None,
+                json=None if body is None else dict(body),
                 headers={"authorization": f"Bearer {token}", "accept": "application/json"},
                 follow_redirects=False,
             ) as response:
+                if response.status_code in ANSWERED_STATUSES:
+                    explained = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        explained.extend(chunk[: MAXIMUM_PROBLEM_BYTES - len(explained)])
+                        if len(explained) >= MAXIMUM_PROBLEM_BYTES:
+                            break
+                    return response.status_code, bytes(explained)
                 if not 200 <= response.status_code < 300:
                     return response.status_code, b""
-                body = bytearray()
+                received = bytearray()
                 async for chunk in response.aiter_bytes():
-                    if len(body) + len(chunk) > maximum_bytes:
+                    if len(received) + len(chunk) > maximum_bytes:
                         raise SvpError("svp.response_too_large")
-                    body.extend(chunk)
-                return response.status_code, bytes(body)
+                    received.extend(chunk)
+                return response.status_code, bytes(received)
         except httpx.HTTPError:
             raise SvpError("svp.provider_unavailable") from None
 
@@ -73,14 +108,38 @@ class SvpClient:
 
         if not is_confined(url):
             raise SvpError("svp.arguments_invalid")
-        return await self._read(url, query, maximum_bytes)
+        return await self._read("GET", url, query, None, maximum_bytes)
 
-    async def _read(self, url: str, query: Sequence[tuple[str, str]], maximum_bytes: int) -> object:
+    async def post(
+        self,
+        url: str,
+        body: Mapping[str, Any],
+        query: Sequence[tuple[str, str]] = (),
+        *,
+        maximum_bytes: int = MAXIMUM_RESULT_BYTES,
+    ) -> object:
+        """Run one reviewed read `POST`; any other target is refused before a request."""
+
+        if not is_read_post(url):
+            raise SvpError("svp.arguments_invalid")
+        return await self._read("POST", url, query, body, maximum_bytes)
+
+    async def _read(
+        self,
+        method: str,
+        url: str,
+        query: Sequence[tuple[str, str]],
+        body: Mapping[str, Any] | None,
+        maximum_bytes: int,
+    ) -> object:
         token = await self._token(None)
-        status, body = await self._send(url, query, token, maximum_bytes)
+        status, received = await self._send(method, url, query, body, token, maximum_bytes)
         if status == 401:
+            # A refused token means the request was not acted on, so one retry is safe.
             token = await self._token(token)
-            status, body = await self._send(url, query, token, maximum_bytes)
+            status, received = await self._send(method, url, query, body, token, maximum_bytes)
+        if status in ANSWERED_STATUSES:
+            raise SvpRejectionError(status, _problem(received))
         if not 200 <= status < 300:
             raise SvpError(
                 "svp.credential_rejected"
@@ -92,7 +151,7 @@ class SvpClient:
                 else "svp.provider_rejected"
             )
         try:
-            return json.loads(body)
+            return json.loads(received)
         except (ValueError, UnicodeError):
             raise SvpError("svp.response_invalid") from None
 
@@ -103,7 +162,11 @@ class SvpClient:
             if self._document is None:
                 try:
                     # The document's own location is fixed and is not a callable target.
-                    payload = await self._read(DOCUMENT_URL, (), MAXIMUM_DOCUMENT_BYTES)
+                    payload = await self._read(
+                        "GET", DOCUMENT_URL, (), None, MAXIMUM_DOCUMENT_BYTES
+                    )
+                except SvpRejectionError:
+                    raise SvpError("svp.specification_invalid") from None
                 except SvpError as exc:
                     if exc.code in {"svp.response_too_large", "svp.response_invalid"}:
                         raise SvpError("svp.specification_invalid") from None

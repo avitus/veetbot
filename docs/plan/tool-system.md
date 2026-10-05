@@ -2211,9 +2211,9 @@ valid only with that target, so no other tool can claim the public-HTTPS
 unsubscribe transport ([ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md)).
 
 
-## The Scale VP data API bridge (ADR-0152)
+## The Scale VP data API bridge (ADR-0153)
 
-[ADR-0152](../adr/0152-scale-vp-api-bridge.md) adds one more first-party stdio
+[ADR-0153](../adr/0153-scale-vp-api-bridge.md) adds one more first-party stdio
 server, `svp_read`, as a default-off, non-milestone extension. It reads the
 Scale VP data service's REST API under `https://scalevp-mcp.com/api/v1/`. The
 service accepts only an authorization-code grant, which the adapter does not
@@ -2259,16 +2259,22 @@ refresh, and the request is retried once.
 
 | Tool | Reads |
 | --- | --- |
-| `list_operations` | the id, path and summary of each published `GET` operation |
-| `describe_operation` | one operation's path and query parameters and its response schema |
-| `call_operation` | one operation, given its declared path and query arguments |
+| `list_operations` | the id, method, path and summary of each offered operation |
+| `describe_operation` | one operation's parameters, request body and response schema |
+| `call_operation` | one operation, given its declared path, query and body arguments |
 
 The package fetches the service's OpenAPI document from
-`/api/openapi.json` once per server process. Only `GET` operations are
-indexed. An operation id is the document's `operationId` when it is unique
-and plain, and otherwise derived from the path. Header and cookie parameters
-are dropped. A call must supply every path placeholder and every required
-query parameter, and may name no other query parameter.
+`/api/openapi.json` once per server process. `GET` operations are indexed,
+and so are the `POST` operations at seven fixed paths that search or look up
+and change nothing: `/v1/companies/_lookup`, `/v1/companies/_search`,
+`/v1/contacts/_search`, `/v1/deals/_search`, `/v1/investors/_coinvestors`,
+`/v1/investors/_portfolio` and `/v1/search`. No other method is indexed. An
+operation id is the document's `operationId` when it is unique and plain, and
+otherwise derived from the method and path. Header and cookie parameters are
+dropped. A call must supply every path placeholder and every required query
+parameter, and may name no other query parameter. A `GET` takes no body. A
+listed `POST` takes one JSON object of at most 16 KiB that names only the
+properties its request schema declares and every property it requires.
 
 **Confinement.** The origin, the `/api` mount the document's paths are
 relative to, the `/api/v1/` root, the document URL and the three OAuth
@@ -2280,17 +2286,28 @@ Every request URL is rebuilt from the
 document path with each path value percent-encoded as one segment, and is
 refused unless it is HTTPS to the fixed host on the default port, under
 `/api/v1/`, with no user information, dot segment, query or fragment of its
-own. Redirects are not followed and ambient proxy settings are not read.
+own. A `POST` is sent only when that URL is exactly one of the seven listed
+paths. Redirects are not followed and ambient proxy settings are not read.
 
 **Bounds and failures.** A result is at most 512 KiB, the document 4 MiB, a
 description 64 KiB with its response schema dropped first, and a listing five
-hundred operations. Failures cross the pipe as an error result holding one
-fixed code and `effect_status: not_applied`: `svp.arguments_invalid`,
-`svp.operation_unknown`, `svp.credential_invalid`, `svp.credential_rejected`,
-`svp.rate_limited`, `svp.provider_rejected`, `svp.provider_unavailable`,
-`svp.response_invalid`, `svp.response_too_large` and
-`svp.specification_invalid`. Upstream bodies, tokens and the client secret are
-never included, and request lines are kept out of the child's standard error.
+hundred operations. A failure the model cannot correct crosses the pipe as an
+error result holding one fixed code and `effect_status: not_applied`:
+`svp.credential_invalid`, `svp.credential_rejected`, `svp.rate_limited`,
+`svp.provider_rejected`, `svp.provider_unavailable`, `svp.response_invalid`,
+`svp.response_too_large` and `svp.specification_invalid`. Tokens and the
+client secret are never included, and request lines are kept out of the
+child's standard error.
+
+**Answers the model can act on.** The runtime gives the model no text from a
+failed MCP call, so two outcomes are ordinary results instead. A call the
+package refuses returns `refused`, holding `svp.arguments_invalid` or
+`svp.operation_unknown`, with a fixed `hint`. A response of 400, 404, 409 or
+422 returns its `status` and a `problem`: the response's `detail`, read from
+at most 16 KiB and cut to two thousand characters, or empty when the body is
+not a JSON object with one. The service uses that message to say how to
+refine a request. Like every result of this server it is external and
+untrusted.
 
 **The ceremony.** `python -m svp_mcp bootstrap --output-file <new absolute
 path>` prints a data-use notice and continues only on the exact input

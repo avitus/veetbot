@@ -1,4 +1,4 @@
-"""The sign-in ceremony proves the grant against the API before it writes it (ADR-0152)."""
+"""The sign-in ceremony proves the grant against the API before it writes it (ADR-0153)."""
 
 from __future__ import annotations
 

@@ -1,12 +1,14 @@
-"""Provider contract starts with confinement and content-free failures (ADR-0152)."""
+"""Provider contract starts with confinement and content-free failures (ADR-0153)."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import httpx
 import pytest
 
+from svp_mcp import constants
 from svp_mcp.client import SvpClient
 from svp_mcp.constants import API_ROOT, DOCUMENT_URL
 from svp_mcp.errors import SvpError
@@ -173,3 +175,74 @@ async def test_a_document_that_is_not_an_object_is_refused() -> None:
 def test_the_document_is_one_fixed_location_beside_the_callable_root() -> None:
     assert DOCUMENT_URL == "https://scalevp-mcp.com/api/openapi.json"
     assert API_ROOT == "https://scalevp-mcp.com/api/v1/"
+
+
+SEARCH_URL = "https://scalevp-mcp.com/api/v1/companies/_search"
+
+
+async def test_a_read_post_sends_its_json_body_only_to_an_allowlisted_url() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    client = _client(handle)
+    post = getattr(client, "post", None)
+    assert callable(post), "read posts must go through the confined client"
+
+    assert await post(SEARCH_URL, {"query": "robotics"}) == {"results": []}
+    assert [(request.method, str(request.url)) for request in requests] == [("POST", SEARCH_URL)]
+    assert json.loads(requests[0].content) == {"query": "robotics"}
+    assert requests[0].headers["authorization"].split() == ["Bearer", "access-1"]
+    for url in (
+        API_ROOT + "companies",
+        API_ROOT + "web-cache/_search",
+        API_ROOT + "tasks",
+        SEARCH_URL + "/",
+        SEARCH_URL + "/../../tasks",
+        "https://elsewhere.example/api/v1/companies/_search",
+    ):
+        with pytest.raises(SvpError, match=r"^svp\.arguments_invalid$"):
+            await post(url, {"query": "robotics"})
+    assert len(requests) == 1
+    assert SEARCH_URL.removeprefix("https://scalevp-mcp.com/api") in constants.READ_POST_PATHS
+
+
+async def test_a_rejected_token_is_replaced_once_for_a_read_post() -> None:
+    bodies: list[bytes] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.content)
+        return httpx.Response(401 if len(bodies) == 1 else 200, json={"results": [1]})
+
+    client = _client(handle)
+    post = getattr(client, "post", None)
+    assert callable(post), "read posts must go through the confined client"
+
+    assert await post(SEARCH_URL, {"query": "robotics"}) == {"results": [1]}
+    assert len(bodies) == 2 and bodies[0] == bodies[1]
+
+
+async def test_a_client_error_keeps_its_status_and_a_bounded_message_off_its_text() -> None:
+    def detailed(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"detail": "Refine your input. " + "x" * 5000})
+
+    def structured(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": [{"loc": ["query", "limit"], "msg": "bad"}]})
+
+    def opaque(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="<html>private page</html>")
+
+    for handler, status, start in (
+        (detailed, 400, "Refine your input."),
+        (structured, 422, '[{"loc"'),
+        (opaque, 404, ""),
+    ):
+        with pytest.raises(SvpError) as caught:
+            await _client(handler).get(URL)
+        assert str(caught.value) == "svp.provider_rejected"
+        assert getattr(caught.value, "status", None) == status
+        problem = getattr(caught.value, "problem", None)
+        assert isinstance(problem, str) and problem.startswith(start)
+        assert len(problem) <= 2000

@@ -167,7 +167,7 @@ project:
   # follows it: hosted CI measures the built browser image's own requests on
   # x86_64 and arm64 whenever the image, its limits, the Playwright version or
   # the vendor-request switches change; the gate count is unchanged.
-  # ADR-0152 (Proposed, 2026-10-05) records the owner-requested non-milestone
+  # ADR-0153 (Proposed, 2026-10-05) records the owner-requested non-milestone
   # extension: a default-off first-party stdio bridge, svp_mcp, reads the
   # Scale VP data service's REST API with a grant it holds as a private
   # file, after a one-time operator sign-in; the gate count is unchanged. The

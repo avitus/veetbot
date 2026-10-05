@@ -1374,7 +1374,7 @@ service that is accidentally bound to a public interface.
 
 ## Optional Scale VP data access
 
-[ADR-0152](adr/0152-scale-vp-api-bridge.md) is off by default. To enable it:
+[ADR-0153](adr/0153-scale-vp-api-bridge.md) is off by default. To enable it:
 
 1. On a machine with a browser, from a checkout of the release, run the
    sign-in once and complete the Scale VP page it opens:
@@ -1399,8 +1399,9 @@ service that is accidentally bound to a public interface.
    workers. Their units allow writes to that directory when it exists.
 
 New chats are then offered `mcp.svp_read.list_operations`,
-`describe_operation` and `call_operation`; scheduled runs are not. Before
-production enables the flag, add it to the two production-roster gates
+`describe_operation` and `call_operation`; scheduled runs are not. On the
+production roster the three are entries in the deferred tool index, reached
+with `tool.call`, and the production-roster gates include the flag
 (ADR-0124). A call that returns `svp.credential_rejected` after the grant
 was working means the grant has ended: repeat steps 1 and 2 with a new file.
 
