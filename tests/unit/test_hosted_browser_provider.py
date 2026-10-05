@@ -930,10 +930,13 @@ class RefusingSessions(FakeSessions):
         return await super().act(lease_ref, action, sequence=sequence, constraint=constraint)
 
 
-async def test_grant_refusal_keeps_the_lease_and_sequence() -> None:
-    """ADR-0129 (B2): grant_not_applicable is a pre-dispatch refusal."""
+@pytest.mark.parametrize(
+    "reason", ["tool.browser.grant_not_applicable", "tool.browser.element_not_found"]
+)
+async def test_action_refusal_keeps_the_lease_and_sequence(reason: str) -> None:
+    """Pre-dispatch refusals preserve observation and the next action sequence."""
 
-    sessions = RefusingSessions(refusals=["tool.browser.grant_not_applicable"])
+    sessions = RefusingSessions(refusals=[reason])
     provider = ready_provider(sessions)
     await provider.bind_execution(call_at(NOW))
     await provider.navigate("https://example.org/lesson")
@@ -942,10 +945,10 @@ async def test_grant_refusal_keeps_the_lease_and_sequence() -> None:
         await provider.act(CLICK)
 
     assert (refused.value.reason_code, sessions.closes) == (
-        "tool.browser.grant_not_applicable",
+        reason,
         [],
     )
-    await provider.navigate("https://example.org/lesson")
+    await provider.observe()
     await provider.act(CLICK)
     assert len(sessions.acquisitions) == 1
     assert sessions.sequence == [1]

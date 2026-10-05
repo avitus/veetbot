@@ -581,6 +581,68 @@ async def test_tool_timeout_includes_pre_effect_work(
     assert invocation.outcome.reason_code == "tool.timeout"
 
 
+@pytest.mark.parametrize("write", [False, True])
+async def test_timeout_after_dispatch_preserves_write_uncertainty(
+    tmp_path: Path, write: bool
+) -> None:
+    """A sent non-idempotent write cannot become a retryable timeout."""
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+
+    class StalledTool(_SchedulingTool):
+        async def execute(
+            self, arguments: dict[str, object], context: ToolExecutionContext
+        ) -> ToolResult:
+            self.started += 1
+            await asyncio.sleep(10)
+            raise AssertionError("the deadline must cancel execution")
+
+    tool = StalledTool(
+        name="demo.stalled_write" if write else "demo.stalled_read",
+        side_effect=SideEffectClass.EXTERNAL_WRITE if write else SideEffectClass.NONE,
+        parallel=False,
+    )
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    async with build(settings=_settings(tmp_path), script=script, fixed_clock_at=NOW) as app:
+        run_id = await app.runs.submit("exercise timeout outcomes")
+        active_run = (await app.runs.get(run_id)).model_copy(
+            update={"deadline_at": app.clock.now() + timedelta(milliseconds=100)}
+        )
+        actor = app.principal.model_copy(update={"scopes": {*app.principal.scopes, "demo.write"}})
+        async with app.uow_factory() as uow:
+            agent = await uow.agents.get_version(active_run.agent_id, active_run.agent_version)
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        pipeline = ToolPipeline(registry, app.uow_factory, app.clock, ids(), policy=_AllowPolicy())
+        result = await pipeline.dispatch(
+            run=active_run,
+            checkpoint=checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="timeout",
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={},
+                    raw_arguments="{}",
+                )
+            ],
+            principal=actor,
+            step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+            agent=agent.model_copy(update={"enabled_tools": [tool.spec.name]}),
+            token=RunCancellationToken(app.clock, None),
+        )
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, actor))[0]
+    assert tool.started == 1
+    assert result[0].is_error
+    assert invocation.status is (
+        ToolInvocationStatus.UNCERTAIN if write else ToolInvocationStatus.FAILED
+    )
+    assert invocation.outcome is not None
+    assert invocation.outcome.reason_code == ("tool.outcome_unknown" if write else "tool.timeout")
+    assert invocation.outcome.retryable is (not write)
+
+
 @pytest.mark.parametrize("authorization_work", ["stalled", "elapsed_clock", "elapsed_monotonic"])
 async def test_standing_authorization_shares_the_execution_deadline(
     tmp_path: Path, authorization_work: str

@@ -1221,6 +1221,16 @@ mutation; an action that starts a main-frame navigation first waits for the new
 document. The whole wait is bounded by 2 seconds. Settling never fails a call:
 a page still changing at the bound is observed as it is.
 
+Before a `browser.act` click, Playwright checks actionability with a trial bounded by
+5 seconds. A trial timeout sends no click and returns the existing
+`tool.browser.element_not_found` refusal, preserving the lease and action
+sequence so the agent can observe an obstructing overlay. The actual click
+also has a 5-second bound, leaving time within the 30-second tool budget for
+validation, settling, observation, and transport. No forced click or automatic
+publication retry is permitted. A failure after actual dispatch remains
+uncertain; the outer tool deadline also preserves non-idempotent write
+uncertainty once the effect watermark is persisted.
+
 The stable reason-code family includes:
 
 - `tool.browser.url_disallowed`

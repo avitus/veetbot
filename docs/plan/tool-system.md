@@ -175,7 +175,7 @@ its own budget; the executor does that once, in one place, where it can also
 refuse to start a call that cannot finish.
 Standing authorization, pre-effect checks, watermark persistence, and execution
 share one absolute deadline. Unavailable standing authority falls back to
-interactive approval; an authorized call exhausting its budget returns `tool.timeout`.
+interactive approval; a timeout after a non-idempotent effect watermark is `UNCERTAIN`, returning non-retryable `tool.outcome_unknown` (media retains its charge warning); otherwise it returns `tool.timeout`.
 
 `credentials` is a resolver, not a dictionary. It takes a `credential_ref` from
 configuration and returns a short-lived value; the reference is what appears in

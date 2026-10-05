@@ -1343,9 +1343,9 @@ class FakeSettlingPage:
                 return "button"
             return {"tag": "button", "role": None, "inputType": None, "name": name}
 
-        async def click(*, timeout: int) -> None:
+        async def click(*, timeout: int, trial: bool = False) -> None:
             del timeout
-            if on_click is not None:
+            if not trial and on_click is not None:
                 on_click()
 
         handle.evaluate.side_effect = evaluate

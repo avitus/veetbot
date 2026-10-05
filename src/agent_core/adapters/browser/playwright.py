@@ -32,6 +32,7 @@ from playwright.async_api import (
     async_playwright,
 )
 from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from agent_core.adapters.browser.virtual_display import platform_virtual_display
 from agent_core.domain.browser import (
@@ -77,6 +78,8 @@ DOM_QUIET_MILLISECONDS = 300
 # How long Playwright waits for an element to become actionable, such as for
 # its click point to reach the element itself, before an act fails.
 ACTION_TIMEOUT_MILLISECONDS = 30_000
+# Leave the outer tool budget for validation, settling, and observation.
+CLICK_TIMEOUT_MILLISECONDS = 5_000
 # Headed Chromium lacks headless shell's new-window switch. A response policy
 # denies auxiliary browsing contexts while retaining normal sign-in capabilities.
 _POPUP_DENIAL_POLICY = (
@@ -882,14 +885,23 @@ class PythonPlaywrightRuntime:
         action: BrowserAction,
         guards: list[JSHandle],
     ) -> None:
-        """Send one action to the element; any failure makes its outcome unknown.
+        """Check click actionability, then send one action without automatic replay.
 
         ``guards`` are a grant-constrained act's click guard and, for a key or
-        text, its focus guard, released once the action is sent.
+        text, its focus guard, released once the action is sent. Only a trial
+        click timeout is a definite refusal; dispatch failures remain uncertain.
         """
         try:
             if action.kind is BrowserActionKind.CLICK:
-                await handle.click(timeout=ACTION_TIMEOUT_MILLISECONDS)
+                try:
+                    # Visibility alone includes controls covered by a modal. Trial
+                    # performs actionability checks without dispatching the click.
+                    await handle.click(trial=True, timeout=CLICK_TIMEOUT_MILLISECONDS)
+                except PlaywrightTimeoutError as exc:
+                    raise BrowserProviderError(
+                        "tool.browser.element_not_found", retryable=False
+                    ) from exc
+                await handle.click(timeout=CLICK_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.TYPE:
                 await handle.fill(action.value or "", timeout=ACTION_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.SELECT:

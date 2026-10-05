@@ -1365,14 +1365,29 @@ class ToolPipeline:
                 validate_output(result.structured, tool.spec.output_schema)
         except TimeoutError:
             media_generation = tool.spec.name in {"image.generate", "video.generate"}
+            timeout_uncertain = (
+                invocation.effect_sent_at is not None
+                and invocation.idempotency_class is IdempotencyClass.NON_IDEMPOTENT
+                and not media_generation
+            )
             result = ToolResult(
                 ok=False,
                 content=[],
                 failure=ToolFailure(
-                    kind=ToolFailureKind.TIMEOUT,
-                    reason_code="tool.media.timeout" if media_generation else "tool.timeout",
+                    kind=(
+                        ToolFailureKind.OUTCOME_UNKNOWN
+                        if timeout_uncertain
+                        else ToolFailureKind.TIMEOUT
+                    ),
+                    reason_code=(
+                        "tool.outcome_unknown"
+                        if timeout_uncertain
+                        else "tool.media.timeout"
+                        if media_generation
+                        else "tool.timeout"
+                    ),
                     detail="tool timeout elapsed",
-                    retryable=not media_generation,
+                    retryable=not (media_generation or timeout_uncertain),
                 ),
             )
         except WorkspaceEscape:

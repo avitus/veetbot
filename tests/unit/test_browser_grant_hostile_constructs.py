@@ -666,6 +666,7 @@ def short_action_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     wait's bound only sets how long a test takes to see it fail."""
 
     monkeypatch.setattr(playwright_adapter, "ACTION_TIMEOUT_MILLISECONDS", 1_500)
+    monkeypatch.setattr(playwright_adapter, "CLICK_TIMEOUT_MILLISECONDS", 1_500)
 
 
 @pytest.mark.usefixtures("short_action_timeout")
@@ -691,7 +692,13 @@ async def test_a_click_point_on_another_element_never_acts_there() -> None:
 
     assert trial is False
     assert clicks == []
-    assert set(outcomes.values()) <= {GRANT_NOT_APPLICABLE, OUTCOME_UNKNOWN}
+    # A trial click can now prove it sent no click when actionability fails.
+    # Keep every effect assertion above: no click may reach the covering node.
+    assert set(outcomes.values()) <= {
+        GRANT_NOT_APPLICABLE,
+        OUTCOME_UNKNOWN,
+        "tool.browser.element_not_found",
+    }
     assert left == []
 
 

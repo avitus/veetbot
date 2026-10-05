@@ -152,7 +152,10 @@ class BrowserActTool:
         description=(
             "Perform one action, subject to approval, on an element of the latest page "
             "revision. The result is the page after the action settles, with a new revision "
-            "and element refs; act on it directly without observing first."
+            "and element refs; act on it directly without observing first. A click refused "
+            "with element_not_found may be covered by an overlay: observe again and inspect "
+            "the current controls before choosing an approved recovery action. Never repeat "
+            "a write whose outcome is uncertain."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
