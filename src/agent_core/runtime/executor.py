@@ -76,6 +76,11 @@ from agent_core.runtime.loop import (
     checkpoint,
     run_loop,
 )
+from agent_core.runtime.scheduled_browser import (
+    ScheduledBrowserUnavailableError,
+    require_scheduled_browser_tools,
+    validate_scheduled_browser,
+)
 
 type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[UUID, RunCancellationToken], None]
@@ -717,6 +722,7 @@ class RunExecutor:
             async with self._uow_factory() as uow:
                 agent = await uow.agents.get_version(run.agent_id, run.agent_version)
                 session = await uow.sessions.get(run.session_id, principal)
+                await validate_scheduled_browser(uow, session, principal)
                 chat_choice = (
                     None
                     if self._model_settings is None
@@ -777,6 +783,7 @@ class RunExecutor:
                     or checkpoint_state.pending_tool_calls
                 ),
             )
+            require_scheduled_browser_tools(session, context_plan)
             await self._register_snapshot_use(run, context_plan, principal, lease)
             self._apply_tool_pins(
                 checkpoint_state,
@@ -929,6 +936,17 @@ class RunExecutor:
                     error_class=type(exc).__name__,
                     message=str(exc),
                     step_number=run.step_count or None,
+                    occurred_at=self._clock.now(),
+                ),
+            )
+        except ScheduledBrowserUnavailableError as exc:
+            outcome = RunOutcome(
+                kind=OutcomeKind.FAILED,
+                failure=RunFailure(
+                    reason=FailureReason.AUTHORIZATION_ERROR,
+                    error_class=type(exc).__name__,
+                    message="Scheduled website access is unavailable.",
+                    details={"reason_code": exc.reason_code},
                     occurred_at=self._clock.now(),
                 ),
             )

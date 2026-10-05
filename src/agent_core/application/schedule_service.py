@@ -12,7 +12,8 @@ from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
-from agent_core.domain.errors import ConflictError, ScheduleValidationError
+from agent_core.domain.browser import BrowserProfileStatus
+from agent_core.domain.errors import ConflictError, NotFoundError, ScheduleValidationError
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.recurrence import RecurrenceCalculator
 from agent_core.domain.schedules import (
@@ -521,6 +522,7 @@ def _revision(
         agent_version=definition.agent_version,
         policy_profile=definition.policy_profile,
         requested_scopes=definition.requested_scopes,
+        browser_profile_id=definition.browser_profile_id,
         limits=definition.limits,
         run_timeout_seconds=definition.run_timeout_seconds,
         cadence=definition.cadence,
@@ -540,6 +542,7 @@ def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
         agent_version=revision.agent_version,
         policy_profile=revision.policy_profile,
         requested_scopes=revision.requested_scopes,
+        browser_profile_id=revision.browser_profile_id,
         limits=revision.limits,
         run_timeout_seconds=revision.run_timeout_seconds,
         cadence=revision.cadence,
@@ -554,6 +557,23 @@ async def _validate_definition(
     definition: ScheduleDefinition,
     limits: ScheduleDefinitionLimits,
 ) -> None:
+    if definition.browser_profile_id is not None:
+        require_scope(principal, "browser.profile.read")
+        if "browser.profile.read" not in definition.requested_scopes:
+            raise ScheduleValidationError(
+                "schedule.browser_scope_required",
+                "a browser schedule must request browser.profile.read",
+            )
+        try:
+            profile = await uow.browser_profiles.get(definition.browser_profile_id, principal)
+        except NotFoundError as exc:
+            raise ScheduleValidationError(
+                "schedule.browser_profile_unavailable", "browser profile is unavailable"
+            ) from exc
+        if profile.status is not BrowserProfileStatus.READY:
+            raise ScheduleValidationError(
+                "schedule.browser_profile_unavailable", "browser profile is not ready"
+            )
     if not definition.requested_scopes <= principal.scopes:
         raise ScheduleValidationError(
             "schedule.scope_not_granted",
@@ -631,8 +651,11 @@ def _idempotency_key(value: str) -> str:
 
 
 def _definition_hash(definition: ScheduleDefinition) -> str:
+    payload = definition.model_dump(mode="json")
+    if definition.browser_profile_id is None:
+        payload.pop("browser_profile_id")
     encoded = json.dumps(
-        definition.model_dump(mode="json"),
+        payload,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

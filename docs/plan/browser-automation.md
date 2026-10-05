@@ -1168,6 +1168,19 @@ If it is hosted, profile availability and grant validity are checked before
 the first model call. A missing device, expired profile, or absent grant is a
 visible run outcome and notification, never an implicit permission expansion.
 
+The explicit read binding is carried by `ScheduleDefinition.browser_profile_id`
+and its immutable revision (ADR-0150). The authenticated schedule surface
+validates the owned ready profile and the requested `browser.profile.read`
+scope. Each occurrence receives that reserved session binding. The run worker
+checks it before model work, without expanding the scheduler's database role;
+profile or read-tool unavailability fails visibly through ordinary run outcome
+accounting. Existing schedules require an explicit full-definition update.
+Hosted adapters compare tenant and principal identity and require the run's
+scopes and roles to be subsets of the configured owner's authority; restricted
+scheduled authority does not change profile ownership.
+This read integration creates no action grant, and model-callable schedule
+creation still selects no profile.
+
 ## Bounds and stable failures
 
 Readable text, element count, accessible names, URLs, titles, screenshots, and

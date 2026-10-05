@@ -121,7 +121,10 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   authenticated browser automation, all external-untrusted (Milestone 10).
 - `agent_core.scheduling` owns recurrence, civil time, atomic occurrence
   materialization into ordinary runs, admission, and the least-privilege
-  schedule worker role (Milestone 11).
+  schedule worker role (Milestone 11). An explicitly bound website schedule
+  pins its owned profile in each occurrence session; the run worker checks
+  access before model work, retaining the schedule budget and ordinary action
+  approvals ([ADR-0150](adr/0150-scheduled-browser-profile-binding.md)).
 
 ## Implemented in Milestone 12 and the later workstreams
 

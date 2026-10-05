@@ -275,4 +275,5 @@ nav:
       - ADR-0147 Browser verification event streams: adr/0147-browser-verification-event-streams.md
       - ADR-0148 Approved browser image upload: adr/0148-approved-browser-image-upload.md
       - ADR-0149 Release-managed owner permissions: adr/0149-release-managed-owner-permissions.md
+      - ADR-0150 Scheduled browser profile binding: adr/0150-scheduled-browser-profile-binding.md
   - Changelog: changelog.md

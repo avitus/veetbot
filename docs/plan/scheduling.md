@@ -159,6 +159,7 @@ class ScheduleRevision(BaseModel):
     agent_version: str
     policy_profile: str
     requested_scopes: frozenset[str]
+    browser_profile_id: UUID | None = None
     limits: RunLimits
     run_timeout_seconds: int
     cadence: dict[str, object]
@@ -361,6 +362,30 @@ principal currently holds. It also records `authority_version` and the schedule
 and occurrence identifiers in the `run.queued` payload. Raw bearer tokens,
 cookies, API keys, and identity-provider assertions appear in no schedule,
 revision, occurrence, event, or run field.
+
+### Explicit website binding
+
+The authenticated complete definition may include `browser_profile_id`
+(ADR-0150). A non-null UUID requires `browser.profile.read` on the caller and
+in `requested_scopes`, and a tenant/principal-scoped read of a `READY` profile.
+Missing, foreign or non-ready profiles fail definition validation. Old
+revisions decode with no binding, and unbound definitions keep their original
+idempotency hash. No credential or profile material is stored.
+
+Materialization copies the immutable revision's UUID into the reserved session
+browser binding. The scheduler's database authority is unchanged. Before the
+first model call, the run worker checks the profile's ownership, readiness and
+requested scope, and that the plan supplies `browser.navigate` and
+`browser.observe`. Unavailable access fails the run with a stable reason code,
+so ordinary outcome accounting, failure limits and notifications apply. The
+provider revalidates again before browser dispatch. The schedule's finite
+limits and deadline remain pinned; it does not inherit the interactive browser
+budget or a source chat's grants.
+
+The full-definition HTTP update can bind or unbind future occurrences with the
+ordinary expected-revision check. Content-only `schedule.update` preserves the
+binding. `schedule.create` still grants no scopes and binds no profile; the
+model cannot choose one. Browser actions retain their existing approval rules.
 
 ## Sessions, context, and results
 
@@ -1059,7 +1084,7 @@ The tool passes its invocation idempotency key to a write-authorized
 `ScheduleService` patch operation. In one application transaction, the service
 checks the key and expected revision, loads the current immutable revision,
 and constructs the complete next definition. It preserves `agent_id`,
-`agent_version`, `policy_profile`, `requested_scopes`, `limits`,
+`agent_version`, `policy_profile`, `requested_scopes`, `browser_profile_id`, `limits`,
 `run_timeout_seconds`, `misfire_grace_seconds`, and
 `max_consecutive_failures`; those fields are neither tool inputs nor tool
 outputs. The ordinary definition validator, secret scanner, recurrence

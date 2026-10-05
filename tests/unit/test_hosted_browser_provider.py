@@ -1062,3 +1062,58 @@ async def test_act_sends_the_constraint_in_the_request_body() -> None:
     ]
     assert "constraint" not in bodies[1]
     assert [body["sequence"] for body in bodies] == [1, 2]
+
+
+@pytest.mark.parametrize("session_bound", [False, True])
+@pytest.mark.parametrize("authority", ["restricted", "foreign", "tenant", "expanded"])
+async def test_browser_binding_accepts_only_same_owner_with_no_broader_authority(
+    session_bound: bool, authority: str
+) -> None:
+    owner = principal()
+    sessions = FakeSessions()
+
+    async def load(requested_owner: Principal, requested_id: UUID) -> BrowserProfile:
+        assert requested_owner == owner
+        assert requested_id == PROFILE_ID
+        return profile()
+
+    async def select(context: ToolExecutionContext) -> UUID:
+        del context
+        return PROFILE_ID
+
+    provider: HostedBrowserProvider | SessionBoundHostedBrowserProvider
+    if session_bound:
+        provider = SessionBoundHostedBrowserProvider(
+            principal=owner,
+            profiles=load,
+            profile_selector=select,
+            sessions=sessions,
+            now=lambda: NOW,
+        )
+    else:
+        provider = HostedBrowserProvider(
+            principal=owner,
+            profile_id=PROFILE_ID,
+            allowed_origins=profile().allowed_origins,
+            profiles=load,
+            sessions=sessions,
+            now=lambda: NOW,
+        )
+    restricted = owner.model_copy(update={"scopes": set(), "roles": set()})
+    if authority == "foreign":
+        restricted = restricted.model_copy(update={"principal_id": "another-owner"})
+    if authority == "tenant":
+        restricted = restricted.model_copy(update={"tenant_id": "another-tenant"})
+    if authority == "expanded":
+        restricted = restricted.model_copy(update={"scopes": owner.scopes | {"ungranted.scope"}})
+    context = replace(tool_context(), principal=restricted)
+    try:
+        if authority == "restricted":
+            await provider.bind_execution(context)
+            assert len(sessions.acquisitions) == 1
+        else:
+            with pytest.raises(BrowserProviderError, match=r"tool\.browser\.profile_unavailable"):
+                await provider.bind_execution(context)
+            assert sessions.acquisitions == []
+    finally:
+        await provider.close()

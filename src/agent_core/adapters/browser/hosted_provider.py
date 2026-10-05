@@ -142,7 +142,7 @@ class HostedBrowserProvider:
             return False
 
     async def bind_execution(self, context: ToolExecutionContext) -> None:
-        if context.principal != self._principal or context.tenant_id != self._principal.tenant_id:
+        if not _owns_execution(self._principal, context):
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         async with self._lock:
             try:
@@ -472,6 +472,18 @@ class HostedBrowserProvider:
         await self._settle_locked(strict=strict)
 
 
+def _owns_execution(owner: Principal, context: ToolExecutionContext) -> bool:
+    """Scheduled runs retain owner identity with explicitly narrower authority."""
+
+    caller = context.principal
+    return (
+        context.tenant_id == caller.tenant_id == owner.tenant_id
+        and caller.principal_id == owner.principal_id
+        and caller.scopes <= owner.scopes
+        and caller.roles <= owner.roles
+    )
+
+
 class SessionBoundHostedBrowserProvider:
     """Resolve a trusted profile from session metadata before each tool invocation."""
 
@@ -501,7 +513,7 @@ class SessionBoundHostedBrowserProvider:
         self._lock = asyncio.Lock()
 
     async def bind_execution(self, context: ToolExecutionContext) -> None:
-        if context.principal != self._principal or context.tenant_id != self._principal.tenant_id:
+        if not _owns_execution(self._principal, context):
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         try:
             profile_id = await self._profile_selector(context)

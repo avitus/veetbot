@@ -22,7 +22,12 @@ from agent_core.domain.schedules import (
     ScheduleRevision,
     ScheduleState,
 )
-from agent_core.domain.sessions import SESSION_SCHEDULE_ID_METADATA_KEY, Session, SessionStatus
+from agent_core.domain.sessions import (
+    SESSION_BROWSER_PROFILE_METADATA_KEY,
+    SESSION_SCHEDULE_ID_METADATA_KEY,
+    Session,
+    SessionStatus,
+)
 from agent_core.observability.schedules import ScheduleMetrics
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import (
@@ -243,6 +248,11 @@ class ScheduleMaterializer:
                 status=SessionStatus.ACTIVE,
                 title=revision.title,
                 metadata={
+                    **(
+                        {SESSION_BROWSER_PROFILE_METADATA_KEY: str(revision.browser_profile_id)}
+                        if revision.browser_profile_id is not None
+                        else {}
+                    ),
                     SESSION_SCHEDULE_ID_METADATA_KEY: str(schedule.id),
                     "schedule_revision": revision.revision,
                     "schedule_occurrence_id": str(occurrence.id),
