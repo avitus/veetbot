@@ -250,6 +250,7 @@ class PythonPlaywrightRuntime:
         self._elements: dict[str, ElementHandle] = {}
         self._facts: BrowserObservationFacts | None = None
         self._disallowed_navigation = False
+        self._dismissed_beforeunload = False
         self._document_session: CDPSession | None = None
         self._main_frame_id: str | None = None
         self._sign_in_entered = False
@@ -472,6 +473,8 @@ class PythonPlaywrightRuntime:
         return path_is_within_prefix(path, path_prefix) and not path_is_sensitive(path)
 
     async def _dismiss_dialog(self, dialog: Dialog) -> None:
+        if dialog.type == "beforeunload":
+            self._dismissed_beforeunload = True
         await dialog.dismiss()
 
     async def _cancel_download(self, download: Download) -> None:
@@ -514,11 +517,25 @@ class PythonPlaywrightRuntime:
         """Navigate within the bound origin policy and preserve stable failure codes."""
         page = self._current_page()
         self._disallowed_navigation = False
+        self._dismissed_beforeunload = False
+        previous_url = page.url
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         except PlaywrightError as exc:
             if self._disallowed_navigation:
                 raise BrowserProviderError("tool.browser.url_disallowed", retryable=False) from exc
+            if (
+                self._dismissed_beforeunload
+                and "net::ERR_ABORTED" in str(exc)
+                and not page.is_closed()
+                and page.url == previous_url
+                and _origin_allowed(page.url, self._allowed_origins)
+            ):
+                # Dismissing an unsaved-change dialog cancels goto, not the
+                # connection. Keep the draft and its lease; never accept or retry.
+                raise BrowserProviderError(
+                    "tool.browser.navigation_cancelled", retryable=False
+                ) from exc
             raise BrowserProviderError(
                 "tool.browser.provider_unavailable",
                 retryable=True,

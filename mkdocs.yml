@@ -276,4 +276,5 @@ nav:
       - ADR-0148 Approved browser image upload: adr/0148-approved-browser-image-upload.md
       - ADR-0149 Release-managed owner permissions: adr/0149-release-managed-owner-permissions.md
       - ADR-0150 Scheduled browser profile binding: adr/0150-scheduled-browser-profile-binding.md
+      - ADR-0151 Browser observation pages: adr/0151-browser-observation-pages.md
   - Changelog: changelog.md

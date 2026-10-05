@@ -162,3 +162,4 @@ implementation without one.
 - [ADR-0149 — Deployment provisions the owner permission set](0149-release-managed-owner-permissions.md)
 
 - [ADR-0150 — Scheduled website reads pin an owned browser profile (Proposed)](0150-scheduled-browser-profile-binding.md)
+- [ADR-0151 — Browser observations remain readable within the model budget (Proposed)](0151-browser-observation-pages.md)

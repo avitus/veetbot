@@ -591,7 +591,7 @@ from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactE
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import BrowserActApprovalPresenter, BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
-from agent_core.tools.browser_observe import BrowserObserveTool
+from agent_core.tools.browser_observe import BrowserObserveTool, LegacyBrowserObserveTool
 from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
@@ -2594,7 +2594,10 @@ async def _compose(
         registry.register(WebFetchTool(web_fetch_provider))
     if browser_provider is not None:
         registry.register(BrowserNavigateTool(browser_provider))
-        registry.register(BrowserObserveTool(browser_provider))
+        registry.register(LegacyBrowserObserveTool(browser_provider))
+        registry.register(
+            BrowserObserveTool(browser_provider, inline_output_bytes=inline_output_bytes)
+        )
         if isinstance(browser_provider, BrowserImageUploader):
             registry.register(
                 BrowserUploadTool(
