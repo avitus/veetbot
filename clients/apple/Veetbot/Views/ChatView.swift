@@ -386,7 +386,7 @@ public struct ChatView: View {
         )
     }
 
-    private var canSendDraft: Bool {
+    var canSendDraft: Bool {
         let hasText = !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let answering = state.runStatus == .waitingForUser
         // Attachments alone make a message, but an answer to a question is text.
@@ -394,6 +394,7 @@ public struct ChatView: View {
             && (answering || model.attachmentsReady)
             && !model.isSending
             && (!state.isRunActive || answering)
+            && model.isConfigured
     }
 
     private static let bottomAnchorID = ConversationScrollTarget.bottom.scrollID

@@ -6,6 +6,50 @@ import UserNotifications
 @testable import VeetbotCore
 
 @Suite(.serialized) @MainActor struct ChatViewModelTests {
+    @Test
+    func testSendWaitsForStartupHistoryReconciliation() async throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configurationStore = ConnectionConfigurationStore(defaults: defaults)
+        await configurationStore.save(try ConnectionConfiguration(baseURLString: "https://veetbot.test"))
+        let historyStore = SuspendedReconciliationHistoryStore()
+        defer { Task { await historyStore.release() } }
+        let lock = NSLock()
+        var writeCount = 0
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: "saved-token"),
+            configurationStore: configurationStore,
+            historyStore: historyStore,
+            urlSession: urlSession { request in
+                if request.httpMethod == "GET", request.url?.path == "/v1/sessions" {
+                    return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+                }
+                lock.withLock { writeCount += 1 }
+                return try response(for: request, statusCode: 503, body: "{}")
+            }
+        )
+        for _ in 0..<5_000 {
+            if await historyStore.isWaiting { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try #require(await historyStore.isWaiting)
+        #expect(model.currentAPIClient != nil)
+        #expect(!model.isConfigured)
+        model.composerText = "Keep this draft until startup finishes"
+        #expect(!ChatView(model: model).canSendDraft)
+        #expect(await model.send(model.composerText) == false)
+        #expect(lock.withLock { writeCount } == 0)
+        #expect(model.errorMessage == nil)
+        #expect(model.composerText == "Keep this draft until startup finishes")
+        await historyStore.release()
+        for await restoring in model.$isBootstrapping.values {
+            if !restoring { break }
+        }
+        #expect(model.isConfigured)
+        #expect(ChatView(model: model).canSendDraft)
+    }
+
     @Test(arguments: [true, false], [true, false])
     func testStartupFinishesWithSavedConnectionOrSetup(
         savedConfiguration: Bool, savedToken: Bool
@@ -2676,6 +2720,28 @@ private final class WebsiteLoginRequestRecorder: @unchecked Sendable {
     func matching(method: String, path: String) -> [Entry] {
         lock.withLock { entries.filter { $0.method == method && $0.path == path } }
     }
+}
+
+private actor SuspendedReconciliationHistoryStore: SessionHistoryStore {
+    private var listCount = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+    var isWaiting: Bool { continuation != nil }
+
+    func list() async -> [SessionHistoryEntry] {
+        listCount += 1
+        if listCount == 2 {
+            await withCheckedContinuation { continuation = $0 }
+        }
+        return []
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func upsert(_ entry: SessionHistoryEntry) {}
+    func delete(sessionID: UUID) {}
 }
 
 private enum DeleteFailingHistoryStoreError: Error, LocalizedError {

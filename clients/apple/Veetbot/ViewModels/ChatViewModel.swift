@@ -1131,7 +1131,7 @@ public final class ChatViewModel: ObservableObject {
     @discardableResult
     public func send(_ rawText: String) async -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty, let api else { return false }
+        guard !text.isEmpty || !attachments.isEmpty, isConfigured, let api else { return false }
         guard !isSending else { return false }
 
         if runState.isRunActive {
