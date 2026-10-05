@@ -163,3 +163,4 @@ implementation without one.
 
 - [ADR-0150 — Scheduled website reads pin an owned browser profile (Proposed)](0150-scheduled-browser-profile-binding.md)
 - [ADR-0151 — Browser observations remain readable within the model budget (Proposed)](0151-browser-observation-pages.md)
+- [ADR-0152 — Hosted CI measures the browser image's own requests (Proposed; amends ADR-0146)](0152-browser-image-traffic-check.md)

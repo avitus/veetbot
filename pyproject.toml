@@ -101,4 +101,5 @@ markers = [
   "integration: tests that require PostgreSQL or another local service",
   "live: tests that call a real model provider and may incur cost",
   "sandbox: tests that require a real container or kernel-isolating runtime",
+  "browser_image: tests that measure the built browser-profile service image",
 ]

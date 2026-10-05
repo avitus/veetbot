@@ -103,6 +103,8 @@ def test_required_make_targets_exist() -> None:
         "test-apple-ui-macos",
         "test-apple-ui-ios",
         "test-deploy",
+        "browser-image",
+        "test-browser-image",
         "production-check",
         "client-build",
         "docs",
@@ -952,9 +954,10 @@ def test_ci_has_the_required_partitions() -> None:
         "deploy-app",
         "deploy-nginx",
         "public-site",
+        "browser-image",
     }
     for name, job in jobs.items():
-        if name == "sandbox":
+        if name in {"sandbox", "browser-image"}:
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
         if name in {"apple", "apple-ios", "apple-signing-smoke", "apple-testflight"}:
@@ -1001,6 +1004,7 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make migrate" in commands["integration"]
     assert any("make test-integration" in command for command in commands["integration"])
     assert any("make test-sandbox" in command for command in commands["sandbox"])
+    assert any("make test-browser-image" in command for command in commands["browser-image"])
     assert "make test-apple" in commands["apple"]
     assert any("make test-apple-ui-macos" in command for command in commands["apple"])
     assert not any("make test-apple-ui-ios" in command for command in commands["apple"])
@@ -1114,11 +1118,12 @@ def test_ci_has_the_required_partitions() -> None:
             "filters": {"branches": {"only": "dev"}},
         }
     }
-    delivery_jobs = {
-        next(iter(job)): next(iter(job.values()))
-        for job in verify["jobs"][7:]
-        if isinstance(job, dict)
-    }
+    assert verify["jobs"][7:10] == [
+        "public-site",
+        {"browser-image": {"name": "browser-image-x86_64", "resource_class": "medium"}},
+        {"browser-image": {"name": "browser-image-arm64", "resource_class": "arm.medium"}},
+    ]
+    delivery_jobs = {next(iter(job)): next(iter(job.values())) for job in verify["jobs"][10:]}
     assert set(delivery_jobs) == {
         "package-release",
         "deploy-app",
@@ -1133,6 +1138,8 @@ def test_ci_has_the_required_partitions() -> None:
         "apple",
         "apple-ios",
         "public-site",
+        "browser-image-x86_64",
+        "browser-image-arm64",
     ]
     assert delivery_jobs["deploy-app"]["requires"] == ["package-release"]
     assert delivery_jobs["deploy-app"]["context"] == "veetbot-production"
@@ -1259,6 +1266,45 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
         next(iter(step)) if isinstance(step, dict) else step for step in jobs["static"]["steps"]
     ].index("skip_verified_tree")
     assert static_names.index("Reading lane floor") < static_skip
+
+
+def test_the_browser_image_check_runs_on_both_architectures_when_its_inputs_change() -> None:
+    """ADR-0152: measure the shipped image per architecture, once per set of inputs."""
+
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    job = config["jobs"]["browser-image"]
+    assert job["parameters"] == {"resource_class": {"type": "string"}}
+    assert job["resource_class"] == "<< parameters.resource_class >>"
+
+    names = [next(iter(step)) if isinstance(step, dict) else step for step in job["steps"]]
+    assert names[:4] == ["checkout", "run", "restore_cache", "run"]
+    inputs_command = job["steps"][1]["run"]["command"]
+    # The executor's own Python reads the inputs, before the project installs.
+    assert "python3 -m scripts.browser_image_inputs > /tmp/veetbot-browser-image/inputs" in (
+        inputs_command
+    )
+    key = 'browser-image-v1-{{ arch }}-{{ checksum "/tmp/veetbot-browser-image/inputs" }}'
+    assert job["steps"][2] == {"restore_cache": {"keys": [key]}}
+    halt_command = job["steps"][3]["run"]["command"]
+    assert "if [[ -f /tmp/veetbot-browser-image-record/passed ]]" in halt_command
+    assert "circleci-agent step halt" in halt_command
+    # Unlike ADR-0114's tree record, this one is honoured on every branch: the
+    # key names everything the measurement depends on.
+    assert "pipeline.git.branch" not in halt_command
+    assert names.index("install_uv") > 3
+    test_index = next(
+        index
+        for index, step in enumerate(job["steps"])
+        if isinstance(step, dict)
+        and "run" in step
+        and "make test-browser-image" in step["run"]["command"]
+    )
+    record_command = job["steps"][test_index + 1]["run"]["command"]
+    assert "touch /tmp/veetbot-browser-image-record/passed" in record_command
+    assert job["steps"][test_index + 2] == {
+        "save_cache": {"key": key, "paths": ["/tmp/veetbot-browser-image-record"]}
+    }
+    assert len(job["steps"]) == test_index + 3
 
 
 def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> None:

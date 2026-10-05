@@ -704,7 +704,10 @@ download, which has no switch. One request remains: the browser lists Google
 accounts at `accounts.google.com` once as it starts, from its own empty
 profile, with no cookie. It has no switch, and the proxy does not refuse a
 host that websites load for sign-in. None of these settings changes what a
-website can observe of the browser.
+website can observe of the browser. Each depends on the Chromium build that a
+Playwright version installs, so hosted CI measures the built image's own
+requests on both architectures whenever the image, its limits, the Playwright
+version or the switches change (ADR-0152).
 
 For a remote ceremony the trusted client presents the returned launch URL behind
 a user-initiated continue action and treats a rejected platform handoff as a

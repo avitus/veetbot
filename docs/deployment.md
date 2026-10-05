@@ -670,9 +670,11 @@ A hosted browser asks the egress proxy for nothing on its own except one
 connection to `accounts.google.com` as it starts (ADR-0146). The launch
 switches that stop the rest are in the service's code, and the image carries
 a Chromium managed policy for the one request no switch reaches. The switches
-name Chromium features and repeat a list from Playwright, so after raising
-the Playwright version, repeat ADR-0146's measurement in the built image
-before releasing.
+name Chromium features and repeat a list from Playwright. Hosted CI repeats
+ADR-0146's measurement in the built image on x86_64 and arm64 whenever the
+image, its limits, the Playwright version or the switches change, and release
+packaging waits for it (ADR-0152). To measure locally before pushing, run
+`make test-browser-image`.
 
 The release script refuses to run until the browser-profile secrets exist,
 even while `BROWSER_PROVIDER=disabled`, because the production compose file

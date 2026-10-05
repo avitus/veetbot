@@ -240,6 +240,48 @@ jobs:
       - store_test_results:
           path: test-results/sandbox
 
+  browser-image:
+    # Hosted Chromium's own requests, measured in the service image as built,
+    # once for each set of inputs that decides them (ADR-0152). The record is
+    # keyed by architecture and inputs, so it holds on every branch.
+    parameters:
+      resource_class:
+        type: string
+    machine:
+      image: ubuntu-2404:current
+    resource_class: << parameters.resource_class >>
+    steps:
+      - checkout
+      - run:
+          name: Identify the browser image inputs
+          command: |
+            mkdir -p /tmp/veetbot-browser-image
+            python3 -m scripts.browser_image_inputs > /tmp/veetbot-browser-image/inputs
+            cat /tmp/veetbot-browser-image/inputs
+      - restore_cache:
+          keys:
+            - 'browser-image-v1-{{ arch }}-{{ checksum "/tmp/veetbot-browser-image/inputs" }}'
+      - run:
+          name: Skip inputs this check already measured
+          command: |
+            if [[ -f /tmp/veetbot-browser-image-record/passed ]]; then
+              echo "The browser image already passed with these inputs; skipping."
+              circleci-agent step halt
+            fi
+      - install_uv
+      - run:
+          name: Browser image traffic check
+          command: make test-browser-image
+      - run:
+          name: Record the measured inputs
+          command: |
+            mkdir -p /tmp/veetbot-browser-image-record
+            touch /tmp/veetbot-browser-image-record/passed
+      - save_cache:
+          key: 'browser-image-v1-{{ arch }}-{{ checksum "/tmp/veetbot-browser-image/inputs" }}'
+          paths:
+            - /tmp/veetbot-browser-image-record
+
   apple:
     macos:
       xcode: "27.0.0"
@@ -644,6 +686,13 @@ workflows:
             branches:
               only: dev
       - public-site
+      # Production runs x86_64; Playwright installs another Chromium build on arm64.
+      - browser-image:
+          name: browser-image-x86_64
+          resource_class: medium
+      - browser-image:
+          name: browser-image-arm64
+          resource_class: arm.medium
       - package-release:
           requires:
             - static
@@ -653,6 +702,8 @@ workflows:
             - apple
             - apple-ios
             - public-site
+            - browser-image-x86_64
+            - browser-image-arm64
           filters:
             branches:
               only: main
