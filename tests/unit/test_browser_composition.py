@@ -160,6 +160,7 @@ async def test_browser_capabilities_are_absent_without_bound_provider() -> None:
 
 
 async def test_configured_playwright_provider_registers_browser_tools() -> None:
+    """Keep pinned observation tools available while wiring paging to the model budget."""
     settings = load_settings(
         {
             **base_environment(),

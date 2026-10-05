@@ -31,7 +31,10 @@ from tests.unit.test_history_cache_window import _factory
 
 
 class ComposerProvider(FakeBrowserProvider):
+    """Model a large composer whose publication control lies beyond the first page."""
+
     def _observation(self, url: str) -> BrowserObservation:
+        """Produce fresh references, many controls, and text requiring byte-aware paging."""
         revision = f"revision-{self.observation_count}"
         return BrowserObservation(
             url=url,
@@ -88,6 +91,7 @@ async def test_composer_controls_are_readable_after_output_admission(tmp_path: P
 
 @pytest.mark.parametrize("budget", [1024, 2048, 4096])
 async def test_pages_cover_every_control_and_unicode_character(budget: int) -> None:
+    """Traverse every control and Unicode character without exceeding admission limits."""
     provider = ComposerProvider()
     tool = BrowserObserveTool(provider, inline_output_bytes=budget)
     seen: list[str] = []
@@ -134,6 +138,7 @@ async def test_pages_cover_every_control_and_unicode_character(budget: int) -> N
     ],
 )
 async def test_invalid_page_requests_never_reach_the_provider(arguments: dict[str, object]) -> None:
+    """Reject malformed offsets and foreign arguments before binding browser authority."""
     provider = ComposerProvider()
     result = await BrowserObserveTool(provider).execute(arguments, tool_context())
     assert not result.ok
@@ -144,6 +149,7 @@ async def test_invalid_page_requests_never_reach_the_provider(arguments: dict[st
 
 
 async def test_page_display_truncation_preserves_full_provider_labels() -> None:
+    """Shorten presentation labels without changing provider facts or element references."""
     original = BrowserObservation(
         url="https://example.org/account",
         revision="current",
@@ -152,7 +158,10 @@ async def test_page_display_truncation_preserves_full_provider_labels() -> None:
     )
 
     class LongLabelProvider(FakeBrowserProvider):
+        """Supply an immutable observation with labels larger than the display limits."""
+
         def _observation(self, url: str) -> BrowserObservation:
+            """Return the original full labels so display truncation can be checked separately."""
             return original
 
     provider = LongLabelProvider()
@@ -169,8 +178,13 @@ async def test_page_display_truncation_preserves_full_provider_labels() -> None:
 
 
 async def test_an_out_of_scope_page_remains_invalid() -> None:
+    """Reject observations outside the provider origin policy before exposing a page."""
+
     class ForeignProvider(FakeBrowserProvider):
+        """Simulate a provider returning a page outside its authorized origin."""
+
         async def observe(self) -> BrowserObservation:
+            """Return a foreign-origin observation for the output-boundary regression."""
             return self._observation("https://foreign.example/account")
 
     result = await BrowserObserveTool(ForeignProvider()).execute({}, tool_context())
@@ -180,6 +194,7 @@ async def test_an_out_of_scope_page_remains_invalid() -> None:
 
 
 async def test_a_page_that_shrank_returns_an_empty_terminal_slice() -> None:
+    """Terminate stale offsets safely when the fresh page has fewer elements or text."""
     result = await BrowserObserveTool(FakeBrowserProvider()).execute(
         {"element_offset": 256, "text_offset": 262144}, tool_context()
     )
@@ -191,8 +206,13 @@ async def test_a_page_that_shrank_returns_an_empty_terminal_slice() -> None:
 
 
 async def test_oversized_page_identity_fails_instead_of_losing_references() -> None:
+    """Fail explicitly when page identity alone exceeds the configured byte budget."""
+
     class LongURLProvider(FakeBrowserProvider):
+        """Supply an allowed-origin URL too large to fit in the smallest page budget."""
+
         async def observe(self) -> BrowserObservation:
+            """Return oversized identity metadata without changing the allowed origin."""
             return self._observation("https://example.org/" + "x" * 2000)
 
     result = await BrowserObserveTool(LongURLProvider(), inline_output_bytes=1024).execute(
@@ -204,6 +224,7 @@ async def test_oversized_page_identity_fails_instead_of_losing_references() -> N
 
 
 async def test_real_composer_can_use_a_publication_control_from_a_later_page() -> None:
+    """Reach a later-page Post control in Chromium while still rejecting stale refs."""
     controls = "".join(f"<button>Control {index}</button>" for index in range(34))
     timeline = "".join(f"<button>Timeline {index}</button>" for index in range(180))
     html = (
@@ -226,7 +247,10 @@ async def test_real_composer_can_use_a_publication_control_from_a_later_page() -
         )
 
         class RuntimeProvider(FakeBrowserProvider):
+            """Adapt the local Chromium fixture to the observation tool contract."""
+
             async def observe(self) -> BrowserObservation:
+                """Refresh the real page so each pagination call receives current references."""
                 return await runtime.observe()
 
         provider = RuntimeProvider(allowed_origins=runtime._allowed_origins)

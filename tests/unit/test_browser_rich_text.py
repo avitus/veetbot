@@ -29,6 +29,7 @@ document.addEventListener('input', () => window.inputs.push(
 
 @pytest.mark.parametrize("headed", [False, True])
 async def test_cancelled_navigation_keeps_the_unsaved_composer(headed: bool) -> None:
+    """Preserve the draft after dismissed beforeunload navigation in both browser modes."""
     page = (
         COMPOSER.format(
             editor='<div contenteditable="true" role="textbox" aria-label="Post text"></div>'

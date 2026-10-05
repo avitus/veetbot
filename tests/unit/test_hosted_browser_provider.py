@@ -405,8 +405,13 @@ class SettledPageSessions(FakeSessions):
 
 
 async def test_cancelled_navigation_does_not_retire_the_hosted_lease() -> None:
+    """Reuse the same hosted lease and action sequence after cancelled navigation."""
+
     class CancelledNavigationSessions(FakeSessions):
+        """Simulate navigation cancelled by an unsaved-draft dialog."""
+
         async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
+            """Return the non-retryable cancellation without invalidating the session."""
             raise BrowserProviderError("tool.browser.navigation_cancelled", retryable=False)
 
     sessions = CancelledNavigationSessions()

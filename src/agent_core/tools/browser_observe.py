@@ -23,6 +23,8 @@ INPUT_SCHEMA: dict[str, Any] = {
 
 
 class LegacyBrowserObserveTool:
+    """Retain the original observation schema for chats pinned to version 1.0.0."""
+
     spec = ToolSpec(
         name="browser.observe",
         version="1.0.0",
@@ -44,9 +46,11 @@ class LegacyBrowserObserveTool:
     )
 
     def __init__(self, provider: BrowserProvider) -> None:
+        """Bind the provider used by the original observation contract."""
         self._provider = provider
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Read a full bounded observation without accepting pagination arguments."""
         if arguments:
             return browser_failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
@@ -62,6 +66,8 @@ class LegacyBrowserObserveTool:
 
 
 class BrowserObserveTool:
+    """Expose complete observation pages that fit the configured inline output budget."""
+
     spec = LegacyBrowserObserveTool.spec.model_copy(
         update={
             "version": "1.1.0",
@@ -87,12 +93,14 @@ class BrowserObserveTool:
     )
 
     def __init__(self, provider: BrowserProvider, *, inline_output_bytes: int = 4096) -> None:
+        """Bind the provider and cap each page at the configured admission limit."""
         if inline_output_bytes < 1024:
             raise ValueError("browser observation pages require at least 1024 bytes")
         self._provider = provider
         self._inline_output_bytes = min(inline_output_bytes, self.spec.maximum_output_bytes)
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Validate offsets before binding, then return a page from a fresh observation."""
         bounds = {"element_offset": 256, "text_offset": 262144}
         if any(
             key not in bounds or type(value) is not int or not 0 <= value <= bounds[key]

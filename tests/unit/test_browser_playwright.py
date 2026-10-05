@@ -1409,6 +1409,7 @@ def settling_runtime(page: FakeSettlingPage) -> PythonPlaywrightRuntime:
 async def test_other_navigation_failures_are_not_mistaken_for_a_cancelled_dialog(
     dialog_type: str, error: str, changed_url: bool, closed: bool, disallowed: bool
 ) -> None:
+    """Keep transport, origin, and unrelated dialog failures out of cancellation recovery."""
     runtime = PythonPlaywrightRuntime()
     runtime._allowed_origins = ("https://example.org",)
     page = Mock(spec=Page)
@@ -1417,6 +1418,7 @@ async def test_other_navigation_failures_are_not_mistaken_for_a_cancelled_dialog
     runtime._page = page
 
     async def failing_goto(*args: object, **kwargs: object) -> None:
+        """Inject the selected dialog and page state before failing navigation."""
         dialog = Mock(type=dialog_type, dismiss=AsyncMock())
         await runtime._dismiss_dialog(dialog)
         if changed_url:

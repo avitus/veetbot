@@ -473,6 +473,7 @@ class PythonPlaywrightRuntime:
         return path_is_within_prefix(path, path_prefix) and not path_is_sensitive(path)
 
     async def _dismiss_dialog(self, dialog: Dialog) -> None:
+        """Dismiss browser dialogs while recording unsaved-draft navigation cancellation."""
         if dialog.type == "beforeunload":
             self._dismissed_beforeunload = True
         await dialog.dismiss()

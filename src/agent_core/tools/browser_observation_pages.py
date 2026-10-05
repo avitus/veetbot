@@ -50,6 +50,7 @@ PAGE_SCHEMA: dict[str, Any] = {
 
 
 def _display(value: str, limit: int) -> tuple[str, bool]:
+    """Bound a display label in UTF-8 bytes and indicate whether it was shortened."""
     encoded = value.encode("utf-8")
     if len(encoded) <= limit:
         return value, False
@@ -57,10 +58,12 @@ def _display(value: str, limit: int) -> tuple[str, bool]:
 
 
 def _content(page: dict[str, Any]) -> list[TextPart]:
+    """Serialize a complete page using the same text content admitted to model context."""
     return [TextPart(text=json.dumps(page, ensure_ascii=False, separators=(",", ":")))]
 
 
 def _size(page: dict[str, Any]) -> int:
+    """Measure serialized content bytes, including the text-part envelope and escaping."""
     return len(content_bytes(list(_content(page))))
 
 
@@ -72,7 +75,10 @@ def observation_page_result(
     element_offset: int,
     text_offset: int,
 ) -> ToolResult:
+    """Build a fresh observation slice that preserves references within the inline budget."""
+
     def invalid() -> ToolResult:
+        """Reject an observation page whose identity or next complete item cannot fit."""
         return browser_failure(
             ToolFailureKind.OUTPUT_INVALID, "tool.browser.output_invalid", retryable=False
         )
