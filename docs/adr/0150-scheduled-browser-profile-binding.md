@@ -27,6 +27,10 @@ and requires the browser read tools in the plan before calling the model.
 Unavailable access produces a failed run with a stable reason code, which the
 existing schedule accounting and notification paths consume. The hosted
 provider still revalidates the profile when acquiring and using its lease.
+Every execution attempt, including resume, also verifies that composition
+uses a session-bound hosted provider or a fixed hosted provider with the same
+profile UUID. A mismatch fails before model work or pending tool dispatch; a
+deployment-wide pin cannot substitute another account for the schedule pin.
 Hosted adapters accept the same tenant and principal with a subset of the
 configured owner's scopes and roles; full principal-object equality incorrectly
 rejected restricted scheduled runs. Other identities and broader authority

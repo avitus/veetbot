@@ -47,6 +47,7 @@ from agent_core.domain.runs import (
     RunStatus,
     Step,
 )
+from agent_core.domain.sessions import Session
 from agent_core.domain.surfaces import SurfaceReply
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
@@ -312,6 +313,7 @@ class RunExecutor:
         finalization_write_probe: FinalizationWriteProbe | None = None,
         task_runner: TaskRunner | None = None,
         typed_task: TypedTaskProbe | None = None,
+        validate_browser_binding: Callable[[Session], None] | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
@@ -345,6 +347,7 @@ class RunExecutor:
         self._finalization_write_probe = finalization_write_probe
         self._task_runner = task_runner
         self._typed_task = typed_task
+        self._validate_browser_binding = validate_browser_binding
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
         self._identical_denial_threshold = identical_denial_threshold
@@ -723,6 +726,8 @@ class RunExecutor:
                 agent = await uow.agents.get_version(run.agent_id, run.agent_version)
                 session = await uow.sessions.get(run.session_id, principal)
                 await validate_scheduled_browser(uow, session, principal)
+                if self._validate_browser_binding is not None:
+                    self._validate_browser_binding(session)
                 chat_choice = (
                     None
                     if self._model_settings is None

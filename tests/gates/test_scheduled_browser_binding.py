@@ -123,20 +123,36 @@ async def test_schedule_api_rejects_unauthorized_browser_binding(problem: str) -
             assert listing.json()["items"] == []
 
 
-async def test_materialized_browser_schedule_exposes_browser_tools_with_pinned_budget() -> None:
+@pytest.mark.parametrize("provider_mode", ["session", "fixed", "mismatch"])
+async def test_materialized_browser_schedule_exposes_browser_tools_with_pinned_budget(
+    provider_mode: str,
+) -> None:
     from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
+    from agent_core.adapters.models.fake import FakeModelProvider
     from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
+    from agent_core.domain.runs import RunStatus
     from agent_core.domain.schedules import ScheduleDefinition
     from agent_core.runtime.checkpoints import DurableCheckpointSeeder
     from agent_core.scheduling.materializer import ScheduleMaterializer
     from tests.unit.test_browser_composition import context_plan_payload, one_text_turn
 
+    settings = session_bound_hosted_settings()
+    if provider_mode != "session":
+        settings = replace(
+            settings,
+            browser_profile_id=UUID(int=999) if provider_mode == "mismatch" else PROFILE_ID,
+            browser_allowed_origins=("https://example.org",),
+        )
     async with build(
-        settings=session_bound_hosted_settings(),
+        settings=settings,
         fixed_clock_at=NOW,
         script=one_text_turn(),
     ) as composition:
         await seed_browser_authority(composition)
+        if provider_mode == "mismatch":
+            async with composition.uow_factory() as uow:
+                profile = await uow.browser_profiles.get(PROFILE_ID, composition.principal)
+                await uow.browser_profiles.create(profile.model_copy(update={"id": UUID(int=999)}))
         session_id = await composition.sessions.create()
         async with composition.uow_factory() as uow:
             source = await uow.sessions.get(session_id, composition.principal)
@@ -171,12 +187,24 @@ async def test_materialized_browser_schedule_exposes_browser_tools_with_pinned_b
             session = await uow.sessions.get(occurrence.session_id, composition.principal)
             assert session.metadata.get("browser_profile_id") == str(PROFILE_ID)
         await composition.executor.execute(occurrence.run_id)
-        plan = await context_plan_payload(composition, occurrence.session_id)
-        assert {"browser.navigate", "browser.observe"} <= set(cast(list[str], plan["tool_names"]))
+        if provider_mode != "mismatch":
+            plan = await context_plan_payload(composition, occurrence.session_id)
+            assert {"browser.navigate", "browser.observe"} <= set(
+                cast(list[str], plan["tool_names"])
+            )
         async with composition.uow_factory() as uow:
             run = await uow.runs.get(occurrence.run_id, composition.principal)
             assert run.limits.max_cost == definition.limits.max_cost
             assert run.principal_scopes == {"browser.profile.read"}
+        if provider_mode == "mismatch":
+            assert run.status is RunStatus.FAILED
+            assert run.failure is not None
+            assert run.failure.details["reason_code"] == "tool.browser.profile_unavailable"
+            provider = composition.executor._model_provider
+            assert isinstance(provider, FakeModelProvider)
+            assert provider.requests == []
+        else:
+            assert run.status is RunStatus.COMPLETED
 
 
 @pytest.mark.parametrize(

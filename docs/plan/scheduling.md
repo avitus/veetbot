@@ -376,7 +376,12 @@ Materialization copies the immutable revision's UUID into the reserved session
 browser binding. The scheduler's database authority is unchanged. Before the
 first model call, the run worker checks the profile's ownership, readiness and
 requested scope, and that the plan supplies `browser.navigate` and
-`browser.observe`. Unavailable access fails the run with a stable reason code,
+`browser.observe`. On every execution attempt, including resume, composition
+also requires a session-bound hosted provider or a fixed hosted provider whose
+profile UUID matches the schedule pin. A mismatched fixed profile is
+`tool.browser.profile_unavailable`; other provider modes are
+`tool.browser.provider_unavailable`. These checks precede model work and pending
+tool dispatch. Unavailable access fails the run with a stable reason code,
 so ordinary outcome accounting, failure limits and notifications apply. The
 provider revalidates again before browser dispatch. The schedule's finite
 limits and deadline remain pinned; it does not inherit the interactive browser

@@ -3,7 +3,12 @@
 from dataclasses import replace
 from typing import cast
 
-from agent_core.adapters.browser.hosted_provider import SessionBoundHostedBrowserProvider
+import pytest
+
+from agent_core.adapters.browser.hosted_provider import (
+    HostedBrowserProvider,
+    SessionBoundHostedBrowserProvider,
+)
 from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
 from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.bootstrap import build
@@ -25,7 +30,10 @@ from tests.unit.test_browser_composition import (
 from tests.unit.test_hosted_browser_provider import FakeSessions
 
 
-async def test_persisted_browser_schedule_reads_through_its_owned_profile() -> None:
+@pytest.mark.parametrize("fixed_profile", [False, True])
+async def test_persisted_browser_schedule_reads_through_its_owned_profile(
+    fixed_profile: bool,
+) -> None:
     script = FakeModelScript(
         turns=[
             ScriptedTurn(
@@ -45,6 +53,8 @@ async def test_persisted_browser_schedule_reads_through_its_owned_profile() -> N
     settings = replace(
         session_bound_hosted_settings(),
         database_url=database_settings().database_url,
+        browser_profile_id=PROFILE_ID if fixed_profile else None,
+        browser_allowed_origins=("https://example.org",) if fixed_profile else (),
     )
     async with build(
         settings=settings, storage="postgres", script=script, fixed_clock_at=NOW
@@ -87,7 +97,7 @@ async def test_persisted_browser_schedule_reads_through_its_owned_profile() -> N
             RegisteredTool, composition.tool_pipeline._registry.get("browser.navigate")
         )
         tool = cast(BrowserNavigateTool, registered.implementation)
-        provider = cast(SessionBoundHostedBrowserProvider, tool._provider)
+        provider = cast(HostedBrowserProvider | SessionBoundHostedBrowserProvider, tool._provider)
         sessions = FakeSessions()
         provider._sessions = sessions
         await composition.executor.execute(occurrence.run_id)

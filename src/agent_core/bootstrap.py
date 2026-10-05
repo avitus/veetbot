@@ -577,6 +577,10 @@ from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.email_tasks import EmailTaskRunner
 from agent_core.runtime.executor import RunExecutor, SurfaceRunStateWriter
 from agent_core.runtime.loop import RunContext
+from agent_core.runtime.scheduled_browser import (
+    ScheduledBrowserUnavailableError,
+    is_browser_schedule,
+)
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.scheduling.accounting import ScheduleOutcomeAccountant
 from agent_core.scheduling.materializer import ScheduleMaterializer
@@ -818,6 +822,26 @@ def _session_tool_filter(
         return [tool for tool in tools if tool.name not in _BROWSER_TOOL_NAMES]
 
     return filter_tools
+
+
+def _scheduled_browser_binding_validator(
+    browser_provider: BrowserProvider | None,
+) -> Callable[[Session], None]:
+    """Refuse a schedule pin the composed provider cannot honor, including resume."""
+
+    def validate(session: Session) -> None:
+        if not is_browser_schedule(session):
+            return
+        if isinstance(browser_provider, SessionBoundHostedBrowserProvider):
+            return
+        if isinstance(browser_provider, HostedBrowserProvider):
+            selected = UUID(str(session.metadata[SESSION_BROWSER_PROFILE_METADATA_KEY]))
+            if selected == browser_provider.profile_id:
+                return
+            raise ScheduledBrowserUnavailableError("tool.browser.profile_unavailable")
+        raise ScheduledBrowserUnavailableError("tool.browser.provider_unavailable")
+
+    return validate
 
 
 def _task_grants_composed(settings: Settings, browser_provider: BrowserProvider) -> bool:
@@ -3836,6 +3860,7 @@ async def _compose(
             notification_producer=notification_producer,
             task_runner=execute_email_task,
             typed_task=is_email_task,
+            validate_browser_binding=_scheduled_browser_binding_validator(browser_provider),
             model_settings=model_settings_catalog,
         )
         dispatcher = (

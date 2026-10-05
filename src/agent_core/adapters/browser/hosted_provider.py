@@ -128,6 +128,11 @@ class HostedBrowserProvider:
         self._lock = asyncio.Lock()
 
     @property
+    def profile_id(self) -> UUID:
+        """The trusted profile this fixed provider will acquire."""
+        return self._profile_id
+
+    @property
     def lease_run_id(self) -> UUID | None:
         return None if self._lease_scope is None else self._lease_scope[0]
 
