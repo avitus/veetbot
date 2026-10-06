@@ -10,10 +10,11 @@ title: Current Milestone
   progress: the Telegram surface is implemented and every registered gate
   passes locally. On 2026-09-28 a paired message's run gained its own USD 10
   budget, which admits it on PostgreSQL (ADR-0064 amendment), and the sixteen
-  CodeRabbit findings pull request 104 left open were resolved on `dev`. The
-  owner's production Telegram smoke, which
-  [the Telegram surface runbook](../telegram-surface-runbook.md) scripts, and
-  the review loop on a dev to main pull request remain. Milestone 13 —
+  CodeRabbit findings pull request 104 left open were resolved; pull request
+  143 carried both to `main`. The owner's production smoke with
+  [the Telegram surface runbook](../telegram-surface-runbook.md) passed on
+  2026-10-06; only its finding, a paired sender's `/pair` reaching the model,
+  remains to ship through a dev to main pull request. Milestone 13 —
   general-purpose subagents and delegation, specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates — completed on 2026-08-27 when pull request 72 passed hosted CI and a

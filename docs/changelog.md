@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-06 — Telegram is live, and `/pair` stays a command
+
+- The Telegram channel passed its production smoke: pairing, a run, a
+  question, an approval, the chat commands, and revocation all work from the
+  phone, and no token or pairing code reached a log.
+- Sending `/pair` from a chat that is already paired went to the model as an
+  ordinary message. It now answers "This chat is already paired with Veetbot."
+  and the code is neither checked nor stored.
+
 ## 2026-10-05 — CI checks that the Website Access browser stays quiet
 
 - The browser that Website Access uses is kept from contacting Google on its

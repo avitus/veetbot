@@ -589,7 +589,7 @@ citations:
   - cite: "docs/plan/thread-folders.md#docs/plan/http-api-and-streaming.md:801-807"
     excerpt: "reflects server-observed conversation activity. The reposito"
     digest: "5d7344698abeb2ab"
-  - cite: "docs/plan/thread-folders.md#docs/plan/inbound-surfaces.md:381-384"
+  - cite: "docs/plan/thread-folders.md#docs/plan/inbound-surfaces.md:382-385"
     excerpt: "plus the authority version; the receipt carries the reverse "
     digest: "961ec640608b2a1f"
   - cite: "docs/plan/thread-folders.md#docs/plan/memory-formation-and-consolidation.md:749"

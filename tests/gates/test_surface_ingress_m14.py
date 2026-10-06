@@ -913,3 +913,43 @@ async def test_an_unreadable_update_gets_one_content_free_receipt() -> None:
     assert receipt.session_id is None
     assert receipt.run_id is None
     assert latest == 77
+
+
+async def test_a_paired_sender_pair_command_never_reaches_the_model() -> None:
+    """/pair is a deterministic command for every sender (inbound-surfaces.md):
+    a paired sender gets a notice, and the code is neither verified nor stored."""
+
+    _, service_type = _application_types()
+    _, uow_factory = await memory_uow_factory()
+    caller = principal().model_copy(update={"scopes": {"run.write"}})
+    await _pair_sender(uow_factory, caller, frozenset({"run.write"}))
+    issued = issue_pairing_code(
+        pairing_id=UUID("00000000-0000-4000-8000-0000000014e0"),
+        surface_id=SURFACE_ID,
+        tenant_id=caller.tenant_id,
+        principal_id=caller.principal_id,
+        created_by_principal_id=caller.principal_id,
+        granted_scopes=frozenset({"run.write"}),
+        label=None,
+        now=NOW,
+        expires_after=timedelta(minutes=10),
+        max_attempts=5,
+        code="Pa1redQ7",
+        salt=b"0123456789abcdef",
+    )
+    async with uow_factory() as uow:
+        await uow.surfaces.pairings.create_code(issued.record, caller)
+    service = _command_service(service_type, uow_factory, caller)
+
+    with_code = await service.ingest(_message("wamid.repair.1", "/pair Pa1redQ7"))
+    bare = await service.ingest(_message("wamid.repair.2", "/pair"))
+
+    for result in (with_code, bare):
+        assert result.disposition is InboundDisposition.COMMAND_HANDLED
+        assert result.reason_code == "surface.already_paired"
+        assert result.run_id is None
+    async with uow_factory() as uow:
+        [code] = await uow.surfaces.pairings.active_codes_for_surface(SURFACE_ID, NOW)
+        assert await uow.surfaces.pairings.live_pairing(SURFACE_ID, "sender-1") is not None
+    assert code.consumed_at is None
+    assert code.attempts == 0

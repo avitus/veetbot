@@ -548,8 +548,7 @@ milestones:
       - Slack and email adapters, group and thread chats, webhook delivery
       - device-scoped tools, presence routing, hand-off, media intake
     open_items:
-      - Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke, following docs/telegram-surface-runbook.md
-      - Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
+      - Ship the repair that answers a paired sender's /pair deterministically, found by the owner's production smoke, through a dev to main pull request with hosted CI and a clean CodeRabbit review
     evidence:
       - check: twenty-one Milestone 14 gate.surface gates
         outcome: passed_locally
@@ -623,6 +622,29 @@ milestones:
           SQLAlchemy shortens the migration's and the model's names alike, and a
           PostgreSQL check now pins the stored surface constraint names to the
           model's.
+      - check: dev to main delivery through pull request 143
+        outcome: passed
+        detail: >-
+          Pull request 143 carried the surface run budget, the resolution of
+          pull request 104's findings, and the dedicated veetbot_surface login
+          to main. CodeRabbit completed its review of the final head 5c6696bb
+          with its one thread resolved, every hosted lane passed on that head,
+          and the owner merged it on 2026-09-29 as f52ee215, which deployed.
+          Verified from GitHub on 2026-10-06.
+      - check: owner production Telegram smoke
+        outcome: passed
+        detail: >-
+          On 2026-10-06 the owner ran docs/telegram-surface-runbook.md against
+          @alvitusbot after the release enabled veetbot-surface. The
+          content-free audit trail shows an unpaired refusal (05:14:45 UTC), a
+          code issued and paired (05:15:36, 05:15:50), a run and a clarifying
+          question answered in the chat, an approval resolved with /approve
+          (05:19:40), /status, /help, /new and /stop (05:20:39-05:21:39), and a
+          revocation (05:22:16) that refused the very next message (05:22:22).
+          A scan of two hours of surface, API, worker and notify journals and
+          the PostgreSQL log found neither the bot token nor the pairing code.
+          The smoke also found that a paired sender's /pair reached the model
+          instead of a deterministic notice; the repair is on dev.
   "15":
     title: Operational hardening
     status: authorized
@@ -1326,7 +1348,6 @@ milestones:
     open_items:
       - Complete the owner Meta ceremony and obtain approval for the content-free utility template
       - Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
-      - Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
     evidence:
       - check: Milestone 25 gate-area red phase
         outcome: observed_expected_failure
@@ -1365,6 +1386,12 @@ milestones:
           and gate.whatsapp.receipt_idempotent now replays a signed webhook's own
           normalized message through ingress. Milestone 14's evidence lists the
           resolved findings.
+      - check: dev to main delivery through pull request 143
+        outcome: passed
+        detail: >-
+          The shared surface repairs reached main through pull request 143,
+          whose final head passed every hosted lane and CodeRabbit's review;
+          Milestone 14's evidence records it.
 
   "26":
     title: Client modes and adaptive email experience

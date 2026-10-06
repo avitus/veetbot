@@ -224,7 +224,9 @@ Use harmless text and record only timestamps, results, and identifiers:
    "This sender is not paired. Send /pair followed by a code." and nothing
    appears in the Apple client.
 2. [ ] **Pairing.** Pair as in Phase 5. Sending the same `/pair CODE` again
-   answers "That pairing code is invalid or expired."
+   answers "This chat is already paired with Veetbot." and never reaches the
+   model; from a chat that is not paired, a used code answers "That pairing
+   code is invalid or expired."
 3. [ ] **A run.** Send `What is 17 times 23?`. One reply arrives, and the
    conversation appears in the Apple client.
 4. [ ] **A question.** Send `Before you answer, ask me one clarifying question

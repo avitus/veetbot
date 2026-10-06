@@ -95,7 +95,7 @@ index, which is what lets a folder created on the Mac appear on the iPhone.
 
 **A session is not owned by a channel, and metadata is not a column.** The
 surface seam records the surface in session metadata precisely because a
-session column would be wrong (inbound-surfaces.md:381-384). Folder
+session column would be wrong (inbound-surfaces.md:382-385). Folder
 membership is the opposite case — it is owner-organized state with a
 uniqueness rule, a cascade, and a count — so it is a table, not a metadata
 key. Metadata stays opaque, bounded, and untrusted.
