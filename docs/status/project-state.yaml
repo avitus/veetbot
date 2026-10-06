@@ -167,6 +167,12 @@ project:
   # follows it: hosted CI measures the built browser image's own requests on
   # x86_64 and arm64 whenever the image, its limits, the Playwright version or
   # the vendor-request switches change; the gate count is unchanged.
+  # ADR-0153 (Proposed, 2026-10-05) records the owner-requested non-milestone
+  # extension: a default-off first-party stdio bridge, svp_mcp, reads the
+  # Scale VP data service's REST API with a grant it holds as a private
+  # file, after a one-time operator sign-in; the gate count is unchanged. The
+  # owner's sign-in and a live read smoke passed on 2026-10-05; production
+  # enablement remains.
   authorized_milestones:
     - 0
     - 1
@@ -1733,12 +1739,20 @@ open_items_outside_milestones:
 - 'HTTP API: event-log-and-persistence.md and ADR-0032 decision 9 require `POST /v1/runs/{run_id}/export`, but no such route is mounted and only `agent run export` exists; mount it or propose an ADR that drops it (found in the 2026-09-28 documentation audit)'
 - 'Owner: accept or reject ADR-0104, ADR-0105, ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138, which are still Proposed although their mechanisms are implemented, specified and on main'
 - 'Owner: accept or reject ADR-0146, which is Proposed and implemented: a hosted browser launch repeats the Playwright disabled-feature list, gives push messaging a check-in address it cannot fetch, and leaves one account request to accounts.google.com on'
-- 'Owner decision: whether branch protection also requires browser-image-x86_64 and browser-image-arm64 (ADR-0152); release packaging already waits for both, so a failure stops delivery but not a merge'
 - 'Owner decision: the hardline protected_host_path rule blocks .git/config only at the workspace root, so sub/.git/config is not blocked, while .env and ~/.ssh already match at any depth; decide whether it should, knowing that a change to the matcher in policy/hardline.py leaves policy_version unchanged but an edit to hardline.yaml moves it and unbinds the memory-formation release evidence (found in the 2026-09-28 test audit)'
 
 # Evidence behind changes to the list above: a closed item, or the check that
 # confirmed a newly recorded gap.
 outside_milestone_evidence:
+- check: first hosted run of the ADR-0152 browser image check
+  outcome: passed
+  detail: >-
+    Requested pipeline 986 on dev at 97ad7fe9 (pull request 151) measured the
+    built image on both architectures: browser-image-x86_64 (CircleCI job
+    5091) and browser-image-arm64 (job 5099) each passed 2 tests, in 3 min
+    50 s and 3 min 57 s. As the owner had authorized, both contexts were then
+    added to main's required status checks on 2026-10-05; main now requires
+    nine. This closes the branch-protection item.
 - check: owner acceptance of ADR-0152
   outcome: accepted
   detail: >-

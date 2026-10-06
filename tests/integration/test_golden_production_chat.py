@@ -66,6 +66,7 @@ from tests.gates.test_email_m18 import (
 )
 from tests.gates.test_email_unsubscribe_m31 import Transport
 from tests.integration.disposable_database import disposable_database_url
+from tests.unit.test_svp_composition import _discovery as svp_discovery
 from tests.unit.test_web_tools import FakeWebProvider
 
 START_CALL = "mcp.bland_call.start_call"
@@ -112,8 +113,11 @@ def _production_settings(tmp_path: Path) -> Settings:
         schedule_worker_enabled=True,
         call_enabled=True,
         call_configuration=configuration,
+        # ADR-0153: the Scale VP bridge adds three read tools.
+        svp_enabled=True,
         credentials={
             **loaded.credentials,
+            "svp_read": SecretStr("/var/lib/veetbot/svp/credential.json"),
             **{
                 name: SecretStr(
                     json.dumps({"api_key": KEY, "configuration": configuration.model_dump()})
@@ -147,6 +151,7 @@ async def _mcp_factory(settings: Settings) -> ScriptedMCPClientFactory:
             ),
         ),
     )
+    scripts["svp_read"] = ScriptedMCPServer(name="svp_read", discovery=await svp_discovery())
     return ScriptedMCPClientFactory(scripts)
 
 
@@ -354,6 +359,10 @@ async def test_production_chat_survives_restarts_through_clarifications_approval
     assert "tool.call" in first_plan.tool_names
     assert set(first_plan.tool_names) >= CALL_READS
     assert START_CALL in first_plan.deferred_tool_names
+    assert {
+        f"mcp.svp_read.{tool}"
+        for tool in ("list_operations", "describe_operation", "call_operation")
+    } <= {*first_plan.tool_names, *first_plan.deferred_tool_names}
     assert first_plan.skipped_tool_names == ()
     # Four restarted processes read the stored plan back and never re-planned.
     assert final_plan.epoch == first_plan.epoch

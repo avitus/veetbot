@@ -28,6 +28,7 @@ from tests.gates.test_email_m18 import _credential as gmail_credential
 from tests.gates.test_email_m18 import _generated_gmail_discovery as generated_gmail_discovery
 from tests.gates.test_email_unsubscribe_m31 import Transport
 from tests.integration.m2_support import memory_settings
+from tests.unit.test_svp_composition import _discovery as svp_discovery
 from tests.unit.test_web_tools import FakeWebProvider
 
 
@@ -118,8 +119,8 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
     find a call keep their definitions and starting one is always offered.
     These settings enable every flag production enables that changes the
     default roster; activating another one in production adds it here first
-    (ADR-0124). The two-account production roster is gated in
-    `test_deferred_tools_adr0123.py`.
+    (ADR-0124). The Scale VP bridge joined on 2026-10-05 (ADR-0153). The
+    two-account production roster is gated in `test_deferred_tools_adr0123.py`.
     """
     configuration = call_configuration()
     scripts = {
@@ -154,7 +155,9 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
         schedule_worker_enabled=True,
         call_enabled=True,
         call_configuration=configuration,
+        svp_enabled=True,
         credentials={
+            "svp_read": SecretStr("/var/lib/veetbot/svp/credential.json"),
             **{
                 f"gmail_{mode}": SecretStr(gmail_credential(mode).as_json())
                 for mode in ("read", "write", "send")
@@ -167,6 +170,7 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
             },
         },
     )
+    scripts["svp_read"] = ScriptedMCPServer(name="svp_read", discovery=await svp_discovery())
     provider = FakeWebProvider()
     async with build(
         settings=settings,
@@ -188,4 +192,8 @@ async def test_production_roster_offers_the_owner_the_call_tools() -> None:
     missing = {"mcp.bland_read.list_calls", "mcp.bland_read.get_call"} - set(plan.tool_names)
     assert not missing, missing
     assert "mcp.bland_call.start_call" in {*plan.tool_names, *plan.deferred_tool_names}
+    assert {*plan.tool_names, *plan.deferred_tool_names} >= {
+        f"mcp.svp_read.{tool}"
+        for tool in ("list_operations", "describe_operation", "call_operation")
+    }
     assert plan.skipped_tool_names == ()

@@ -2,8 +2,8 @@
 
 The production-shaped roster below enables every flag production enables that
 changes the default roster (People, Email mode, email unsubscribe, scheduling,
-web and calling) and both Gmail accounts. Activating another such flag in
-production adds it here first.
+web, calling and the Scale VP bridge) and both Gmail accounts. Activating
+another such flag in production adds it here first.
 """
 
 import asyncio
@@ -48,6 +48,7 @@ from tests.gates.test_email_m18 import (
 )
 from tests.gates.test_email_unsubscribe_m31 import Transport
 from tests.unit.test_deferred_tool_index import jsonb_key_order
+from tests.unit.test_svp_composition import _discovery as _svp_discovery
 from tests.unit.test_web_tools import FakeWebProvider
 
 MANAGEMENT_TOOLS = frozenset(
@@ -72,6 +73,9 @@ DISCOVERED_READS = frozenset(
     }
 )
 START_CALL = "mcp.bland_call.start_call"
+SVP_READS = frozenset(
+    f"mcp.svp_read.{tool}" for tool in ("list_operations", "describe_operation", "call_operation")
+)
 
 
 async def _bland_discovery(mode: str) -> MCPDiscovery:
@@ -113,8 +117,10 @@ async def _production(
         schedule_worker_enabled=True,
         call_enabled=True,
         call_configuration=configuration,
+        svp_enabled=True,
         credentials={
             **loaded.credentials,
+            "svp_read": SecretStr("/var/lib/veetbot/svp/credential.json"),
             **{
                 name: SecretStr(
                     json.dumps({"api_key": KEY, "configuration": configuration.model_dump()})
@@ -145,6 +151,7 @@ async def _production(
             ),
         ),
     )
+    scripts["svp_read"] = ScriptedMCPServer(name="svp_read", discovery=await _svp_discovery())
     factory = ScriptedMCPClientFactory(scripts)
     provider = FakeWebProvider()
     return factory, build(
@@ -193,13 +200,16 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     discovered = [spec for spec in plan.pinned_tool_specs if spec.name.startswith("mcp.")]
     # Nothing is dropped: every candidate has a definition or an index entry.
     assert plan.skipped_tool_names == ()
-    assert len(discovered) == 19
+    assert len(discovered) == 22
     assert len(plan.tool_names) == 30
     assert "tool.call" in defined
     # The six management tools are deferred by the default agent's configuration.
     assert deferred >= MANAGEMENT_TOOLS
     # Reads take the definition slots before anything that changes the world.
     assert defined >= DISCOVERED_READS
+    # The calling and Gmail reads fill the last definitions, so the Scale VP
+    # reads, which rank after them, are offered through the index (ADR-0153).
+    assert deferred >= SVP_READS
     writes = {
         spec.name for spec in discovered if spec.side_effect is not SideEffectClass.NETWORK_READ
     }
@@ -253,7 +263,7 @@ async def test_an_agent_without_tool_call_records_what_it_cannot_offer(tmp_path:
     assert "tool.call" not in plan.tool_names
     offered = {*plan.tool_names, *plan.skipped_tool_names}
     assert {spec.name for spec in default.pinned_tool_specs} - {"tool.call"} <= offered
-    assert len(plan.skipped_tool_names) == len(legacy_tools) + 19 - 30
+    assert len(plan.skipped_tool_names) == len(legacy_tools) + 22 - 30
 
 
 async def test_a_deferred_call_waits_for_the_same_approval(tmp_path: Path) -> None:

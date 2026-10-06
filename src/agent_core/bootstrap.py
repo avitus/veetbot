@@ -492,6 +492,7 @@ from agent_core.mcp.configuration import (
     calling_server_configs,
     email_server_configs,
     is_email_server_id,
+    svp_server_configs,
     validate_mcp_config,
 )
 from agent_core.mcp.runtime import MCPRuntime
@@ -4931,7 +4932,30 @@ async def build(
     composed_call_rows = calling_server_configs(
         effective_principal.tenant_id, enabled=effective_settings.call_enabled
     )
-    effective_mcp_servers = (*mcp_servers, *composed_email_rows, *composed_call_rows)
+    if any(config.server_id == "svp_read" for config in mcp_servers):
+        raise ConfigurationError("the first-party Scale VP row requires AGENT_SVP_ENABLED")
+    # A role that carries the flag but not the grant's path composes nothing.
+    composed_svp_rows = svp_server_configs(
+        effective_principal.tenant_id,
+        enabled=effective_settings.svp_enabled
+        and (credential_resolver is not None or "svp_read" in effective_settings.credentials),
+    )
+    effective_mcp_servers = (
+        *mcp_servers,
+        *composed_email_rows,
+        *composed_call_rows,
+        *composed_svp_rows,
+    )
+    if composed_svp_rows:
+        effective_principal = effective_principal.model_copy(
+            update={
+                "scopes": {
+                    *effective_principal.scopes,
+                    *(scope for row in composed_svp_rows for scope in row.required_scopes),
+                }
+            },
+            deep=True,
+        )
     if composed_call_rows:
         effective_principal = effective_principal.model_copy(
             update={

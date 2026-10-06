@@ -158,9 +158,11 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   role (Milestones 14 and 25). `agent_core.adapters.device_channel` and
   `agent_core.application.device_ingest` carry SMS through the owner's iPhone
   as one framed, untrusted triage turn per message (Milestone 24).
-- `src/gmail_mcp` and `src/bland_mcp` are first-party MCP server packages
-  beside `agent_core`, which they never import; the platform reaches them only
-  through its MCP process boundary (Milestones 18 and 27). Typed Email work runs
+- `src/gmail_mcp`, `src/bland_mcp` and `src/svp_mcp` are first-party MCP server
+  packages beside `agent_core`, which they never import; the platform reaches
+  them only through its MCP process boundary (Milestones 18 and 27, and
+  [ADR-0153](adr/0153-scale-vp-api-bridge.md) for the default-off Scale VP
+  read bridge). Typed Email work runs
   on the ordinary run, tool, and model path in `agent_core.runtime.email_*`
   (Milestone 26), and `agent_core.adapters.unsubscribe` is the fixed one-click
   unsubscribe transport (Milestone 31). Calling adds the `call-worker` and

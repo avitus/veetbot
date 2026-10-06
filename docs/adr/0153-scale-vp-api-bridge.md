@@ -1,0 +1,160 @@
+# ADR-0153: Scale VP data through its REST API, behind a first-party bridge that owns its sign-in
+
+- Status: Proposed (drafted at the repository owner's request, 2026-10-05)
+- Date: 2026-10-05
+- Related: ADR-0021, ADR-0071, ADR-0097, ADR-0131
+- Detailed design: `docs/plan/tool-system.md`
+
+## Context
+
+The owner wants Chat to read the Scale VP data service at
+`https://scalevp-mcp.com`. The service offers a hosted MCP endpoint and a REST
+API under `/api/v1/` whose OpenAPI document is published at
+`/api/openapi.json`. Both accept only a
+bearer token from the service's own OAuth authorization server, which offers
+the authorization-code grant with PKCE and dynamic client registration and
+nothing else: no client-credentials grant and no static key (its published
+metadata, checked 2026-10-05; the service's operator confirmed OAuth is the
+intended route).
+
+Nothing in the platform can complete that grant.
+[tool-system.md](../plan/tool-system.md) defers the user-delegated flows for
+platform-dialled MCP servers and refuses refresh tokens there, and the shipped
+egress policy admits no remote MCP destination. The one precedent for an
+authorization-code grant is Gmail (ADR-0071): a first-party stdio package
+holds the grant, and the platform never learns that the credential is OAuth.
+
+## Decision
+
+Add read access to the service as a default-off, non-milestone extension. It
+authorizes no milestone, changes no registered gate, and does not make
+third-party MCP servers installable.
+
+**The REST API, behind a third sibling package.** At the owner's direction
+(2026-10-05) access goes through `/api/v1/`, not the hosted MCP endpoint.
+`svp_mcp` joins `gmail_mcp` and `bland_mcp` as an operator-configured stdio
+server, `svp_read`, that cannot import core. Its tool declarations ship with
+the release, so the catalog reuse of ADR-0131 holds, and the remote service's
+own tool names, descriptions and schemas never reach the advertisement.
+
+**Three read tools over the published document.** `list_operations`,
+`describe_operation` and `call_operation` are driven by the service's OpenAPI
+document, which the package fetches with its grant. `GET` operations are
+listed and callable by their path and query parameters, and a query name the
+document does not declare is refused. At the owner's decision (2026-10-05)
+seven `POST` operations that search or look up and change nothing are offered
+too, from a fixed list in the package: company lookup and semantic search,
+contact search, deal search, an investor's co-investors and portfolio, and
+the reranked company search. Each takes a bounded JSON object naming only the
+properties its request schema declares. Every other operation that is not a
+`GET` stays invisible, including the service's web-cache searches and
+fetches, which reach the public web and for which the platform has its own
+tools. The row is `NETWORK_READ`, `LOW`, `READ_ONLY`, and requires
+`mcp.svp_read.use`, which composition grants the owner as it does for the
+other first-party rows. No write mode exists; one is a separate decision on
+the Bland read/call precedent.
+
+**Confinement is the package's own.** A stdio child is not behind the egress
+proxy. The origin, the API root and the three OAuth endpoints are package
+constants. Every API request is built from a document path and refused
+unless it is HTTPS to that host under `/api/v1/` with no dot segment;
+redirects are never followed and ambient proxy settings are ignored. Header
+and cookie parameters in the document are never sent, and a `POST` is sent
+only to a listed operation's exact URL. Bodies are bounded. A failure the
+model cannot correct is a fixed `svp.*` code with no upstream text.
+
+**What the model can correct is an answer.** The platform shows the model no
+text from a failed MCP call, and this service explains a refused request in
+its message, for example by listing the closest matches to an ambiguous
+name. A client-error response (400, 404, 409 or 422) is therefore returned
+as a result holding its status and the service's message, cut to two thousand
+characters, and a call the package itself refuses returns its code with a
+fixed hint. Both carry the untrusted label every result of this server
+carries. Authorization, rate-limit, redirect and server failures stay
+content-free failures.
+
+**Sign-in is a one-time operator ceremony.** `python -m svp_mcp bootstrap`
+registers a client, runs the authorization-code grant with PKCE (S256)
+through an installed-app loopback redirect on the operator's machine after an
+explicit data-use confirmation that precedes any request, proves the grant
+against the API by fetching the document, and writes one owner-only file once
+the API has accepted the token. A document that is missing or unusable is
+reported after the grant is saved, so a wrong location never costs a second
+sign-in. The platform's deferral of user-delegated flows stands; no route,
+callback or token store is added to the API.
+
+**The package owns its grant as a file, and that is the difference from
+Gmail.** Google's refresh tokens do not rotate, so ADR-0071 passes a read-only
+credential by value. This service may rotate its refresh token on use, a
+rotated token must be durable before it is relied on, and several server
+processes run at once. `SVP_CREDENTIAL_FILE` therefore names a private state
+file; the credential resolver maps `svp_read` to that path rather than to the
+file's contents, and the adapter's existing `env` scheme places it in the one
+declared variable, `SVP_MCP_CREDENTIAL_FILE`. The package refreshes at use
+with a sixty-second skew and no timer, under an exclusive advisory lock,
+re-reading the file first so one process's rotation serves the others, and
+replaces the file atomically before the new token is used. No token, client
+secret or upstream body enters `argv`, an event, a log or a tool result.
+
+**Activation.** `AGENT_SVP_ENABLED` defaults to false. Enabled, it requires
+`SVP_CREDENTIAL_FILE` to be the absolute path of an owner-only regular file,
+or startup fails closed. A row named `svp_read` is composed only by the flag.
+The four owner units gain one optional writable path, `/var/lib/veetbot/svp`,
+because under `ProtectSystem=strict` the grant's holder could not otherwise
+replace it.
+
+## Alternatives
+
+- **Dial the hosted MCP endpoint as a tenant HTTP server.** This needs the
+  interactive authorization surface the tool system defers, refresh tokens it
+  refuses, and an egress destination the sandbox would share. It is the
+  general "install an MCP server" feature, which nobody has authorized.
+- **Run the vendor-suggested `npx mcp-remote` wrapper.** That is a stdio
+  server whose code is downloaded at start, on a host with no Node runtime,
+  and whose sign-in needs a desktop browser.
+- **Pass the credential by value, as Gmail does.** A rotated refresh token
+  could not be kept, so the grant would die at its first refresh.
+
+## Consequences
+
+New chats on a deployment with the flag advertise three more tools through
+the existing deferred index; older chats keep their pinned roster. No
+dependency, policy rule, adapter change or registered gate is introduced.
+The flag has joined the production-roster gates (ADR-0124). On that roster
+the calling and Gmail reads fill the last of Chat's thirty definitions and
+the Scale VP reads rank after them, so the three tools are offered through
+the deferred index and reached with `tool.call`; no other definition moves.
+A scheduled run is not offered the tools: the schedule role composes its own
+principal and carries no credentials, and the owner does not need it there.
+
+The grant is one identity's. Whatever that sign-in may read, a run may read
+on the owner's behalf, and results are external-untrusted text that reaches
+the hosted model provider like any other tool output; the ceremony says so
+before the browser opens.
+
+A rotating grant has one holder. A crash between the service rotating a token
+and the durable write, or a copy of the file left in use on a second machine,
+breaks the chain, and the fix is to run the ceremony again. The file is moved
+to the deployment, not copied.
+
+Generic tools cost the model a lookup that typed tools would not. The
+document read on 2026-10-05 publishes eighty-six paths: seventy `GET`
+operations and twenty-eight others. The bridge offers the seventy and the
+seven listed searches, seventy-seven in all. A new read that the service adds
+behind `POST` is not offered until the list is extended in a release.
+
+The owner signed in on 2026-10-05 and three open facts were settled against
+the real service. The document is at `/api/openapi.json` with its paths
+relative to `/api`, not at the location first assumed, and the constants
+were corrected. The REST API accepts the authorization server's tokens,
+which last twenty-four hours. Refresh tokens rotate on every use, so the
+file-holding design above is required rather than precautionary. A live
+smoke through the platform's adapter and the real child process listed the
+seventy operations, described and called three of them, refused an
+undeclared query and a `POST` operation, and kept working after a forced
+rotation. With the searches added, six of the seven answered through the
+bridge, one of them with the service's own request to narrow an ambiguous
+company name; the investor portfolio search returned a server error from the
+service for the input tried. Offline tests cover the grant, rotation,
+confinement and tool behaviour against a scripted transport. Production
+enablement remains.

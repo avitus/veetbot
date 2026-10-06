@@ -1475,6 +1475,19 @@ require production PostgreSQL, a current migration and an explicit owner binding
 See [setup](../bland-setup.md) for the complete configuration and role inventory.
 
 
+## Scale VP bridge composition
+
+[ADR-0153](../adr/0153-scale-vp-api-bridge.md) adds default-off
+`AGENT_SVP_ENABLED` and `SVP_CREDENTIAL_FILE`, the absolute path of the
+owner-only grant file. Enabled without that path, or with a path that is
+relative, linked, missing or not `0600`, startup fails closed; the path
+without the flag is refused. Core never reads the file: the credential
+resolver carries its path, and the fixed sibling `svp_mcp` package, which
+cannot import core, reads and rewrites it. Composition adds the `svp_read`
+row and its `mcp.svp_read.use` scope to the owner's principal. The mechanism
+is in [tool-system.md](tool-system.md).
+
+
 ## Milestone 28 People composition
 
 `AGENT_PEOPLE_ENABLED` defaults to true and controls People capture, public
