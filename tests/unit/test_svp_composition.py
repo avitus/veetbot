@@ -123,8 +123,12 @@ def test_the_bridge_is_default_off_and_the_platform_holds_only_a_private_path(
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
-def test_a_grant_the_service_could_not_rewrite_is_refused_at_startup(tmp_path: Path) -> None:
-    """The bridge rewrites the grant beside a lock file, so its directory must be writable."""
+@pytest.mark.parametrize("mode", [0o500, 0o300], ids=["unwritable", "unreadable"])
+def test_a_grant_the_service_could_not_rewrite_is_refused_at_startup(
+    tmp_path: Path, mode: int
+) -> None:
+    """The bridge rewrites the grant beside a lock file and syncs its directory, so the
+    directory must be readable and writable."""
     from agent_core.config import ConfigurationError, load_settings
 
     directory = tmp_path / "svp"
@@ -135,7 +139,7 @@ def test_a_grant_the_service_could_not_rewrite_is_refused_at_startup(tmp_path: P
     values = {**base_environment(), "AGENT_SVP_ENABLED": "1", "SVP_CREDENTIAL_FILE": str(state)}
     assert load_settings(values).svp_enabled is True
 
-    directory.chmod(0o500)
+    directory.chmod(mode)
     try:
         with pytest.raises(ConfigurationError, match="SVP_CREDENTIAL_FILE"):
             load_settings(values)
