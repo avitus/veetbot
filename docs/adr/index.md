@@ -83,7 +83,7 @@ implementation without one.
 - [ADR-0072 — Milestone 19 conversational schedule creation (Proposed)](0072-milestone-19-conversational-schedule-creation.md)
 - [ADR-0073 — Milestone 20 calendar recurrence and conversational schedules (Proposed)](0073-milestone-20-calendar-recurrence.md)
 - [ADR-0074 — Automated macOS TestFlight delivery](0074-automated-macos-testflight-delivery.md)
-- [ADR-0075 — Native schedule browser over the existing control plane (Proposed; decision 3 superseded by ADR-0089)](0075-native-schedule-browser.md)
+- [ADR-0075 — Native schedule browser over the existing control plane (Proposed; decision 3 superseded by ADR-0089; decision 4 amended by ADR-0154)](0075-native-schedule-browser.md)
 - [ADR-0076 — Keenable and deterministic weighted web routing (Proposed)](0076-keenable-and-weighted-web-routing.md)
 - [ADR-0077 — Milestone 21 adaptive memory distillation (Proposed)](0077-milestone-21-adaptive-memory-distillation.md)
 - [ADR-0078 — Run-limit synthesis reserves](0078-run-limit-synthesis-reserves.md)
@@ -165,3 +165,4 @@ implementation without one.
 - [ADR-0151 — Browser observations remain readable within the model budget (Proposed)](0151-browser-observation-pages.md)
 - [ADR-0152 — Hosted CI measures the browser image's own requests (Accepted; amends ADR-0146)](0152-browser-image-traffic-check.md)
 - [ADR-0153 — Scale VP data through its REST API, behind a first-party bridge that owns its sign-in (Proposed)](0153-scale-vp-api-bridge.md)
+- [ADR-0154 — The native schedule detail chooses a schedule's website access (Accepted; amends ADR-0075)](0154-native-schedule-website-access.md)

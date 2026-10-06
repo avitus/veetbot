@@ -1,7 +1,7 @@
 """A scheduled website read keeps an explicitly selected, owned profile."""
 
 from dataclasses import replace
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -276,6 +276,84 @@ def test_legacy_unbound_schedule_request_hash_is_unchanged() -> None:
         json.dumps(legacy, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     assert _definition_hash(definition) == previous_hash
+
+
+NATIVE_REVISION_ONLY_FIELDS = (
+    "schedule_id",
+    "revision",
+    "timezone",
+    "created_by_principal_id",
+    "created_at",
+)
+
+
+def native_website_access_update(record: dict[str, Any], profile_id: str | None) -> dict[str, Any]:
+    """The update the Apple client derives from a point read (ADR-0154)."""
+    definition = {
+        name: value
+        for name, value in record["revision"].items()
+        if name not in NATIVE_REVISION_ONLY_FIELDS
+    }
+    scopes = [scope for scope in definition["requested_scopes"] if scope != "browser.profile.read"]
+    if profile_id is not None:
+        scopes.append("browser.profile.read")
+    definition["requested_scopes"] = scopes
+    definition["browser_profile_id"] = profile_id
+    return {"expected_revision": record["schedule"]["current_revision"], "definition": definition}
+
+
+async def test_native_echo_of_a_point_read_binds_and_unbinds_the_schedule() -> None:
+    """A revision field the definition does not accept would break the app's picker."""
+    async with build(
+        settings=replace(session_bound_hosted_settings(), schedule_api_enabled=True),
+        fixed_clock_at=NOW,
+    ) as composition:
+        await seed_browser_authority(composition)
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(_agent())
+        async with _client(composition) as client:
+            created = await client.post(
+                "/v1/schedules", json=_definition(), headers={"Idempotency-Key": "native-echo"}
+            )
+            assert created.status_code == 201, created.text
+            schedule_id = created.json()["schedule"]["id"]
+            read = (await client.get(f"/v1/schedules/{schedule_id}")).json()
+
+            bound = await client.patch(
+                f"/v1/schedules/{schedule_id}",
+                json=native_website_access_update(read, str(PROFILE_ID)),
+            )
+
+            assert bound.status_code == 200, bound.text
+            revision = bound.json()["revision"]
+            assert revision["browser_profile_id"] == str(PROFILE_ID)
+            assert sorted(revision["requested_scopes"]) == [
+                "browser.profile.read",
+                "workspace.read",
+            ]
+            for unchanged in (
+                "title",
+                "instruction",
+                "agent_id",
+                "agent_version",
+                "policy_profile",
+                "limits",
+                "run_timeout_seconds",
+                "cadence",
+                "misfire_grace_seconds",
+                "max_consecutive_failures",
+            ):
+                assert revision[unchanged] == read["revision"][unchanged], unchanged
+
+            reread = (await client.get(f"/v1/schedules/{schedule_id}")).json()
+            unbound = await client.patch(
+                f"/v1/schedules/{schedule_id}",
+                json=native_website_access_update(reread, None),
+            )
+
+            assert unbound.status_code == 200, unbound.text
+            assert unbound.json()["revision"]["browser_profile_id"] is None
+            assert unbound.json()["revision"]["requested_scopes"] == ["workspace.read"]
 
 
 async def test_api_can_bind_existing_schedule_without_changing_prior_revision() -> None:

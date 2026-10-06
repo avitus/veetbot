@@ -1988,6 +1988,35 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
     }
 
+    func testScheduleDetailBindsAReadySignInThroughTheServer() {
+        app.launchArguments.append("--ui-testing-schedule-website-access")
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.schedules")
+
+        let scheduleRow = app.descendants(matching: .any)[
+            "schedule.row.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
+        scheduleRow.tap()
+
+        let picker = app.buttons["schedule.websiteAccess"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), app.debugDescription)
+        picker.tap()
+        let choice = app.buttons["x.com"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        choice.tap()
+
+        // The picker shows the server's record, so it only reads x.com once the
+        // fixture accepted the update; a rejected one snaps back to None.
+        let bound = NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "x.com", "x.com")
+        expectation(for: bound, evaluatedWith: picker)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["schedule.websiteAccess.error"].exists,
+            app.debugDescription
+        )
+    }
+
     func testScheduleBrowserMakesRecentTerminalHistoryAccessible() {
         app.launch()
         openSidebarDestination(identifier: "sidebar.schedules")

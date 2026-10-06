@@ -709,6 +709,9 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
     public let agentVersion: String
     public let policyProfile: String
     public let requestedScopes: [String]
+    /// The website sign-in future occurrences may read (ADR-0150); absent on
+    /// servers that predate scheduled website access.
+    public let browserProfileID: UUID?
     public let limits: ScheduleRunLimitsView
     public let runTimeoutSeconds: Int
     public let cadence: ScheduleCadenceView
@@ -725,6 +728,7 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
         case agentVersion = "agent_version"
         case policyProfile = "policy_profile"
         case requestedScopes = "requested_scopes"
+        case browserProfileID = "browser_profile_id"
         case runTimeoutSeconds = "run_timeout_seconds"
         case misfireGraceSeconds = "misfire_grace_seconds"
         case maxConsecutiveFailures = "max_consecutive_failures"

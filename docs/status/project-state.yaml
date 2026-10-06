@@ -173,6 +173,10 @@ project:
   # file, after a one-time operator sign-in; the gate count is unchanged. The
   # owner's sign-in and a live read smoke passed on 2026-10-05; production
   # enablement remains.
+  # ADR-0154 (Accepted, 2026-10-06) records the owner's non-milestone native
+  # extension: the schedule detail chooses a schedule's website access through
+  # the existing full-definition update, amending ADR-0075's read-only browser
+  # for that one control; the gate count is unchanged.
   authorized_milestones:
     - 0
     - 1

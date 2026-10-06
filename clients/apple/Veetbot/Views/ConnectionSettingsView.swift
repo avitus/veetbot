@@ -675,7 +675,7 @@ public struct ConnectionSettingsView: View {
     }
 }
 
-private extension BrowserProfileStatus {
+extension BrowserProfileStatus {
     var displayName: String {
         switch self {
         case .provisioning: return "Provisioning"

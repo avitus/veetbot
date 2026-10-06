@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-06 — Choose a schedule's website access in the app
+
+- A schedule's detail now has a Website access picker. Choosing one of your
+  ready sign-ins, such as x.com, lets that schedule's runs read the signed-in
+  site; None removes it. The app saves through the existing schedule update and
+  changes nothing else about the schedule. A sign-in that stopped working stays
+  shown with its state, and a refused change is explained while the schedule
+  keeps its server setting. Posting and scrolling still ask first (ADR-0154).
+
 ## 2026-10-06 — Telegram is live, and `/pair` stays a command
 
 - The Telegram channel passed its production smoke: pairing, a run, a

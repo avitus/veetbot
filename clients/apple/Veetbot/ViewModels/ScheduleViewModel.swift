@@ -15,10 +15,47 @@ public enum ScheduleBrowserSection: String, CaseIterable, Identifiable, Sendable
     }
 }
 
-/// Read-only presentation state for the existing schedule control plane
+/// One choice in a schedule's website access picker (ADR-0154).
+public struct ScheduleWebsiteAccessOption: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let label: String
+}
+
+/// Ready sign-ins in server order, plus the one the schedule already uses
+/// whatever its state, so a binding that stopped working stays visible.
+public func scheduleWebsiteAccessOptions(
+    profiles: [BrowserProfileView],
+    boundProfileID: UUID?
+) -> [ScheduleWebsiteAccessOption] {
+    var options = profiles
+        .filter { $0.status == .ready || $0.id == boundProfileID }
+        .map { profile in
+            let sites = profile.allowedOrigins
+                .map { URLComponents(string: $0)?.host ?? $0 }
+                .joined(separator: ", ")
+            return ScheduleWebsiteAccessOption(
+                id: profile.id,
+                label: profile.status == .ready
+                    ? sites : "\(sites) · \(profile.status.displayName)"
+            )
+        }
+    if let boundProfileID, !profiles.contains(where: { $0.id == boundProfileID }) {
+        options.append(ScheduleWebsiteAccessOption(id: boundProfileID, label: "Unavailable sign-in"))
+    }
+    return options
+}
+
+/// The server refuses updates to a terminal schedule, and an unknown state is
+/// not assumed to accept one.
+public func scheduleAllowsWebsiteAccessChange(_ state: ScheduleStateKind?) -> Bool {
+    state == .active || state == .paused
+}
+
+/// Presentation state for the existing schedule control plane
 /// (scheduling.md#native-apple-schedule-browser). Server records remain
 /// authoritative; every presentation reloads and every detail opening performs
-/// the point read that is allowed to return the complete instruction.
+/// the point read that is allowed to return the complete instruction. The only
+/// change it can make is a schedule's website access (ADR-0154).
 @MainActor
 public final class ScheduleViewModel: ObservableObject {
     @Published public private(set) var items: [ScheduleListItemView] = []
@@ -28,8 +65,13 @@ public final class ScheduleViewModel: ObservableObject {
     @Published public private(set) var unavailable = false
     @Published public private(set) var section = ScheduleBrowserSection.current
     @Published public private(set) var detailRecords: [UUID: ScheduleRecordView] = [:]
+    /// Nil until the sign-ins load, so a failed load is not shown as "none".
+    @Published public private(set) var websiteAccessProfiles: [BrowserProfileView]?
+    @Published public private(set) var websiteAccessProfilesError: String?
     @Published private var detailErrors: [UUID: String] = [:]
     @Published private var detailLoadingIDs: Set<UUID> = []
+    @Published private var websiteAccessErrors: [UUID: String] = [:]
+    @Published private var websiteAccessSavingIDs: Set<UUID> = []
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
     private var nextCursor: String?
@@ -187,6 +229,64 @@ public final class ScheduleViewModel: ObservableObject {
 
     public func isLoadingDetail(_ scheduleID: UUID) -> Bool {
         detailLoadingIDs.contains(scheduleID)
+    }
+
+    public func loadWebsiteAccessProfiles() async {
+        websiteAccessProfilesError = nil
+        guard let api = await makeAPIClient() else {
+            websiteAccessProfilesError = "Connect to a Veetbot server to choose website access."
+            return
+        }
+        var profiles: [BrowserProfileView] = []
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        do {
+            repeat {
+                let page = try await api.listBrowserProfiles(cursor: cursor)
+                profiles.append(contentsOf: page.items)
+                cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
+            } while cursor != nil
+            websiteAccessProfiles = profiles
+        } catch {
+            websiteAccessProfilesError = displayMessage(for: error)
+        }
+    }
+
+    /// Saves the owner's choice and shows the record the server returns; on
+    /// failure the server's current binding stays displayed with the reason.
+    public func setWebsiteAccess(_ scheduleID: UUID, browserProfileID: UUID?) async {
+        guard websiteAccessSavingIDs.insert(scheduleID).inserted else { return }
+        defer { websiteAccessSavingIDs.remove(scheduleID) }
+        websiteAccessErrors[scheduleID] = nil
+        guard let api = await makeAPIClient() else {
+            websiteAccessErrors[scheduleID] = "Connect to a Veetbot server to change website access."
+            return
+        }
+        do {
+            detailRecords[scheduleID] = try await api.setScheduleWebsiteAccess(
+                scheduleID,
+                browserProfileID: browserProfileID
+            )
+        } catch {
+            websiteAccessErrors[scheduleID] = websiteAccessMessage(for: error)
+        }
+    }
+
+    public func websiteAccessError(for scheduleID: UUID) -> String? {
+        websiteAccessErrors[scheduleID]
+    }
+
+    public func isSavingWebsiteAccess(_ scheduleID: UUID) -> Bool {
+        websiteAccessSavingIDs.contains(scheduleID)
+    }
+
+    private func websiteAccessMessage(for error: Error) -> String {
+        if case HTTPTransportError.api(let apiError) = error,
+            apiError.details.reason == "schedule.browser_profile_unavailable"
+        {
+            return "That sign-in isn't ready. Sign in again in Website Access, then choose it here."
+        }
+        return displayMessage(for: error)
     }
 
     private func consumeNextCursor(_ cursor: String?) -> String? {

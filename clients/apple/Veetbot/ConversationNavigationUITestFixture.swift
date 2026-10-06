@@ -40,6 +40,9 @@ enum ConversationNavigationUITestFixture {
     static let subscriptionsFailureLaunchArgument = "--ui-testing-email-subscriptions-failure"
     /// Adds a bulk conversation whose projection carries a subscription block.
     static let bulkThreadLaunchArgument = "--ui-testing-email-bulk-thread"
+    /// ADR-0154: one ready x.com sign-in, and a schedule update that binds the
+    /// daily review only when the client echoes its definition correctly.
+    static let scheduleWebsiteAccessLaunchArgument = "--ui-testing-schedule-website-access"
     static let newsSubscriptionID = "00000000-0000-0000-0000-000000000B01"
     static let dealsSubscriptionID = "00000000-0000-0000-0000-000000000B02"
     static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
@@ -219,6 +222,18 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var genericCheckpoint: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-testing-generic-checkpoint")
     }
+    private static let scheduleWebsiteLock = NSLock()
+    private static var scheduleWebsiteBound = false
+    private static var scheduleWebsiteJourney: Bool {
+        ProcessInfo.processInfo.arguments.contains(
+            ConversationNavigationUITestFixture.scheduleWebsiteAccessLaunchArgument)
+    }
+    /// The definition fields the server accepts on a full update, by name.
+    private static let scheduleDefinitionFields: Set<String> = [
+        "title", "instruction", "agent_id", "agent_version", "policy_profile",
+        "requested_scopes", "browser_profile_id", "limits", "run_timeout_seconds",
+        "cadence", "misfire_grace_seconds", "max_consecutive_failures",
+    ]
     /// Starts the task-grant journey with the approval pending and no grant.
     static func resetTaskGrant() {
         taskGrantLock.withLock {
@@ -755,7 +770,26 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         case ("GET", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)"):
             statusCode = 200
-            body = Self.scheduleDetailJSON
+            body = Self.scheduleWebsiteLock.withLock { Self.scheduleWebsiteBound }
+                ? Self.boundScheduleDetailJSON : Self.scheduleDetailJSON
+        case ("PATCH", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)")
+        where Self.scheduleWebsiteJourney:
+            let payload = requestJSON()
+            let definition = payload["definition"] as? [String: Any] ?? [:]
+            if payload["expected_revision"] as? Int == 1,
+                Set(definition.keys) == Self.scheduleDefinitionFields,
+                definition["instruction"] as? String
+                    == "Full instruction from the schedule point read.",
+                definition["requested_scopes"] as? [String] == ["browser.profile.read"],
+                definition["browser_profile_id"] as? String == Self.scheduleWebsiteProfileID
+            {
+                Self.scheduleWebsiteLock.withLock { Self.scheduleWebsiteBound = true }
+                statusCode = 200
+                body = Self.boundScheduleDetailJSON
+            } else {
+                statusCode = 422
+                body = #"{"error":{"code":"schedule_validation_error","message":"The fixture rejected the schedule definition.","details":{"reason":"schedule.fixture_rejected"},"request_id":"ui-test"}}"#
+            }
         case ("GET", "/v1/settings/models"):
             statusCode = 200
             body = Self.modelSettingsLock.withLock { Self.modelSettingsJSON }
@@ -835,6 +869,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
             statusCode = response.0
             body = response.1
+        case ("GET", "/v1/browser-profiles") where Self.scheduleWebsiteJourney:
+            statusCode = 200
+            body = """
+                {"items":[{"id":"\(Self.scheduleWebsiteProfileID)","allowed_origins":["https://x.com"],"status":"ready","generation":1,"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-01T00:00:00Z","last_used_at":null}],"next_cursor":null}
+                """
         case ("GET", "/v1/browser-profiles"):
             statusCode = 200
             body = #"{"items":[],"next_cursor":null}"#
@@ -1268,6 +1307,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let scheduleDetailJSON = """
         {"schedule":{"id":"\(ConversationNavigationUITestFixture.scheduleID)","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)","revision":1,"title":"Daily review","instruction":"Full instruction from the schedule point read.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}
+        """
+
+    private static let scheduleWebsiteProfileID = "00000000-0000-0000-0000-0000000007aa"
+
+    private static let boundScheduleDetailJSON = """
+        {"schedule":{"id":"\(ConversationNavigationUITestFixture.scheduleID)","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":2,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T01:00:00Z"},"revision":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)","revision":2,"title":"Daily review","instruction":"Full instruction from the schedule point read.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":["browser.profile.read"],"browser_profile_id":"\(scheduleWebsiteProfileID)","limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T01:00:00Z"},"replayed":false}
         """
 
     private static let browserProfileID = "00000000-0000-0000-0000-000000000789"

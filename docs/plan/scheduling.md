@@ -391,6 +391,8 @@ The full-definition HTTP update can bind or unbind future occurrences with the
 ordinary expected-revision check. Content-only `schedule.update` preserves the
 binding. `schedule.create` still grants no scopes and binds no profile; the
 model cannot choose one. Browser actions retain their existing approval rules.
+The native schedule detail offers that update as its Website access picker
+(ADR-0154).
 
 ## Sessions, context, and results
 
@@ -587,6 +589,19 @@ policy identifiers, finite execution limits, failure policy, and lifecycle
 timestamps. If the schedule is removed or becomes inaccessible between the
 list and point reads, the detail shows the ordinary not-found failure and a
 retry affordance; it does not reinterpret the result as version skew.
+
+Detail also shows the schedule's website access, the browser's only write
+(ADR-0154). For an ACTIVE or PAUSED schedule a picker offers None and each of
+the owner's `ready` browser profiles, labelled by the host names of its
+allowed origins; a bound profile that is not ready, or is no longer listed,
+stays visible with its state. A choice performs a fresh point read, then the
+full-definition update with that read's `current_revision` and the revision's
+own fields less `schedule_id`, `revision`, `timezone`,
+`created_by_principal_id`, and `created_at`. Only `browser_profile_id` and the
+`browser.profile.read` requested scope change, and fields the client does not
+model are sent back unchanged. A revision conflict is read again and retried
+once; any other refusal leaves the server's binding displayed with the reason.
+Terminal and unknown states show the binding read-only.
 
 The client models state and cadence kind as raw strings with typed known-case
 accessors. Any unknown value returned by a compatible server renders by
