@@ -106,8 +106,14 @@ def test_static_uses_two_workers_with_a_serial_override(checkout: Path) -> None:
     assert command[command.index("-n") + 1] == "0"
 
 
-def test_general_test_target_excludes_live_and_browser_image(checkout: Path) -> None:
+@pytest.mark.parametrize(
+    "parent_options", ["", "-n 2 --dist loadscope --junitxml=parent-results.xml"]
+)
+def test_general_test_target_excludes_live_and_browser_image(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, parent_options: str
+) -> None:
     """The ordinary Make target must not run dedicated credential/image lanes."""
+    monkeypatch.setenv("PYTEST_ADDOPTS", parent_options)
     result = run_make(checkout, "test")
     assert result.returncode == 0, result.stderr
     command = commands(checkout)[0]
@@ -125,6 +131,8 @@ def test_general_test_target_excludes_live_and_browser_image(checkout: Path) -> 
     selected = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-c", "/dev/null", "-m", marker, str(suite)],
         cwd=checkout,
+        # This isolated suite owns its selection, workers, and result artifacts.
+        env={**os.environ, "PYTEST_ADDOPTS": ""},
         capture_output=True,
         text=True,
         timeout=15,
