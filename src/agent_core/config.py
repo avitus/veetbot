@@ -713,6 +713,13 @@ def _svp_credential_path(raw_path: str) -> str:
         raise ConfigurationError("SVP_CREDENTIAL_FILE is unavailable") from exc
     if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
         raise ConfigurationError("SVP_CREDENTIAL_FILE must be a 0600 regular file")
+    # The bridge reads the grant and rewrites it beside a lock file in its
+    # directory, so a grant this service cannot read or replace fails here
+    # rather than in the child at its first refresh.
+    if not os.access(path, os.R_OK) or not os.access(path.parent, os.W_OK | os.X_OK):
+        raise ConfigurationError(
+            "SVP_CREDENTIAL_FILE must be readable, in a directory this service can write"
+        )
     return str(path)
 
 

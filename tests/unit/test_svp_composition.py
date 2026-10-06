@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
 import sys
 from dataclasses import replace
@@ -119,6 +120,27 @@ def test_the_bridge_is_default_off_and_the_platform_holds_only_a_private_path(
         load_settings(values)
     with pytest.raises(ConfigurationError, match="AGENT_SVP_ENABLED"):
         load_settings({**base_environment(), "SVP_CREDENTIAL_FILE": str(state)})
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_a_grant_the_service_could_not_rewrite_is_refused_at_startup(tmp_path: Path) -> None:
+    """The bridge rewrites the grant beside a lock file, so its directory must be writable."""
+    from agent_core.config import ConfigurationError, load_settings
+
+    directory = tmp_path / "svp"
+    directory.mkdir()
+    state = directory / "credential.json"
+    state.write_text("{}", encoding="utf-8")
+    state.chmod(0o600)
+    values = {**base_environment(), "AGENT_SVP_ENABLED": "1", "SVP_CREDENTIAL_FILE": str(state)}
+    assert load_settings(values).svp_enabled is True
+
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(ConfigurationError, match="SVP_CREDENTIAL_FILE"):
+            load_settings(values)
+    finally:
+        directory.chmod(0o700)
 
 
 def test_a_role_that_refuses_provider_credentials_refuses_the_grant_file(tmp_path: Path) -> None:
