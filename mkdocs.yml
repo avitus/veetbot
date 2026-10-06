@@ -277,4 +277,5 @@ nav:
       - ADR-0149 Release-managed owner permissions: adr/0149-release-managed-owner-permissions.md
       - ADR-0150 Scheduled browser profile binding: adr/0150-scheduled-browser-profile-binding.md
       - ADR-0151 Browser observation pages: adr/0151-browser-observation-pages.md
+      - ADR-0152 Browser image traffic check: adr/0152-browser-image-traffic-check.md
   - Changelog: changelog.md

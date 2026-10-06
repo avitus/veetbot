@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-05 — CI checks that the Website Access browser stays quiet
+
+- The browser that Website Access uses is kept from contacting Google on its
+  own by settings that a browser update can silently undo. Hosted CI now
+  builds the browser image and watches what its browser asks for while it
+  fills in forms and sits idle, on both processor types. A release waits for
+  that check. It runs again whenever the browser version, the image or those
+  settings change, and is skipped otherwise (ADR-0152).
+
 ## 2026-10-05 — Website bindings for scheduled briefings
 
 - A schedule can explicitly retain its authenticated website profile through

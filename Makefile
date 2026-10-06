@@ -1,6 +1,7 @@
 PYTHON ?= python
 CHECK_JOBS ?= 2
 STATIC_TEST_WORKERS ?= 2
+BROWSER_IMAGE ?= veetbot-browser-profile-service:check
 
 # Keep one Make graph so repeated goals share prerequisites. Independent lanes
 # overlap; static and contract tests retain their specified sequence.
@@ -14,7 +15,7 @@ endif
 .PHONY: install format lint typecheck test check db-up migrate env-pull client-build \
 	test-static test-contract test-fast test-integration test-live \
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-ios \
-	test-deploy sandbox-image \
+	test-deploy sandbox-image browser-image test-browser-image \
 	production-check \
 	docs docs-serve docs-check citations-fix website-install test-website
 
@@ -55,7 +56,7 @@ client-build:
 	uv run $(PYTHON) scripts/build_client.py
 
 test:
-	uv run pytest -m "not live"
+	uv run pytest -m "not live and not browser_image"
 
 test-static:
 	uv run pytest -n $(STATIC_TEST_WORKERS) --dist loadscope -m static
@@ -67,7 +68,7 @@ test-contract:
 test-fast: test-static test-contract
 
 test-integration:
-	@uv run pytest -m "integration and not sandbox"; \
+	@uv run pytest -m "integration and not sandbox and not browser_image"; \
 	status=$$?; test $$status -eq 0 -o $$status -eq 5
 
 sandbox-image:
@@ -75,6 +76,13 @@ sandbox-image:
 
 test-sandbox: sandbox-image
 	uv run pytest -m sandbox
+
+# The browser's own requests, measured in the service image as built (ADR-0152).
+browser-image:
+	docker build -f deploy/browser-profile-service.Dockerfile -t $(BROWSER_IMAGE) .
+
+test-browser-image: browser-image
+	VEETBOT_BROWSER_IMAGE=$(BROWSER_IMAGE) uv run pytest -m browser_image
 
 test-live:
 	@RUN_LIVE_MODEL_TESTS=1 uv run pytest -m live; \

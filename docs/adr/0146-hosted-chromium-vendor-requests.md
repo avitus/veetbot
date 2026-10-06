@@ -101,8 +101,9 @@ any public host on port 443:
   Playwright's. Either can change when the Playwright version is raised. The
   launch test fails if Playwright's list gains a feature the runtime's lacks.
   The real-browser test fails if a request returns, but only on a machine with
-  Chromium installed, which CI is not. After raising Playwright, repeat this
-  measurement in the built image.
+  Chromium installed, which CI is not. Hosted CI repeats this measurement in
+  the built image on both architectures whenever the image, its limits, the
+  Playwright version or these switches change (amended by ADR-0152).
 - The launch switches apply wherever the runtime starts a headed browser. The
   policy applies only in the image. A development Mac does not need it,
   because Chromium uses the system spell checker there; a headed browser on
@@ -113,7 +114,7 @@ any public host on port 443:
   browser process. No retry reaches the proxy.
 - If Playwright changes which Chromium build it installs for an architecture,
   the policy directory may change with it and the dictionary download would
-  return without any test failing.
+  return. ADR-0152's image check fails when it does.
 
 ## Alternatives rejected
 

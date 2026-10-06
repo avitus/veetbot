@@ -106,6 +106,41 @@ def test_static_uses_two_workers_with_a_serial_override(checkout: Path) -> None:
     assert command[command.index("-n") + 1] == "0"
 
 
+@pytest.mark.parametrize(
+    "parent_options", ["", "-n 2 --dist loadscope --junitxml=parent-results.xml"]
+)
+def test_general_test_target_excludes_live_and_browser_image(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, parent_options: str
+) -> None:
+    """The ordinary Make target must not run dedicated credential/image lanes."""
+    monkeypatch.setenv("PYTEST_ADDOPTS", parent_options)
+    result = run_make(checkout, "test")
+    assert result.returncode == 0, result.stderr
+    command = commands(checkout)[0]
+    marker = command[command.index("-m") + 1]
+    suite = checkout / "test_selection.py"
+    suite.write_text(
+        "import pytest\n"
+        "def test_ordinary(): pass\n"
+        "@pytest.mark.live\n"
+        "def test_live(): raise AssertionError('live lane selected')\n"
+        "@pytest.mark.browser_image\n"
+        "def test_image(): raise AssertionError('image lane selected')\n",
+        encoding="utf-8",
+    )
+    selected = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-c", "/dev/null", "-m", marker, str(suite)],
+        cwd=checkout,
+        # This isolated suite owns its selection, workers, and result artifacts.
+        env={**os.environ, "PYTEST_ADDOPTS": ""},
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert selected.returncode == 0, selected.stdout + selected.stderr
+    assert "1 passed, 2 deselected" in selected.stdout
+
+
 def test_contract_alone_does_not_rerun_static_tests(checkout: Path) -> None:
     result = run_make(checkout, "test-contract")
     assert result.returncode == 0, result.stderr

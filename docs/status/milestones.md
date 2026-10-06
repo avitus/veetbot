@@ -296,6 +296,7 @@ mirrors `open_items_outside_milestones` in
 - [ ] HTTP API: event-log-and-persistence.md and ADR-0032 decision 9 require `POST /v1/runs/{run_id}/export`, but no such route is mounted and only `agent run export` exists; mount it or propose an ADR that drops it (found in the 2026-09-28 documentation audit)
 - [ ] Owner: accept or reject ADR-0104, ADR-0105, ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138, which are still Proposed although their mechanisms are implemented, specified and on main
 - [ ] Owner: accept or reject ADR-0146, which is Proposed and implemented: a hosted browser launch repeats the Playwright disabled-feature list, gives push messaging a check-in address it cannot fetch, and leaves one account request to accounts.google.com on
+- [ ] Owner decision: whether branch protection also requires browser-image-x86_64 and browser-image-arm64 (ADR-0152); release packaging already waits for both, so a failure stops delivery but not a merge
 - [ ] Owner decision: the hardline protected_host_path rule blocks .git/config only at the workspace root, so sub/.git/config is not blocked, while .env and ~/.ssh already match at any depth; decide whether it should, knowing that a change to the matcher in policy/hardline.py leaves policy_version unchanged but an edit to hardline.yaml moves it and unbinds the memory-formation release evidence (found in the 2026-09-28 test audit)
 
 The earlier item asking the owner to confirm the ADR-0127 to ADR-0130 deploy

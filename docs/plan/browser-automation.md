@@ -704,7 +704,10 @@ download, which has no switch. One request remains: the browser lists Google
 accounts at `accounts.google.com` once as it starts, from its own empty
 profile, with no cookie. It has no switch, and the proxy does not refuse a
 host that websites load for sign-in. None of these settings changes what a
-website can observe of the browser.
+website can observe of the browser. Each depends on the Chromium build that a
+Playwright version installs, so hosted CI measures the built image's own
+requests on both architectures whenever the image, its limits, the Playwright
+version or the switches change (ADR-0152).
 
 For a remote ceremony the trusted client presents the returned launch URL behind
 a user-initiated continue action and treats a rejected platform handoff as a
@@ -1217,6 +1220,16 @@ network to be idle for 500 ms, then for the document to go 300 ms without a DOM
 mutation; an action that starts a main-frame navigation first waits for the new
 document. The whole wait is bounded by 2 seconds. Settling never fails a call:
 a page still changing at the bound is observed as it is.
+
+Before a `browser.act` click, Playwright checks actionability with a trial bounded by
+5 seconds. A trial timeout sends no click and returns the existing
+`tool.browser.element_not_found` refusal, preserving the lease and action
+sequence so the agent can observe an obstructing overlay. The actual click
+also has a 5-second bound, leaving time within the 30-second tool budget for
+validation, settling, observation, and transport. No forced click or automatic
+publication retry is permitted. A failure after actual dispatch remains
+uncertain; the outer tool deadline also preserves non-idempotent write
+uncertainty once the effect watermark is persisted.
 
 The stable reason-code family includes:
 

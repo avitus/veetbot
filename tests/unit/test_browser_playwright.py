@@ -1334,6 +1334,7 @@ class FakeSettlingPage:
         self.buttons: list[AsyncMock] = []
 
     def button(self, name: str, *, on_click: Callable[[], None] | None = None) -> AsyncMock:
+        """Create a visible fake control whose trial click produces no effect."""
         handle = control(name)
         handle.get_attribute.return_value = None
         handle.is_enabled.return_value = True
@@ -1343,9 +1344,10 @@ class FakeSettlingPage:
                 return "button"
             return {"tag": "button", "role": None, "inputType": None, "name": name}
 
-        async def click(*, timeout: int) -> None:
+        async def click(*, timeout: int, trial: bool = False) -> None:
+            """Invoke the synthetic page effect only for an actual click."""
             del timeout
-            if on_click is not None:
+            if not trial and on_click is not None:
                 on_click()
 
         handle.evaluate.side_effect = evaluate

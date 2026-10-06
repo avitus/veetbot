@@ -232,14 +232,16 @@ website-install   validated local reuse or npm ci; always npm ci in CI
 test-website      website-install, static export tests, and lint
 ```
 
-Seven more serve checks, CI steps, or operators. `docs-check` runs
+Nine more serve checks, CI steps, or operators. `docs-check` runs
 `scripts/check_docs.py` and `test-deploy` the release, rollback, and Nginx
 deployment script tests; both are inside `make check` and CI's static job,
 which also runs `client-build` to build the downloadable client zipapp.
 `citations-fix` updates the citation ledger after an edit moves cited lines.
 `docs-serve` serves the documentation locally, `sandbox-image` builds the
 development sandbox image, and `production-check` validates a host-native
-production deployment.
+production deployment. `browser-image` builds the browser-profile service
+image, and `test-browser-image` measures what its browser asks for on its own
+(ADR-0152); both need Docker and stay outside `make check`.
 
 `make check` is `lint typecheck test-fast test-deploy docs-check
 test-website`. `test-fast` is `test-static` followed by `test-contract`;
@@ -274,7 +276,7 @@ been manually modified; force an install when repairing such modifications.
 
 `make test` and `make test-fast` differ, and the difference is
 deliberate. `test` is what a developer runs when they want the whole
-suite that can run locally, including integration if a database is up;
+suite that can run locally, including database integration but excluding live and browser-image tests;
 `test-fast` is what gates. Naming them apart is what stops the
 integration suite from being quietly deleted from `check` the first
 time a laptop has no Docker.
@@ -355,7 +357,9 @@ The sidecar is the gate for every branch except `main` (ADR-0107). Hosted
 verification no longer starts when such a branch is pushed, so a change reaches
 `dev` on a passing `chunk validate`, plus the local suites the sidecar cannot
 run when the change touches them: `make test-integration` against a scratch
-PostgreSQL database marked disposable, `make test-sandbox`, and the Xcode suites. The workflow
+PostgreSQL database marked disposable, `make test-sandbox`,
+`make test-browser-image` when an input of the browser image check changes,
+and the Xcode suites. The workflow
 section below defines when the hosted jobs still run.
 
 ## The compose file
@@ -424,6 +428,8 @@ job           target invoked         needs     runs on
 8 apple-      shared archive and     signing   main, after deploy-app
   testflight  package script, altool API key
 9 public-site make test-website      Node 22   main, on request
+10 browser-   make test-browser-     machine   main, on request,
+   image      image, x86_64 and arm64          when inputs changed
 ```
 
 Jobs 1, 2, and 9 partition `make check`, split so the cheap lanes fail
@@ -475,6 +481,26 @@ each job packs its bundles into one `apple-test-results-<platform>.tar`
 artifact, even after a failure, because uploading thousands of loose bundle
 files took about half a minute.
 Release packaging depends on all three additional gates.
+
+Job 10 measures what hosted Chromium asks for on its own (ADR-0152). Two
+instances run it, `browser-image-x86_64` on a `medium` machine executor, the
+architecture production runs, and `browser-image-arm64` on an `arm.medium`
+one, because Playwright installs a different Chromium build there. Each builds
+the browser-profile service image and runs `make test-browser-image`: a probe
+in a container from that image, under the production compose limits and on an
+internal network with no route out, types into a page with sign-in and
+address forms, submits it, clicks into a lone text field on a second page and
+types, idles for two minutes and types there again, through a relay that
+refuses and records every request but the site's. The job fails if the
+browser asked for anything except the page and the one account request
+ADR-0146 leaves. Before installing anything, the job reads its inputs with
+`python3 -m scripts.browser_image_inputs`: the Dockerfile, the production
+compose file, the Playwright version in `uv.lock`, runtime startup/context configuration,
+vendor-request launch switches and the check's own code. It writes a CircleCI
+cache record keyed by architecture and those inputs after the lane passes, and
+a later job that finds its record halts successfully, on any branch. Most
+pipelines therefore spend a checkout on each architecture; a change to an
+input measures the image again. Release packaging requires both instances.
 
 Job 9 is a credential-free Node lane. It installs the exact
 `website/package-lock.json`, builds the static export, runs rendered-route
@@ -551,7 +577,8 @@ credentials without placing them in the configuration file.
 Three workflow-level facts complete the definition:
 
 1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 plus the additional
-    sandbox, Apple, and public-site jobs 5, 6, and 9. It starts by itself only
+    sandbox, Apple, public-site and browser-image jobs 5, 6, 9 and 10. It
+    starts by itself only
     on `main`: the condition reads the pipeline's branch, not what created the
     pipeline, so a push and a requested pipeline both run it there. On every
     other branch, pull-request branches included, a pipeline starts no workflow
@@ -575,7 +602,8 @@ Three workflow-level facts complete the definition:
     runs only on trusted `dev`, and only in a requested pipeline; it does not
     receive publication credentials.
     Production delivery begins only after all seven required verification jobs
-    pass. On `main`, each verification job except `public-site` halts
+    and both browser-image instances pass. On `main`, each verification job
+    except `public-site` halts
     successfully right after checkout when it finds its own record for the
     commit's source tree, and otherwise runs in full (ADR-0114). A job writes
     that CircleCI cache record, keyed by job and tree hash, only after its last

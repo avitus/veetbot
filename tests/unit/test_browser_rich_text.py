@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
+import asyncio
+from unittest.mock import AsyncMock, Mock
 
+import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+from agent_core.adapters.browser.playwright import PythonPlaywrightRuntime
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
@@ -25,6 +30,63 @@ window.inputs = [];
 document.addEventListener('input', () => window.inputs.push(
     document.querySelector('[contenteditable]').innerText));
 </script>"""
+
+
+async def test_click_timeout_after_trial_remains_uncertain() -> None:
+    """Passing a trial does not prove whether a subsequently failed click landed."""
+    handle = Mock()
+    handle.click = AsyncMock(side_effect=[None, PlaywrightTimeoutError("dispatch timed out")])
+    runtime = PythonPlaywrightRuntime()
+    action = BrowserAction(kind=BrowserActionKind.CLICK, expected_revision="revision", ref="post")
+    with pytest.raises(BrowserProviderError) as error:
+        await runtime._dispatch(Mock(), handle, action, [])
+    assert error.value.reason_code == "tool.browser.outcome_unknown"
+    assert not error.value.retryable
+    assert handle.click.await_count == 2
+    assert handle.click.await_args_list[0].kwargs["trial"] is True
+    assert "trial" not in handle.click.await_args_list[1].kwargs
+
+
+@pytest.mark.parametrize("headed", [False, True])
+async def test_covered_post_is_refused_without_losing_the_draft(headed: bool) -> None:
+    """A promotion covering Post must permit observation and deliberate recovery."""
+    page = """<!doctype html><title>Compose</title>
+    <button onclick="window.posts++">Post</button>
+    <div id="promotion" style="position:fixed;inset:0;background:white;z-index:10">
+      Built to Earn
+      <button onclick="document.querySelector('#promotion').remove()">Not Now</button>
+    </div>
+    <script>window.posts = 0;</script>"""
+    async with lesson_pages({"/compose/post": page}, headed=headed) as (runtime, visit, _):
+        before = await visit("/compose/post")
+        with pytest.raises(BrowserProviderError) as refused:
+            async with asyncio.timeout(10):
+                await runtime.act(
+                    BrowserAction(
+                        kind=BrowserActionKind.CLICK,
+                        expected_revision=before.revision,
+                        ref=_ref(before, "Post"),
+                    )
+                )
+        assert refused.value.reason_code == "tool.browser.element_not_found"
+        assert not refused.value.retryable
+        assert await runtime._current_page().evaluate("window.posts") == 0
+        current = await runtime.observe()
+        after = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.CLICK,
+                expected_revision=current.revision,
+                ref=_ref(current, "Not Now"),
+            )
+        )
+        await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.CLICK,
+                expected_revision=after.revision,
+                ref=_ref(after, "Post"),
+            )
+        )
+        assert await runtime._current_page().evaluate("window.posts") == 1
 
 
 @pytest.mark.parametrize("headed", [False, True])

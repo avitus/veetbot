@@ -16,6 +16,10 @@ its origin guard, its CDP document guard and its egress routing all run.
 Every test that uses the harness calls ``require_real_browser()``. It skips
 when Playwright's Chromium is missing, as in CI, and fails instead when
 ``VEETBOT_REQUIRE_REAL_BROWSER=1``, so a local run can prove the test ran.
+
+The browser image check imports this module inside the service image, which
+has no test dependencies, so only ``require_real_browser()`` imports pytest
+(ADR-0152).
 """
 
 from __future__ import annotations
@@ -35,7 +39,6 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-import pytest
 import uvicorn
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -77,6 +80,7 @@ def chromium_installed() -> bool:
 
 def require_real_browser() -> None:
     """Skip without Chromium, unless ``VEETBOT_REQUIRE_REAL_BROWSER=1`` demands it."""
+    import pytest
 
     if chromium_installed():
         return
