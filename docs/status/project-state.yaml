@@ -179,6 +179,11 @@ project:
   # extension: the schedule detail chooses a schedule's website access through
   # the existing full-definition update, amending ADR-0075's read-only browser
   # for that one control; the gate count is unchanged.
+  # ADR-0155 (Accepted, 2026-10-07) records the owner's non-milestone
+  # extension: after a completed reply, the maintenance role asks a model to
+  # title a chat conversation from the owner's own messages, and to retitle it
+  # only when the subject clearly moves; first-writer-wins titles become a
+  # placeholder (conversation-titles.md); the gate count is unchanged.
   authorized_milestones:
     - 0
     - 1

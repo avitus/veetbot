@@ -662,9 +662,12 @@ is an idempotency record, not a third session state.
 `SessionView.title` is server-owned conversation-history state, not a title a
 client may keep only in its local cache. On the first top-level user message,
 the application collapses whitespace in the first non-empty text block and
-stores its first 64 characters with the session. Later messages never replace
-that title. A message containing no non-empty text leaves the nullable field
-unset.
+stores its first 64 characters with the session. A message containing no
+non-empty text leaves the nullable field unset. That first-message title is a
+placeholder: after the first completed reply, and again whenever the subject
+clearly moves, a model-generated title replaces it in the same field
+([conversation-titles.md](conversation-titles.md), ADR-0155). Titles that
+other features set when they create a session are never replaced.
 
 Sessions created before this rule may still have a null stored title even
 though their event log contains conversation history. Reads of those rows

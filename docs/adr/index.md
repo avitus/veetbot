@@ -166,3 +166,4 @@ implementation without one.
 - [ADR-0152 — Hosted CI measures the browser image's own requests (Accepted; amends ADR-0146)](0152-browser-image-traffic-check.md)
 - [ADR-0153 — Scale VP data through its REST API, behind a first-party bridge that owns its sign-in (Proposed)](0153-scale-vp-api-bridge.md)
 - [ADR-0154 — The native schedule detail chooses a schedule's website access (Accepted; amends ADR-0075)](0154-native-schedule-website-access.md)
+- [ADR-0155 — A model titles chat conversations and retitles them when the subject moves (Accepted)](0155-generated-conversation-titles.md)

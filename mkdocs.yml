@@ -99,6 +99,7 @@ nav:
       - Adaptive Memory Distillation: plan/adaptive-memory-distillation.md
       - Persona Surface: plan/persona-surface.md
       - Chat Thread Folders: plan/thread-folders.md
+      - Conversation Titles: plan/conversation-titles.md
       - Typed Judgment: plan/typed-judgment.md
       - Email Integration: plan/email-integration.md
       - Client Modes and Email Experience: plan/email-experience.md
@@ -280,4 +281,5 @@ nav:
       - ADR-0152 Browser image traffic check: adr/0152-browser-image-traffic-check.md
       - ADR-0153 Scale VP API bridge: adr/0153-scale-vp-api-bridge.md
       - ADR-0154 Native schedule website access: adr/0154-native-schedule-website-access.md
+      - ADR-0155 Generated conversation titles: adr/0155-generated-conversation-titles.md
   - Changelog: changelog.md

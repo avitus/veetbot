@@ -21,7 +21,7 @@ Read, in this order, before starting an assignment:
 6. Relevant ADRs in `docs/adr/` (index at `docs/adr/index.md`)
 7. Existing code and tests related to the assignment
 
-Also read `docs/plan/milestone-map.md` when a gate could move, and `docs/plan/readiness.md` before calling anything undesigned.
+Also read `milestone-map.md` when a gate could move, and `readiness.md` before calling anything undesigned.
 
 ## Reading lanes
 
@@ -82,7 +82,7 @@ checks it per commit; no trailer means lane A.
 | WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
 | Bland calling and public reception | `bland-calling.md` |
 | People, relationships, interaction history | `people-and-relationships.md` |
-| Thread folders, proposals; typed judgment | `thread-folders.md`, `typed-judgment.md` |
+| Chat folders, titles; typed judgment | `thread-folders.md`, `conversation-titles.md`, `typed-judgment.md` |
 | Email unsubscribe, bulk-sender census | `email-unsubscribe.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
