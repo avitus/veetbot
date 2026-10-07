@@ -750,6 +750,157 @@ import UserNotifications
         #expect(lock.withLock { messageRequests } == 3)
     }
 
+    /// Reopening a chat whose answer followed three approved commands lands on
+    /// the answer, with the commands in one collapsed summary above it.
+    @Test
+    func testReopenedChatShowsTheAnswerBelowTheApprovedCommandsItRan() async throws {
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000123")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000456")
+        )
+        let approvalIDs = (1...3).map { index in
+            UUID(uuidString: "00000000-0000-0000-0000-00000000070\(index)")!
+        }
+        let sessionBody = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Fwd: Intro","metadata":{},"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
+            """
+        var events = """
+            id: 2
+            event: user.message.created
+            data: {"content":[{"type":"text","text":"Is Polargrid being tracked?"}]}
+
+
+            """
+        for (index, approvalID) in approvalIDs.enumerated() {
+            let base = 3 + index * 7
+            let call = "{\"name\":\"sandbox.run_command\",\"call_id\":\"command-\(index + 1)\""
+            events += """
+                id: \(base)
+                event: tool.call.proposed
+                data: \(call)}
+
+                id: \(base + 1)
+                event: approval.requested
+                data: {"approval_id":"\(approvalID.uuidString)"}
+
+                id: \(base + 2)
+                event: run.waiting_for_approval
+                data: {"approval_id":"\(approvalID.uuidString)"}
+
+                id: \(base + 3)
+                event: approval.resolved
+                data: {"approval_id":"\(approvalID.uuidString)","resolution":"approve_once"}
+
+                id: \(base + 4)
+                event: run.resumed
+                data: {}
+
+                id: \(base + 5)
+                event: tool.call.started
+                data: \(call)}
+
+                id: \(base + 6)
+                event: tool.call.completed
+                data: \(call),"result_item":{"content":[{"type":"text","text":"exit 0"}],"is_error":false,"trust":"external_untrusted"}}
+
+
+                """
+        }
+        events += """
+            id: 24
+            event: assistant.message.completed
+            data: {"message":{"kind":"assistant","content":[{"kind":"text","text":"Two partners track Polargrid."}]}}
+
+            id: 25
+            event: run.completed
+            data: {"run_id":"\(runID.uuidString)"}
+
+
+            """
+        let model = try configuredModel { request in
+            let path = request.url?.path ?? ""
+            switch (request.httpMethod, path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[
+                          {"sequence":2,"role":"user","content":[{"type":"text","text":"Is Polargrid being tracked?"}]},
+                          {"sequence":24,"role":"assistant","content":[{"type":"text","text":"Two partners track Polargrid."}]}
+                        ],"next_cursor":null}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":4,"model_call_count":4,"tool_call_count":3,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z"}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(for: request, statusCode: 200, body: events)
+            case ("GET", "/v1/approvals"):
+                return try response(
+                    for: request, statusCode: 200, body: "{\"items\":[],\"next_cursor\":null}"
+                )
+            case ("GET", _) where path.hasPrefix("/v1/approvals/"):
+                let approvalID = String(path.dropFirst("/v1/approvals/".count))
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(approvalID)","run_id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","status":"APPROVED","tool_name":"sandbox.run_command","action_summary":"Run a command in the sandbox","arguments":{"command":["python3","parse.py"]},"risk":"HIGH","policy_reason":"policy.matrix.code_execution","expires_at":null,"created_at":"2026-10-07T15:34:00Z","resolved_at":"2026-10-07T15:34:56Z","resolved_by":"owner","decision":"approve_once"}
+                        """
+                )
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "nil") \(path)")
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        defer { model.newSession() }
+        #expect(
+            await model.configure(baseURLString: "https://veetbot.test", token: "replacement-token")
+        )
+
+        let entry = try #require(model.history.first)
+        await model.selectSession(entry)
+        // The stored run is already complete; wait for its replay to settle.
+        for _ in 0 ..< 2_000 {
+            if model.runState.approvals.count == 3,
+                model.runState.tools.count == 3,
+                model.runState.tools.allSatisfy({ $0.status == .completed })
+            {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        #expect(model.runState.tools.map(\.status) == [.completed, .completed, .completed])
+        #expect(model.runState.activityTimeline.map(\.id) == [
+            "message:event-2",
+            "tool:command-1",
+            "message:event-24",
+        ])
+        guard case .toolBundle(let bundle) = model.runState.activityTimeline[1] else {
+            Issue.record("expected the approved commands in one collapsed summary")
+            return
+        }
+        #expect(bundle.summary == "3 tool calls · Completed")
+        #expect(bundle.activities.map(\.approvalID) == approvalIDs)
+    }
+
     @Test
     func testSuccessfulServerDeleteRemovesVisibleRowWhenCacheDeleteFails() async throws {
         let sessionID = try #require(

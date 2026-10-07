@@ -49,6 +49,8 @@ public struct ToolActivity: Identifiable, Sendable {
     public var authorizationKind: String? = nil
     public var authorizationView: [String: JSONValue]? = nil
     fileprivate var hasKnownName: Bool
+    /// Whether the owner has already decided this call's approval.
+    fileprivate var approvalSettled = false
 
     public var id: String { callID }
 
@@ -85,9 +87,14 @@ public struct ToolActivity: Identifiable, Sendable {
         status == .completed && result?.isError == true
             ? .failed : status
     }
-    /// Select terminal tool outcomes that can be grouped without hiding approval state.
+    /// Select terminal tool outcomes that can be grouped without hiding a pending approval.
     fileprivate var isBundleCandidate: Bool {
-        guard hasKnownName, approvalID == nil else { return false }
+        guard hasKnownName else { return false }
+        if approvalID != nil {
+            guard approvalSettled else { return false }
+            // A refusal the owner made at the approval is no surprise to surface.
+            if presentationStatus == .denied { return true }
+        }
         return [
             .completed, .rejected, .unavailable, .failed, .needsCorrection, .correctedAndRetried,
         ].contains(presentationStatus)
@@ -115,6 +122,7 @@ public struct ToolActivityBundle: Identifiable, Sendable {
         let title = "\(count) tool calls"
         let statuses: [ToolActivityStatus] = [
             .completed, .correctedAndRetried, .needsCorrection, .rejected, .unavailable, .failed,
+            .denied,
         ]
         let outcomes = statuses.compactMap { status -> (Int, String)? in
             let matchingCount = activities.filter { $0.presentationStatus == status }.count
@@ -185,6 +193,8 @@ public final class RunStateReducer: ObservableObject {
     private var toolIndex: [String: Int] = [:]
     private var pendingApprovalIDs: Set<UUID> = []
     private var activityOrder: [ConversationActivityReference] = []
+    /// The durable event sequence behind each placed activity, when it has one.
+    private var activitySequences: [ConversationActivityReference: Int] = [:]
     private var summaryHeadings = ReasoningSummaryHeadings()
 
     public init() {}
@@ -247,6 +257,7 @@ public final class RunStateReducer: ObservableObject {
         toolIndex = [:]
         pendingApprovalIDs = []
         activityOrder = []
+        activitySequences = [:]
     }
 
     public func restore(messages: [SessionMessageView]) {
@@ -255,7 +266,7 @@ public final class RunStateReducer: ObservableObject {
             guard persistedSequences.insert(message.sequence).inserted else { continue }
             let id = "event-\(message.sequence)"
             let role: TimelineItem.Role = message.role == .user ? .user : .assistant
-            activityOrder.append(.message(id))
+            place(.message(id), sequence: message.sequence)
             timeline.append(
                 TimelineItem(id: id, role: role, content: message.content)
             )
@@ -329,7 +340,7 @@ public final class RunStateReducer: ObservableObject {
         case "assistant.message.completed":
             endReasoning()
             if let message = frame.data["message"] {
-                reconcileAssistantMessage(message, fallbackID: frameID(frame))
+                reconcileAssistantMessage(message, from: frame)
             }
         case "model.response.completed":
             endReasoning()
@@ -360,7 +371,7 @@ public final class RunStateReducer: ObservableObject {
             reduceQuestion(frame, runID: runID)
         case "run.completed":
             if let final = frame.data["final_message"] {
-                reconcileAssistantMessage(final, fallbackID: frameID(frame))
+                reconcileAssistantMessage(final, from: frame)
             }
             transitionToTerminal(.completed)
         case "run.failed":
@@ -398,6 +409,7 @@ public final class RunStateReducer: ObservableObject {
                 tool.arguments = approval.arguments
                 tool.risk = RiskLevel(rawValue: approval.risk.lowercased())
                 tool.approvalID = approval.id
+                tool.approvalSettled = !approval.status.isPending
             }
         }
     }
@@ -422,11 +434,12 @@ public final class RunStateReducer: ObservableObject {
                 return false
             }) {
                 activityOrder[activityIndex] = .message(id)
+                activitySequences[.message(id)] = frame.id
             }
             self.pendingUserMessageID = nil
             return
         }
-        activityOrder.append(.message(id))
+        place(.message(id), sequence: frame.id)
         timeline.append(
             TimelineItem(id: id, role: .user, content: content)
         )
@@ -450,7 +463,7 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
-    private func reconcileAssistantMessage(_ value: JSONValue, fallbackID: String) {
+    private func reconcileAssistantMessage(_ value: JSONValue, from frame: SSEFrame) {
         guard let message = decode(AssistantMessagePayload.self, from: value) else { return }
         if let streamingMessageID,
             let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
@@ -462,9 +475,10 @@ public final class RunStateReducer: ObservableObject {
         }
         guard !timeline.contains(where: { $0.role == .assistant && $0.content == message.content })
         else { return }
-        activityOrder.append(.message(fallbackID))
+        let id = frameID(frame)
+        place(.message(id), sequence: frame.id)
         timeline.append(
-            TimelineItem(id: fallbackID, role: .assistant, content: message.content)
+            TimelineItem(id: id, role: .assistant, content: message.content)
         )
     }
 
@@ -482,7 +496,8 @@ public final class RunStateReducer: ObservableObject {
                 callID: callID,
                 name: name,
                 hasKnownName: suppliedName != nil,
-                status: .queued
+                status: .queued,
+                sequence: frame.id
             )
             updateTool(callID: callID) { tool in
                 tool.arguments = arguments
@@ -515,7 +530,8 @@ public final class RunStateReducer: ObservableObject {
             callID: callID,
             name: name,
             hasKnownName: suppliedName != nil,
-            status: presentedStatus
+            status: presentedStatus,
+            sequence: frame.id
         )
         updateTool(callID: callID) { tool in
             tool.status = presentedStatus
@@ -580,11 +596,12 @@ public final class RunStateReducer: ObservableObject {
         callID: String,
         name: String,
         hasKnownName: Bool,
-        status: ToolActivityStatus
+        status: ToolActivityStatus,
+        sequence: Int?
     ) {
         guard toolIndex[callID] == nil else { return }
         toolIndex[callID] = tools.count
-        activityOrder.append(.tool(callID))
+        place(.tool(callID), sequence: sequence)
         tools.append(
             ToolActivity(
                 callID: callID,
@@ -598,6 +615,22 @@ public final class RunStateReducer: ObservableObject {
                 hasKnownName: hasKnownName
             )
         )
+    }
+
+    /// Place an activity by its durable event sequence. A reopened chat restores
+    /// its saved messages before replaying its last run, so a replayed call
+    /// belongs ahead of the restored answer it produced. Live and transient
+    /// activity arrives in order and lands at the end.
+    private func place(_ reference: ConversationActivityReference, sequence: Int?) {
+        guard let sequence else {
+            activityOrder.append(reference)
+            return
+        }
+        activitySequences[reference] = sequence
+        let index =
+            activityOrder.firstIndex { activitySequences[$0].map { $0 > sequence } ?? false }
+            ?? activityOrder.endIndex
+        activityOrder.insert(reference, at: index)
     }
 
     private func updateTool(callID: String, update: (inout ToolActivity) -> Void) {
@@ -697,7 +730,7 @@ public final class RunStateReducer: ObservableObject {
     }
 }
 
-private enum ConversationActivityReference {
+private enum ConversationActivityReference: Hashable {
     case message(String)
     case tool(String)
 }

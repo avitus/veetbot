@@ -108,6 +108,23 @@ runs the iPhone and iPad cases. Server release packaging requires both jobs, so
 native-client regressions still block delivery. No case was removed; the split
 shortens the lane's wall-clock time by overlapping work that ran in sequence.
 
+## Settled-approval presentation refinement (2026-10-07)
+
+The owner reopened a chat whose answer followed three approved
+`sandbox.run_command` calls and landed on three standalone cards with the answer
+above them. Two causes compounded. Selection restores the saved transcript and
+then replays the latest run (ADR-0053), and the reducer appended each replayed
+call after the restored answer. The approval each call carried also kept it
+standalone. The reducer now places every durable activity by its event sequence,
+so a replayed call sits before the answer it produced. Live and transient
+activity still lands at the end. An approval the owner has already settled no
+longer breaks a bundle, and a call refused at its approval joins as denied. The
+bundle row names the decision and keeps the collapsed approval inside it. Every
+settled approval card collapses to its decision, not only an approved one.
+Pending approvals, queued or running calls, unknown tool names, policy denials,
+and uncertain outcomes remain boundaries. Execution, policy, and durable events
+are unchanged.
+
 ## Consequences
 
 - Apple users gain a native conversation, approval, question, working-state,

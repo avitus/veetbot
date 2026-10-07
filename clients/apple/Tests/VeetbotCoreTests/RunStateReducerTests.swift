@@ -616,55 +616,115 @@ import Testing
         }
     }
 
-    /// Preserve the individual card for calls carrying an approval reference.
-    @Test(arguments: ["web.search", "web.fetch"])
-    func testApprovalBoundCompletedToolBreaksCompletedToolBundles(name: String) {
+    /// Group a call whose approval the owner already settled with its neighbours.
+    @Test(arguments: ["web.search", "sandbox.run_command"])
+    func testSettledApprovalJoinsTheAdjacentToolBundle(name: String) {
         let reducer = RunStateReducer()
-        reducer.reduce(toolFrame(id: 1, callID: "search-1", name: name))
-        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: name))
+        reducer.reduce(toolFrame(id: 1, callID: "call-1", name: name))
+        reducer.reduce(toolFrame(id: 2, callID: "call-2", name: name))
         reducer.reduce(
-            toolFrame(
-                id: 3,
-                event: "tool.call.proposed",
-                callID: "search-approved",
-                name: name
-            )
+            toolFrame(id: 3, event: "tool.call.proposed", callID: "call-approved", name: name)
         )
-        let approval = ApprovalView(
-            id: UUID(),
-            runID: UUID(),
-            sessionID: UUID(),
-            status: .approved,
-            toolName: name,
-            actionSummary: "Search the web",
-            arguments: ["query": .string("approved query")],
-            argumentDigests: nil,
-            risk: "high",
-            policyReason: "explicit approval required",
-            expiresAt: nil,
-            createdAt: Date(),
-            resolvedAt: Date(),
-            resolvedBy: "test",
-            decision: .approveOnce
-        )
+        let approval = approvalView(toolName: name, status: .approved, decision: .approveOnce)
         reducer.mergeApproval(approval)
-        reducer.reduce(toolFrame(id: 4, callID: "search-approved", name: name))
-        reducer.reduce(toolFrame(id: 5, callID: "search-3", name: name))
-        reducer.reduce(toolFrame(id: 6, callID: "search-4", name: name))
+        reducer.reduce(toolFrame(id: 4, callID: "call-approved", name: name))
+        reducer.reduce(toolFrame(id: 5, callID: "call-3", name: name))
 
-        #expect(
-            reducer.activityTimeline.map(\.id) == [
-                "tool:search-1",
-                "tool:search-approved",
-                "tool:search-3",
-            ]
-        )
-        guard case .tool(let approved) = reducer.activityTimeline[1] else {
-            Issue.record("expected approved completed tool to remain standalone")
+        #expect(reducer.activityTimeline.map(\.id) == ["tool:call-1"])
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected the approved call inside the adjacent summary")
             return
         }
-        #expect(approved.status == .completed)
-        #expect(approved.approvalID == approval.id)
+        #expect(bundle.summary == "4 tool calls · Completed")
+        #expect(bundle.activities.map(\.callID) == ["call-1", "call-2", "call-approved", "call-3"])
+        #expect(bundle.activities.map(\.approvalID) == [nil, nil, approval.id, nil])
+    }
+
+    /// A call the owner refused joins the summary; the refusal stays counted.
+    @Test
+    func testCallDeniedAtItsApprovalJoinsTheBundleAsDenied() {
+        let reducer = RunStateReducer()
+        let name = "sandbox.run_command"
+        reducer.reduce(toolFrame(id: 1, callID: "call-1", name: name))
+        reducer.reduce(
+            toolFrame(id: 2, event: "tool.call.proposed", callID: "call-refused", name: name)
+        )
+        reducer.mergeApproval(approvalView(toolName: name, status: .denied, decision: .deny))
+        reducer.reduce(
+            toolFrame(id: 3, event: "tool.call.denied", callID: "call-refused", name: name)
+        )
+        reducer.reduce(toolFrame(id: 4, callID: "call-2", name: name))
+
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first,
+            reducer.activityTimeline.count == 1
+        else {
+            Issue.record("expected the refused call inside the adjacent summary")
+            return
+        }
+        #expect(bundle.summary == "3 tool calls · 2 Completed · 1 Denied")
+    }
+
+    /// Keep a call waiting on the owner's decision outside every bundle.
+    @Test
+    func testPendingApprovalRemainsAStandaloneCard() {
+        let reducer = RunStateReducer()
+        let name = "sandbox.run_command"
+        reducer.reduce(toolFrame(id: 1, callID: "call-1", name: name))
+        reducer.reduce(toolFrame(id: 2, callID: "call-2", name: name))
+        reducer.reduce(
+            toolFrame(id: 3, event: "tool.call.proposed", callID: "call-waiting", name: name)
+        )
+        let approval = approvalView(toolName: name, status: .pending, decision: nil)
+        reducer.mergeApproval(approval)
+
+        #expect(reducer.activityTimeline.map(\.id) == ["tool:call-1", "tool:call-waiting"])
+        guard case .tool(let waiting) = reducer.activityTimeline.last else {
+            Issue.record("expected the pending approval to remain a standalone card")
+            return
+        }
+        #expect(waiting.status == .awaitingApproval)
+        #expect(waiting.approvalID == approval.id)
+    }
+
+    /// Reopening a chat restores its saved messages, then replays the last run:
+    /// the replayed calls belong before the answer they produced, not after it.
+    @Test
+    func testReplayedRunPlacesItsToolCallsBeforeTheRestoredAnswer() throws {
+        let reducer = RunStateReducer()
+        let messages = try JSONDecoder().decode([SessionMessageView].self, from: Data(#"""
+            [
+              {"sequence":1,"role":"user","content":[{"type":"text","text":"Earlier question"}]},
+              {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Earlier answer"}]},
+              {"sequence":3,"role":"user","content":[{"type":"text","text":"Is it tracked?"}]},
+              {"sequence":9,"role":"assistant","content":[{"type":"text","text":"Yes, by two people."}]}
+            ]
+            """#.utf8))
+        reducer.restore(messages: messages)
+        reducer.reduce(SSEFrame(id: 3, event: "user.message.created", data: [
+            "content": .array([.object(["type": .string("text"), "text": .string("Is it tracked?")])]),
+        ]))
+        for (proposed, callID) in [(4, "command-1"), (6, "command-2")] {
+            reducer.reduce(toolFrame(
+                id: proposed, event: "tool.call.proposed", callID: callID,
+                name: "sandbox.run_command"
+            ))
+            reducer.reduce(toolFrame(id: proposed + 1, callID: callID, name: "sandbox.run_command"))
+        }
+        reducer.reduce(assistantMessageFrame(id: 9, text: "Yes, by two people."))
+        reducer.reduce(SSEFrame(id: 10, event: "run.completed", data: [:]))
+
+        #expect(reducer.activityTimeline.map(\.id) == [
+            "message:event-1",
+            "message:event-2",
+            "message:event-3",
+            "tool:command-1",
+            "message:event-9",
+        ])
+        guard case .toolBundle(let bundle) = reducer.activityTimeline[3] else {
+            Issue.record("expected the replayed commands in one summary above the answer")
+            return
+        }
+        #expect(bundle.activities.map(\.callID) == ["command-1", "command-2"])
     }
 
     @Test
@@ -742,6 +802,30 @@ import Testing
         #expect(bundle.activities[19].name == "mcp.gmail_read.get_thread")
         #expect(bundle.activities[19].arguments["query"]?.stringValue == "example 20")
         #expect(bundle.highestRisk == .high)
+    }
+
+    private func approvalView(
+        toolName: String,
+        status: ApprovalStatus,
+        decision: ApprovalDecision?
+    ) -> ApprovalView {
+        ApprovalView(
+            id: UUID(),
+            runID: UUID(),
+            sessionID: UUID(),
+            status: status,
+            toolName: toolName,
+            actionSummary: "Run a command",
+            arguments: ["command": .array([.string("true")])],
+            argumentDigests: nil,
+            risk: "high",
+            policyReason: "explicit approval required",
+            expiresAt: nil,
+            createdAt: Date(),
+            resolvedAt: status.isPending ? nil : Date(),
+            resolvedBy: status.isPending ? nil : "test",
+            decision: decision
+        )
     }
 
     private func assistantMessageFrame(id: Int, text: String) -> SSEFrame {

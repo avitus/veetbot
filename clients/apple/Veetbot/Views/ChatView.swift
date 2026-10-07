@@ -109,10 +109,12 @@ public struct ChatView: View {
                             case .toolBundle(let bundle):
                                 ToolActivityBundleCard(
                                     bundle: bundle,
+                                    approvals: state.approvals,
                                     openArtifact: { artifactID in
                                         artifactSelection = ArtifactSelection(id: artifactID)
                                     }
                                 )
+                                .id(scrollID(for: bundle, fallback: item.id))
                             }
                         }
                         ForEach(
@@ -409,6 +411,14 @@ public struct ChatView: View {
         // Follow newly inserted activity, but leave the viewport fixed while an
         // existing assistant message grows so its beginning remains readable.
         "\(state.timeline.count):\(state.tools.count):\(state.approvals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none"):\(state.failure?.occurredAt.timeIntervalSince1970 ?? 0)"
+    }
+
+    /// A notification for an approval a bundle now holds scrolls to the bundle.
+    private func scrollID(for bundle: ToolActivityBundle, fallback: String) -> String {
+        guard case .approval(let approvalID) = model.notificationFocus,
+            bundle.activities.contains(where: { $0.approvalID == approvalID })
+        else { return fallback }
+        return NotificationFocus.approval(approvalID).scrollID
     }
 
     private func scroll(_ proxy: ScrollViewProxy) {

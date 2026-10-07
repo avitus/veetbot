@@ -86,6 +86,8 @@ struct ToolActivityCard: View {
 
 struct ToolActivityBundleCard: View {
     let bundle: ToolActivityBundle
+    /// The settled approvals some bundled calls carry.
+    var approvals: [ApprovalView] = []
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
@@ -118,6 +120,7 @@ struct ToolActivityBundleCard: View {
                         BundledToolActivityRow(
                             index: index + 1,
                             activity: activity,
+                            approval: approvals.first { $0.id == activity.approvalID },
                             openArtifact: openArtifact
                         )
                     }
@@ -139,6 +142,7 @@ struct ToolActivityBundleCard: View {
 private struct BundledToolActivityRow: View {
     let index: Int
     let activity: ToolActivity
+    let approval: ApprovalView?
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
@@ -158,6 +162,11 @@ private struct BundledToolActivityRow: View {
                         }
                         if activity.allowedByTaskGrant {
                             Text("Allowed by task permission")
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        if let approval {
+                            Text(approval.settledTitle)
                                 .appFont(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -193,6 +202,10 @@ private struct BundledToolActivityRow: View {
                         result: result,
                         openArtifact: openArtifact
                     )
+                }
+                if let approval {
+                    // A bundle holds only settled approvals, which offer no controls.
+                    ApprovalCardView(approval: approval) { _, _, _ in }
                 }
             }
         }
@@ -237,15 +250,16 @@ struct ApprovalCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if approval.status == .approved {
+            // Only a pending approval needs its details and controls in view.
+            if !approval.status.isPending {
                 Button {
                     expanded.toggle()
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                        Image(systemName: approval.settledSymbol)
+                            .foregroundColor(approval.settledColor)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(approval.decision == .approveForTask ? "Allowed for this task" : "Approved")
+                            Text(approval.settledTitle)
                                 .appFont(.subheadline, weight: .semibold)
                             Text(verbatim: approval.actionSummary)
                                 .appFont(.caption)
@@ -280,6 +294,38 @@ struct ApprovalCardView: View {
             ApprovalCard(approval: approval, inFlight: inFlight) { decision, reason in
                 resolve(decision, reason, nil)
             }
+        }
+    }
+}
+
+private extension ApprovalView {
+    /// How a settled approval reads in its collapsed row.
+    var settledTitle: String {
+        switch status {
+        case .approved: decision == .approveForTask ? "Allowed for this task" : "Approved"
+        case .denied: "Denied"
+        case .expired: "Expired"
+        case .cancelled: "Cancelled"
+        case .pending: "Approval checkpoint"
+        }
+    }
+
+    var settledSymbol: String {
+        switch status {
+        case .approved: "checkmark.circle.fill"
+        case .denied: "xmark.circle.fill"
+        case .expired: "clock"
+        case .cancelled: "slash.circle"
+        case .pending: "hand.raised.fill"
+        }
+    }
+
+    var settledColor: Color {
+        switch status {
+        case .approved: .green
+        case .denied: .red
+        case .expired, .cancelled: .secondary
+        case .pending: AppTheme.orange
         }
     }
 }
