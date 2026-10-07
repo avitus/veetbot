@@ -1395,8 +1395,18 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         openApprovalChat()
         XCTAssertTrue(app.staticTexts["Approval checkpoint"].waitForExistence(timeout: 10))
+        #if os(iOS)
+        let status = app.staticTexts["chat.status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertEqual(status.label, "Needs your approval")
+        #endif
         activate(app.buttons["Approve once"])
         assertCollapsedApproval(detail: "Approval checkpoint")
+        // The run is resuming: the header asks for nothing and the activity row shows work.
+        XCTAssertTrue(app.staticTexts["Working…"].waitForExistence(timeout: 5))
+        #if os(iOS)
+        XCTAssertFalse(status.exists)
+        #endif
     }
 
     func testChatApprovalLoadedApprovedStartsCollapsed() {
@@ -1802,9 +1812,16 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(newConversationRow.waitForExistence(timeout: 5))
         newConversationRow.tap()
 
+        // The conversation's title is the window's on the Mac and the navigation bar's on iOS.
+        #if os(macOS)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        XCTAssertEqual(window.title, "New conversation")
+        #else
         let heading = app.staticTexts["chat.heading"]
         XCTAssertTrue(heading.waitForExistence(timeout: 5))
         XCTAssertEqual(heading.label, "New conversation")
+        #endif
         XCTAssertTrue(app.descendants(matching: .any)["chat.composer"].exists)
     }
 

@@ -1017,4 +1017,43 @@ import Testing
             ) == "Sending…"
         )
     }
+
+    /// A run parked with nothing left for the owner to decide is still working:
+    /// an answered approval resuming, or a delegated child, whose wait reuses
+    /// the waiting-for-approval status (runtime-loop.md).
+    @Test
+    func aParkedRunWithNothingLeftToDecideShowsItIsWorking() {
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .waitingForApproval, awaitingApproval: false,
+                reasoningActive: false, reasoningTitle: nil
+            ) == "Working…"
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .waitingForApproval, awaitingApproval: true,
+                reasoningActive: false, reasoningTitle: nil
+            ) == nil
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .waitingForUser, awaitingApproval: false,
+                reasoningActive: false, reasoningTitle: nil
+            ) == nil
+        )
+    }
+
+    @Test
+    func theConversationStatusNamesOnlyWhatTheRunNeedsFromTheOwner() {
+        #expect(
+            ConversationStatus.label(runStatus: .waitingForApproval, awaitingApproval: true)
+                == "Needs your approval"
+        )
+        #expect(ConversationStatus.label(runStatus: .waitingForApproval, awaitingApproval: false) == nil)
+        #expect(ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false) == "Needs your answer")
+        // A pending card left behind by a run that moved on asks for nothing.
+        for status: RunStatus? in [nil, .queued, .running, .completed, .failed, .cancelled] {
+            #expect(ConversationStatus.label(runStatus: status, awaitingApproval: true) == nil)
+        }
+    }
 }

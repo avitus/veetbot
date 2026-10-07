@@ -174,6 +174,22 @@ public final class ChatViewModel: ObservableObject {
     /// under a new name; never the global banner.
     @Published public private(set) var folderEditorError: String?
     @Published public private(set) var pendingFolderProposalIDs: Set<UUID> = []
+    /// The decision on its way to the server for each approval the owner has
+    /// just answered; its card shows progress and accepts no second decision.
+    @Published public private(set) var approvalsInFlight: [UUID: ApprovalDecision] = [:]
+    /// Presented from the conversation's toolbar, which on the Mac belongs to the window.
+    @Published public var isPeopleLookupPresented = false
+
+    /// Whether an approval still waits on the owner; one whose decision is on its way does not.
+    public var awaitingOwnerApproval: Bool {
+        runState.needsApprovalIDs.contains { approvalsInFlight[$0] == nil }
+    }
+
+    /// The open conversation's sidebar title.
+    public var selectedConversationTitle: String {
+        guard let selectedSessionID else { return "New conversation" }
+        return history.first { $0.sessionID == selectedSessionID }?.title ?? "Conversation"
+    }
 
     public var groupedHistory: GroupedConversationHistory {
         .make(history: history, folders: folders, available: foldersAvailable)
@@ -1502,13 +1518,16 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Resolve the owner's decision and refresh an offer that the server withdrew.
+    /// A decision already on its way makes any further tap on that card a no-op.
     public func resolveApproval(
         _ approval: ApprovalView,
         decision: ApprovalDecision,
         reason: String? = nil,
         taskGrant: TaskGrantEcho? = nil
     ) async {
-        guard let api else { return }
+        guard let api, approvalsInFlight[approval.id] == nil else { return }
+        approvalsInFlight[approval.id] = decision
+        defer { approvalsInFlight[approval.id] = nil }
         do {
             let stored = try await api.resolveApproval(
                 approval.id,

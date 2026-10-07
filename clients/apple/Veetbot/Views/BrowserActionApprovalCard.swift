@@ -8,6 +8,8 @@ import SwiftUI
 struct BrowserActionApprovalCard: View {
     let approval: ApprovalView
     let presentation: BrowserActionApprovalPresentation
+    /// The decision on its way, which disables every control until the server answers.
+    var inFlight: ApprovalDecision? = nil
     let resolve: (ApprovalDecision, String?, TaskGrantEcho?) -> Void
     @State private var denialReason = ""
     @State private var confirmingTask = false
@@ -108,30 +110,44 @@ struct BrowserActionApprovalCard: View {
             }
             if approval.status.isPending {
                 TextField("Reason for denial (optional)", text: $denialReason)
+                    .disabled(inFlight != nil)
                 if presentation.offersTaskGrant, let offer = approval.taskGrantOffer {
                     Text(verbatim: offer.summary)
                         .appFont(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("approval.task-scope")
-                    Button("Allow all actions for this task") {
+                    Button {
                         confirmingTask = true
+                    } label: {
+                        ApprovalDecisionLabel(
+                            title: "Allow all actions for this task", decision: .approveForTask,
+                            inFlight: inFlight, websiteCard: true
+                        )
                     }
                     .buttonStyle(.bordered)
+                    .disabled(inFlight != nil)
                     .accessibilityIdentifier("approval.allow-for-task")
                 }
                 HStack {
-                    Button("Allow once") {
+                    Button {
                         resolve(.approveOnce, nil, nil)
+                    } label: {
+                        ApprovalDecisionLabel(
+                            title: "Allow once", decision: .approveOnce, inFlight: inFlight, websiteCard: true
+                        )
                     }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("approval.allow-once")
-                    Button("Deny", role: .destructive) {
+                    Button(role: .destructive) {
                         let reason = denialReason.trimmingCharacters(in: .whitespacesAndNewlines)
                         resolve(.deny, reason.isEmpty ? nil : reason, nil)
+                    } label: {
+                        ApprovalDecisionLabel(title: "Deny", decision: .deny, inFlight: inFlight, websiteCard: true)
                     }
                     .accessibilityIdentifier("approval.deny")
                 }
+                .disabled(inFlight != nil)
             } else {
                 Text(resolutionText)
                     .appFont(.caption)

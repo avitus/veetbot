@@ -760,12 +760,29 @@ private struct ToolOutcomePayload: Decodable {
 }
 
 /// The one-line status a chat shows while its run is in flight.
+/// The line under a conversation's title names only what the run needs from
+/// the owner. A run parked as waiting for approval with no approval left to
+/// decide is resuming, or waiting on a delegated child, and asks for nothing.
+public enum ConversationStatus {
+    public static func label(runStatus: RunStatus?, awaitingApproval: Bool) -> String? {
+        switch runStatus {
+        case .waitingForApproval where awaitingApproval: return "Needs your approval"
+        case .waitingForUser: return "Needs your answer"
+        default: return nil
+        }
+    }
+}
+
 public enum RunActivity {
     public static func label(
-        isSending: Bool, runStatus: RunStatus?, reasoningActive: Bool, reasoningTitle: String?
+        isSending: Bool, runStatus: RunStatus?, awaitingApproval: Bool = false,
+        reasoningActive: Bool, reasoningTitle: String?
     ) -> String? {
         if isSending { return "Sending…" }
-        guard runStatus == .running || runStatus == .queued else { return nil }
+        let working =
+            runStatus == .running || runStatus == .queued
+            || (runStatus == .waitingForApproval && !awaitingApproval)
+        guard working else { return nil }
         if let reasoningTitle { return "Thinking: \(reasoningTitle)" }
         return reasoningActive ? "Reasoning…" : "Working…"
     }

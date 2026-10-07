@@ -212,8 +212,16 @@ boundary and represented by a compact activity indicator. A reasoning summary
 contributes only the heading of its latest part, which the indicator shows as
 "Thinking: <heading>" until the answer starts (ADR-0144). A failed run renders
 the API's public failure message inside the conversation together with its
-stable reason and available step and attempt numbers; the header status is not
-the only failure indication.
+stable reason and available step and attempt numbers.
+
+The conversation's sidebar title is the window title on the Mac and the
+navigation title on iOS, with no repeated heading in the pane. Beneath it, a
+status names only what the run needs from the owner: Needs your approval while
+an unanswered approval is pending, and Needs your answer for a question. A run
+still parked as waiting for approval with nothing left to decide, because an
+answered approval is resuming or a delegated child is working, shows Working…
+in the activity indicator instead. People and Stop sit in the window toolbar on
+the Mac and in the navigation bar on iOS.
 
 The sidebar mirrors the server's authoritative, paginated session index.
 SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS
@@ -368,6 +376,9 @@ expands the original details for inspection without restoring decision controls.
 This applies to generic and website approvals, inside tool cards and standalone
 in chat, including approvals loaded from history. Pending requests remain open
 until the server confirms approval; a failed resolution leaves them actionable.
+While a decision is on its way, the card disables its controls and the chosen
+one shows progress (Approving…, Allowing…, or Denying…), so a second tap sends
+nothing.
 
 Every finished message with text has Copy and Select Text (ADR-0122): labelled
 under an answer, icon-only under the owner's own messages and at accessibility

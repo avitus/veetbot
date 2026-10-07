@@ -266,6 +266,7 @@ public struct RootView: View {
                     }
                     .accessibilityLabel("Schedules")
                     .accessibilityIdentifier("sidebar.schedules")
+                    ChatToolbarActions(model: model)
                 } else {
                     // The entry exists only where an account advertises support.
                     if coordinator.email.unsubscribeAvailable {

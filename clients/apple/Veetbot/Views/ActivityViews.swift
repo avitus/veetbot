@@ -13,6 +13,8 @@ struct ToolActivityCard: View {
     let activity: ToolActivity
     let approval: ApprovalView?
     var activeTaskGrant: BrowserTaskGrantView? = nil
+    /// The decision on its way for this card's approval, if any.
+    var approvalInFlight: ApprovalDecision? = nil
     let resolve: (ApprovalView, ApprovalDecision, String?, TaskGrantEcho?) -> Void
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
@@ -65,8 +67,9 @@ struct ToolActivityCard: View {
                 }
             }
             if let approval {
-                ApprovalCardView(approval: approval, activeTaskGrant: activeTaskGrant) {
-                    decision, reason, taskGrant in
+                ApprovalCardView(
+                    approval: approval, activeTaskGrant: activeTaskGrant, inFlight: approvalInFlight
+                ) { decision, reason, taskGrant in
                     resolve(approval, decision, reason, taskGrant)
                 }
             }
@@ -227,6 +230,8 @@ private struct RiskBadge: View {
 struct ApprovalCardView: View {
     let approval: ApprovalView
     var activeTaskGrant: BrowserTaskGrantView? = nil
+    /// The decision on its way, which disables every control until the server answers.
+    var inFlight: ApprovalDecision? = nil
     let resolve: (ApprovalDecision, String?, TaskGrantEcho?) -> Void
     @State private var expanded = false
 
@@ -268,9 +273,11 @@ struct ApprovalCardView: View {
     @ViewBuilder
     private var details: some View {
         if let presentation = BrowserActionApprovalPresentation(approval: approval, activeGrant: activeTaskGrant) {
-            BrowserActionApprovalCard(approval: approval, presentation: presentation, resolve: resolve)
+            BrowserActionApprovalCard(
+                approval: approval, presentation: presentation, inFlight: inFlight, resolve: resolve
+            )
         } else {
-            ApprovalCard(approval: approval) { decision, reason in
+            ApprovalCard(approval: approval, inFlight: inFlight) { decision, reason in
                 resolve(decision, reason, nil)
             }
         }
@@ -279,6 +286,7 @@ struct ApprovalCardView: View {
 
 struct ApprovalCard: View {
     let approval: ApprovalView
+    var inFlight: ApprovalDecision? = nil
     let resolve: (ApprovalDecision, String?) -> Void
     @State private var denialReason = ""
 
@@ -301,14 +309,20 @@ struct ApprovalCard: View {
             }
             if approval.status.isPending {
                 TextField("Reason for denial (optional)", text: $denialReason)
+                    .disabled(inFlight != nil)
                 HStack {
-                    Button("Approve once") { resolve(.approveOnce, nil) }
-                        .buttonStyle(.borderedProminent)
-                    Button("Deny", role: .destructive) {
+                    Button { resolve(.approveOnce, nil) } label: {
+                        ApprovalDecisionLabel(title: "Approve once", decision: .approveOnce, inFlight: inFlight)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button(role: .destructive) {
                         let reason = denialReason.trimmingCharacters(in: .whitespacesAndNewlines)
                         resolve(.deny, reason.isEmpty ? nil : reason)
+                    } label: {
+                        ApprovalDecisionLabel(title: "Deny", decision: .deny, inFlight: inFlight)
                     }
                 }
+                .disabled(inFlight != nil)
             } else {
                 Text("Resolved: \(approval.decision?.rawValue ?? approval.status.displayName)")
                     .appFont(.caption)
@@ -321,6 +335,25 @@ struct ApprovalCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(AppTheme.orange.opacity(0.45))
         )
+    }
+}
+
+/// A decision control's own title, or progress once that decision is on its way.
+struct ApprovalDecisionLabel: View {
+    let title: String
+    let decision: ApprovalDecision
+    let inFlight: ApprovalDecision?
+    var websiteCard = false
+
+    var body: some View {
+        if inFlight == decision {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(decision.progressLabel(websiteCard: websiteCard))
+            }
+        } else {
+            Text(title)
+        }
     }
 }
 
