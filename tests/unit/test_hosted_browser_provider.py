@@ -1144,3 +1144,67 @@ async def test_browser_binding_accepts_only_same_owner_with_no_broader_authority
             assert sessions.acquisitions == []
     finally:
         await provider.close()
+
+
+async def test_expansion_caches_new_facts_without_advancing_the_action_sequence() -> None:
+    from agent_core.domain.browser import BrowserObservationExpansion
+
+    class ExpandingSessions(FakeSessions):
+        async def expand(
+            self, lease_ref: str, request: BrowserObservationExpansion
+        ) -> BrowserSnapshot:
+            assert lease_ref and request.after == "revision-1:0"
+            observation = await self.navigate(lease_ref, "https://example.org/lesson")
+            observation = observation.model_copy(update={"revision": "expanded"})
+            return BrowserSnapshot(
+                observation=observation,
+                facts=BrowserObservationFacts(
+                    revision="expanded",
+                    elements={
+                        "revision-1:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)
+                    },
+                ),
+            )
+
+    sessions = ExpandingSessions()
+    provider = ready_provider(sessions)
+    await provider.bind_execution(tool_context())
+    expanded = await provider.expand(BrowserObservationExpansion(after="revision-1:0"))
+    assert expanded.revision == "expanded"
+    assert not sessions.sequence and len(sessions.acquisitions) == 1
+    snapshot = provider.snapshot()
+    assert snapshot is not None and snapshot.facts is not None
+    assert snapshot.facts.revision == "expanded"
+
+
+async def test_extraction_caches_new_facts_without_advancing_the_action_sequence() -> None:
+    from agent_core.domain.browser_extraction import BrowserExtractionRequest
+    from tests.unit.test_browser_extraction import extracted_page, extraction_arguments
+
+    class ExpandingSessions(FakeSessions):
+        async def extract(
+            self, lease_ref: str, request: BrowserExtractionRequest
+        ) -> BrowserSnapshot:
+            assert lease_ref and request.expected_revision == "revision-1"
+            observation = extracted_page(request, "expanded")
+            return BrowserSnapshot(
+                observation=observation,
+                facts=BrowserObservationFacts(
+                    revision="expanded",
+                    elements={
+                        "revision-1:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)
+                    },
+                ),
+            )
+
+    sessions = ExpandingSessions()
+    provider = ready_provider(sessions)
+    await provider.bind_execution(tool_context())
+    expanded = await provider.extract(
+        BrowserExtractionRequest.model_validate(extraction_arguments()["extract"])
+    )
+    assert expanded.revision == "expanded"
+    assert not sessions.sequence and len(sessions.acquisitions) == 1
+    snapshot = provider.snapshot()
+    assert snapshot is not None and snapshot.facts is not None
+    assert snapshot.facts.revision == "expanded"

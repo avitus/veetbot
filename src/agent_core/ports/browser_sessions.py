@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -14,12 +15,39 @@ from agent_core.domain.browser import (
     BrowserDispatchConstraint,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationExpansion,
+    BrowserProviderError,
     BrowserSnapshot,
 )
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 
 # ADR-0129: a page from the isolated service. A newer service returns the
 # observation with element facts beside it; an older one, the observation.
 type BrowserSessionPage = BrowserObservation | BrowserSnapshot
+
+
+async def expand_browser_session(
+    sessions: object, lease_ref: str, request: BrowserObservationExpansion
+) -> BrowserSessionPage:
+    candidate = getattr(sessions, "expand", None)
+    if candidate is None:
+        raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+    expand = cast(
+        Callable[[str, BrowserObservationExpansion], Awaitable[BrowserSessionPage]], candidate
+    )
+    return await expand(lease_ref, request)
+
+
+async def extract_browser_session(
+    sessions: object, lease_ref: str, request: BrowserExtractionRequest
+) -> BrowserSessionPage:
+    candidate = getattr(sessions, "extract", None)
+    if candidate is None:
+        raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+    extract = cast(
+        Callable[[str, BrowserExtractionRequest], Awaitable[BrowserSessionPage]], candidate
+    )
+    return await extract(lease_ref, request)
 
 
 class BrowserSessionControlPlane(Protocol):

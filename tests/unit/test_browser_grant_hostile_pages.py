@@ -394,7 +394,8 @@ window.clicks = [];
 async def test_a_shadow_root_label_reference_is_read_in_its_own_tree() -> None:
     async with lesson_pages({"/lesson/1": SHADOW_LABELLEDBY}) as (runtime, visit, _left):
         page = await visit("/lesson/1")
-        refusal = await _refused(runtime, _click_named(page, "Continue"))
+        assert page.elements[0].name == "Buy 500 gems"
+        refusal = await _refused(runtime, _click_named(page, "Buy 500 gems"))
         clicks = await _page_value(runtime, "window.clicks")
 
     assert refusal.reason_code == GRANT_NOT_APPLICABLE

@@ -958,6 +958,7 @@ def test_ci_has_the_required_partitions() -> None:
         "deploy-nginx",
         "public-site",
         "browser-image",
+        "browser",
     }
     for name, job in jobs.items():
         if name in {"sandbox", "browser-image"}:
@@ -1126,7 +1127,8 @@ def test_ci_has_the_required_partitions() -> None:
         {"browser-image": {"name": "browser-image-x86_64", "resource_class": "medium"}},
         {"browser-image": {"name": "browser-image-arm64", "resource_class": "arm.medium"}},
     ]
-    delivery_jobs = {next(iter(job)): next(iter(job.values())) for job in verify["jobs"][10:]}
+    assert verify["jobs"][10] == "browser"
+    delivery_jobs = {next(iter(job)): next(iter(job.values())) for job in verify["jobs"][11:]}
     assert set(delivery_jobs) == {
         "package-release",
         "deploy-app",
@@ -1143,6 +1145,7 @@ def test_ci_has_the_required_partitions() -> None:
         "public-site",
         "browser-image-x86_64",
         "browser-image-arm64",
+        "browser",
     ]
     assert delivery_jobs["deploy-app"]["requires"] == ["package-release"]
     assert delivery_jobs["deploy-app"]["context"] == "veetbot-production"
@@ -1242,7 +1245,7 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
     # Every verification partition consults the record before its tests and
     # writes it only after its last test passed. The public site still builds
     # on main because packaging consumes its output, and delivery never skips.
-    partitions = {"static", "contract", "integration", "sandbox", "apple", "apple-ios"}
+    partitions = {"static", "contract", "integration", "sandbox", "apple", "apple-ios", "browser"}
     for name, job in jobs.items():
         names = [next(iter(step)) if isinstance(step, dict) else step for step in job["steps"]]
         if name not in partitions:
@@ -1319,6 +1322,7 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
         "contract": "test-contract",
         "integration": "test-integration",
         "sandbox": "test-sandbox",
+        "browser": "test-browser",
     }
     for job_name, target in expected_python_lanes.items():
         commands = [

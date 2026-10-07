@@ -163,6 +163,28 @@ jobs:
           path: build/veetbot-client.pyz
           destination: veetbot-client.pyz
 
+  browser:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: medium
+    steps:
+      - checkout
+      - skip_verified_tree:
+          job: browser
+      - install_uv
+      - run:
+          name: Required real-browser regression baseline
+          command: |
+            mkdir -p test-results/browser
+            PYTEST_ADDOPTS="--junitxml=test-results/browser/results.xml" \
+              make test-browser
+      - record_verified_tree:
+          job: browser
+      - store_test_results:
+          path: test-results/browser
+      - store_artifacts:
+          path: test-results/browser/baseline.json
+
   contract:
     docker:
       - image: cimg/python:3.12
@@ -693,6 +715,7 @@ workflows:
       - browser-image:
           name: browser-image-arm64
           resource_class: arm.medium
+      - browser
       - package-release:
           requires:
             - static
@@ -704,6 +727,7 @@ workflows:
             - public-site
             - browser-image-x86_64
             - browser-image-arm64
+            - browser
           filters:
             branches:
               only: main

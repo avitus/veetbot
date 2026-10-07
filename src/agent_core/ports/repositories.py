@@ -104,6 +104,12 @@ class SessionRepository(Protocol):
 
 
 class RunRepository(Protocol):
+    async def waiting_for_user(
+        self, principal: Principal, *, limit: int, after_id: UUID | None = None
+    ) -> list[Run]:
+        """Bounded ascending-ID scan of one owner's suspended runs."""
+        ...
+
     async def create(self, run: Run) -> None: ...
 
     async def get(self, run_id: UUID, principal: Principal) -> Run: ...

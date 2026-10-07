@@ -40,7 +40,7 @@ CI is defined as running that target plus the ones that do.
 Three consequences follow.
 
 1.  A developer who runs `make check` and sees it pass has run exactly
-    the three CI jobs that gate a pull request without a database. They
+    the four CI jobs that gate a pull request without a database. They
     have not run the integration job; the Makefile says so by giving it
     a separate target rather than folding it in silently.
 2.  Adding a gate means adding it to one place. A gate registered under
@@ -210,12 +210,12 @@ format      uv run ruff format . && uv run ruff check --fix .
 lint        uv run ruff format --check . && uv run ruff check .
 typecheck   uv run mypy src tests
 test        uv run pytest -m "not live"
-check       lint typecheck test-fast test-deploy docs-check test-website
+check       lint typecheck test-fast test-browser test-deploy docs-check test-website
 db-up       docker compose up -d postgres && wait-for-healthy
 migrate     uv run alembic upgrade head
 ```
 
-Eight targets exist that Section 21 does not list, because CI needs them
+Ten targets exist that Section 21 does not list, because CI needs them
 and rule 3 above says CI may not invent commands:
 
 ```text
@@ -223,8 +223,10 @@ target            runs
 ----------------  -------------------------------------------
 test-static       pytest -n 2 --dist loadscope -m static
 test-contract     pytest -m "not static and not integration
-                  and not live"
+                  and not live and not browser"
 test-fast         test-static then test-contract
+browser-install   playwright install --with-deps chromium
+test-browser      required Chromium partition with content-free baseline
 test-integration  pytest -m integration
 test-live         RUN_LIVE_MODEL_TESTS=1 pytest -m live
 docs              mkdocs build --strict
@@ -243,10 +245,10 @@ production deployment. `browser-image` builds the browser-profile service
 image, and `test-browser-image` measures what its browser asks for on its own
 (ADR-0152); both need Docker and stay outside `make check`.
 
-`make check` is `lint typecheck test-fast test-deploy docs-check
+`make check` is `lint typecheck test-fast test-browser test-deploy docs-check
 test-website`. `test-fast` is `test-static` followed by `test-contract`;
-those Python checks plus the independent Node website lane are CI jobs 1,
-2, and 9 exactly — everything that needs neither a database nor a
+those Python checks plus the independent browser and Node website lanes are
+CI jobs 1, 2, 9, and 11 exactly — everything that needs neither a database nor a
 credential, partitioned rather than overlapping. This is the whole of
 the reconciliation the governing rule demands. A developer with no Docker
 daemon running can still satisfy the criterion in Section 24 that says
@@ -255,7 +257,7 @@ scratch database, and runs `make test-integration` against it with the
 disposable opt-in described below, and has run the third job as well.
 
 Locally, `make check` schedules two independent Make jobs by default, starting
-the Python and website lanes first. Static tests use two load-scope workers;
+the Python and browser lanes first. Static tests use two load-scope workers;
 contract tests follow static tests and stay serial. `CHECK_JOBS=1` and
 `STATIC_TEST_WORKERS=0` provide a serial diagnostic run. All targets remain in
 one Make dependency graph, so explicitly naming `docs-check` or `test-static`
@@ -277,7 +279,8 @@ been manually modified; force an install when repairing such modifications.
 `make test` and `make test-fast` differ, and the difference is
 deliberate. `test` is what a developer runs when they want the whole
 suite that can run locally, including database integration but excluding live and browser-image tests;
-`test-fast` is what gates. Naming them apart is what stops the
+`test-fast` runs the Python static and contract partitions, while the required
+browser partition is a separate dependency of `check`. Naming them apart is what stops the
 integration suite from being quietly deleted from `check` the first
 time a laptop has no Docker.
 
@@ -362,6 +365,32 @@ PostgreSQL database marked disposable, `make test-sandbox`,
 and the Xcode suites. The workflow
 section below defines when the hosted jobs still run.
 
+## Required real-browser verification
+
+ADR-0156 adds the `browser` partition for the existing real Chromium runtime,
+hostile-page, device-handoff, and hosted task-grant modules. Those modules are
+excluded from static, contract, and PostgreSQL selections. `make browser-install`
+installs the lockfile-matched Chromium and its platform dependencies;
+`make test-browser` requires it, runs the partition serially, and writes a
+content-free baseline report. Missing browsers, skipped or filtered browser
+cases, and an empty partition fail this gate. The normal suite socket guard
+remains in force; only each synthetic HTTPS harness opens its bounded local
+transport.
+
+`make check` includes `test-browser`, which depends on `browser-install`.
+Hosted CI runs a separate browser job and packaging depends on
+it. The job publishes JUnit and a JSON runtime baseline with source revision,
+dirty status, observed browser builds, outcomes, counts, and durations. Case
+identities omit parameter values. This report contains no page text,
+URLs, exceptions, or tool output and makes no claim about live model task
+completion. ADR-0157 adds a twelve-scenario scripted component task manifest
+and model-budget-sized observation drivers. Baseline schema version 2 also
+records task identities, operation counts, durations, expected/observed effect
+counts, and inline budgets. Independent synthetic server state determines
+completion. Missing tasks or mismatched effects fail verification; model calls
+are zero and model cost and live task quality remain unmeasured. The browser
+job participates in exact-tree verification records.
+
 ## The compose file
 
 One service at Milestone 0.
@@ -430,21 +459,22 @@ job           target invoked         needs     runs on
 9 public-site make test-website      Node 22   main, on request
 10 browser-   make test-browser-     machine   main, on request,
    image      image, x86_64 and arm64          when inputs changed
+11 browser    make test-browser      Chromium  main, on request
 ```
 
-Jobs 1, 2, and 9 partition `make check`, split so the cheap lanes fail
+Jobs 1, 2, 9, and 10 partition `make check`, split so the cheap lanes fail
 first. The union of those jobs' `make` targets is exactly
 `make check`, including `test-deploy` in both the static lane and the
 local aggregate; job 1's reading-lane step below is the one check
 outside that equality, because it reads git range state `make check`
 does not assume. No check appears in more than one lane, and a developer who
-runs `make check` locally has run all three jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
+runs `make check` locally has run all four jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
 Job 1 uses a two-vCPU CircleCI executor and runs only `test-static` with two
 processes and load-scope scheduling, matching the local target's default.
 The selected tests and required checks are unchanged. Its Makefile
 targets are separate CircleCI steps so timing data identifies the remaining
-bottleneck. Jobs 1 through 3 and job 5 publish their pytest JUnit XML through
+bottleneck. Jobs 1 through 3, job 5, and job 10 publish their pytest JUnit XML through
 CircleCI's test-results collector so failed and slow tests are visible without
 searching raw logs.
 Job 6 is an additional native-client gate outside `make check`, split across
@@ -601,7 +631,7 @@ Three workflow-level facts complete the definition:
     The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
     runs only on trusted `dev`, and only in a requested pipeline; it does not
     receive publication credentials.
-    Production delivery begins only after all seven required verification jobs
+    Production delivery begins only after all eight required verification jobs
     and both browser-image instances pass. On `main`, each verification job
     except `public-site` halts
     successfully right after checkout when it finds its own record for the
@@ -657,7 +687,10 @@ a database, and the marker exists to answer "can this run without
 Docker" rather than to restate the directory name. Structural gates —
 the import-boundary walk, transaction hygiene, the secret scanner,
 contract-module coverage — live in `tests/unit` and carry `static`,
-because they are pure functions over the source tree.
+because they are pure functions over the source tree. The runtime browser
+modules explicitly listed in `tests/browser_partition.py` take precedence over
+the directory routing: they carry only `browser` and run without PostgreSQL.
+New real Chromium modules must join that list before delivery.
 
 `tests/eval_cases/` holds data, not tests. The case files the harness
 loads live there; the runner that loads them lives in
@@ -836,17 +869,18 @@ done badly.
 
 1.  **`make check` and CI are the same set of checks.** CI runs no
     command that is not a Makefile target, and `make check` is the
-    exact union of the three CI jobs that need neither a database nor a
+    exact union of the four CI jobs that need neither a database nor a
     credential. The Python lanes select by pytest marker, and the independent
     public-site lane runs the pinned Node build through its Make target.
-2.  **Eight targets are added to Section 21's eight.** `test-static`,
+2.  **Ten targets are added to Section 21's eight.** `test-static`,
     `test-contract`, `test-fast`, `test-integration`, `test-live`, and
-    `docs`, plus `website-install` and `test-website`. Each exists because a CI
+    `docs`, plus `website-install`, `test-website`, `browser-install`, and
+    `test-browser`. Each exists because a CI
     job invokes it; none exists
     because it seemed useful.
 3.  **`test-static` and `test-contract` partition `test-fast`.** The
     contract selector is a negation — not static, not integration, not
-    live — so a test with no marker runs in job 2 rather than nowhere.
+    browser, not live — so a test with no marker runs in job 2 rather than nowhere.
     A new unmarked test is visible by default, which is the safe
     direction for the mistake to fall.
 4.  **`--strict-markers` and `--strict-config` are on.** A mistyped

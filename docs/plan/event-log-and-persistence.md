@@ -1578,3 +1578,25 @@ lease-exhaustion `run.failed` events, never from total claims. It preserves
 actual crash history and never reopens terminal runs. Existing queued
 continuations with unused crash allowance become claimable with their saved
 answers, checkpoints, tool identities and approval requirements intact.
+
+
+### Browser recovery call receipts (ADR-0163)
+
+A `run.checkpointed` event with `trigger: browser_recovery` optionally extends
+its existing payload with `runtime_tool_call`, the complete queued read or
+owner-question call. Write that receipt in the same transaction as the checkpoint
+that marks it pending. Conversation projection reads the call from this receipt
+and its result from the ordinary tool event, preserving pairs in later runs and
+cold replay. Legacy checkpoint payloads are unchanged; no model response is
+invented, no required legacy field changes and no event type is added. Recovery
+receipts permit only `browser.observe` and `conversation.ask_user`.
+
+ADR-0164 adds `browser_auth_resume` checkpoint receipts for a fresh
+`browser.navigate`/`browser.observe` and `browser_workflow` receipts for one
+ordinary navigate/observe/act invocation. Receipt admission requires a runtime
+actor; all dispatched calls retain ordinary result events and authorization.
+The platform event `browser.authentication.resumed` records question/profile/
+ceremony identifiers and the bounded continuation content. It replaces neither
+an owner message nor authority. The matching `tool.call.completed`, working-state
+update, full checkpoint and run requeue commit atomically with it, using the
+question-derived idempotency key. Replay preserves exactly one call/result pair.

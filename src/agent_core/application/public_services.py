@@ -54,7 +54,12 @@ from agent_core.domain.artifacts import (
     StoredArtifactRef,
 )
 from agent_core.domain.attachments import upload_key, upload_media_type, upload_name
-from agent_core.domain.browser import BrowserProfileStatus, sign_in_outcome_unrecorded
+from agent_core.domain.browser import (
+    BrowserAuthenticationStatus,
+    BrowserAuthenticationWait,
+    BrowserProfileStatus,
+    sign_in_outcome_unrecorded,
+)
 from agent_core.domain.browser_act_views import session_allows_task_grant
 from agent_core.domain.browser_task_grants import (
     TASK_GRANT_DURATION,
@@ -1135,6 +1140,7 @@ class PublicRunService:
         payload_extra: dict[str, object] | None = None,
         derivation_namespace: str = "run.input",
         derivation_suffix: str | None = None,
+        verified_browser_authentication: UUID | None = None,
     ) -> SubmitResult:
         """Complete one suspended question and atomically queue its run to resume."""
 
@@ -1180,7 +1186,11 @@ class PublicRunService:
             NewEvent(
                 session_id=run.session_id,
                 run_id=run.id,
-                event_type="user.message.created",
+                event_type=(
+                    "user.message.created"
+                    if verified_browser_authentication is None
+                    else "browser.authentication.resumed"
+                ),
                 actor_type=actor_type,
                 actor_id=principal.principal_id,
                 payload={
@@ -1195,7 +1205,11 @@ class PublicRunService:
             status=ToolOutcomeStatus.SUCCEEDED,
             action=invocation.tool_name,
             reason_code="tool.succeeded",
-            message="The user answered the outstanding question.",
+            message=(
+                "The user answered the outstanding question."
+                if verified_browser_authentication is None
+                else "The isolated browser service verified sign-in."
+            ),
             retryable=False,
             remediation="none",
         )
@@ -1213,6 +1227,11 @@ class PublicRunService:
                 "structured_result": {
                     "question_id": str(effective_question),
                     "answered": True,
+                    **(
+                        {"resolved_by": "browser_authentication"}
+                        if verified_browser_authentication is not None
+                        else {}
+                    ),
                 },
                 "result_item": result_item,
                 "updated_at": self._clock.now(),
@@ -1266,6 +1285,7 @@ class PublicRunService:
         checkpoint.working_state["context"] = state.model_dump(mode="json")
         checkpoint.working_state.pop("outstanding_question_id", None)
         checkpoint.working_state.pop("outstanding_question_text", None)
+        browser_wait = checkpoint.working_state.pop("browser_auth_wait", None)
         state_event = await uow.events.append(
             NewEvent(
                 session_id=run.session_id,
@@ -1275,16 +1295,128 @@ class PublicRunService:
                 actor_id=principal.principal_id,
                 payload={
                     "working_state": state.model_dump(mode="json"),
-                    "source": "user_answer",
+                    "source": (
+                        "user_answer"
+                        if verified_browser_authentication is None
+                        else "browser_authentication"
+                    ),
                 },
                 derivation_key=f"{derivation_namespace}.state:{suffix}",
             )
         )
         checkpoint.last_event_sequence = max(completed_event.sequence, state_event.sequence)
+        if browser_wait is not None and "browser.observe" in checkpoint.pinned_tool_names:
+            wait = BrowserAuthenticationWait.model_validate(browser_wait)
+            arguments = (
+                {"url": wait.resume_url}
+                if wait.resume_url is not None
+                and "browser.navigate" in checkpoint.pinned_tool_names
+                else {}
+            )
+            call = ToolCallItem(
+                call_id=f"browser-recovery:{self._ids.new_id()}",
+                item_index=0,
+                name="browser.navigate" if arguments else "browser.observe",
+                arguments=arguments,
+                raw_arguments=json.dumps(arguments),
+            )
+            checkpoint.conversation.append(call)
+            checkpoint.pending_tool_calls.append(call.model_dump(mode="json"))
+            receipt = await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="run.checkpointed",
+                    actor_type="runtime",
+                    payload={
+                        "version": checkpoint.version,
+                        "full": True,
+                        "trigger": "browser_auth_resume",
+                        "runtime_tool_call": call.model_dump(mode="json"),
+                    },
+                    derivation_key=f"{derivation_namespace}.observe:{suffix}",
+                )
+            )
+            checkpoint.last_event_sequence = receipt.sequence
         checkpoint.created_at = self._clock.now()
         await uow.checkpoints.write(run.id, checkpoint, full=True)
         await self._resume_waiting_run(uow, run)
         return SubmitResult(run_id=run.id, status=RunStatus.QUEUED)
+
+    async def resume_verified_browser_authentication(
+        self, principal: Principal, run_id: UUID, authentication_id: UUID
+    ) -> bool:
+        """Internal trusted continuation; no owner-input endpoint or invented user message."""
+        async with self._uow_factory() as uow:
+            run = await uow.runs.get(run_id, principal)
+            if (
+                run.status is not RunStatus.WAITING_FOR_USER
+                or run.cancel_requested_at is not None
+                or (run.deadline_at is not None and run.deadline_at <= self._clock.now())
+                or run.tool_call_count >= run.limits.max_tool_calls
+            ):
+                return False
+            checkpoint = await uow.checkpoints.latest(run.id)
+            if checkpoint is None or "browser_auth_wait" not in checkpoint.working_state:
+                return False
+            wait = BrowserAuthenticationWait.model_validate(
+                checkpoint.working_state["browser_auth_wait"]
+            )
+            if (
+                wait.question_id is None
+                or wait.expires_at <= self._clock.now()
+                or str(wait.question_id) != checkpoint.working_state.get("outstanding_question_id")
+            ):
+                return False
+            session = await uow.sessions.get(run.session_id, principal)
+            if session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY) != str(wait.profile_id):
+                return False
+            # Serialize against sign-in admission, revocation and generation changes.
+            async with uow.browser_profiles.authentication_admission(
+                wait.profile_id,
+                principal,
+                timeout_seconds=5,
+            ) as profile:
+                records = await uow.browser_authentications.list(
+                    principal, profile_id=wait.profile_id
+                )
+                record = next((item for item in records if item.id == authentication_id), None)
+                if (
+                    record is None
+                    or record.status is not BrowserAuthenticationStatus.READY
+                    or record.created_at < wait.started_at
+                    or any(
+                        item.id != record.id and item.created_at >= record.created_at
+                        for item in records
+                    )
+                    or profile.status is not BrowserProfileStatus.READY
+                    or profile.generation <= wait.generation
+                    or profile.updated_at > record.updated_at
+                ):
+                    return False
+                await self._deliver_input_in(
+                    uow,
+                    principal,
+                    run,
+                    [
+                        TextContentBlock(
+                            text="The isolated browser service verified sign-in. Read fresh page "
+                            "evidence before continuing. Previous actions and approvals "
+                            "are not replayed."
+                        )
+                    ],
+                    wait.question_id,
+                    trust=TrustLevel.PLATFORM,
+                    actor_type="application",
+                    payload_extra={
+                        "authentication_id": str(record.id),
+                        "profile_id": str(profile.id),
+                    },
+                    derivation_namespace="browser.authentication.resume",
+                    verified_browser_authentication=record.id,
+                )
+        await self._dispatcher.resume(run_id)
+        return True
 
     async def deliver_input(
         self,

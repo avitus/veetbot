@@ -7,16 +7,25 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol, cast
+from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.artifacts import reply_attachments, reply_file_reference
+from agent_core.domain.browser import (
+    BROWSER_AUTH_INTERRUPTION_MARKER,
+    BrowserAuthenticationWait,
+    BrowserObservation,
+    BrowserProfileStatus,
+    browser_origin,
+)
 from agent_core.domain.context import ContextPlan, WorkingState
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     ChildRunRequiredError,
     ContextOverflow,
+    NotFoundError,
     UserInputRequiredError,
 )
 from agent_core.domain.events import NewEvent
@@ -53,6 +62,7 @@ from agent_core.domain.runs import (
     RunOutcome,
     Step,
 )
+from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
 from agent_core.domain.tools import ToolOutcome, ToolOutcomeStatus
 from agent_core.model.streaming import ModelStreamError, validated_stream
 from agent_core.ports.context import Compactor, PressureAwareContextBuilder, TokenEstimator
@@ -295,6 +305,11 @@ async def checkpoint(context: RunContext, trigger: str) -> None:
                         "version": context.checkpoint.version,
                         "trigger": trigger,
                         "full": full,
+                        **(
+                            {"runtime_tool_call": context.checkpoint.pending_tool_calls[0]}
+                            if trigger in {"browser_recovery", "browser_workflow"}
+                            else {}
+                        ),
                     },
                 ),
                 lease=context.lease,
@@ -459,7 +474,17 @@ def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelReque
         )
     )
     control = UserMessage(
-        content=[TextPart(text=reason)],
+        content=[
+            TextPart(
+                text=(
+                    "Runtime control: the reviewed browser workflow has stopped. Do not call tools "
+                    "or repeat its actions. Report only what the existing evidence confirms, "
+                    "and state any unverified outcome or remaining gap."
+                    if dimension == "browser_workflow"
+                    else reason
+                )
+            )
+        ],
         trust=TrustLevel.PLATFORM,
         principal_id=None,
     )
@@ -575,6 +600,194 @@ async def _record_denials(
         counters[key] = count
         tripped = tripped or count >= context.identical_denial_threshold
     return tripped
+
+
+async def recover_browser_failure(
+    context: RunContext, step: Step, calls: list[ToolCallItem], results: list[ToolResultItem]
+) -> None:
+    """Queue a separate bounded read or owner question, never an action replay."""
+    failures: set[str] = set()
+    for call, result in zip(calls, results, strict=True):
+        if call.name not in {"browser.observe", "browser.navigate", "browser.act"}:
+            continue
+        if call.call_id != result.call_id:
+            continue
+        if not result.is_error:
+            for part in result.content[:1]:
+                if isinstance(part, TextPart):
+                    try:
+                        observed = BrowserObservation.model_validate_json(part.text)
+                    except ValueError:
+                        continue
+                    if observed.interruption == "needs_user":
+                        failures.add("tool.browser.needs_user")
+            continue
+        for part in result.content[:1]:
+            if not isinstance(part, TextPart):
+                continue
+            try:
+                outcome = ToolOutcome.model_validate_json(part.text)
+            except ValueError:
+                continue
+            if outcome.action == call.name:
+                failures.add(outcome.reason_code)
+                if (
+                    call.name == "browser.act"
+                    and outcome.reason_code == "tool.browser.outcome_unknown"
+                    and any(
+                        isinstance(hint, TextPart) and hint.text == BROWSER_AUTH_INTERRUPTION_MARKER
+                        for hint in result.content[1:]
+                    )
+                ):
+                    failures.add("tool.browser.needs_user")
+    available = set(context.context_plan.tool_names) | set(context.context_plan.deferred_tool_names)
+    if context.run.tool_call_count >= context.run.limits.max_tool_calls:
+        return
+    needs_user = bool(
+        failures & {"tool.browser.authentication_required", "tool.browser.needs_user"}
+    )
+    if needs_user:
+        name, counter, maximum = "conversation.ask_user", "browser_auth_interruptions", 2
+        wait = await prepare_browser_auth_wait(context)
+        if wait is not None:
+            episode = f"{wait.profile_id}:{wait.generation}"
+            if context.checkpoint.working_state.get("browser_auth_episode") == episode:
+                return
+            context.checkpoint.working_state["browser_auth_episode"] = episode
+            context.checkpoint.working_state["browser_auth_wait"] = wait.model_dump(mode="json")
+        arguments: dict[str, Any] = {
+            "question": (
+                "Please sign in to this chat's website in Website Access on your device, "
+                + (
+                    "and I will continue automatically once sign-in is verified. "
+                    if wait
+                    else "then reply here to continue. "
+                )
+                + "Keep passwords, verification codes and CAPTCHA "
+                "answers in the sign-in window. I will read fresh evidence before continuing; "
+                "the interrupted operation will not be replayed."
+            )
+        }
+    elif failures & {"tool.browser.page_changed", "tool.browser.element_not_found"}:
+        if any(call.call_id.startswith("browser-recovery:") for call in calls):
+            return
+        name, counter, maximum = "browser.observe", "browser_recovery_reads", 3
+        arguments = {}
+    else:
+        return
+    if name not in available:
+        return
+    count = context.checkpoint.working_state.get(counter, 0)
+    if type(count) is not int or not 0 <= count < maximum:
+        return
+    context.checkpoint.working_state[counter] = count + 1
+    call = ToolCallItem(
+        call_id=f"browser-recovery:{context.ids.new_id()}",
+        item_index=0,
+        name=name,
+        arguments=arguments,
+        raw_arguments=json.dumps(arguments),
+    )
+    context.checkpoint.conversation.append(call)
+    context.checkpoint.pending_tool_calls = [call.model_dump(mode="json")]
+    await checkpoint(context, "browser_recovery")
+    recovered = await context.dispatch_tools(
+        run=context.run,
+        checkpoint=context.checkpoint,
+        tool_calls=[call],
+        principal=context.principal,
+        step=step,
+        agent=context.agent,
+        token=context.token,
+        lease=context.lease,
+    )
+    await context.budgets.record_tool_usage(context.run, len(recovered), step=step)
+    context.checkpoint.conversation.extend(recovered)
+    apply_tool_evidence(context.checkpoint.working_state, [call])
+    context.checkpoint.pending_tool_calls = []
+    # Only an authentication refusal from this read can lead to a question.
+    # Its stale failures cannot lead to another recovery read.
+    await recover_browser_failure(context, step, [call], recovered)
+
+
+async def prepare_browser_auth_wait(context: RunContext) -> BrowserAuthenticationWait | None:
+    try:
+        async with context.uow_factory() as uow:
+            session = await uow.sessions.get(context.run.session_id, context.principal)
+            selected = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+            if not isinstance(selected, str):
+                return None
+            profile = await uow.browser_profiles.get(UUID(selected), context.principal)
+    except (ValueError, NotFoundError):
+        return None
+    if profile.status in {BrowserProfileStatus.PROVISIONING, BrowserProfileStatus.REVOKED}:
+        return None
+    resume_url = profile.allowed_origins[0] + "/"
+    for item in reversed(context.checkpoint.conversation):
+        candidate = None
+        if isinstance(item, ToolCallItem) and item.name == "browser.navigate":
+            candidate = item.arguments.get("url")
+        elif isinstance(item, ToolResultItem) and not item.is_error:
+            for part in item.content[:1]:
+                if isinstance(part, TextPart):
+                    try:
+                        observed = BrowserObservation.model_validate_json(part.text)
+                        if observed.interruption is None:
+                            candidate = observed.url
+                    except ValueError:
+                        pass
+        if isinstance(candidate, str):
+            try:
+                if browser_origin(candidate) in profile.allowed_origins:
+                    resume_url = candidate
+                    break
+            except ValueError:
+                pass
+    now = context.clock.now()
+    return BrowserAuthenticationWait(
+        profile_id=profile.id,
+        generation=profile.generation,
+        started_at=now,
+        resume_url=resume_url,
+        expires_at=min(
+            now + timedelta(minutes=15), context.run.deadline_at or now + timedelta(minutes=15)
+        ),
+    )
+
+
+def bind_browser_auth_question(checkpoint: RunCheckpoint, question_id: UUID) -> None:
+    raw = checkpoint.working_state.get("browser_auth_wait")
+    if raw is not None:
+        wait = BrowserAuthenticationWait.model_validate(raw)
+        checkpoint.working_state["browser_auth_wait"] = wait.model_copy(
+            update={"question_id": question_id}
+        ).model_dump(mode="json")
+
+
+async def suspend_for_browser_question(
+    context: RunContext, error: UserInputRequiredError
+) -> RunOutcome:
+    question = str(context.checkpoint.pending_tool_calls[0]["arguments"]["question"])
+    state = _record_open_question(context.checkpoint, question, context.add_open_question)
+    context.checkpoint.working_state["outstanding_question_id"] = str(error.question_id)
+    bind_browser_auth_question(context.checkpoint, error.question_id)
+    await _append_event(
+        context,
+        "context.working_state.updated",
+        {
+            "working_state": state.model_dump(mode="json"),
+            "source": "runtime_question",
+        },
+    )
+    await checkpoint(context, "suspended")
+    return RunOutcome(
+        kind=OutcomeKind.SUSPENDED,
+        suspension={
+            "kind": "user",
+            "question_id": str(error.question_id),
+            "invocation_id": str(error.invocation_id),
+        },
+    )
 
 
 async def _invoke_model(
@@ -822,7 +1035,11 @@ async def run_loop(context: RunContext) -> RunOutcome:
 
     while True:
         context.token.raise_if_cancelled()
-        synthesis_reserve = _synthesis_reserve_dimension(context.run)
+        synthesis_reserve = (
+            "browser_workflow"
+            if context.checkpoint.working_state.get("browser_workflow_report_only")
+            else _synthesis_reserve_dimension(context.run)
+        )
         context.budgets.check(context.run, BudgetScope.STEP)
         context.run.step_count += 1
         context.run.updated_at = context.clock.now()
@@ -882,6 +1099,8 @@ async def run_loop(context: RunContext) -> RunOutcome:
             context.run,
             step_in_progress=True,
         )
+        if context.checkpoint.working_state.get("browser_workflow_report_only"):
+            synthesis_reserve = "browser_workflow"
         if synthesis_reserve is not None:
             return _failure(
                 context,
@@ -988,6 +1207,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 context.add_open_question,
             )
             context.checkpoint.working_state["outstanding_question_id"] = str(exc.question_id)
+            bind_browser_auth_question(context.checkpoint, exc.question_id)
             await _append_event(
                 context,
                 "context.working_state.updated",
@@ -1011,6 +1231,10 @@ async def run_loop(context: RunContext) -> RunOutcome:
         apply_tool_evidence(context.checkpoint.working_state, fitted_calls)
         context.checkpoint.pending_tool_calls = []
         repeated_denial = await _record_denials(context, step, fitted_calls, results)
+        try:
+            await recover_browser_failure(context, step, fitted_calls, results)
+        except UserInputRequiredError as exc:
+            return await suspend_for_browser_question(context, exc)
         await checkpoint(context, "tool_call")
         if repeated_denial:
             return _failure(

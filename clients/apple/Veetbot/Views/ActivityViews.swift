@@ -53,6 +53,9 @@ struct ToolActivityCard: View {
                 if let summary = activity.taskGrantSummary {
                     DetailBlock(title: "What it did", text: summary)
                 }
+                if let diagnostics = activity.browserDiagnostics {
+                    DetailBlock(title: "Browser activity", text: diagnostics.summary + "\n" + diagnostics.detail)
+                }
                 if !activity.arguments.isEmpty {
                     DetailBlock(
                         title: "Arguments", text: JSONValue.object(activity.arguments).prettyPrinted
@@ -189,6 +192,9 @@ private struct BundledToolActivityRow: View {
             if expanded {
                 if let summary = activity.taskGrantSummary {
                     DetailBlock(title: "What it did", text: summary)
+                }
+                if let diagnostics = activity.browserDiagnostics {
+                    DetailBlock(title: "Browser activity", text: diagnostics.summary + "\n" + diagnostics.detail)
                 }
                 if !activity.arguments.isEmpty {
                     DetailBlock(

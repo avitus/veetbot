@@ -235,6 +235,7 @@ SHIPPED_CONFIGS = (
     "context/plan.yaml",
     "tools/limits.yaml",
     "runtime/limits.yaml",
+    "runtime/browser-workflows.yaml",
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
     "folders/profiles.yaml",
@@ -970,6 +971,13 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
+    if relative == "runtime/browser-workflows.yaml":
+        from agent_core.domain.browser_workflows import BrowserWorkflowCatalog
+
+        try:
+            BrowserWorkflowCatalog.model_validate(merged)
+        except ValueError as exc:
+            raise ConfigurationError("invalid reviewed browser workflow catalog") from exc
     if relative == "runtime/limits.yaml":
         retry_delays = merged["notifications"]["retry_delays_seconds"]
         if (

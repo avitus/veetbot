@@ -2210,6 +2210,15 @@ target is valid only for the builtin named `email.unsubscribe` with
 valid only with that target, so no other tool can claim the public-HTTPS
 unsubscribe transport ([ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md)).
 
+### Browser operation diagnostics (ADR-0158)
+
+The terminal events for builtin browser tools may additionally carry a versioned
+`browser_diagnostics` summary collected by trusted execution. It contains only
+closed phase/outcome/failure/placement enums, bounded timings and a truncation
+flag. It is separate from result content and cannot be set by an upstream tool.
+The existing started, authorized, denied and uncertain events and effect
+watermark retain their meanings. This adds no tool event family or retry rule.
+
 
 ## The Scale VP data API bridge (ADR-0153)
 

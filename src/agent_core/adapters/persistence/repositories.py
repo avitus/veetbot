@@ -547,6 +547,25 @@ def _lease_predicates(lease: WorkerLease | None) -> list[Any]:
 
 
 class PostgresRunRepository:
+    async def waiting_for_user(
+        self, principal: Principal, *, limit: int, after_id: UUID | None = None
+    ) -> list[Run]:
+        if limit <= 0:
+            return []
+        statement = (
+            select(RunRow)
+            .join(SessionRow, SessionRow.id == RunRow.session_id)
+            .where(
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+                RunRow.status == RunStatus.WAITING_FOR_USER.value,
+            )
+        )
+        if after_id is not None:
+            statement = statement.where(RunRow.id > after_id)
+        rows = (await self._session.scalars(statement.order_by(RunRow.id).limit(limit))).all()
+        return [run_to_domain(row) for row in rows]
+
     def __init__(self, session: AsyncSession, clock: Clock) -> None:
         self._session = session
         self._clock = clock

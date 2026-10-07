@@ -97,6 +97,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
+  "browser: required real Chromium runtime and browser contract verification",
   "static: tests that need no runtime, database, or network",
   "integration: tests that require PostgreSQL or another local service",
   "live: tests that call a real model provider and may incur cost",

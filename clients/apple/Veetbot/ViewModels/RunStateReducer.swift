@@ -44,6 +44,7 @@ public struct ToolActivity: Identifiable, Sendable {
     public var sideEffect: SideEffectClass?
     public var risk: RiskLevel?
     public var approvalID: UUID?
+    public var browserDiagnostics: BrowserActivityDiagnostics? = nil
     /// How the call was allowed without a card, such as
     /// `browser_task_grant`, and the view of what it did (ADR-0129 G7).
     public var authorizationKind: String? = nil
@@ -325,6 +326,7 @@ public final class RunStateReducer: ObservableObject {
             runStatus = .queued
         case "run.started", "run.resumed", "run.claimed":
             runStatus = .running
+            clarifyingQuestion = nil
         case "message.delta":
             appendDelta(frame.data["text"]?.stringValue)
         case "reasoning.delta", "reasoning.summary.delta":
@@ -553,6 +555,11 @@ public final class RunStateReducer: ObservableObject {
             }
             if let view = frame.data["authorization_view"]?.objectValue {
                 tool.authorizationView = view
+            }
+            if let payload = frame.data["browser_diagnostics"] {
+                let report = decode(BrowserActivityDiagnostics.self, from: payload)
+                tool.browserDiagnostics = name.hasPrefix("browser.") && report?.isValid == true
+                    ? report : nil
             }
             if let result {
                 tool.result = ToolResultView(
@@ -867,4 +874,78 @@ struct ReasoningSummaryHeadings {
         }
         return title
     }
+}
+
+/// Content-free terminal browser phase evidence (ADR-0158).
+public struct BrowserActivityDiagnostics: Decodable, Sendable {
+    public struct Phase: Decodable, Sendable {
+        public let phase: String
+        public let placement: String
+        public let outcome: String
+        public let failure: String
+        public let elapsedMS: Int
+        enum CodingKeys: String, CodingKey {
+            case phase, placement, outcome, failure
+            case elapsedMS = "elapsed_ms"
+        }
+    }
+    public let version: Int
+    public let phases: [Phase]
+    public let truncated: Bool
+    public let elapsedMS: Int
+    enum CodingKeys: String, CodingKey {
+        case version, phases, truncated
+        case elapsedMS = "elapsed_ms"
+    }
+
+    public var isValid: Bool {
+        version == 1 && phases.count <= 64 && (0...3_600_000).contains(elapsedMS)
+            && phases.allSatisfy {
+                Self.phaseLabels[$0.phase] != nil && Self.failureLabels[$0.failure] != nil
+                    && ["orchestrator", "hosted", "runtime"].contains($0.placement)
+                    && ["completed", "failed", "cancelled", "bound_expired"].contains($0.outcome)
+                    && (0...3_600_000).contains($0.elapsedMS)
+            }
+    }
+
+    public var summary: String {
+        let duration = String(format: "%.1f s", Double(elapsedMS) / 1000)
+        let failure = phases.first { $0.failure == "outcome_unknown" }
+            ?? phases.first { $0.failure != "none" }
+        if let failure, let message = Self.failureLabels[failure.failure] {
+            return "\(duration) · \(message)"
+        }
+        return duration
+    }
+
+    public var detail: String {
+        var rows = phases.map {
+            let label = Self.phaseLabels[$0.phase] ?? "Browser operation"
+            let duration = String(format: "%.1f s", Double($0.elapsedMS) / 1000)
+            let outcome = $0.outcome == "bound_expired" ? "wait limit reached" : $0.outcome
+            return "\(label): \(outcome) · \(duration)"
+        }
+        if truncated { rows.append("Additional phase details omitted.") }
+        rows.append("Nested phase times overlap.")
+        return rows.joined(separator: "\n")
+    }
+
+    private static let phaseLabels = [
+        "binding": "Website connection", "acquisition": "Browser session", "launch": "Browser launch",
+        "navigation": "Open page", "readiness": "Wait for page", "observation": "Read page",
+        "dispatch": "Send action", "projection": "Prepare result", "cleanup": "Close browser",
+        "operation": "Browser operation", "postcondition": "Check expected result",
+    ]
+    private static let failureLabels = [
+        "none": "", "stale_page": "Page changed; refresh before acting.",
+        "target_missing": "Control unavailable; refresh the page.", "login_needed": "Sign in again.",
+        "profile_unavailable": "Website profile unavailable.",
+        "browser_unavailable": "Browser connection unavailable.", "access_refused": "Website access refused.",
+        "unsupported": "This browser operation is unsupported.",
+        "outcome_unknown": "The action may have happened; check before repeating it.",
+        "output_invalid": "The browser returned an invalid result.",
+        "grant_refused": "Task permission does not cover this action.",
+        "timeout": "The browser operation timed out.", "internal": "The browser operation failed.",
+        "cancelled": "The browser operation was interrupted.",
+    ]
 }

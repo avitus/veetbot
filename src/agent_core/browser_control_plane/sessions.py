@@ -27,6 +27,10 @@ from agent_core.browser_control_plane.models import (
     ProfileMaterialMetadata,
 )
 from agent_core.browser_control_plane.ports import EncryptedProfileStore
+from agent_core.browser_control_plane.verification import (
+    BrowserSiteVerification,
+    BrowserVerificationCatalog,
+)
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS,
@@ -40,6 +44,7 @@ from agent_core.domain.browser import (
     BrowserInteractiveEvent,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
@@ -48,8 +53,11 @@ from agent_core.domain.browser import (
     browser_origin,
     require_service_origin,
 )
+from agent_core.domain.browser_diagnostics import browser_phase_call
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.errors import ConflictError
+from agent_core.ports.browser import expand_browser_observation, extract_browser_observation
 from agent_core.ports.browser_upload import upload_browser_image
 
 MAXIMUM_LEASE_SECONDS = MAXIMUM_BROWSER_LEASE_SECONDS
@@ -160,6 +168,8 @@ class _TerminalCeremonyState:
 
 
 class BrowserSessionRuntime(Protocol):
+    def set_interactive_authentication(self) -> None: ...
+
     async def start(
         self,
         material: bytes,
@@ -213,6 +223,7 @@ class HostedProfileSessionService:
         ceremony_base_url: str,
         device_sign_in_enabled: bool = True,
         verification_seconds: float = DEVICE_VERIFICATION_SECONDS,
+        verification: BrowserVerificationCatalog | None = None,
         sweep_sample_seconds: float = 2.5,
     ) -> None:
         normalized_ceremony_origin = require_service_origin(
@@ -228,12 +239,15 @@ class HostedProfileSessionService:
         self._ceremony_base_url = normalized_ceremony_origin
         self._device_sign_in_enabled = device_sign_in_enabled
         self._verification_seconds = verification_seconds
+        self._verification = verification or BrowserVerificationCatalog()
         self._sweep_sample_seconds = sweep_sample_seconds
         self._leases: dict[bytes, _LeaseState] = {}
         self._ceremonies: dict[UUID, _CeremonyState] = {}
         self._terminal_ceremonies: dict[UUID, _TerminalCeremonyState] = {}
         self._lock = asyncio.Lock()
+        self._verification_browsers = 0
 
+    @browser_phase_call("acquisition", "hosted")
     async def acquire(
         self,
         profile_id: UUID,
@@ -283,9 +297,30 @@ class HostedProfileSessionService:
             material = await self._store.load(identity)
             runtime = self._runtime_factory(principal.tenant_id)
             try:
-                # A website can refuse a headless browser on any page (ADR-0145).
                 await runtime.start(material, metadata.allowed_origins, headed=True)
-            except Exception:
+                definition = next(
+                    (site for site in self._verification.sites if site.profile_id == profile_id),
+                    None,
+                )
+                if definition is not None:
+                    if definition.origin not in metadata.allowed_origins:
+                        raise BrowserProviderError(
+                            "tool.browser.authentication_required", retryable=False
+                        )
+                    async with asyncio.timeout(min(self._verification_seconds, 10.0)):
+                        evidence = await runtime.load_page_evidence(
+                            definition.origin + definition.protected_path,
+                            on_stage=_VerificationLoad("with_session").enter,
+                        )
+                        if (
+                            not evidence.on_allowed_origin
+                            or evidence.challenge_visible
+                            or not definition.confirms(await runtime.observe())
+                        ):
+                            raise BrowserProviderError(
+                                "tool.browser.authentication_required", retryable=False
+                            )
+            except BaseException:
                 await runtime.close()
                 raise
             self._leases[self._lookup_digest(lease_ref)] = _LeaseState(
@@ -326,12 +361,28 @@ class HostedProfileSessionService:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
             return _snapshot(state.runtime, await state.runtime.navigate(url))
 
-    async def observe_snapshot(self, lease_ref: str) -> BrowserSnapshot:
+    async def observe_snapshot(
+        self,
+        lease_ref: str,
+        expansion: BrowserObservationExpansion | None = None,
+        extraction: BrowserExtractionRequest | None = None,
+    ) -> BrowserSnapshot:
         state = await self._require_lease(lease_ref)
         async with state.lock:
             if state.closed:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-            return _snapshot(state.runtime, await state.runtime.observe())
+            if extraction is not None and expansion is not None:
+                raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+            observation = (
+                await extract_browser_observation(state.runtime, extraction)
+                if extraction is not None
+                else (
+                    await state.runtime.observe()
+                    if expansion is None
+                    else await expand_browser_observation(state.runtime, expansion)
+                )
+            )
+            return _snapshot(state.runtime, observation)
 
     async def act_snapshot(
         self,
@@ -504,6 +555,7 @@ class HostedProfileSessionService:
                 )
             self._admit_browsers_locked(1)
             runtime = self._runtime_factory(principal.tenant_id)
+            runtime.set_interactive_authentication()
             try:
                 await runtime.start(
                     await self._store.load(identity),
@@ -572,21 +624,138 @@ class HostedProfileSessionService:
             if state.status in _TERMINAL_AUTH_STATUSES or runtime is None:
                 # A device ceremony's status changes only through its handoff.
                 return _ceremony_view(state)
-            async with state.runtime_lock:
+        async with state.runtime_lock:
+            async with asyncio.timeout(self._verification_seconds):
                 status = await runtime.authentication_status()
-                state.status = status
+                sealed = None
                 if status is BrowserAuthenticationStatus.READY:
                     try:
-                        await self._store.write(
-                            state.identity,
-                            await runtime.storage_state(),
+                        sealed = await self._verify_remote_material(state)
+                    except DeviceSessionRejected:
+                        status = BrowserAuthenticationStatus.NEEDS_USER
+            async with self._lock:
+                if self._ceremonies.get(state.id) is not state:
+                    terminal = self._owned_terminal_ceremony(ceremony_id, principal)
+                    if terminal is not None:
+                        return _terminal_ceremony_view(terminal)
+                    raise CeremonyCapabilityRejected
+                if sealed is not None:
+                    metadata = await self._store.find_by_profile(state.profile_id)
+                    if (
+                        metadata is None
+                        or metadata.revoked
+                        or metadata.identity() != state.identity
+                    ):
+                        raise BrowserProviderError(
+                            "tool.browser.profile_unavailable", retryable=False
                         )
+                    try:
+                        await self._store.write(state.identity, sealed)
+                    except BaseException:
+                        state.status = BrowserAuthenticationStatus.CANCELLED
+                        await self._finish_ceremony_locked(state)
+                        raise
                     finally:
                         with suppress(Exception):
                             await runtime.close()
-            if status is BrowserAuthenticationStatus.READY:
-                return await self._finish_ceremony_locked(state)
-            return _ceremony_view(state)
+                    state.status = BrowserAuthenticationStatus.READY
+                    return await self._finish_ceremony_locked(state)
+                state.status = status
+                return _ceremony_view(state)
+
+    async def _verify_remote_material(self, state: _CeremonyState) -> bytes:
+        """A preliminary READY claim is insufficient: confirm against an empty session."""
+        runtime = state.runtime
+        if runtime is None:
+            raise DeviceSessionRejected("session_unconfirmed")
+        observation = await runtime.observe()
+        if browser_origin(observation.url) not in state.identity.allowed_origins:
+            raise DeviceSessionRejected("session_signed_out")
+        material = await runtime.storage_state()
+        return await self._verified_material(state, material, observation.url)
+
+    async def _verified_material(self, state: _CeremonyState, material: bytes, page: str) -> bytes:
+        async with self._lock:
+            self._admit_browsers_locked(2)
+            self._verification_browsers += 2
+        try:
+            return await self._remote_verification_loads(state, material, page)
+        finally:
+            async with self._lock:
+                self._verification_browsers -= 2
+
+    async def _remote_verification_loads(
+        self, state: _CeremonyState, material: bytes, page: str
+    ) -> bytes:
+        origins = state.identity.allowed_origins
+        definition = self._site_definition(state)
+        if definition is not None:
+            page = definition.origin + definition.protected_path
+        signed_in = self._runtime_factory(state.tenant_id)
+        signed_out = self._runtime_factory(state.tenant_id)
+        loads = [
+            asyncio.create_task(
+                _page_evidence(
+                    signed_in, material, origins, page, _VerificationLoad("with_session")
+                )
+            ),
+            asyncio.create_task(
+                _page_evidence(
+                    signed_out,
+                    _NO_SESSION_MATERIAL,
+                    origins,
+                    page,
+                    _VerificationLoad("without_session"),
+                )
+            ),
+        ]
+        try:
+            async with asyncio.timeout(self._verification_seconds):
+                with_session, without_session = await asyncio.gather(*loads)
+                await self._verify_page_pair(
+                    definition, signed_in, signed_out, with_session, without_session, page
+                )
+                return await signed_in.storage_state()
+        finally:
+            for load in loads:
+                load.cancel()
+            await asyncio.gather(*loads, return_exceptions=True)
+            for candidate in (signed_in, signed_out):
+                with suppress(Exception):
+                    await candidate.close()
+
+    def _site_definition(self, state: _CeremonyState) -> BrowserSiteVerification | None:
+        definition = next(
+            (site for site in self._verification.sites if site.profile_id == state.profile_id), None
+        )
+        if definition is not None and definition.origin not in state.identity.allowed_origins:
+            raise DeviceSessionRejected("session_unconfirmed")
+        return definition
+
+    async def _verify_page_pair(
+        self,
+        definition: BrowserSiteVerification | None,
+        signed_in: BrowserSessionRuntime,
+        signed_out: BrowserSessionRuntime,
+        with_session: BrowserPageEvidence,
+        without_session: BrowserPageEvidence,
+        page: str,
+    ) -> None:
+        if definition is None:
+            _decide(with_session, without_session, confirmed_path=urlsplit(page).path)
+            return
+        if (
+            not with_session.on_allowed_origin
+            or with_session.challenge_visible
+            or not definition.confirms(await signed_in.observe())
+        ):
+            raise DeviceSessionRejected("session_unconfirmed")
+        if (
+            without_session.on_allowed_origin
+            and not without_session.challenge_visible
+            and definition.confirms(await signed_out.observe())
+        ):
+            raise DeviceSessionRejected("session_unconfirmed")
 
     async def cancel_authentication(
         self,
@@ -641,31 +810,36 @@ class HostedProfileSessionService:
         await asyncio.sleep(self._sweep_sample_seconds)
         if await self._sample(state) is not BrowserAuthenticationStatus.READY:
             return
-        async with self._lock:
-            runtime = state.runtime
-            if (
-                runtime is None
-                or self._ceremonies.get(state.id) is not state
-                or state.status in _TERMINAL_AUTH_STATUSES
-            ):
-                return
-            metadata = await self._store.find_by_profile(state.profile_id)
-            if metadata is None or metadata.revoked:
-                return
+        async with state.runtime_lock:
             try:
-                async with state.runtime_lock:
+                async with asyncio.timeout(self._verification_seconds):
+                    sealed = await self._verify_remote_material(state)
+            except DeviceSessionRejected:
+                return
+            async with self._lock:
+                runtime = state.runtime
+                if (
+                    runtime is None
+                    or self._ceremonies.get(state.id) is not state
+                    or state.status in _TERMINAL_AUTH_STATUSES
+                ):
+                    return
+                metadata = await self._store.find_by_profile(state.profile_id)
+                if metadata is None or metadata.revoked or metadata.identity() != state.identity:
+                    return
+                try:
                     try:
-                        await self._store.write(state.identity, await runtime.storage_state())
+                        await self._store.write(state.identity, sealed)
                     finally:
                         with suppress(Exception):
                             await runtime.close()
-            except Exception:
-                # The browser is gone either way; end the ceremony, not a lease.
-                state.status = BrowserAuthenticationStatus.CANCELLED
+                except Exception:
+                    # The browser is gone either way; end the ceremony, not a lease.
+                    state.status = BrowserAuthenticationStatus.CANCELLED
+                    await self._finish_ceremony_locked(state)
+                    raise
+                state.status = BrowserAuthenticationStatus.READY
                 await self._finish_ceremony_locked(state)
-                raise
-            state.status = BrowserAuthenticationStatus.READY
-            await self._finish_ceremony_locked(state)
 
     async def _sample(self, state: _CeremonyState) -> BrowserAuthenticationStatus | None:
         async with state.runtime_lock:
@@ -723,6 +897,9 @@ class HostedProfileSessionService:
         if material is None:
             raise DeviceSessionRejected("session_empty")
         page = handoff.confirmed_page()
+        definition = self._site_definition(state)
+        if definition is not None:
+            page = definition.origin + definition.protected_path
         origins = state.identity.allowed_origins
         signed_in = self._runtime_factory(state.tenant_id)
         signed_out = self._runtime_factory(state.tenant_id)
@@ -739,7 +916,9 @@ class HostedProfileSessionService:
             try:
                 async with asyncio.timeout(self._verification_seconds):
                     with_session, without_session = await asyncio.gather(*loads)
-                    _decide(with_session, without_session, confirmed_path=urlsplit(page).path)
+                    await self._verify_page_pair(
+                        definition, signed_in, signed_out, with_session, without_session, page
+                    )
                     sealed = await signed_in.storage_state()
             except DeviceSessionRejected:
                 raise
@@ -779,10 +958,14 @@ class HostedProfileSessionService:
 
     def _live_browsers_locked(self) -> int:
         """Browsers running or reserved: leases, remote ceremonies, a verification's two."""
-        return len(self._leases) + sum(
-            2 if state.mode is BrowserAuthenticationMode.DEVICE else 1
-            for state in self._ceremonies.values()
-            if state.runtime is not None or state.consumed
+        return (
+            len(self._leases)
+            + self._verification_browsers
+            + sum(
+                2 if state.mode is BrowserAuthenticationMode.DEVICE else 1
+                for state in self._ceremonies.values()
+                if state.runtime is not None or state.consumed
+            )
         )
 
     def _admit_browsers_locked(self, count: int) -> None:
@@ -844,8 +1027,10 @@ class HostedProfileSessionService:
         await self._expire()
         async with self._lock:
             state, runtime = self._surface_runtime_locked(ceremony_id, capability)
-            async with state.runtime_lock:
-                return await runtime.interactive_frame()
+        async with state.runtime_lock:
+            async with self._lock:
+                self._surface_runtime_locked(ceremony_id, capability)
+            return await runtime.interactive_frame()
 
     async def authentication_event(
         self,
@@ -856,8 +1041,10 @@ class HostedProfileSessionService:
         await self._expire()
         async with self._lock:
             state, runtime = self._surface_runtime_locked(ceremony_id, capability)
-            async with state.runtime_lock:
-                await runtime.interactive_event(event)
+        async with state.runtime_lock:
+            async with self._lock:
+                self._surface_runtime_locked(ceremony_id, capability)
+            await runtime.interactive_event(event)
 
     def _mac(self, value: bytes) -> bytes:
         return hmac.digest(self._process_secret, value, hashlib.sha256)
@@ -1063,6 +1250,7 @@ async def _page_evidence(
 ) -> BrowserPageEvidence:
     try:
         # Both loads use the browser a lease will use, so the control is fair (ADR-0145).
+        runtime.set_interactive_authentication()
         await runtime.start(material, origins, headed=True)
         evidence = await runtime.load_page_evidence(url, on_stage=progress.enter)
     except Exception:

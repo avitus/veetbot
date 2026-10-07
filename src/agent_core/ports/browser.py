@@ -11,8 +11,12 @@ from agent_core.domain.browser import (
     BrowserActionContext,
     BrowserDispatchConstraint,
     BrowserObservation,
+    BrowserObservationExpansion,
+    BrowserProviderError,
     BrowserSnapshot,
 )
+from agent_core.domain.browser_diagnostics import browser_phase_call
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.tools import ToolExecutionContext
 
 
@@ -43,11 +47,52 @@ class BrowserProvider(Protocol):
     async def close(self) -> None: ...
 
 
+async def expand_browser_observation(
+    provider: object, request: BrowserObservationExpansion
+) -> BrowserObservation:
+    """Optional capability: a legacy provider refuses rather than dropping scope."""
+    candidate = getattr(provider, "expand", None)
+    if candidate is None:
+        raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+    expand = cast(Callable[[BrowserObservationExpansion], Awaitable[BrowserObservation]], candidate)
+    observation = await expand(request)
+    if request.region_ref is not None and (
+        observation.focus is None
+        or observation.revision == request.expected_revision
+        or observation.focus.text_offset != request.text_offset
+    ):
+        raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+    return observation
+
+
+async def extract_browser_observation(
+    provider: object, request: BrowserExtractionRequest
+) -> BrowserObservation:
+    """Optional capability: a legacy provider refuses rather than dropping scope."""
+    candidate = getattr(provider, "extract", None)
+    if candidate is None:
+        raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
+    extract = cast(Callable[[BrowserExtractionRequest], Awaitable[BrowserObservation]], candidate)
+    observation = await extract(request)
+    result = observation.extraction
+    if (
+        result is None
+        or observation.revision == request.expected_revision
+        or result.kind != request.kind
+        or result.index != request.index
+        or result.fields != request.fields
+        or result.row_limit != request.row_limit
+    ):
+        raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+    return observation
+
+
 # ADR-0129: the refusal a runtime gives when a grant's constraint does not
 # hold on the live page; a pre-dispatch refusal.
 GRANT_NOT_APPLICABLE = "tool.browser.grant_not_applicable"
 
 
+@browser_phase_call("binding", "orchestrator")
 async def bind_browser_execution(
     provider: BrowserProvider,
     context: ToolExecutionContext,
@@ -119,3 +164,33 @@ async def browser_action_context_in_session(
         Callable[[UUID, BrowserAction], Awaitable[BrowserActionContext | None]], candidate
     )
     return await resolver(session_id, action)
+
+
+async def check_browser_interruption(runtime: object) -> None:
+    """Optional trusted challenge guard; older adapters retain their own refusal contract."""
+    candidate = getattr(runtime, "check_automation_ready", None)
+    if candidate is not None:
+        await cast(Callable[[], Awaitable[None]], candidate)()
+
+
+async def browser_action_interruption(
+    runtime: object, observation: BrowserObservation
+) -> BrowserObservation:
+    """An action was dispatched; a subsequent sign-in screen is not effect proof."""
+    try:
+        await check_browser_interruption(runtime)
+    except BrowserProviderError as error:
+        if error.reason_code not in {
+            "tool.browser.needs_user",
+            "tool.browser.authentication_required",
+        }:
+            raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from error
+        return BrowserObservation(
+            url=observation.url,
+            title=observation.title,
+            revision=observation.revision,
+            interruption="needs_user",
+        )
+    except Exception as error:
+        raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from error
+    return observation

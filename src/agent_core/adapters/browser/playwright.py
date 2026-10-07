@@ -34,6 +34,11 @@ from playwright.async_api import (
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
+from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
+from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
+from agent_core.adapters.browser.page_structure import REGION_CAPTURE_SCRIPT
+from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
 from agent_core.adapters.browser.virtual_display import platform_virtual_display
 from agent_core.domain.browser import (
     MAXIMUM_FACT_LABEL_CHARACTERS,
@@ -48,9 +53,14 @@ from agent_core.domain.browser import (
     BrowserInteractiveEvent,
     BrowserLabelSource,
     BrowserObservation,
+    BrowserObservationCoverage,
+    BrowserObservationExpansion,
     BrowserObservationFacts,
+    BrowserObservationFocus,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserRegionCoverage,
+    BrowserSemanticRegion,
     BrowserTargetFacts,
     BrowserVerificationStage,
     browser_origin,
@@ -63,16 +73,64 @@ from agent_core.domain.browser_classification import (
     path_is_sensitive,
     path_is_within_prefix,
 )
+from agent_core.domain.browser_diagnostics import browser_phase, browser_phase_call
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
 from agent_core.domain.web import is_public_https_url
 from agent_core.execution.proxy import start_browser_egress_proxy
+from agent_core.ports.browser import (
+    browser_action_interruption,
+    check_browser_interruption,
+    expand_browser_observation,
+    extract_browser_observation,
+)
 from agent_core.ports.browser_upload import upload_browser_image
 
 MAXIMUM_ELEMENTS = 256
 # Candidates scanned for visibility before the element cap applies (ADR-0130).
 MAXIMUM_SCANNED_ELEMENTS = 4_096
-MAXIMUM_TEXT_CHARACTERS = 262_144
+MAXIMUM_CANDIDATE_OFFSET = 65_536
+# Return a bounded handle set in an isolated world, including open shadow roots.
+# The numeric offset is supplied only by this runtime, never by a model.
+_CONTROL_SELECTOR = """(() => {
+    const queryAll = (root, selector) => {
+        const offset = Number(selector);
+        if (!Number.isInteger(offset) || offset < 0 || offset > 65536) return [];
+        let dialog = null;
+        if (root.nodeType === 9) {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let candidate, visited = 0;
+            while (visited++ < 8192 && (candidate = walker.nextNode())) {
+                if (!candidate.matches('dialog[open],[role="dialog"],[role="alertdialog"]'))
+                    continue;
+                const style = getComputedStyle(candidate), box = candidate.getBoundingClientRect();
+                if (style.visibility === 'visible' && style.display !== 'none'
+                    && style.opacity !== '0' && box.width > 0 && box.height > 0
+                    && !candidate.closest('[hidden],[aria-hidden="true"]')) {
+                    dialog = candidate; break;
+                }
+            }
+        }
+        const result = [], pending = [];
+        if (dialog?.firstElementChild) pending.push(root.firstElementChild);
+        else dialog = null;
+        let node = dialog?.firstElementChild || root.firstElementChild, index = 0;
+
+        while (node) {
+            if (node === dialog) { node = node.nextElementSibling || pending.pop(); continue; }
+            if (node.matches('a,button,input,select,textarea,[role]')) {
+                if (index++ >= offset) result.push(node);
+                if (result.length === 4097) break;
+            }
+            if (node.nextElementSibling) pending.push(node.nextElementSibling);
+            if (node.firstElementChild) pending.push(node.firstElementChild);
+            node = node.shadowRoot?.firstElementChild || pending.pop();
+        }
+        return result;
+    };
+    return {queryAll, query: (root, selector) => queryAll(root, selector)[0] || null};
+})()"""
 # A page settles for at most this long after navigation or an action (ADR-0130).
 SETTLE_SECONDS = 2.0
 # The DOM counts as quiet after this long without a mutation.
@@ -130,19 +188,19 @@ _QUIET_SCRIPT = """([quietMs, timeoutMs]) => new Promise(resolve => {
     let limit = 0;
     const observer = new MutationObserver(() => {
         clearTimeout(quiet);
-        quiet = setTimeout(finish, quietMs);
+        quiet = setTimeout(() => finish(true), quietMs);
     });
-    function finish() {
+    function finish(quietReached) {
         observer.disconnect();
         clearTimeout(quiet);
         clearTimeout(limit);
-        resolve(null);
+        resolve(quietReached);
     }
     observer.observe(document, {
         subtree: true, childList: true, attributes: true, characterData: true
     });
-    quiet = setTimeout(finish, quietMs);
-    limit = setTimeout(finish, timeoutMs);
+    quiet = setTimeout(() => finish(true), quietMs);
+    limit = setTimeout(() => finish(false), timeoutMs);
 })"""
 # Playwright's is_visible in one round trip, ported from its computeBox: a
 # display:contents node is visible when a child element or text is; any other
@@ -233,6 +291,86 @@ def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
         return False
 
 
+async def _capture_regions(
+    page: Page, root: ElementHandle | None
+) -> tuple[dict[str, Any], list[ElementHandle]]:
+    capture = await page.evaluate_handle(REGION_CAPTURE_SCRIPT, root)
+    nodes = None
+    handles: list[ElementHandle] = []
+    try:
+        structure = await capture.evaluate(
+            "value => ({regions: value.regions, coverage: value.coverage})"
+        )
+        nodes = await capture.get_property("nodes")
+        for _, handle in sorted(
+            (await nodes.get_properties()).items(), key=lambda item: int(item[0])
+        ):
+            element = handle.as_element()
+            if element is None:
+                await handle.dispose()
+                raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            handles.append(element)
+        return structure, handles
+    except BaseException:
+        await _dispose(handles, keep=())
+        raise
+    finally:
+        if nodes is not None:
+            await nodes.dispose()
+        await capture.dispose()
+
+
+class _ReadinessRequests:
+    """Wait only for a snapshot of finite requests; never read response bodies."""
+
+    def __init__(self) -> None:
+        self._pending: set[Request] = set()
+        self._changed = asyncio.Event()
+        self._overflow = False
+
+    def reset(self) -> None:
+        """A new document or a closed runtime cannot retain the old request set."""
+        self._pending.clear()
+        self._overflow = False
+        self._changed.set()
+
+    def began(self, request: Request) -> None:
+        if request.resource_type in {"document", "script", "stylesheet", "xhr", "fetch"}:
+            if len(self._pending) >= 256:
+                self._overflow = True
+            else:
+                self._pending.add(request)
+
+    def ended(self, request: Request) -> None:
+        self._pending.discard(request)
+        self._changed.set()
+
+    def responded(self, response: Response) -> None:
+        request = response.request
+        if (
+            request in self._pending
+            and request.resource_type in {"xhr", "fetch"}
+            and response.status == 200
+            and response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            == "text/event-stream"
+        ):
+            self.ended(request)
+
+    async def drain(self, timeout: float) -> bool:
+        """Drain the initial set within the caller's shared deadline."""
+        if self._overflow:
+            return False
+        initial = self._pending.copy()
+        try:
+            async with asyncio.timeout(timeout):
+                while initial & self._pending:
+                    self._changed.clear()
+                    await self._changed.wait()
+        except TimeoutError:
+            return False
+        return True
+
+
 class PythonPlaywrightRuntime:
     """Own one Chromium process, headed for every hosted use, and one non-persistent context."""
 
@@ -253,7 +391,16 @@ class PythonPlaywrightRuntime:
         self._headed_popup_policy = False
         self._revision: str | None = None
         self._elements: dict[str, ElementHandle] = {}
+        self._regions: dict[str, ElementHandle] = {}
+        self._focus_root: ElementHandle | None = None
+        self._focus_text: str | None = None
+        self._text_cursor: str | None = None
         self._facts: BrowserObservationFacts | None = None
+        self._element_offsets: dict[str, int] = {}
+        self._continuation: tuple[str, int] | None = None
+        self._observation_document = 0
+        self._known_draft: tuple[JSHandle, str, int] | None = None
+        self._readiness_requests = _ReadinessRequests()
         self._disallowed_navigation = False
         self._dismissed_beforeunload = False
         self._document_session: CDPSession | None = None
@@ -266,6 +413,7 @@ class PythonPlaywrightRuntime:
         self._document_fence: tuple[str, str] | None = None
         self._fence_refused_page = False
 
+    @browser_phase_call("launch")
     async def start(
         self,
         proxy_url: str,
@@ -294,6 +442,9 @@ class PythonPlaywrightRuntime:
             if display_name is not None:
                 environment["DISPLAY"] = display_name
         self._playwright = await async_playwright().start()
+        await self._playwright.selectors.register(
+            "veetbot_controls", script=_CONTROL_SELECTOR, content_script=True
+        )
         self._browser = await self._playwright.chromium.launch(
             headless=not headed,
             proxy={"server": proxy_url},
@@ -389,6 +540,10 @@ class PythonPlaywrightRuntime:
         # Record refused navigation for failure classification; the CDP document
         # guard enforces redirect hops before dispatch.
         page.on("request", self._track_navigation)
+        page.on("request", self._readiness_requests.began)
+        page.on("response", self._readiness_requests.responded)
+        page.on("requestfinished", self._readiness_requests.ended)
+        page.on("requestfailed", self._readiness_requests.ended)
         page.on("framenavigated", self._count_main_frame_navigation)
         self._page = page
 
@@ -396,6 +551,7 @@ class PythonPlaywrightRuntime:
         """Count committed main-frame documents so an action knows it loaded a new one."""
         if frame.parent_frame is None:
             self._main_frame_navigations += 1
+            self._readiness_requests.reset()
 
     def _track_navigation(self, request: Request) -> None:
         """Remember refused navigation origins for stable browser failure classification."""
@@ -519,6 +675,7 @@ class PythonPlaywrightRuntime:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         return self._page
 
+    @browser_phase_call("navigation")
     async def navigate(self, url: str) -> BrowserObservation:
         """Navigate within the bound origin policy and preserve stable failure codes."""
         page = self._current_page()
@@ -548,21 +705,26 @@ class PythonPlaywrightRuntime:
             ) from exc
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
-        await self._settle(page, after_document=True)
+        readiness = await self._settle(page, after_document=True)
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
-        return await self._observation(page)
+        observation = await self._observation(page)
+        return observation.model_copy(update={"readiness": readiness})
 
-    async def _settle(self, page: Page, *, after_document: bool) -> None:
-        """Wait, at most SETTLE_SECONDS, for the page to stop loading and changing.
+    async def _settle(
+        self,
+        page: Page,
+        *,
+        after_document: bool,
+    ) -> Literal["dom_quiet", "bound_expired"]:
+        with browser_phase("readiness") as phase:
+            quiet = await self._settle_page(page, after_document=after_document)
+            if not quiet:
+                phase.outcome = "bound_expired"
+            return "dom_quiet" if quiet else "bound_expired"
 
-        ADR-0130 decisions 5 and 6: after a new document, first wait for the
-        network to go idle; then wait in the page until the DOM has not
-        changed for DOM_QUIET_MILLISECONDS. A page that never settles is
-        observed at the bound. Nothing here fails: a context destroyed by a
-        navigation waits for the new document and tries the quiet wait once
-        more within the same deadline.
-        """
+    async def _settle_page(self, page: Page, *, after_document: bool) -> bool:
+        """ADR-0159: bounded DOM quiet; background network traffic need not stop."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + SETTLE_SECONDS
 
@@ -578,23 +740,27 @@ class PythonPlaywrightRuntime:
                     await page.wait_for_load_state(state, timeout=max(1.0, left * 1000))
 
         if after_document:
-            await load_state("networkidle")
+            await load_state("domcontentloaded")
+        if not await self._readiness_requests.drain(remaining()):
+            return False
         for attempt in range(2):
             left = remaining()
             if left <= 0:
-                return
+                return False
             try:
                 async with asyncio.timeout(left + 0.25):
-                    await page.evaluate(
+                    quiet = await page.evaluate(
                         _QUIET_SCRIPT, [DOM_QUIET_MILLISECONDS, max(1, int(left * 1000))]
                     )
-                return
+                return quiet is True
             except TimeoutError:
-                return
+                return False
             except PlaywrightError:
                 if attempt:
-                    return
+                    return False
                 await load_state("domcontentloaded")
+
+        return False
 
     def facts(self, revision: str) -> BrowserObservationFacts | None:
         """The element facts of ``revision``, while it is the current observation."""
@@ -679,53 +845,245 @@ class PythonPlaywrightRuntime:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         return await self._observation(page)
 
-    async def _observation(self, page: Page) -> BrowserObservation:
+    async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+        page = self._current_page()
+        if not _origin_allowed(page.url, self._allowed_origins):
+            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+        if self._observation_document != self._main_frame_navigations:
+            await self._forget_observation()
+            raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+        if request.region_ref is not None:
+            root = self._regions.get(request.region_ref)
+            if request.expected_revision != self._revision or root is None:
+                raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+            prior_text = None
+            if request.text_offset:
+                if self._focus_root is None or not await root.evaluate(
+                    "(node, previous) => node === previous", self._focus_root
+                ):
+                    raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+                prior_text = self._focus_text
+            return await self._observation(
+                page, root=root, text_offset=request.text_offset, prior_text=prior_text
+            )
+        if self._text_cursor is not None and request.cursor is not None:
+            token, separator, value = request.cursor.partition(".")
+            if token == self._text_cursor and separator and value.isascii() and value.isdecimal():
+                text_offset = int(value)
+                if 0 < text_offset <= 262_144 and self._focus_root is not None:
+                    return await self._observation(
+                        page,
+                        root=self._focus_root,
+                        text_offset=text_offset,
+                        prior_text=self._focus_text,
+                    )
+                raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+        if request.after is not None:
+            handle = self._elements.get(request.after)
+            offset = self._element_offsets.get(request.after)
+            if handle is None or offset is None:
+                raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+            return await self._observation(
+                page, offset=offset, anchor=handle, root=self._focus_root
+            )
+        if self._continuation is None or request.cursor != self._continuation[0]:
+            raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+        return await self._observation(page, offset=self._continuation[1], root=self._focus_root)
+
+    async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+        page = self._current_page()
+        if not _origin_allowed(page.url, self._allowed_origins):
+            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+        if (
+            self._revision != request.expected_revision
+            or self._observation_document != self._main_frame_navigations
+        ):
+            raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+        return await self._observation(page, extraction=request)
+
+    @browser_phase_call("observation")
+    async def _observation(
+        self,
+        page: Page,
+        *,
+        offset: int = 0,
+        anchor: ElementHandle | None = None,
+        extraction: BrowserExtractionRequest | None = None,
+        root: ElementHandle | None = None,
+        text_offset: int = 0,
+        prior_text: str | None = None,
+    ) -> BrowserObservation:
         revision = secrets.token_hex(16)
-        body = page.locator("body")
-        text = (await body.inner_text(timeout=5_000))[:MAXIMUM_TEXT_CHARACTERS]
-        locator = page.locator("a,button,input,select,textarea,[role]")
-        found = await locator.element_handles()
-        candidates = found[:MAXIMUM_SCANNED_ELEMENTS]
-        # Hidden controls never take an element slot (ADR-0130 decision 8).
-        flags = await page.evaluate(_VISIBLE_SCRIPT, candidates)
-        snapshot = [handle for handle, visible in zip(candidates, flags, strict=True) if visible][
-            :MAXIMUM_ELEMENTS
-        ]
-        slots = asyncio.Semaphore(8)
-        page_url = page.url
+        found: list[ElementHandle] = []
+        captures: list[asyncio.Task[tuple[BrowserElement, BrowserElementFacts] | None]] = []
+        region_handles: list[ElementHandle] = []
+        try:
+            if root is not None and not await root.evaluate("""node => {
+                if (!node.isConnected || node.ownerDocument !== document) return false;
+                for (let p = node, count = 0; p; p = p.parentElement) {
+                    if (++count > 8192 || p.hidden || p.getAttribute('aria-hidden') === 'true'
+                        || p.isContentEditable) return false;
+                    const style = getComputedStyle(p);
+                    if (style.display === 'none' || style.visibility !== 'visible'
+                        || style.opacity === '0') return false;
+                }
+                return true;
+            }"""):
+                await self._forget_observation()
+                raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+            document = self._main_frame_navigations
+            readable = await page.evaluate(READABLE_TEXT_SCRIPT, root)
+            known = await self._confirmed_draft(root)
+            if known and len((known + readable["text"]).encode("utf-8")) <= 262_144:
+                readable["text"] = known + readable["text"]
+            full_text = readable["text"]
+            if prior_text is not None and full_text != prior_text:
+                raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+            encoded = full_text.encode("utf-8")
+            try:
+                if text_offset > len(encoded):
+                    raise ValueError("offset outside capture")
+                readable["text"] = encoded[text_offset:].decode("utf-8")
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise BrowserProviderError("tool.browser.page_changed", retryable=False) from exc
+            if root is None:
+                found = await page.locator(f"veetbot_controls={offset}").element_handles()
+            else:
+                found = await root.query_selector_all(f"veetbot_controls={offset}")
+            start = 0
+            if anchor is not None:
+                if not found or not await page.evaluate(
+                    "([anchor, current]) => anchor === current && anchor.isConnected",
+                    [anchor, found[0]],
+                ):
+                    raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+                start = 1
+            stop = min(MAXIMUM_SCANNED_ELEMENTS, MAXIMUM_CANDIDATE_OFFSET - offset)
+            candidates = found[start:stop]
+            candidate_offset = offset + start
+            # Hidden controls never take an element slot (ADR-0130 decision 8).
+            flags = await page.evaluate(_VISIBLE_SCRIPT, candidates)
+            selected = [
+                (candidate_offset + index, handle)
+                for index, (handle, visible) in enumerate(zip(candidates, flags, strict=True))
+                if visible
+            ][:MAXIMUM_ELEMENTS]
+            snapshot = [handle for _, handle in selected]
+            next_offset = (
+                selected[-1][0] + 1
+                if len(selected) == MAXIMUM_ELEMENTS
+                else candidate_offset + len(candidates)
+            )
+            has_more = next_offset < offset + len(found)
+            scan_limit = has_more and next_offset >= MAXIMUM_CANDIDATE_OFFSET
+            continuation = (
+                (secrets.token_hex(16), next_offset) if has_more and not scan_limit else None
+            )
+            slots = asyncio.Semaphore(8)
+            page_url = page.url
 
-        async def capture(
-            index: int, handle: ElementHandle
-        ) -> tuple[BrowserElement, BrowserElementFacts] | None:
-            async with slots:
-                return await self._element_observation(
-                    handle, f"{revision}:{index}", page_url=page_url
-                )
+            async def capture(
+                index: int, handle: ElementHandle
+            ) -> tuple[BrowserElement, BrowserElementFacts] | None:
+                async with slots:
+                    return await self._element_observation(
+                        handle, f"{revision}:{index}", page_url=page_url
+                    )
 
-        captured = await asyncio.gather(
-            *(capture(index, handle) for index, handle in enumerate(snapshot))
-        )
-        elements: list[BrowserElement] = []
-        handles: dict[str, ElementHandle] = {}
-        facts: dict[str, BrowserElementFacts] = {}
-        for handle, observed in zip(snapshot, captured, strict=True):
-            if observed is not None:
-                element, element_facts = observed
-                elements.append(element)
-                handles[element.ref] = handle
-                facts[element.ref] = element_facts
-        released = [*self._elements.values(), *found]
+            captures = [
+                asyncio.create_task(capture(index, handle)) for index, handle in enumerate(snapshot)
+            ]
+            captured = await asyncio.gather(*captures)
+            structure, region_handles = await _capture_regions(page, root)
+            extracted = None
+            if extraction is not None:
+                raw = await page.evaluate(EXTRACTION_SCRIPT, extraction.model_dump(mode="json"))
+                extracted = extracted_observation(raw, extraction, revision)
+            elements: list[BrowserElement] = []
+            handles: dict[str, ElementHandle] = {}
+            facts: dict[str, BrowserElementFacts] = {}
+            for handle, observed in zip(snapshot, captured, strict=True):
+                if observed is not None:
+                    element, element_facts = observed
+                    elements.append(element)
+                    handles[element.ref] = handle
+                    facts[element.ref] = element_facts
+            observation = BrowserObservation(
+                url=page.url,
+                title=await page.title(),
+                revision=revision,
+                text=readable["text"],
+                text_coverage=readable["coverage"],
+                focus=(
+                    BrowserObservationFocus(
+                        region_ref=f"{revision}:focus",
+                        text_offset=text_offset,
+                        text_total_bytes=len(encoded),
+                        text_cursor=secrets.token_hex(16),
+                    )
+                    if root is not None
+                    else None
+                ),
+                elements=tuple(elements),
+                regions=tuple(
+                    BrowserSemanticRegion.model_validate(
+                        {**region, "ref": f"{revision}:region:{index}"}
+                    )
+                    for index, region in enumerate(structure["regions"])
+                ),
+                region_coverage=BrowserRegionCoverage.model_validate(structure["coverage"]),
+                extraction=extracted,
+                coverage=BrowserObservationCoverage(
+                    candidate_offset=candidate_offset,
+                    scanned_candidates=len(candidates),
+                    next_cursor=None if continuation is None else continuation[0],
+                    scan_limit_reached=scan_limit,
+                ),
+            )
+            observation_facts = BrowserObservationFacts(revision=revision, elements=facts)
+            regions = {f"{revision}:region:{i}": h for i, h in enumerate(region_handles)}
+            if root is not None:
+                regions[f"{revision}:focus"] = root
+            await _dispose(
+                [*self._elements.values(), *self._regions.values(), *found],
+                keep=[*handles.values(), *regions.values()],
+            )
+            if document != self._main_frame_navigations:
+                raise BrowserProviderError("tool.browser.page_changed", retryable=False)
+        except BaseException:
+            # gather does not cancel sibling work on an ordinary capture error.
+            # Join it before disposing its handles, including on cancellation.
+            for task in captures:
+                task.cancel()
+            await asyncio.gather(*captures, return_exceptions=True)
+            released = [*self._elements.values(), *self._regions.values(), *found, *region_handles]
+            self._revision = None
+            self._elements = {}
+            self._regions = {}
+            self._focus_root = None
+            self._focus_text = None
+            self._text_cursor = None
+            self._facts = None
+            self._element_offsets = {}
+            self._continuation = None
+            await _dispose(released, keep=())
+            raise
         self._revision = revision
+        self._regions = regions
+        self._focus_root = root
+        self._focus_text = full_text if root is not None else None
+        self._text_cursor = observation.focus.text_cursor if observation.focus is not None else None
         self._elements = handles
-        self._facts = BrowserObservationFacts(revision=revision, elements=facts)
-        await _dispose(released, keep=handles.values())
-        return BrowserObservation(
-            url=page.url,
-            title=await page.title(),
-            revision=revision,
-            text=text,
-            elements=tuple(elements),
-        )
+        self._facts = observation_facts
+        self._element_offsets = {
+            element.ref: candidate_index
+            for (candidate_index, _), observed in zip(selected, captured, strict=True)
+            if observed is not None
+            for element, _ in [observed]
+        }
+        self._continuation = continuation
+        self._observation_document = document
+        return observation
 
     @staticmethod
     async def _element_observation(
@@ -834,13 +1192,32 @@ class PythonPlaywrightRuntime:
         self._fence_refused_page = False
         if constraint is not None and constraint.path_prefix is not None:
             self._document_fence = (constraint.origins[0], constraint.path_prefix)
+        draft_binding = None
+        if approved_editable:
+            # Chromium can split inherited editable descendants while typing newlines.
+            # Bind the existing editing host before dispatch, without reading its value.
+            draft_binding = await handle.evaluate_handle("""node => {
+                let count = 0;
+                while (node.parentElement?.isContentEditable) {
+                    if (++count > 256) return null;
+                    node = node.parentElement;
+                }
+                return new WeakRef(node);
+            }""")
         try:
             await self._dispatch(page, handle, action, guards)
+            if draft_binding is not None and self._main_frame_navigations == documents_before:
+                await self._forget_draft()
+                self._known_draft = (draft_binding, action.value or "", documents_before)
+                draft_binding = None
             # The action was sent; settling never turns it into a failure (ADR-0130).
-            await self._settle(
+            readiness = await self._settle(
                 page, after_document=self._main_frame_navigations != documents_before
             )
         finally:
+            if draft_binding is not None:
+                with suppress(PlaywrightError):
+                    await draft_binding.dispose()
             self._document_fence = None
             refused_page = self._fence_refused_page
             self._fence_refused_page = False
@@ -849,7 +1226,8 @@ class PythonPlaywrightRuntime:
             # which never loaded; the page now shows the browser's error page.
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
-        return await self._observation(page)
+        observation = await self._observation(page)
+        return observation.model_copy(update={"readiness": readiness})
 
     async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
         """Select approved bytes in one main-document file control (ADR-0148)."""
@@ -894,6 +1272,7 @@ class PythonPlaywrightRuntime:
         await self._settle(page, after_document=self._main_frame_navigations != documents_before)
         return await self._observation(page)
 
+    @browser_phase_call("dispatch")
     async def _dispatch(
         self,
         page: Page,
@@ -1070,16 +1449,47 @@ class PythonPlaywrightRuntime:
         raise BrowserProviderError("tool.browser.grant_not_applicable", retryable=False)
 
     async def _forget_observation(self) -> None:
-        released = list(self._elements.values())
+        released = [*self._elements.values(), *self._regions.values()]
+        self._regions = {}
+        self._focus_root = None
+        self._focus_text = None
+        self._text_cursor = None
         self._revision = None
         self._elements = {}
         self._facts = None
+        self._element_offsets = {}
+        self._continuation = None
         await _dispose(released, keep=())
+
+    async def _confirmed_draft(self, root: ElementHandle | None) -> str:
+        """Echo our last approved draft only while its bounded visible editor still matches."""
+        if self._known_draft is None:
+            return ""
+        weak, submitted, document = self._known_draft
+        if document == self._main_frame_navigations:
+            with suppress(PlaywrightError):
+                if await weak.evaluate(CONFIRM_DRAFT_SCRIPT, [submitted, root]) is True:
+                    return "Confirmed submitted draft:\n" + submitted + "\n"
+        # A changed document or value cannot later resurrect an old draft receipt.
+        await self._forget_draft()
+        return ""
+
+    async def _forget_draft(self) -> None:
+        if self._known_draft is not None:
+            weak, _submitted, _document = self._known_draft
+            self._known_draft = None
+            with suppress(PlaywrightError):
+                await weak.dispose()
 
     async def storage_state(self) -> dict[str, object]:
         if self._context is None:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         return cast(dict[str, object], await self._context.storage_state(indexed_db=True))
+
+    async def check_automation_ready(self) -> None:
+        if await self._current_page().evaluate(AUTHENTICATION_SCRIPT):
+            await self._forget_observation()
+            raise BrowserProviderError("tool.browser.needs_user", retryable=False)
 
     @staticmethod
     async def _sign_in_challenge_visible(page: Page) -> bool:
@@ -1145,9 +1555,11 @@ class PythonPlaywrightRuntime:
             assert event.key is not None
             await page.keyboard.press(event.key)
 
+    @browser_phase_call("cleanup")
     async def close(self) -> None:
         """Release the browser and proxy resources owned by this session."""
         try:
+            await self._forget_draft()
             if self._context is not None:
                 with suppress(Exception):
                     await self._context.close()
@@ -1172,13 +1584,20 @@ class PythonPlaywrightRuntime:
             self._temporary_home = None
             self._revision = None
             self._elements = {}
+            self._regions = {}
+            self._focus_root = None
+            self._focus_text = None
+            self._text_cursor = None
             self._facts = None
+            self._element_offsets = {}
+            self._continuation = None
             self._disallowed_navigation = False
             self._headed_popup_policy = False
             self._document_session = None
             self._main_frame_id = None
             self._sign_in_entered = False
             self._main_frame_navigations = 0
+            self._readiness_requests.reset()
             self._document_fence = None
             self._fence_refused_page = False
 
@@ -1295,7 +1714,7 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
     await asyncio.gather(*(release(handle) for handle in released.values()))
 
 
-# One read of an element: the model-visible name exactly as before, and every
+# One read of an element: its bounded label-derived name, and every
 # live attribute its facts are derived from (ADR-0129 section 4.5). Facts follow
 # the flat tree the browser renders and dispatches events through: a slotted
 # node's parent is its slot, a shadow root's is its host, and a slot's children
@@ -1495,12 +1914,20 @@ _READ_ELEMENT_SCRIPT = """node => {
     };
     const labels = Object.fromEntries(
         Object.entries(sources).map(([source, value]) => [source, clean(value)]));
+    // An action's rendered label remains discoverable inside an editor; it is
+    // not the editor's field value. The private facts still fence its key use.
+    const actionLabel = node.matches('a,button,[role="button"],[role="link"]');
+    const privateText = (node.isContentEditable && !actionLabel) ||
+        ['textbox', 'searchbox', 'combobox', 'spinbutton'].includes(node.getAttribute('role'));
     const metadata = {
         tag,
         role: node.getAttribute('role'),
         inputType: node.getAttribute('type'),
-        name: Array.from(node.getAttribute('aria-label') || node.getAttribute('title') ||
-            node.getAttribute('placeholder') || node.innerText || '')
+        name: Array.from(referenced(node, node.getAttribute('aria-labelledby')).trim() ||
+            node.getAttribute('aria-label') ||
+            Array.from(node.labels || []).map(label => label.innerText).join(' ').trim() ||
+            node.getAttribute('title') ||
+            node.getAttribute('placeholder') || (privateText ? '' : node.innerText) || '')
             .slice(0, 1024).join(''),
         autocomplete: node.getAttribute('autocomplete') || '',
         editable: node.isContentEditable === true,
@@ -1941,6 +2368,7 @@ class PlaywrightBrowserProvider:
             await self._start()
             try:
                 observation = await self._runtime.navigate(url)
+                await check_browser_interruption(self._runtime)
             except BrowserProviderError:
                 raise
             except Exception as exc:
@@ -1958,12 +2386,45 @@ class PlaywrightBrowserProvider:
             await self._start()
             try:
                 observation = await self._runtime.observe()
+                await check_browser_interruption(self._runtime)
             except BrowserProviderError:
                 raise
             except Exception as exc:
                 raise BrowserProviderError(
                     "tool.browser.provider_unavailable",
                     retryable=True,
+                ) from exc
+            if not self.allows(observation.url):
+                raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            return observation
+
+    async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+        async with self._operation_lock:
+            await self._start()
+            try:
+                observation = await expand_browser_observation(self._runtime, request)
+                await check_browser_interruption(self._runtime)
+            except BrowserProviderError:
+                raise
+            except Exception as exc:
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable", retryable=True
+                ) from exc
+            if not self.allows(observation.url):
+                raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            return observation
+
+    async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+        async with self._operation_lock:
+            await self._start()
+            try:
+                observation = await extract_browser_observation(self._runtime, request)
+                await check_browser_interruption(self._runtime)
+            except BrowserProviderError:
+                raise
+            except Exception as exc:
+                raise BrowserProviderError(
+                    "tool.browser.provider_unavailable", retryable=True
                 ) from exc
             if not self.allows(observation.url):
                 raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
@@ -1979,6 +2440,7 @@ class PlaywrightBrowserProvider:
         async with self._operation_lock:
             await self._start()
             try:
+                await check_browser_interruption(self._runtime)
                 if constraint is None:
                     observation = await self._runtime.act(action)
                 else:
@@ -1998,13 +2460,14 @@ class PlaywrightBrowserProvider:
                 ) from exc
             if not self.allows(observation.url):
                 raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
-            return observation
+            return await browser_action_interruption(self._runtime, observation)
 
     async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
         """Transfer an approved image while exclusively holding the browser page."""
         async with self._operation_lock:
             await self._start()
             try:
+                await check_browser_interruption(self._runtime)
                 observation = await upload_browser_image(self._runtime, action, image)
             except BrowserProviderError:
                 raise
@@ -2012,7 +2475,7 @@ class PlaywrightBrowserProvider:
                 raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False) from exc
             if not self.allows(observation.url):
                 raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
-            return observation
+            return await browser_action_interruption(self._runtime, observation)
 
     async def close(self) -> None:
         """Wait for the active operation before releasing runtime and proxy resources."""

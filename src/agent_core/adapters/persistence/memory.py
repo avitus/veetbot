@@ -352,6 +352,32 @@ class InMemorySessionRepository:
 
 
 class InMemoryRunRepository:
+    async def waiting_for_user(
+        self, principal: Principal, *, limit: int, after_id: UUID | None = None
+    ) -> list[Run]:
+        if limit <= 0:
+            return []
+        async with self._lock:
+            candidates = sorted(
+                (
+                    row.model_copy(deep=True)
+                    for row in self._runs.values()
+                    if row.status is RunStatus.WAITING_FOR_USER
+                    and (after_id is None or row.id.int > after_id.int)
+                ),
+                key=lambda row: row.id.int,
+            )
+        rows = []
+        for row in candidates:
+            try:
+                await self._sessions.get(row.session_id, principal)
+            except NotFoundError:
+                continue
+            rows.append(row)
+            if len(rows) >= limit:
+                break
+        return rows
+
     def __init__(self, sessions: SessionRepository, clock: Clock) -> None:
         self._sessions = sessions
         self._clock = clock

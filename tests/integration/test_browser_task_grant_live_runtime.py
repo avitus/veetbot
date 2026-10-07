@@ -260,12 +260,15 @@ async def _after_the_late_change(started: float) -> None:
 
 def _assert_refused(response: httpx.Response) -> None:
     assert response.status_code == 409, response.text
-    assert response.json() == {
-        "error": {
-            "code": "tool.browser.grant_not_applicable",
-            "message": "browser operation rejected",
-        }
+    assert response.json()["error"] == {
+        "code": "tool.browser.grant_not_applicable",
+        "message": "browser operation rejected",
     }
+    assert set(response.json()) == {"error", "browser_diagnostics"}
+    assert any(
+        phase["failure"] == "grant_refused"
+        for phase in response.json()["browser_diagnostics"]["phases"]
+    )
 
 
 async def test_the_live_page_decides_whether_a_task_grant_covers_an_act(tmp_path: Path) -> None:

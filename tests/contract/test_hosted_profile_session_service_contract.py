@@ -38,6 +38,7 @@ from agent_core.browser_control_plane.sessions import (
     DeviceSessionRejected,
     HostedProfileSessionService,
 )
+from agent_core.browser_control_plane.verification import BrowserVerificationCatalog
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
@@ -85,6 +86,8 @@ class HandoffScenario:
     stages: tuple[BrowserVerificationStage, ...] = (BrowserVerificationStage.NAVIGATE,)
     # The signed-out load holds the event loop this long before it returns.
     signed_out_blocks_seconds: float = 0
+    with_observation: BrowserObservation | None = None
+    without_observation: BrowserObservation | None = None
 
 
 @dataclass
@@ -110,6 +113,9 @@ class FakeSessionRuntime:
     known_facts: dict[str, BrowserObservationFacts] = field(default_factory=dict)
     # ADR-0129: every grant-constrained act, with the service clock it carried.
     constrained: list[tuple[BrowserDispatchConstraint, datetime]] = field(default_factory=list)
+
+    def set_interactive_authentication(self) -> None:
+        """The fake has no automatic login guard to bypass for its ceremony."""
 
     async def start(
         self,
@@ -145,6 +151,14 @@ class FakeSessionRuntime:
             self.observe_started.set()
         if self.observe_release is not None:
             await self.observe_release.wait()
+        if self.scenario is not None:
+            override = (
+                self.scenario.with_observation
+                if self.signed_in
+                else self.scenario.without_observation
+            )
+            if override is not None:
+                return override
         return BrowserObservation(
             url=self.allowed_origins[0] + "/current",
             revision="revision-1",
@@ -228,6 +242,7 @@ def services(
     first_navigate_error: Exception | None = None,
     scenario: HandoffScenario | None = None,
     verification_seconds: float = 30.0,
+    verification: BrowserVerificationCatalog | None = None,
 ) -> tuple[
     HostedProfileLifecycleService,
     HostedProfileSessionService,
@@ -260,6 +275,7 @@ def services(
         process_secret=b"synthetic-process-secret-with-32-bytes",
         ceremony_base_url="https://browser-login.example.test",
         verification_seconds=verification_seconds,
+        verification=verification,
         sweep_sample_seconds=0,
     )
     lifecycle = HostedProfileLifecycleService(
@@ -272,6 +288,22 @@ def services(
 
 async def provision(lifecycle: HostedProfileLifecycleService) -> None:
     await lifecycle.provision(PROFILE_ID, principal(), ("https://example.org",))
+
+
+async def test_remote_ready_claim_requires_a_protected_page(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path, scenario=HandoffScenario(with_session=None, without_session=None)
+    )
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/public"
+    )
+    assert runtimes[0].authentication is BrowserAuthenticationStatus.READY
+    result = await sessions.refresh_authentication(ceremony.id, principal())
+    assert result.status is not BrowserAuthenticationStatus.READY, (
+        "a public page and storage are not sign-in proof"
+    )
+    assert not runtimes[0].closed
 
 
 async def test_hosted_session_lease_is_scoped_exclusive_and_seals_server_side(
@@ -993,6 +1025,50 @@ async def test_a_remote_ceremony_counts_against_the_browser_limit(tmp_path: Path
     assert len(runtimes) == MAXIMUM_LIVE_BROWSERS
 
 
+async def test_remote_verification_reserves_both_control_browsers(tmp_path: Path) -> None:
+    """The remote sign-in browser and its two verification loads share the cap."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    profiles = await more_profiles(sessions, 1)
+    lease = await lease_for(sessions, profiles[0])
+    ceremony_id = await begin_remote(sessions)
+    with pytest.raises(BrowserProviderError, match="provider_unavailable"):
+        await sessions.refresh_authentication(ceremony_id, principal())
+    assert len(runtimes) == 2
+    await sessions.close(lease.lease_ref)
+    ready = await sessions.refresh_authentication(ceremony_id, principal())
+    assert ready.status is BrowserAuthenticationStatus.READY
+    assert all(runtime.closed for runtime in runtimes)
+
+
+async def test_surface_poll_during_remote_verification_does_not_deadlock(tmp_path: Path) -> None:
+    """A frame poll cannot hold admission while waiting for verification's page lock."""
+    scenario = HandoffScenario(gate=asyncio.Event())
+    lifecycle, sessions, _runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    view = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    assert view.launch_url is not None
+    capability = view.launch_url.split("#capability=", 1)[1]
+    verifying = asyncio.create_task(sessions.refresh_authentication(view.id, principal()))
+    await scenario.started.wait()
+    frame = asyncio.create_task(sessions.authentication_frame(view.id, capability))
+    await asyncio.sleep(0.01)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(verifying, frame, return_exceptions=True), timeout=1
+        )
+    finally:
+        verifying.cancel()
+        frame.cancel()
+        await asyncio.gather(verifying, frame, return_exceptions=True)
+    assert not isinstance(results[0], BaseException)
+    assert results[0].status is BrowserAuthenticationStatus.READY
+
+
 async def test_a_verification_without_room_for_both_browsers_is_unavailable(
     tmp_path: Path,
 ) -> None:
@@ -1589,6 +1665,24 @@ async def begin_remote(sessions: HostedProfileSessionService) -> UUID:
         PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
     )
     return view.id
+
+
+async def test_remote_ready_is_never_visible_when_sealing_fails(tmp_path: Path) -> None:
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony_id = await begin_remote(sessions)
+
+    async def fail_write(
+        identity: ProfileMaterialIdentity, material: bytes
+    ) -> ProfileMaterialMetadata:
+        del identity, material
+        raise OSError("unavailable storage")
+
+    sessions._store.write = fail_write  # type: ignore[method-assign]  # noqa: SLF001
+    with pytest.raises(OSError, match="unavailable storage"):
+        await sessions.refresh_authentication(ceremony_id, principal())
+    assert await ceremony_status(sessions, ceremony_id) is not BrowserAuthenticationStatus.READY
+    assert all(runtime.closed for runtime in runtimes)
 
 
 async def test_sweep_seals_a_remote_ceremony_ready_on_two_samples(tmp_path: Path) -> None:

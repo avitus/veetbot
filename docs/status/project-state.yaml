@@ -10,6 +10,18 @@ project:
   # ceiling's advance to Milestone 13 (268 gates) were recorded on 2026-09-28.
   current_milestone: 13
   active_milestone: 14
+  # ADR-0164 records the owner's instruction to implement the minimal-user-
+  # involvement browser tranche: automatic verification, session reuse,
+  # verified resumption, consolidated interruptions and guarded workflows.
+  # It preserves all existing authority boundaries and benchmark deferral.
+  # ADR-0163 records the owner's 2026-10-06 continuation: focused region reads,
+  # bounded text/control expansion, audited recovery reads, and owner sign-in
+  # interruptions. This stays within the browser extension; no milestone or
+  # release gate moves, and comparative benchmarks remain deferred.
+  # ADR-0156 records the owner's 2026-09-30 instruction to implement the
+  # self-hosted browser improvement program, independently within the
+  # Milestone 10 browser tranche. Work begins with real-browser verification
+  # and complete bounded observations; later packages remain pending.
   # ADR-0140 records the owner's non-milestone extension on 2026-09-28:
   # image.generate and video.generate use TensorScale behind a media port;
   # generated files reach Chat through the existing artifact attachment path;

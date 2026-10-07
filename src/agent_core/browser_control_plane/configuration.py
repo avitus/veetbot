@@ -8,12 +8,13 @@ import os
 import re
 import stat
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from agent_core.browser_control_plane.models import ProfileStoreIntegrityError
 from agent_core.browser_control_plane.ports import StaticProfileKeyring
+from agent_core.browser_control_plane.verification import BrowserVerificationCatalog
 from agent_core.domain.credentials import SecretValue
 
 _KEY_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
@@ -31,6 +32,7 @@ class ProfileServiceSettings:
     ceremony_base_url: str
     # ADR-0128 kill switch: a service environment variable, not a versioned knob.
     device_sign_in_enabled: bool
+    verification: BrowserVerificationCatalog = field(default_factory=BrowserVerificationCatalog)
 
 
 def load_profile_service_settings(
@@ -83,6 +85,19 @@ def load_profile_service_settings(
     device_switch = values.get("BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED")
     if device_switch not in {None, "true", "false"}:
         raise ProfileStoreIntegrityError("device sign-in switch is invalid")
+    verification = BrowserVerificationCatalog()
+    if "BROWSER_PROFILE_VERIFICATION_FILE" in values:
+        try:
+            verification = BrowserVerificationCatalog.model_validate_json(
+                _read_private_text(
+                    _absolute_path(values, "BROWSER_PROFILE_VERIFICATION_FILE"),
+                    "site verification",
+                    maximum_bytes=65536,
+                    multiline=True,
+                )
+            )
+        except ValueError as error:
+            raise ProfileStoreIntegrityError("site verification definitions are invalid") from error
     return ProfileServiceSettings(
         authorization=SecretValue(authorization),
         session_secret=SecretValue(session_secret),
@@ -92,6 +107,7 @@ def load_profile_service_settings(
         bind_port=bind_port,
         ceremony_base_url=ceremony_base_url.rstrip("/"),
         device_sign_in_enabled=device_switch != "false",
+        verification=verification,
     )
 
 
@@ -118,7 +134,13 @@ def _assert_owned_private(path: Path, *, directory: bool) -> os.stat_result:
     return metadata
 
 
-def _read_private_text(path: Path, label: str) -> str:
+def _read_private_text(
+    path: Path,
+    label: str,
+    *,
+    maximum_bytes: int = _MAXIMUM_SECRET_FILE_BYTES,
+    multiline: bool = False,
+) -> str:
     flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
     no_follow = getattr(os, "O_NOFOLLOW", 0)
     if no_follow == 0:
@@ -133,11 +155,11 @@ def _read_private_text(path: Path, label: str) -> str:
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_uid != os.geteuid()
             or metadata.st_mode & 0o077
-            or metadata.st_size > _MAXIMUM_SECRET_FILE_BYTES
+            or metadata.st_size > maximum_bytes
         ):
             raise ProfileStoreIntegrityError(f"{label} is invalid")
-        raw = os.read(descriptor, _MAXIMUM_SECRET_FILE_BYTES + 1)
-        if len(raw) > _MAXIMUM_SECRET_FILE_BYTES or len(raw) != metadata.st_size:
+        raw = os.read(descriptor, maximum_bytes + 1)
+        if len(raw) > maximum_bytes or len(raw) != metadata.st_size:
             raise ProfileStoreIntegrityError(f"{label} is invalid")
         text = raw.decode("ascii")
     except (OSError, UnicodeDecodeError) as exc:
@@ -145,7 +167,7 @@ def _read_private_text(path: Path, label: str) -> str:
     finally:
         os.close(descriptor)
     value = text.removesuffix("\n").removesuffix("\r")
-    if not value or "\n" in value or "\r" in value:
+    if not value or (not multiline and ("\n" in value or "\r" in value)):
         raise ProfileStoreIntegrityError(f"{label} is invalid")
     return value
 

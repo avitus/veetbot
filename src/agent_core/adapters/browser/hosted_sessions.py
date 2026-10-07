@@ -26,11 +26,14 @@ from agent_core.domain.browser import (
     BrowserDispatchConstraint,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserObservationFacts,
     BrowserProviderError,
     BrowserSnapshot,
     require_service_origin,
 )
+from agent_core.domain.browser_diagnostics import admit_browser_diagnostics, browser_phase_call
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile, BrowserImagePayload
 from agent_core.domain.credentials import CredentialRef
 from agent_core.ports.credentials import CredentialResolver
@@ -131,9 +134,11 @@ class HostedBrowserSessionControlPlane:
                     )
                 if response.status_code == 409:
                     body = await _bounded_body(response)
+                    _admit_diagnostics(body)
                     reason = _safe_reason_code(body) or "tool.browser.profile_unavailable"
                     raise BrowserProviderError(reason, retryable=False)
                 if response.status_code in {408, 425, 429} or response.status_code >= 500:
+                    _admit_diagnostics(await _bounded_body(response))
                     raise BrowserProviderError(
                         "tool.browser.provider_unavailable",
                         retryable=True,
@@ -154,7 +159,9 @@ class HostedBrowserSessionControlPlane:
                 retryable=True,
             ) from exc
         try:
-            return response_model.model_validate_json(body)
+            result = response_model.model_validate_json(body)
+            _admit_diagnostics(body)
+            return result
         except ValidationError as exc:
             raise BrowserProviderError(
                 "tool.browser.output_invalid",
@@ -200,6 +207,34 @@ class HostedBrowserSessionControlPlane:
         result = await self._post(
             "/v1/browser-sessions:observe",
             payload={"lease_ref": lease_ref},
+            response_model=BrowserSessionObservation,
+        )
+        assert isinstance(result, BrowserSessionObservation)
+        return result
+
+    async def expand(
+        self, lease_ref: str, request: BrowserObservationExpansion
+    ) -> BrowserSessionObservation:
+        result = await self._post(
+            "/v1/browser-sessions:observe",
+            payload={
+                "lease_ref": lease_ref,
+                "expansion": request.model_dump(mode="json", exclude_unset=True),
+            },
+            response_model=BrowserSessionObservation,
+        )
+        assert isinstance(result, BrowserSessionObservation)
+        return result
+
+    async def extract(
+        self, lease_ref: str, request: BrowserExtractionRequest
+    ) -> BrowserSessionObservation:
+        result = await self._post(
+            "/v1/browser-sessions:observe",
+            payload={
+                "lease_ref": lease_ref,
+                "extraction": request.model_dump(mode="json", exclude_none=True),
+            },
             response_model=BrowserSessionObservation,
         )
         assert isinstance(result, BrowserSessionObservation)
@@ -260,6 +295,7 @@ class HostedBrowserSessionControlPlane:
         assert isinstance(result, BrowserLease)
         return result
 
+    @browser_phase_call("cleanup", "orchestrator")
     async def close(self, lease_ref: str) -> None:
         digest = _private_ref_digest(lease_ref)
         await self._post(
@@ -359,3 +395,12 @@ def _safe_reason_code(body: bytes) -> str | None:
 
 def _private_ref_digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:24]
+
+
+def _admit_diagnostics(body: bytes) -> None:
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeError):
+        return
+    if isinstance(payload, dict) and "browser_diagnostics" in payload:
+        admit_browser_diagnostics(json.dumps(payload["browser_diagnostics"]))

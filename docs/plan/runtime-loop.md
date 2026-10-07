@@ -1827,3 +1827,49 @@ normal resumptions do not reset actual crash history. Exhausted queued rows
 fail visibly in the bounded maintenance sweep rather than remaining excluded
 from claims forever. See [ADR-0118](../adr/0118-crash-retries-exclude-durable-continuations.md)
 and the queue design's crash-allowance amendment.
+
+
+## Browser recovery continuations (ADR-0163)
+
+After recording a stale browser result, the runtime may queue one ordinary
+`browser.observe`, at most three times per run. It does not replay the failed
+operation. Recovery reads use the pinned roster, validation, policy, budgets,
+invocation persistence and cancellation path. A recovery read cannot recursively
+recover its own stale failure. Transport failures and uncertain writes stay failed.
+
+An authentication refusal, or a dispatched action's control-free sign-in
+interruption observation, can queue `conversation.ask_user` twice per run when
+that tool is available. Persist the completed browser result and the new pending
+question together before dispatch. The same checkpoint event carries an optional
+runtime-call receipt so later conversation history preserves the call/result pair.
+Existing user-input suspension releases the
+browser lease; resumption revalidates the question, never the completed browser
+operation. Profile generation and exact action-authority checks still apply.
+
+ADR-0164 adds a durable `browser_auth_wait` bound to the principal-owned selected
+profile, generation, outstanding question, start/expiry and a previously observed
+allowed resume URL. Its maximum wait is 15 minutes, bounded by the run deadline.
+The latest uniquely ordered ceremony must have begun during this wait and have a
+durable verified-ready record matching a ready newer profile generation. The
+application completes the suspended invocation, records a platform continuation,
+clears the question and requeues the same run atomically. It fabricates no owner
+message. A fresh lease navigates to the bound allowed URL before observing; a
+new lease's blank page is not a continuation point. Current tool/policy checks
+still govern that navigation and any later action. Old generation grants expire.
+
+A verified-status callback attempts continuation immediately. Maintenance scans
+32 principal-scoped waiting runs in UUID order with a rotating cursor at most
+once per 15 seconds; each pass has a 45-second ceiling and remote status refresh
+has a 35-second ceiling. Durable reconciliation covers missed callbacks and
+worker restarts. Cancelled, expired, superseded, revoked or exhausted runs do
+not resume. One unresolved authentication episode produces one question; the
+existing maximum of two sign-in questions per run remains. Native run resumption
+clears the question without creating a user transcript message.
+
+Reviewed browser workflows (ADR-0164) persist their definition hash, authority
+bindings, phase, queued call and verified step count. Every action first captures
+a fresh observation. Reclaimed calls reuse the ordinary invocation/effect ledger
+and checkpoint usage watermark; a completed action is neither resent nor charged
+twice. Uncertain outcomes permit observation only. Changed definitions or stale
+pending action generations cannot authorize a new effect. A bounded stop forces
+a tool-free report of the evidence and remaining gap.

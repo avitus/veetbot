@@ -13,7 +13,7 @@ test-contract: | test-static
 endif
 
 .PHONY: install format lint typecheck test check db-up migrate env-pull client-build \
-	test-static test-contract test-fast test-integration test-live \
+	test-static test-contract test-fast test-integration test-live browser-install test-browser \
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-ios \
 	test-deploy sandbox-image browser-image test-browser-image \
 	production-check \
@@ -21,6 +21,9 @@ endif
 
 install:
 	uv sync --all-groups
+
+browser-install:
+	uv run playwright install --with-deps chromium
 
 # Doppler holds the development secrets; .env is a generated cache of them.
 # Regenerate it after changing a secret, and in each new worktree. install
@@ -62,10 +65,14 @@ test-static:
 	uv run pytest -n $(STATIC_TEST_WORKERS) --dist loadscope -m static
 
 test-contract:
-	@uv run pytest -m "not static and not integration and not live"; \
+	@uv run pytest -m "not static and not integration and not live and not browser"; \
 	status=$$?; test $$status -eq 0 -o $$status -eq 5
 
 test-fast: test-static test-contract
+
+test-browser: browser-install
+	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 -m browser \
+		-p tests.browser_report --browser-report test-results/browser/baseline.json
 
 test-integration:
 	@uv run pytest -m "integration and not sandbox and not browser_image"; \
@@ -288,7 +295,7 @@ docs-check:
 citations-fix:
 	uv run $(PYTHON) scripts/check_citations.py --update
 
-check: test-fast test-website lint typecheck test-deploy docs-check
+check: test-fast test-browser test-website lint typecheck test-deploy docs-check
 
 db-up:
 	docker compose up -d postgres

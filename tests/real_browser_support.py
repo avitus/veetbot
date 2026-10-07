@@ -14,8 +14,8 @@ The browser checks the throwaway certificate as usual; only
 its origin guard, its CDP document guard and its egress routing all run.
 
 Every test that uses the harness calls ``require_real_browser()``. It skips
-when Playwright's Chromium is missing, as in CI, and fails instead when
-``VEETBOT_REQUIRE_REAL_BROWSER=1``, so a local run can prove the test ran.
+when Playwright's Chromium is missing in an optional test invocation, and fails
+instead when ``VEETBOT_REQUIRE_REAL_BROWSER=1`` in the required delivery lane.
 
 The browser image check imports this module inside the service image, which
 has no test dependencies, so only ``require_real_browser()`` imports pytest
@@ -61,6 +61,7 @@ CHROMIUM_OWN_TARGETS = frozenset(
     {"accounts.google.com:443"}
     | ({"redirector.gvt1.com:443"} if sys.platform.startswith("linux") else set())
 )
+OBSERVED_BROWSER_BUILDS: set[str] = set()
 
 
 @cache
@@ -93,6 +94,18 @@ def require_real_browser() -> None:
 
 class RealBrowserRuntime(PythonPlaywrightRuntime):
     """The production runtime, trusting the harness's throwaway certificate."""
+
+    async def start(
+        self,
+        proxy_url: str,
+        allowed_origins: tuple[str, ...],
+        *,
+        storage_state: dict[str, object] | None = None,
+        headed: bool = False,
+    ) -> None:
+        await super().start(proxy_url, allowed_origins, storage_state=storage_state, headed=headed)
+        assert self._browser is not None
+        OBSERVED_BROWSER_BUILDS.add(self._browser.version)
 
     def _context_options(self, storage_state: dict[str, object] | None) -> dict[str, Any]:
         return super()._context_options(storage_state) | {"ignore_https_errors": True}

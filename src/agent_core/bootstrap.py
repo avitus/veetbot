@@ -245,6 +245,7 @@ from agent_core.api.call_ingress import create_call_ingress
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.attachments import StoredAttachmentResolver
+from agent_core.application.browser_continuation import BrowserContinuationService
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
 from agent_core.application.browser_leases import (
     browser_run_state,
@@ -593,9 +594,17 @@ from agent_core.titles.profiles import TitleProfiles
 from agent_core.titles.titling import ConversationTitlePass, request_title_after_run
 from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
-from agent_core.tools.browser_act import BrowserActApprovalPresenter, BrowserActTool
-from agent_core.tools.browser_navigate import BrowserNavigateTool
-from agent_core.tools.browser_observe import BrowserObserveTool, LegacyBrowserObserveTool
+from agent_core.tools.browser_act import (
+    BrowserActApprovalPresenter,
+    BrowserActTool,
+    LegacyBrowserActTool,
+)
+from agent_core.tools.browser_navigate import BrowserNavigateTool, LegacyBrowserNavigateTool
+from agent_core.tools.browser_observe import (
+    BrowserObserveTool,
+    LegacyBrowserObserveTool,
+    PagedBrowserObserveTool,
+)
 from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
@@ -2598,11 +2607,13 @@ async def _compose(
     if web_fetch_provider is not None:
         registry.register(WebFetchTool(web_fetch_provider))
     if browser_provider is not None:
+        registry.register(LegacyBrowserNavigateTool(browser_provider))
         registry.register(BrowserNavigateTool(browser_provider))
         registry.register(LegacyBrowserObserveTool(browser_provider))
         registry.register(
-            BrowserObserveTool(browser_provider, inline_output_bytes=inline_output_bytes)
+            PagedBrowserObserveTool(browser_provider, inline_output_bytes=inline_output_bytes)
         )
+        registry.register(BrowserObserveTool(browser_provider))
         if isinstance(browser_provider, BrowserImageUploader):
             registry.register(
                 BrowserUploadTool(
@@ -2616,6 +2627,17 @@ async def _compose(
             )
         # ADR-0129: the approval card describes the action whatever the flag;
         # it offers a task grant only when task grants are enabled.
+        registry.register(
+            LegacyBrowserActTool(
+                browser_provider,
+                presenter=BrowserActApprovalPresenter(
+                    browser_provider,
+                    context_reader=_task_grant_context_reader(uow_factory, clock),
+                    enabled=_task_grants_composed(settings, browser_provider),
+                    now=clock.now,
+                ),
+            )
+        )
         registry.register(
             BrowserActTool(
                 browser_provider,
@@ -3796,8 +3818,19 @@ async def _compose(
             people_import_runner.mailbox_factory = discover_email
             people_service.imports.email_capture_available = True
 
+        from agent_core.domain.browser_workflows import BrowserWorkflowCatalog
+        from agent_core.runtime.browser_workflows import BrowserWorkflowRunner
+
+        browser_workflows = BrowserWorkflowRunner(
+            BrowserWorkflowCatalog.model_validate(
+                load_config_document(settings, "runtime/browser-workflows.yaml")
+            ),
+            policy_version=ruleset.policy_version,
+        )
+
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
             """Recognize persisted typed work even when its public feature is disabled."""
+            await browser_workflows(context)
             if people_import_runner is None:
                 async with uow_factory() as uow:
                     typed_session = await uow.sessions.get(
@@ -4037,12 +4070,17 @@ async def _compose(
                 )
 
         browser_uow_factory = cast(BrowserUnitOfWorkFactory, uow_factory)
+
+        async def continue_verified_browser(owner: Principal, profile_id: UUID) -> None:
+            await browser_continuation.resume_profile(owner, profile_id)
+
         browser_profile_service = BrowserProfileManagementService(
             uow_factory=browser_uow_factory,
             lifecycle=browser_profile_lifecycle,
             authentications=browser_authentications,
             clock=clock,
             ids=ids,
+            on_verified=continue_verified_browser,
         )
         browser_grant_service = BrowserGrantManagementService(
             uow_factory=browser_uow_factory,
@@ -4079,6 +4117,13 @@ async def _compose(
             resolve_open_question=working_state.resolve_question,
             trajectory_export_enabled=trajectory_export_enabled,
             live_events=live_events,
+        )
+        browser_continuation = BrowserContinuationService(
+            uow_factory=uow_factory,
+            clock=clock,
+            principal=principal,
+            runs=public_run_service,
+            profiles=browser_profile_service,
         )
 
         async def create_surface_session(
@@ -4460,6 +4505,7 @@ async def _compose(
                         if task_grants_enabled
                         else None
                     ),
+                    sweep_browser_continuations=browser_continuation.sweep,
                     memory_decay_interval_seconds=(
                         memory_profiles.formation.scheduled_interval_seconds
                     ),

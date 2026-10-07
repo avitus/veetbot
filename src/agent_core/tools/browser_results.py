@@ -6,9 +6,21 @@ import hashlib
 import json
 from typing import Any
 
-from agent_core.domain.browser import BrowserObservation, BrowserProviderError
+from agent_core.domain.browser import (
+    BrowserConditionResult,
+    BrowserObservation,
+    BrowserObservationCoverage,
+    BrowserObservationExpansion,
+    BrowserObservationFocus,
+    BrowserProviderError,
+    BrowserRegionCoverage,
+    BrowserSemanticRegion,
+    BrowserTextCoverage,
+)
+from agent_core.domain.browser_extraction import BrowserExtractionResult
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.tool_output import content_bytes
 from agent_core.domain.tools import ToolFailure, ToolFailureKind, ToolResult
 from agent_core.ports.browser import BrowserProvider
 
@@ -29,7 +41,10 @@ ELEMENT_SCHEMA: dict[str, Any] = {
     "required": ["ref", "role", "name", "disabled", "checked"],
     "additionalProperties": False,
 }
+_EXTRACTION_SCHEMA = BrowserExtractionResult.model_json_schema()
+_EXTRACTION_DEFINITIONS = _EXTRACTION_SCHEMA.pop("$defs")
 OUTPUT_SCHEMA: dict[str, Any] = {
+    "$defs": _EXTRACTION_DEFINITIONS,
     "type": "object",
     "properties": {
         "provider": {"type": "string"},
@@ -37,7 +52,30 @@ OUTPUT_SCHEMA: dict[str, Any] = {
         "title": {"type": ["string", "null"]},
         "revision": {"type": "string"},
         "text": {"type": "string"},
+        "text_coverage": BrowserTextCoverage.model_json_schema(),
+        "focus": BrowserObservationFocus.model_json_schema(),
+        "interruption": {"type": "string", "enum": ["needs_user"]},
+        "next_text": BrowserObservationExpansion.model_json_schema(),
         "elements": {"type": "array", "items": ELEMENT_SCHEMA, "maxItems": 256},
+        "coverage": BrowserObservationCoverage.model_json_schema(),
+        "readiness": {"type": "string", "enum": ["dom_quiet", "bound_expired"]},
+        "condition": BrowserConditionResult.model_json_schema(),
+        "regions": {
+            "type": "array",
+            "items": BrowserSemanticRegion.model_json_schema(),
+            "maxItems": 32,
+        },
+        "region_coverage": BrowserRegionCoverage.model_json_schema(),
+        "extraction": _EXTRACTION_SCHEMA,
+        "extraction_omitted": {"type": "boolean"},
+        "next_observe": {
+            "type": "object",
+            "properties": {
+                "after": {"type": "string"},
+                "cursor": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
     },
     "required": ["provider", "url", "title", "revision", "text", "elements"],
     "additionalProperties": False,
@@ -100,6 +138,10 @@ def _serialized_observation(structured: dict[str, Any]) -> str:
     return json.dumps(structured, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
+def _observation_bytes(structured: dict[str, Any]) -> int:
+    return len(content_bytes([TextPart(text=_serialized_observation(structured))]))
+
+
 def bounded_observation_payload(
     provider: BrowserProvider,
     observation: BrowserObservation,
@@ -118,28 +160,87 @@ def bounded_observation_payload(
         "text": "",
         "elements": elements,
     }
-    if len(_serialized_observation(base).encode("utf-8")) > maximum_bytes:
+    if observation.focus is not None:
+        base["focus"] = observation.focus.model_dump(mode="json")
+        if observation.focus.text_offset < observation.focus.text_total_bytes:
+            base["next_text"] = {
+                "cursor": f"{observation.focus.text_cursor}.{observation.focus.text_offset}"
+            }
+
+    original_text_bytes = len(observation.text.encode("utf-8"))
+    if observation.text_coverage is not None:
+        base["text_coverage"] = observation.text_coverage.model_dump(mode="json")
+        base["text_coverage"]["omitted_text_bytes"] += original_text_bytes
+    if observation.extraction is not None:
+        base["extraction"] = observation.extraction.model_dump(mode="json")
+    if observation.interruption is not None:
+        base["interruption"] = observation.interruption
+    if observation.readiness is not None:
+        base["readiness"] = observation.readiness
+    if observation.condition is not None:
+        base["condition"] = observation.condition.model_dump(mode="json")
+    if observation.region_coverage is not None:
+        base["regions"] = [region.model_dump(mode="json") for region in observation.regions]
+        base["region_coverage"] = observation.region_coverage.model_dump(mode="json")
+    if observation.coverage is not None:
+        base["coverage"] = observation.coverage.model_dump(mode="json")
+        if observation.coverage.next_cursor is not None:
+            base["next_observe"] = {"cursor": observation.coverage.next_cursor}
+    while base.get("regions") and _observation_bytes(base) > maximum_bytes:
+        base["regions"].pop()
+        base["region_coverage"]["omitted_regions"] += 1
+    if _observation_bytes(base) > maximum_bytes:
         low = 0
         high = len(elements)
         while low < high:
             candidate_count = (low + high + 1) // 2
             base["elements"] = elements[:candidate_count]
-            if len(_serialized_observation(base).encode("utf-8")) <= maximum_bytes:
+            if observation.coverage is not None:
+                base["next_observe"] = {"after": elements[candidate_count - 1]["ref"]}
+            if _observation_bytes(base) <= maximum_bytes:
                 low = candidate_count
             else:
                 high = candidate_count - 1
         base["elements"] = elements[:low]
+        if observation.coverage is not None:
+            if low:
+                base["next_observe"] = {"after": elements[low - 1]["ref"]}
+            else:
+                base.pop("next_observe", None)
+
+    while base.get("extraction", {}).get("rows") and _observation_bytes(base) > maximum_bytes:
+        base["extraction"]["rows"].pop()
+        base["extraction"]["omitted_rows"] += 1
+        base["extraction"]["byte_limit_reached"] = True
+    if "extraction" in base and _observation_bytes(base) > maximum_bytes:
+        base.pop("extraction")
+        base["extraction_omitted"] = True
 
     low = 0
-    high = min(len(observation.text.encode("utf-8")), MAX_TEXT_BYTES)
+    high = min(original_text_bytes, MAX_TEXT_BYTES)
+
+    def admit_text(candidate_bytes: int) -> None:
+        base["text"] = _bounded_utf8(observation.text, candidate_bytes)
+        if observation.focus is not None:
+            offset = observation.focus.text_offset + len(base["text"].encode("utf-8"))
+            base.pop("next_text", None)
+            if offset < observation.focus.text_total_bytes:
+                base["next_text"] = {"cursor": f"{observation.focus.text_cursor}.{offset}"}
+        if observation.text_coverage is not None:
+            base["text_coverage"]["omitted_text_bytes"] = (
+                observation.text_coverage.omitted_text_bytes
+                + original_text_bytes
+                - len(base["text"].encode("utf-8"))
+            )
+
     while low <= high:
         candidate_bytes = (low + high) // 2
-        base["text"] = _bounded_utf8(observation.text, candidate_bytes)
-        if len(_serialized_observation(base).encode("utf-8")) <= maximum_bytes:
+        admit_text(candidate_bytes)
+        if _observation_bytes(base) <= maximum_bytes:
             low = candidate_bytes + 1
         else:
             high = candidate_bytes - 1
-    base["text"] = _bounded_utf8(observation.text, max(0, high))
+    admit_text(max(0, high))
     return base, _serialized_observation(base)
 
 
@@ -172,7 +273,13 @@ def observation_evidence_key(structured: dict[str, Any]) -> str:
     reads it; it is never model-visible and never stored.
     """
 
-    evidence = {
+    condition = structured.get("condition")
+    if isinstance(condition, dict):
+        # A task predicate is the relevant progress signal. Timers, adverts,
+        # capture counts and unrelated controls cannot extend a failed wait.
+        canonical = json.dumps({"condition_status": condition.get("status")}, sort_keys=True)
+        return hashlib.sha256(canonical.encode()).hexdigest()[:32]
+    evidence: dict[str, Any] = {
         "url": structured.get("url"),
         "title": structured.get("title"),
         "text": structured.get("text"),
@@ -186,5 +293,30 @@ def observation_evidence_key(structured: dict[str, Any]) -> str:
             for element in structured.get("elements", ())
         ],
     }
+    coverage = structured.get("coverage")
+    if isinstance(coverage, dict):
+        evidence["candidate_offset"] = coverage.get("candidate_offset")
+    if structured.get("region_coverage") is not None:
+        evidence["regions"] = [
+            [region.get("kind"), region.get("text"), region.get("text_truncated")]
+            for region in structured.get("regions", ())
+        ]
+    extracted = structured.get("extraction")
+    if isinstance(extracted, dict):
+        evidence["extraction"] = {
+            key: value
+            for key, value in extracted.items()
+            if key not in {"revision", "source_ref", "rows"}
+        }
+        evidence["extraction"]["rows"] = [
+            {
+                "schema_valid": row["schema_valid"],
+                "cells": [
+                    {key: value for key, value in cell.items() if key != "ref"}
+                    for cell in row["cells"]
+                ],
+            }
+            for row in extracted.get("rows", ())
+        ]
     canonical = json.dumps(evidence, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]

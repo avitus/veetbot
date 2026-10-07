@@ -236,6 +236,7 @@ class MaintenanceWorker:
         sweep_people_duplicates: Callable[[], Awaitable[int]] | None = None,
         sweep_browser_task_grants: Callable[[], Awaitable[int]] | None = None,
         sweep_conversation_titles: Callable[[], Awaitable[int]] | None = None,
+        sweep_browser_continuations: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
@@ -266,6 +267,8 @@ class MaintenanceWorker:
         self._sweep_people_duplicates = sweep_people_duplicates
         self._sweep_browser_task_grants = sweep_browser_task_grants
         self._sweep_conversation_titles = sweep_conversation_titles
+        self._sweep_browser_continuations = sweep_browser_continuations
+        self._last_browser_continuation_sweep: datetime | None = None
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         if email_cache_sweep_interval_seconds <= 0:
@@ -352,6 +355,15 @@ class MaintenanceWorker:
                 await self._sweep_browser_task_grants()
             except Exception:
                 logger.exception("browser task grant expiry sweep failed")
+        if self._sweep_browser_continuations is not None and (
+            self._last_browser_continuation_sweep is None
+            or (self._clock.now() - self._last_browser_continuation_sweep).total_seconds() >= 15
+        ):
+            self._last_browser_continuation_sweep = self._clock.now()
+            try:
+                await self._sweep_browser_continuations()
+            except Exception:
+                logger.exception("browser continuation sweep failed")
         if self._sweep_exports is not None:
             try:
                 await self._sweep_exports()

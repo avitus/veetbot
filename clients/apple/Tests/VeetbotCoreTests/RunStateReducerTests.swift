@@ -6,6 +6,52 @@ import Testing
 @MainActor
 @Suite struct RunStateReducerTests {
     @Test
+    func testBrowserActivityKeepsUncertainOutcomeAheadOfAnInnerReadFailure() {
+        let reducer = RunStateReducer()
+        func phase(_ failure: String) -> JSONValue {
+            .object([
+                "phase": .string("postcondition"), "placement": .string("orchestrator"),
+                "outcome": .string("failed"), "failure": .string(failure),
+                "elapsed_ms": .number(10),
+            ])
+        }
+        reducer.reduce(SSEFrame(id: 1, event: "tool.call.uncertain", data: [
+            "call_id": .string("browser-step"), "name": .string("browser.act"),
+            "browser_diagnostics": .object([
+                "version": .number(1), "elapsed_ms": .number(1000), "truncated": .bool(false),
+                "phases": .array([phase("internal"), phase("outcome_unknown")]),
+            ]),
+        ]))
+        #expect(reducer.tools[0].status == .uncertain)
+        #expect(reducer.tools[0].browserDiagnostics?.summary ==
+            "1.0 s · The action may have happened; check before repeating it.")
+    }
+
+    @Test
+    func testBrowserDiagnosticsSurviveReplayAndRejectUnknownFailureText() {
+        let reducer = RunStateReducer()
+        func frame(_ failure: String, id: Int) -> SSEFrame {
+            SSEFrame(id: id, event: "tool.call.failed", data: [
+                "call_id": .string("browser-step"), "name": .string("browser.act"),
+                "browser_diagnostics": .object([
+                    "version": .number(1), "elapsed_ms": .number(1251), "truncated": .bool(false),
+                    "phases": .array([.object([
+                        "phase": .string("dispatch"), "placement": .string("runtime"),
+                        "outcome": .string("failed"), "failure": .string(failure),
+                        "elapsed_ms": .number(500),
+                    ])]),
+                ]),
+            ])
+        }
+        reducer.reduce(frame("outcome_unknown", id: 1))
+        #expect(reducer.tools[0].browserDiagnostics?.summary ==
+            "1.3 s · The action may have happened; check before repeating it.")
+        #expect(reducer.tools[0].status == .failed)
+        reducer.reduce(frame("secret-cookie-canary", id: 2))
+        #expect(reducer.tools[0].browserDiagnostics == nil)
+    }
+
+    @Test
     func testFailedRunPresentsThePublicMessageReasonAndLocation() {
         let reducer = RunStateReducer()
 
@@ -174,6 +220,26 @@ import Testing
         reducer.reduce(frame)
         reducer.reduce(frame)
         #expect(reducer.timeline.count == 1)
+    }
+
+    @Test
+    func verifiedResumeClearsSignInPromptWithoutInventingAUserMessage() {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        reducer.begin(runID: runID, status: .running)
+        reducer.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "question": .string("Sign in to continue automatically."),
+        ]))
+        #expect(reducer.clarifyingQuestion != nil)
+        let count = reducer.timeline.count
+        reducer.reduce(SSEFrame(id: 2, event: "run.resumed", data: [
+            "run_id": .string(runID.uuidString),
+        ]))
+        #expect(reducer.runStatus == .running)
+        #expect(reducer.clarifyingQuestion == nil)
+        #expect(reducer.timeline.count == count)
     }
 
     @Test

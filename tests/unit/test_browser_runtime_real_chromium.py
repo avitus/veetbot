@@ -58,7 +58,7 @@ async def browsing(
 def test_a_required_real_browser_fails_instead_of_skipping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CI skips these tests; a local run with the variable set proves they ran."""
+    """The required delivery lane fails explicitly when Chromium is unavailable."""
 
     monkeypatch.setattr(real_browser_support, "chromium_installed", lambda: False)
     monkeypatch.setenv(REQUIRE_REAL_BROWSER, "1")

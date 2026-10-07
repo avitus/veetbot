@@ -10,6 +10,42 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal, run, session
 
 
+async def waiting_runs_contract(factory: UnitOfWorkFactory) -> None:
+    owner = principal()
+    async with factory() as uow:
+        for index in range(4):
+            source = session().model_copy(
+                update={
+                    "id": UUID(int=7700 + index),
+                    "principal_id": "foreign" if index == 3 else owner.principal_id,
+                }
+            )
+            await uow.sessions.create(source)
+            await uow.runs.create(
+                run(status=RunStatus.WAITING_FOR_USER).model_copy(
+                    update={
+                        "id": UUID(int=7800 + index),
+                        "session_id": source.id,
+                    }
+                )
+            )
+    async with factory() as uow:
+        reader = getattr(uow.runs, "waiting_for_user", None)
+        assert reader is not None, "bounded principal-scoped waiting run scan is unavailable"
+        page = await reader(owner, limit=2)
+        assert [item.id for item in page] == [UUID(int=7800), UUID(int=7801)]
+        page = await reader(owner, limit=2, after_id=page[-1].id)
+        assert [item.id for item in page] == [UUID(int=7802)]
+        assert await reader(owner, limit=0) == []
+
+
+async def test_waiting_runs_are_bounded_scoped_and_paginated() -> None:
+    from tests.contract.support import memory_uow_factory
+
+    _clock, factory = await memory_uow_factory()
+    await waiting_runs_contract(factory)
+
+
 async def higher_priority_work_contract(factory: UnitOfWorkFactory, clock: FixedClock) -> None:
     """Only this owner's due queued/running work can defer an import."""
     cases = [
