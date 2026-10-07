@@ -218,6 +218,8 @@ class _TaskIO:
         self.render_context = render_context
         self.serial = 0
         self.imported: dict[UUID, EmailThread] = {}
+        # Provider threads whose retained window this slice's discovery waited on.
+        self.window_waiting: set[tuple[str, str]] = set()
         counts = context.checkpoint.working_state.setdefault("email_read_counts", {})
         if not isinstance(counts, dict):
             raise ConflictError("email read counters are malformed")
@@ -606,6 +608,7 @@ class _TaskIO:
             if fresh:
                 return {**progress, "complete": False, "content_limited": True}, False
             if not await self._window_analyzed(account_id, provider_id):
+                self.window_waiting.add((account_id, provider_id))
                 return {**progress, "complete": False}, True
             previous = [
                 {
@@ -959,11 +962,13 @@ class _TaskIO:
                 and prior.payload.get("source_fingerprint") == thread.source_fingerprint
             )
 
-        def assessment_order(thread: EmailThread) -> tuple[float, float, str]:
+        def assessment_order(thread: EmailThread) -> tuple[bool, float, float, str]:
             """Prioritize the oldest unfinished assessments with deterministic tie breaking."""
             prior = assessments.get(str(thread.id))
-            # A rejected result's single retry runs in the next slice.
+            # Discovery cannot pass a retained window until it is analyzed, so that
+            # window goes first. A rejected result's single retry runs in the next slice.
             return (
+                (thread.account_id, thread.provider_thread_id) not in self.window_waiting,
                 float("-inf")
                 if prior is None or prior.payload.get("retry_pending") is True
                 else prior.updated_at.timestamp(),

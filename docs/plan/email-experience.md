@@ -300,7 +300,9 @@ without bound. Completed passages can leave the cache while original message,
 body-offset and source-event receipts survive. Analysis walks 8,192-character
 passages; a rolled window remains explicitly partial and cannot authorize a
 draft that requires complete thread context. These thresholds bound one working
-window, not lifetime historical coverage.
+window, not lifetime historical coverage. Discovery waits on a full window's
+analysis, so a slice assesses a window its discovery waited on before any other
+pending conversation of the same Inbox or historical class, one passage per slice.
 
 Interactive Chat and reading/editing email take priority over historical work.
 Every run retains its existing finite limits. Add explicit aggregate automatic

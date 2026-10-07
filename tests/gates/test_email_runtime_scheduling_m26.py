@@ -114,6 +114,80 @@ async def test_profile_churn_cannot_starve_historical_body_assessment() -> None:
         assert historical_assessment is not None
 
 
+async def test_a_window_holding_discovery_is_assessed_before_older_pending_mail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discovery waits on a full window's analysis, so that analysis cannot queue.
+
+    Production, 2026-10-07: the work account's catch-up and history each waited
+    on a retained window of 70 to 91 passages. About 980 threads with older
+    assessments were ahead of each, and a slice assesses one passage of one
+    historical thread, so neither window could finish.
+    """
+    from agent_core.runtime import email_tasks
+
+    monkeypatch.setattr(email_tasks, "EMAIL_MESSAGE_WINDOW", 2)
+    base = await _current_mail_factory()
+    reads: list[int] = []
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            if name != "get_thread_page":
+                return await original(name, arguments)
+            index = int(arguments.get("page_token") or 0)
+            reads.append(index)
+            page = _page()
+            page["messages"][0].update(
+                id=f"m{index}", body=f"Passage {index}", internal_date=1789128000000 + index
+            )
+            page.update(
+                total_messages=5,
+                next_page_token=str(index + 1) if index < 4 else None,
+                complete=index == 4,
+            )
+            return MCPCallResult(content=(json.dumps(page),), structured=page)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(20)]),
+        mcp_client_factory=factory,
+    ) as app:
+        session = await app.sessions.create()
+        backlog = []
+        for index in range(24):
+            page = _page()
+            page["thread_id"] = f"backlog-{index}"
+            page["messages"][0].update(
+                thread_id=page["thread_id"],
+                id=f"backlog-message-{index}",
+                internal_date=1789128000000 - 1000 * (index + 1),
+            )
+            backlog.append(
+                await app.services.email.import_thread(app.principal, "default", page, session)
+            )
+        for _ in range(5):
+            operation = await app.services.email.submit_task(app.principal, kind="refresh")
+            current = await app.runs.get(operation.run_id)
+            assert current.status is RunStatus.COMPLETED, current.failure
+        async with app.uow_factory() as uow:
+            waiting = [
+                thread
+                for thread in backlog
+                if await uow.email.get(app.principal, "assessment", str(thread.id)) is None
+            ]
+        # Older mail is still waiting, yet the window was analyzed and discovery moved on.
+        assert waiting
+        assert reads == [0, 1, 2]
+
+
 async def test_deleting_cached_message_preserves_partial_thread_coverage() -> None:
     base = await _unchanged_mailbox()
 
