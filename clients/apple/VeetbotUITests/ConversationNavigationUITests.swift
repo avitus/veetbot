@@ -1850,6 +1850,84 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
     }
 
+    /// The owner reads the morning's scheduled briefing on an iPad after
+    /// triaging Email. Opening it from Chat must acknowledge it, so the
+    /// schedule's new-report dot clears while the report is on screen.
+    func testReadingAScheduledReportAfterEmailClearsItsNewReportDot() {
+        app.launchArguments.append("--ui-testing-unread-report")
+        app.launch()
+        let group = app.descendants(matching: .any)[
+            "sidebar.schedule.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(group.waitForExistence(timeout: 10))
+        waitForLabel(of: group, toContain: "New report", true)
+
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 5))
+        emailMode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["email.inbox"].waitForExistence(timeout: 5))
+        app.buttons["mode.chat"].tap()
+
+        let report = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A1"
+        ]
+        // The mode switch can still be settling, so expand until the row shows.
+        for _ in 0..<3 where !report.waitForExistence(timeout: 2) {
+            if group.value as? String != "Expanded" { group.tap() }
+        }
+        XCTAssertTrue(report.waitForExistence(timeout: 5))
+        report.tap()
+        XCTAssertTrue(app.staticTexts["Weekday briefing loaded"].waitForExistence(timeout: 10))
+
+        // A compact window stacks the report over the sidebar; reading it
+        // first leaves the acknowledgement time to land before going back.
+        if !group.isHittable { sleep(3) }
+        revealSidebarIfNeeded(for: group)
+        waitForLabel(of: group, toContain: "New report", false)
+    }
+
+    /// The owner opens the app from the background each morning; the report
+    /// read after returning must still be acknowledged.
+    func testReadingAScheduledReportAfterReturningToTheAppClearsItsNewReportDot() {
+        app.launchArguments.append("--ui-testing-unread-report")
+        app.launch()
+        let group = app.descendants(matching: .any)[
+            "sidebar.schedule.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(group.waitForExistence(timeout: 10))
+        waitForLabel(of: group, toContain: "New report", true)
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+
+        let report = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A1"
+        ]
+        for _ in 0..<3 where !report.waitForExistence(timeout: 2) {
+            if group.value as? String != "Expanded" { group.tap() }
+        }
+        XCTAssertTrue(report.waitForExistence(timeout: 5))
+        report.tap()
+        XCTAssertTrue(app.staticTexts["Weekday briefing loaded"].waitForExistence(timeout: 10))
+
+        if !group.isHittable { sleep(3) }
+        revealSidebarIfNeeded(for: group)
+        waitForLabel(of: group, toContain: "New report", false)
+    }
+
+    private func waitForLabel(
+        of element: XCUIElement, toContain text: String, _ contains: Bool, timeout: TimeInterval = 15
+    ) {
+        let predicate = NSPredicate(format: contains ? "label CONTAINS %@" : "NOT (label CONTAINS %@)", text)
+        let met = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [met], timeout: timeout), .completed,
+            "\(element.identifier) label is \"\(element.label)\""
+        )
+    }
+
     private func submitSlowChatMessage(fails: Bool = false, useReturn: Bool = false, holdSubmission: Bool = false) {
         app.launchArguments.append("--ui-testing-chat-slow-send")
         if fails { app.launchArguments.append("--ui-testing-chat-send-failure") }

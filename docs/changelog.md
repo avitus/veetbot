@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-07 — A scheduled report you read on iPad loses its dot
+
+- On iPhone and iPad, a scheduled report opened after a visit to Email, or after
+  the app came back from the background, kept its New report dot however long
+  you read it. The app judged whether you could see the conversation from the
+  screen as it was before the switch, so it never told the server you had read
+  the report. The dot now clears as soon as the report is loaded, and new
+  reports appear again without first switching modes.
+
 ## 2026-10-06 — A sign-in check that cannot finish says where it stopped
 
 - When Veetbot could not finish checking a sign-in you made on your device,

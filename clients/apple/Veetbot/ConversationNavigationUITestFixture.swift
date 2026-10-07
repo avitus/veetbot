@@ -43,6 +43,12 @@ enum ConversationNavigationUITestFixture {
     /// ADR-0154: one ready x.com sign-in, and a schedule update that binds the
     /// daily review only when the client echoes its definition correctly.
     static let scheduleWebsiteAccessLaunchArgument = "--ui-testing-schedule-website-access"
+    /// ADR-0143: a scheduled report this device has not read. Notification
+    /// sync reports it unread until a sync acknowledges it as seen.
+    static let unreadReportLaunchArgument = "--ui-testing-unread-report"
+    static let reportSessionID = "00000000-0000-0000-0000-0000000005A1"
+    /// The schedule's earlier occurrence, already read, so the two form a group.
+    static let previousReportSessionID = "00000000-0000-0000-0000-0000000005A3"
     static let newsSubscriptionID = "00000000-0000-0000-0000-000000000B01"
     static let dealsSubscriptionID = "00000000-0000-0000-0000-000000000B02"
     static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
@@ -82,6 +88,7 @@ enum ConversationNavigationUITestFixture {
         ConversationNavigationUITestURLProtocol.resetTaskGrant()
         ConversationNavigationUITestURLProtocol.resetSubscriptions()
         ConversationNavigationUITestURLProtocol.resetMemory()
+        ConversationNavigationUITestURLProtocol.resetReport()
         #if os(macOS)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools") {
             let availableAfter = Date().addingTimeInterval(
@@ -295,6 +302,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             subscriptionOperations = [:]
         }
     }
+    private static let reportLock = NSLock()
+    /// Set once a notification sync names the report among its seen runs.
+    private static var reportSeen = false
+    private static var unreadReportEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.unreadReportLaunchArgument)
+    }
+    static func resetReport() { reportLock.withLock { reportSeen = false } }
     private static let memoryLock = NSLock()
     /// Set by a governed delete, after which the browser's reads omit the belief.
     private static var memoryDeleted = false
@@ -568,9 +582,48 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/sessions"):
             statusCode = 200
             let folderSessions = Self.foldersEnabled ? "," + Self.folderJourneySessionsJSON : ""
+            let reportSession = Self.unreadReportEnabled
+                ? "," + Self.reportSessionJSON + "," + Self.previousReportSessionJSON : ""
             body = """
-                {"items":[\(Self.firstSessionJSON),\(Self.secondSessionJSON)\(folderSessions)],"next_cursor":null}
+                {"items":[\(Self.firstSessionJSON),\(Self.secondSessionJSON)\(folderSessions)\(reportSession)],"next_cursor":null}
                 """
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)") where Self.unreadReportEnabled:
+            statusCode = 200
+            body = Self.reportSessionJSON
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)/messages") where Self.unreadReportEnabled:
+            statusCode = 200
+            body = """
+                {"items":[
+                  {"sequence":2,"role":"user","content":[{"type":"text","text":"Prepare the weekday briefing."}]},
+                  {"sequence":9,"role":"assistant","content":[{"type":"text","text":"Weekday briefing loaded"}]}
+                ],"next_cursor":null}
+                """
+        case ("GET", "/v1/runs/\(Self.reportRunID)") where Self.unreadReportEnabled:
+            statusCode = 200
+            body = """
+                {"id":"\(Self.reportRunID)","session_id":"\(ConversationNavigationUITestFixture.reportSessionID)","parent_run_id":null,"status":"COMPLETED","step_count":2,"model_call_count":2,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":12,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-07T16:00:00Z","updated_at":"2026-10-07T16:01:46Z"}
+                """
+        case ("GET", "/v1/runs/\(Self.reportRunID)/events") where Self.unreadReportEnabled:
+            statusCode = 200
+            body = [
+                "id: 3\nevent: run.queued\ndata: {\"run_id\":\"\(Self.reportRunID)\"}\n\n",
+                "id: 6\nevent: run.started\ndata: {\"run_id\":\"\(Self.reportRunID)\"}\n\n",
+                "id: 8\nevent: assistant.message.completed\ndata: {\"run_id\":\"\(Self.reportRunID)\"}\n\n",
+                "id: 10\nevent: run.completed\ndata: {\"run_id\":\"\(Self.reportRunID)\"}\n\n",
+            ].joined()
+        case ("POST", "/v1/notifications/sync") where Self.unreadReportEnabled:
+            let values = requestJSON()
+            let seen = values["seen_run_ids"] as? [String] ?? []
+            let queried = values["query_run_ids"] as? [String] ?? []
+            let read = Self.reportLock.withLock {
+                if seen.contains(where: { $0.caseInsensitiveCompare(Self.reportRunID) == .orderedSame }) {
+                    Self.reportSeen = true
+                }
+                return Self.reportSeen
+            }
+            let unread = !read && queried.contains { $0.caseInsensitiveCompare(Self.reportRunID) == .orderedSame }
+            statusCode = 200
+            body = "{\"obsolete_notification_ids\":[],\"unread_run_ids\":[\(unread ? "\"\(Self.reportRunID)\"" : "")]}"
         case ("POST", "/v1/sessions"):
             statusCode = 201
             body = Self.firstSessionJSON
@@ -1147,6 +1200,19 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         frames.append("id: 23\nevent: assistant.message.completed\ndata: {\"message\":{\"kind\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Your answer is visible below the tool summary.\"}]}}\n\n")
         frames.append("id: 24\nevent: run.completed\ndata: {\"run_id\":\"\(runID)\"}\n\n")
         return frames.joined()
+    }
+
+    private static let reportRunID = "00000000-0000-0000-0000-0000000005A2"
+    private static var reportSessionJSON: String {
+        """
+            {"id":"\(ConversationNavigationUITestFixture.reportSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Weekday briefing","metadata":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)"},"created_at":"2026-10-07T16:00:00Z","updated_at":"2026-10-07T16:01:46Z","active_run_id":null,"last_run_id":"\(reportRunID)"}
+            """
+    }
+
+    private static var previousReportSessionJSON: String {
+        """
+            {"id":"\(ConversationNavigationUITestFixture.previousReportSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Weekday briefing","metadata":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)"},"created_at":"2026-10-06T16:00:00Z","updated_at":"2026-10-06T16:01:07Z","active_run_id":null,"last_run_id":"00000000-0000-0000-0000-0000000005A4"}
+            """
     }
 
     private static var firstSessionJSON: String {

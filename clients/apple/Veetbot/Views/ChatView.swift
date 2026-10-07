@@ -53,8 +53,10 @@ public struct ChatView: View {
         return covered
     }
 
-    private func updateNotificationVisibility() {
-        model.notificationTranscriptVisible = activeMode == .chat && !notificationCovered
+    /// An `onChange` action is the closure built for the previous body, so the
+    /// environment it reads still holds the old mode: callers pass the new value.
+    private func updateNotificationVisibility(mode: ClientMode? = nil, covered: Bool? = nil) {
+        model.notificationTranscriptVisible = (mode ?? activeMode) == .chat && !(covered ?? notificationCovered)
         if model.notificationTranscriptVisible { Task { await model.synchronizeNotifications() } }
     }
 
@@ -186,8 +188,8 @@ public struct ChatView: View {
         }
         .onAppear { updateNotificationVisibility() }
         .onDisappear { model.notificationTranscriptVisible = false }
-        .onChange(of: notificationCovered) { _ in updateNotificationVisibility() }
-        .onChange(of: activeMode) { _ in updateNotificationVisibility() }
+        .onChange(of: notificationCovered) { covered in updateNotificationVisibility(covered: covered) }
+        .onChange(of: activeMode) { mode in updateNotificationVisibility(mode: mode) }
         // While the conversation is on screen, its task permission is re-read
         // every 30 seconds; a revoke or sweep elsewhere reaches no run stream.
         .task(id: model.selectedSessionID) {
