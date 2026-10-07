@@ -99,6 +99,7 @@ nav:
       - Adaptive Memory Distillation: plan/adaptive-memory-distillation.md
       - Persona Surface: plan/persona-surface.md
       - Chat Thread Folders: plan/thread-folders.md
+      - Conversation Titles: plan/conversation-titles.md
       - Typed Judgment: plan/typed-judgment.md
       - Email Integration: plan/email-integration.md
       - Client Modes and Email Experience: plan/email-experience.md
@@ -110,6 +111,7 @@ nav:
   - Readiness: plan/readiness.md
   - Proposals:
       - Client Modes and Email Experience: email-mode-proposal.md
+      - Self-hosted Browser Automation: browser-automation-improvement-proposal.md
   - Implementation:
       - Architecture: architecture.md
       - Events: events.md
@@ -126,6 +128,15 @@ nav:
       - Corpus Audit Log: status/corpus-audit-log.md
   - Architecture Decisions:
       - Overview: adr/index.md
+      - ADR-0156 Self-hosted Browser Improvement Program: adr/0156-self-hosted-browser-improvement-program.md
+      - ADR-0157 Bounded Browser Observation Expansion: adr/0157-bounded-browser-observation-expansion.md
+      - ADR-0158 Content-free Browser Operation Diagnostics: adr/0158-browser-operation-diagnostics.md
+      - ADR-0159 Browser Readiness and Postconditions: adr/0159-browser-readiness-and-postconditions.md
+      - ADR-0160 Bounded Browser Page Structure: adr/0160-bounded-browser-page-structure.md
+      - ADR-0161 Deterministic Browser Extraction: adr/0161-deterministic-browser-extraction.md
+      - ADR-0162 Bounded Readable Browser Snapshots: adr/0162-bounded-readable-browser-snapshots.md
+      - ADR-0163 Focused Browser Observations and Recovery: adr/0163-focused-browser-observations-and-recovery.md
+      - ADR-0164 Browser Autonomy and Verified Resumption: adr/0164-browser-autonomy-and-verified-resumption.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
       - ADR-0002 Provider-neutral model protocol: adr/0002-provider-neutral-model-protocol.md
       - ADR-0003 Event log, projections, and checkpoints: adr/0003-event-log-and-projections.md
@@ -279,4 +290,6 @@ nav:
       - ADR-0151 Browser observation pages: adr/0151-browser-observation-pages.md
       - ADR-0152 Browser image traffic check: adr/0152-browser-image-traffic-check.md
       - ADR-0153 Scale VP API bridge: adr/0153-scale-vp-api-bridge.md
+      - ADR-0154 Native schedule website access: adr/0154-native-schedule-website-access.md
+      - ADR-0155 Generated conversation titles: adr/0155-generated-conversation-titles.md
   - Changelog: changelog.md

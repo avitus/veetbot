@@ -4,10 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_core.domain.browser import BrowserProviderError
+from pydantic import ValidationError
+
+from agent_core.domain.browser import (
+    BrowserCondition,
+    BrowserObservationExpansion,
+    BrowserProviderError,
+)
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
-from agent_core.ports.browser import BrowserProvider, bind_browser_execution
+from agent_core.ports.browser import (
+    BrowserProvider,
+    bind_browser_execution,
+    expand_browser_observation,
+    extract_browser_observation,
+)
+from agent_core.tools.browser_conditions import browser_condition_schema, check_browser_condition
 from agent_core.tools.browser_observation_pages import PAGE_SCHEMA, observation_page_result
 from agent_core.tools.browser_results import (
     OUTPUT_SCHEMA,
@@ -15,9 +28,46 @@ from agent_core.tools.browser_results import (
     observation_result,
 )
 
+_EXTRACTION_SCHEMA = BrowserExtractionRequest.model_json_schema()
+_EXTRACTION_DEFINITIONS = {"f": _EXTRACTION_SCHEMA.pop("$defs")["BrowserExtractionField"]}
+_EXTRACTION_SCHEMA["properties"]["fields"]["items"] = {"$ref": "#/$defs/f"}
+_EXTRACTION_SCHEMA.pop("title", None)
+_EXTRACTION_DEFINITIONS["f"].pop("title", None)
+_CONDITION_SCHEMA = browser_condition_schema()
+_CONDITION_DEFINITIONS = _CONDITION_SCHEMA.pop("$defs")
+
 INPUT_SCHEMA: dict[str, Any] = {
+    "$defs": {**_EXTRACTION_DEFINITIONS, **_CONDITION_DEFINITIONS},
     "type": "object",
-    "properties": {},
+    "properties": {
+        "wait_for": _CONDITION_SCHEMA,
+        "extract": _EXTRACTION_SCHEMA,
+        **{
+            name: {"type": "string", "minLength": minimum, "maxLength": 128}
+            for name, minimum in (
+                ("after", 1),
+                ("cursor", 32),
+                ("region_ref", 1),
+                ("expected_revision", 1),
+            )
+        },
+        "text_offset": {"type": "integer", "minimum": 0, "maximum": 262144},
+    },
+    "oneOf": [
+        {
+            "maxProperties": 1,
+            "not": {
+                "anyOf": [
+                    {"required": [key]}
+                    for key in ("region_ref", "expected_revision", "text_offset")
+                ]
+            },
+        },
+        {
+            "required": ["region_ref", "expected_revision"],
+            "properties": dict.fromkeys(("wait_for", "extract", "after", "cursor"), False),
+        },
+    ],
     "additionalProperties": False,
 }
 
@@ -33,7 +83,7 @@ class LegacyBrowserObserveTool:
             "already return the settled page, so observe only to refresh a page that changes "
             "on its own."
         ),
-        input_schema=INPUT_SCHEMA,
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         output_schema=OUTPUT_SCHEMA,
         side_effect=SideEffectClass.NETWORK_READ,
         risk=RiskLevel.LOW,
@@ -65,7 +115,7 @@ class LegacyBrowserObserveTool:
         return observation_result(self._provider, observation, self.spec.maximum_output_bytes)
 
 
-class BrowserObserveTool:
+class PagedBrowserObserveTool:
     """Expose complete observation pages that fit the configured inline output budget."""
 
     spec = LegacyBrowserObserveTool.spec.model_copy(
@@ -121,3 +171,69 @@ class BrowserObserveTool:
             element_offset=arguments.get("element_offset", 0),
             text_offset=arguments.get("text_offset", 0),
         )
+
+
+class BrowserObserveTool:
+    spec = ToolSpec(
+        name="browser.observe",
+        version="1.7.0",
+        description=(
+            "Read modes: {}; next_observe "
+            "after/cursor; region_ref+expected_revision with text_offset; extract "
+            "table/list/form; wait_for role/name or evidence. Evidence: text=complete line, "
+            "region=kind/text, location=exact url, row=collection/index/typed fields/value. "
+            "timeout_ms: 2000 default, 5000 max. failure_evidence: text/region/location. Form "
+            "columns: label/role/disabled/checked/required, never values. Checks are window-scoped."
+        ),
+        input_schema=INPUT_SCHEMA,
+        output_schema=OUTPUT_SCHEMA,
+        side_effect=SideEffectClass.NETWORK_READ,
+        risk=RiskLevel.LOW,
+        idempotency=IdempotencyClass.READ_ONLY,
+        timeout_seconds=30,
+        maximum_output_bytes=512 * 1024,
+        allow_parallel=False,
+        target_kind="browser_provider",
+        output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+    )
+
+    def __init__(self, provider: BrowserProvider) -> None:
+        self._provider = provider
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        try:
+            condition = None
+            expansion = None
+            extraction = None
+            if "extract" in arguments:
+                if set(arguments) != {"extract"}:
+                    raise ValueError("extraction cannot be combined with another mode")
+                extraction = BrowserExtractionRequest.model_validate(arguments["extract"])
+            elif "wait_for" in arguments:
+                if set(arguments) != {"wait_for"}:
+                    raise ValueError("wait and expansion cannot be combined")
+                condition = BrowserCondition.model_validate(arguments["wait_for"])
+            elif arguments:
+                expansion = BrowserObservationExpansion.model_validate(arguments)
+        except (ValidationError, ValueError):
+            return browser_failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "tool.arguments_invalid",
+                retryable=False,
+            )
+        try:
+            await bind_browser_execution(self._provider, context)
+            observation = (
+                await extract_browser_observation(self._provider, extraction)
+                if extraction is not None
+                else (
+                    await self._provider.observe()
+                    if expansion is None
+                    else await expand_browser_observation(self._provider, expansion)
+                )
+            )
+            if condition is not None:
+                observation = await check_browser_condition(self._provider, observation, condition)
+        except BrowserProviderError as error:
+            return browser_failure(error)
+        return observation_result(self._provider, observation, self.spec.maximum_output_bytes)

@@ -74,7 +74,9 @@ from agent_core.runtime.loop import (
     ToolDispatch,
     _record_open_question,
     apply_tool_evidence,
+    bind_browser_auth_question,
     checkpoint,
+    recover_browser_failure,
     run_loop,
 )
 from agent_core.runtime.scheduled_browser import (
@@ -882,6 +884,7 @@ class RunExecutor:
                     self._add_open_question,
                 )
                 context.checkpoint.working_state["outstanding_question_id"] = str(exc.question_id)
+                bind_browser_auth_question(context.checkpoint, exc.question_id)
                 async with context.uow_factory() as uow:
                     await uow.events.append(
                         NewEvent(
@@ -1066,6 +1069,7 @@ class RunExecutor:
         # ADR-0130: a batch completed after an approval restarts counts too.
         apply_tool_evidence(context.checkpoint.working_state, calls)
         context.checkpoint.pending_tool_calls = []
+        await recover_browser_failure(context, step, calls, results)
         await checkpoint(context, "tool_recovered")
 
     def _internal_failure(self, run: Run, exc: Exception) -> RunOutcome:

@@ -1605,6 +1605,301 @@ import Testing
         }
     }
 
+    @Test
+    func testBindingWebsiteAccessEchoesTheServerDefinitionWithOnlyTheBindingChanged() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000713"))
+        let profileID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000007AA"))
+        let lock = NSLock()
+        var requests: [(method: String, path: String, body: [String: Any]?)] = []
+        StubURLProtocol.handler = { request in
+            let body = request.httpMethod == "PATCH" ? try self.requestJSONObject(request) : nil
+            lock.withLock {
+                requests.append((request.httpMethod ?? "", request.url?.path ?? "", body))
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            if request.httpMethod == "GET" {
+                return (
+                    response,
+                    Data(
+                        self.websiteScheduleJSON(
+                            id: scheduleID, currentRevision: 3, scopes: #"["web.search"]"#,
+                            profile: "null"
+                        ).utf8)
+                )
+            }
+            return (
+                response,
+                Data(
+                    self.websiteScheduleJSON(
+                        id: scheduleID, currentRevision: 4,
+                        scopes: #"["web.search","browser.profile.read"]"#,
+                        profile: #""00000000-0000-0000-0000-0000000007aa""#
+                    ).utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        let record = try await client.setScheduleWebsiteAccess(
+            scheduleID, browserProfileID: profileID
+        )
+
+        let sent = lock.withLock { requests }
+        #expect(sent.map(\.method) == ["GET", "PATCH"])
+        #expect(sent.allSatisfy { $0.path == "/v1/schedules/\(scheduleID.uuidString)" })
+        let expected: [String: Any] = [
+            "expected_revision": 3,
+            "definition": [
+                "title": "Morning X trends summary",
+                "instruction": "Summarize my X home feed.",
+                "agent_id": "00000000-0000-0000-0000-000000000714",
+                "agent_version": "3",
+                "policy_profile": "default",
+                "requested_scopes": ["web.search", "browser.profile.read"],
+                "browser_profile_id": "00000000-0000-0000-0000-0000000007aa",
+                "limits": [
+                    "max_steps": 12, "max_model_calls": 10, "max_tool_calls": 20,
+                    "max_input_tokens": NSNull(), "max_output_tokens": NSNull(),
+                    "max_cost": "5", "deadline_at": NSNull(),
+                    "synthesis_reserve_steps": 1, "synthesis_reserve_model_calls": 1,
+                    "synthesis_reserve_cost": "0.5",
+                ],
+                "run_timeout_seconds": 300,
+                "cadence": [
+                    "kind": "DAILY", "local_time": "07:00:00", "timezone": "America/Los_Angeles",
+                ],
+                "misfire_grace_seconds": 3600,
+                "max_consecutive_failures": 2,
+                "future_setting": ["mode": "keep"],
+            ] as [String: Any],
+        ]
+        #expect((sent.last?.body ?? [:]) as NSDictionary == expected as NSDictionary)
+        #expect(record.schedule.currentRevision == 4)
+        #expect(record.revision.browserProfileID == profileID)
+    }
+
+    @Test
+    func testUnbindingWebsiteAccessClearsTheProfileAndDropsTheReadScope() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000715"))
+        let lock = NSLock()
+        var patches: [[String: Any]] = []
+        StubURLProtocol.handler = { request in
+            if request.httpMethod == "PATCH" {
+                let body = try self.requestJSONObject(request)
+                lock.withLock { patches.append(body) }
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            let bound = request.httpMethod == "GET"
+            return (
+                response,
+                Data(
+                    self.websiteScheduleJSON(
+                        id: scheduleID, currentRevision: bound ? 5 : 6,
+                        scopes: bound ? #"["browser.profile.read","web.search"]"# : #"["web.search"]"#,
+                        profile: bound ? #""00000000-0000-0000-0000-0000000007aa""# : "null"
+                    ).utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        let record = try await client.setScheduleWebsiteAccess(scheduleID, browserProfileID: nil)
+
+        let definition = try #require(
+            lock.withLock { patches.first }?["definition"] as? [String: Any]
+        )
+        #expect(definition["requested_scopes"] as? [String] == ["web.search"])
+        #expect(definition["browser_profile_id"] is NSNull)
+        #expect(lock.withLock { patches.first }?["expected_revision"] as? Int == 5)
+        #expect(record.revision.browserProfileID == nil)
+    }
+
+    @Test
+    func testAStaleRevisionIsReadAgainAndTheBindingRetriedOnce() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000716"))
+        let profileID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000007AA"))
+        let lock = NSLock()
+        var calls: [String] = []
+        var patches: [[String: Any]] = []
+        StubURLProtocol.handler = { request in
+            let method = request.httpMethod ?? ""
+            let count = lock.withLock {
+                calls.append(method)
+                return calls.filter { $0 == method }.count
+            }
+            if method == "PATCH" {
+                let body = try self.requestJSONObject(request)
+                lock.withLock { patches.append(body) }
+                if count == 1 {
+                    return try self.jsonResponse(
+                        request, statusCode: 409,
+                        body: #"{"error":{"code":"conflict","message":"schedule revision changed","details":{"reason":"schedule.revision_conflict","current_revision":4},"request_id":"stale"}}"#
+                    )
+                }
+                return try self.jsonResponse(
+                    request, statusCode: 200,
+                    body: self.websiteScheduleJSON(
+                        id: scheduleID, currentRevision: 5,
+                        scopes: #"["web.search","browser.profile.read"]"#,
+                        profile: #""00000000-0000-0000-0000-0000000007aa""#,
+                        title: "Renamed briefing"
+                    )
+                )
+            }
+            return try self.jsonResponse(
+                request, statusCode: 200,
+                body: self.websiteScheduleJSON(
+                    id: scheduleID, currentRevision: count == 1 ? 3 : 4,
+                    scopes: #"["web.search"]"#, profile: "null",
+                    title: count == 1 ? "Morning X trends summary" : "Renamed briefing"
+                )
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        let record = try await client.setScheduleWebsiteAccess(
+            scheduleID, browserProfileID: profileID
+        )
+
+        #expect(lock.withLock { calls } == ["GET", "PATCH", "GET", "PATCH"])
+        let retried = try #require(lock.withLock { patches.last })
+        #expect(retried["expected_revision"] as? Int == 4)
+        #expect((retried["definition"] as? [String: Any])?["title"] as? String == "Renamed briefing")
+        #expect(record.schedule.currentRevision == 5)
+    }
+
+    @Test
+    func testASecondStaleRevisionIsReportedWithoutAThirdWrite() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000717"))
+        let lock = NSLock()
+        var calls: [String] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { calls.append(request.httpMethod ?? "") }
+            if request.httpMethod == "PATCH" {
+                return try self.jsonResponse(
+                    request, statusCode: 409,
+                    body: #"{"error":{"code":"conflict","message":"schedule revision changed","details":{"reason":"schedule.revision_conflict","current_revision":9},"request_id":"stale"}}"#
+                )
+            }
+            return try self.jsonResponse(
+                request, statusCode: 200,
+                body: self.websiteScheduleJSON(
+                    id: scheduleID, currentRevision: 3, scopes: "[]", profile: "null"
+                )
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            _ = try await client.setScheduleWebsiteAccess(scheduleID, browserProfileID: UUID())
+            Issue.record("expected the second conflict to be reported")
+        } catch HTTPTransportError.api(let apiError) {
+            #expect(apiError.statusCode == 409)
+            #expect(apiError.details.reason == "schedule.revision_conflict")
+        }
+        #expect(lock.withLock { calls } == ["GET", "PATCH", "GET", "PATCH"])
+    }
+
+    @Test
+    func testARejectedBindingIsReportedWithoutRetrying() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000718"))
+        let lock = NSLock()
+        var calls: [String] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { calls.append(request.httpMethod ?? "") }
+            if request.httpMethod == "PATCH" {
+                return try self.jsonResponse(
+                    request, statusCode: 422,
+                    body: #"{"error":{"code":"schedule_validation_error","message":"browser profile is not ready","details":{"reason":"schedule.browser_profile_unavailable"},"request_id":"rejected"}}"#
+                )
+            }
+            return try self.jsonResponse(
+                request, statusCode: 200,
+                body: self.websiteScheduleJSON(
+                    id: scheduleID, currentRevision: 3, scopes: "[]", profile: "null"
+                )
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            _ = try await client.setScheduleWebsiteAccess(scheduleID, browserProfileID: UUID())
+            Issue.record("expected the rejected binding to be reported")
+        } catch HTTPTransportError.api(let apiError) {
+            #expect(apiError.statusCode == 422)
+            #expect(apiError.details.reason == "schedule.browser_profile_unavailable")
+        }
+        #expect(lock.withLock { calls } == ["GET", "PATCH"])
+    }
+
+    @Test
+    func testAScheduleAlreadyBoundToTheChosenSignInIsNotRewritten() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000719"))
+        let profileID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000007AA"))
+        let lock = NSLock()
+        var calls: [String] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { calls.append(request.httpMethod ?? "") }
+            return try self.jsonResponse(
+                request, statusCode: 200,
+                body: self.websiteScheduleJSON(
+                    id: scheduleID, currentRevision: 7,
+                    scopes: #"["browser.profile.read"]"#,
+                    profile: #""00000000-0000-0000-0000-0000000007aa""#
+                )
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        let record = try await client.setScheduleWebsiteAccess(
+            scheduleID, browserProfileID: profileID
+        )
+
+        #expect(lock.withLock { calls } == ["GET"])
+        #expect(record.schedule.currentRevision == 7)
+        #expect(record.revision.browserProfileID == profileID)
+    }
+
+    private func jsonResponse(
+        _ request: URLRequest,
+        statusCode: Int,
+        body: String
+    ) throws -> (HTTPURLResponse, Data) {
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!, statusCode: statusCode, httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )
+        )
+        return (response, Data(body.utf8))
+    }
+
+    /// A point read whose revision also carries a definition field this client
+    /// does not model, which an update must send back unchanged.
+    private func websiteScheduleJSON(
+        id: UUID,
+        currentRevision: Int,
+        scopes: String,
+        profile: String,
+        title: String = "Morning X trends summary"
+    ) -> String {
+        #"{"schedule":{"id":"\#(id.uuidString.lowercased())","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":\#(currentRevision),"next_fire_at":"2026-10-07T14:00:00Z","consecutive_failures":0,"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-06T17:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString.lowercased())","revision":\#(currentRevision),"title":"\#(title)","instruction":"Summarize my X home feed.","agent_id":"00000000-0000-0000-0000-000000000714","agent_version":"3","policy_profile":"default","requested_scopes":\#(scopes),"browser_profile_id":\#(profile),"limits":{"max_steps":12,"max_model_calls":10,"max_tool_calls":20,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"5","deadline_at":null,"synthesis_reserve_steps":1,"synthesis_reserve_model_calls":1,"synthesis_reserve_cost":"0.5"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"07:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":2,"future_setting":{"mode":"keep"},"created_by_principal_id":"principal","created_at":"2026-10-06T17:00:00Z"},"replayed":false}"#
+    }
+
     private func scheduleDetailJSON(id: UUID) -> String {
         #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":1,"title":"Daily review","instruction":"Review the full schedule instruction.","agent_id":"00000000-0000-0000-0000-000000000712","agent_version":"1","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}"#
     }

@@ -391,6 +391,8 @@ The full-definition HTTP update can bind or unbind future occurrences with the
 ordinary expected-revision check. Content-only `schedule.update` preserves the
 binding. `schedule.create` still grants no scopes and binds no profile; the
 model cannot choose one. Browser actions retain their existing approval rules.
+The native schedule detail offers that update as its Website access picker
+(ADR-0154).
 
 ## Sessions, context, and results
 
@@ -588,6 +590,20 @@ timestamps. If the schedule is removed or becomes inaccessible between the
 list and point reads, the detail shows the ordinary not-found failure and a
 retry affordance; it does not reinterpret the result as version skew.
 
+Detail also shows the schedule's website access, the browser's only write
+(ADR-0154). For an ACTIVE or PAUSED schedule a picker offers None and each of
+the owner's `ready` browser profiles, labelled by the host names of its
+allowed origins; a bound profile that is not ready, or is no longer listed,
+stays visible with its state. A choice performs a fresh point read, then the
+full-definition update with that read's `current_revision` and the revision's
+own fields less `schedule_id`, `revision`, `timezone`,
+`created_by_principal_id`, and `created_at`. Only `browser_profile_id` and the
+`browser.profile.read` requested scope change, and fields the client does not
+model are sent back unchanged. A revision conflict is read again and retried
+once; any other refusal leaves the server's binding displayed with the reason.
+Terminal and unknown states show the binding read-only. Overlapping sign-in
+loads apply results or failures only for the newest request.
+
 The client models state and cadence kind as raw strings with typed known-case
 accessors. Any unknown value returned by a compatible server renders by
 replacing separators with spaces and capitalizing the result. Known cadence
@@ -611,9 +627,11 @@ the already loaded rows with an inline retry. A 404 or 405 from the list route
 means schedule browsing is unavailable on that server. The same statuses from
 a point read retain their ordinary HTTP meaning.
 
-The surface is read-only. It has no create, update, pause, resume, cancel,
-delete, occurrence, or run-history control and therefore needs only the
-existing `schedule.read` scope. Swift transport, model, view-model, structure,
+The surface is read-only except for website-access binding on ACTIVE or PAUSED
+schedules (ADR-0154). Reading needs `schedule.read`, listing sign-ins needs
+`browser.profile.read`, and saving the binding needs `schedule.write` plus
+`browser.profile.read` when bound. It has no other create, update, pause, resume,
+cancel, delete, occurrence, or run-history control. Swift transport, model, view-model, structure,
 and in-process iOS navigation tests are the acceptance evidence under
 ADR-0049's native verification contract. The current/history extension adds no
 route or scope and does not alter the historical milestone gate counts.

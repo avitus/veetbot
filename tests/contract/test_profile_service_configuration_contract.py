@@ -62,6 +62,15 @@ def test_profile_service_loads_only_private_file_mounted_material(tmp_path: Path
     assert settings.ceremony_base_url == "https://login.example.test"
 
 
+def test_site_verification_refuses_executable_definitions(tmp_path: Path) -> None:
+    values = environment(tmp_path)
+    definition = tmp_path / "verification.json"
+    private_file(definition, '{"sites":[{"script":"return true"}]}')
+    values["BROWSER_PROFILE_VERIFICATION_FILE"] = str(definition)
+    with pytest.raises(ProfileStoreIntegrityError):
+        load_profile_service_settings(values)
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [(None, True), ("true", True), ("false", False)],

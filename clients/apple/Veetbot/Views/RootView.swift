@@ -105,13 +105,13 @@ public struct RootView: View {
         }
         .onChange(of: model.isReconfiguring) { _ in updateEmailActivity() }
         .onChange(of: model.errorMessage) { _ in updateEmailActivity() }
-        .onChange(of: scenePhase) { _ in updateEmailActivity() }
+        .onChange(of: scenePhase) { phase in updateEmailActivity(scenePhase: phase) }
         .onAppear { updateEmailActivity() }
         .onChange(of: showingGlobalMemory) { _ in updateEmailActivity() }
         .onChange(of: showingGlobalPersona) { _ in updateEmailActivity() }
         .onChange(of: showingGlobalSchedules) { _ in updateEmailActivity() }
         #if os(macOS)
-        .onChange(of: controlActiveState) { _ in updateEmailActivity() }
+        .onChange(of: controlActiveState) { state in updateEmailActivity(keyWindow: state == .key) }
         #else
         .onChange(of: showingSettings) { _ in updateEmailActivity() }
         #endif
@@ -266,6 +266,7 @@ public struct RootView: View {
                     }
                     .accessibilityLabel("Schedules")
                     .accessibilityIdentifier("sidebar.schedules")
+                    ChatToolbarActions(model: model)
                 } else {
                     // The entry exists only where an account advertises support.
                     if coordinator.email.unsubscribeAvailable {
@@ -295,19 +296,22 @@ public struct RootView: View {
         #endif
     }
 
-    private func updateEmailActivity() {
-        model.notificationSyncActive = model.isConfigured && scenePhase == .active
-        var visible = model.isConfigured && !model.isReconfiguring && scenePhase == .active
+    /// An `onChange` action is the closure built for the previous body, so the
+    /// environment it reads still holds the old phase: callers pass the new value.
+    private func updateEmailActivity(scenePhase newPhase: ScenePhase? = nil, keyWindow: Bool? = nil) {
+        let active = (newPhase ?? scenePhase) == .active
+        model.notificationSyncActive = model.isConfigured && active
+        var visible = model.isConfigured && !model.isReconfiguring && active
             && model.errorMessage == nil && coordinator.mode == .chat
             && !showingGlobalMemory && !showingGlobalPersona && !showingGlobalSchedules
         #if os(macOS)
-        visible = visible && controlActiveState == .key
+        visible = visible && (keyWindow ?? (controlActiveState == .key))
         #else
         visible = visible && !showingSettings
         #endif
         model.notificationAttentionEnabled = visible
         if visible { Task { await model.synchronizeNotifications() } }
-        coordinator.email.setActive(model.isConfigured && !model.isReconfiguring && scenePhase == .active && coordinator.mode == .email)
+        coordinator.email.setActive(model.isConfigured && !model.isReconfiguring && active && coordinator.mode == .email)
     }
 
     @ViewBuilder

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -17,6 +17,7 @@ from agent_core.domain.browser import (
     BrowserFieldKind,
     BrowserLabelSource,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserObservationFacts,
     BrowserProviderError,
 )
@@ -387,6 +388,18 @@ async def test_model_visible_observation_excludes_facts() -> None:
         "revision",
         "text",
         "elements",
+        "coverage",
+        "next_observe",
+        "readiness",
+        "condition",
+        "regions",
+        "region_coverage",
+        "text_coverage",
+        "extraction",
+        "extraction_omitted",
+        "focus",
+        "next_text",
+        "interruption",
     }
 
 
@@ -469,33 +482,277 @@ async def test_a_provider_that_cannot_recheck_refuses_a_constrained_act() -> Non
 
 def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
     """ADR-0130 decision 6: navigate and act return the settled page, so the
-    model acts on it directly instead of observing again. Versions stay."""
+    model acts on it directly instead of observing again. ADR-0157 versions
+    the additive expansion contract."""
 
     provider = FakeBrowserProvider()
 
     assert BrowserNavigateTool(provider).spec.description == (
-        "Open one page in this chat's website profile and return it once it settles. "
-        "Use a full https:// URL on an origin listed as browser_origins in the runtime "
-        "metadata."
+        "Open an https:// URL within runtime browser_origins; returns the settled page and fresh "
+        "refs. After navigation_cancelled, observe the existing page."
     )
     assert LegacyBrowserObserveTool(provider).spec.description == (
         "Read the current page of this chat's website profile again. navigate and act "
         "already return the settled page, so observe only to refresh a page that changes "
         "on its own."
     )
+    assert BrowserObserveTool(provider).spec.description == (
+        "Read modes: {}; next_observe after/cursor; "
+        "region_ref+expected_revision with text_offset; extract table/list/form; wait_for "
+        "role/name or evidence. Evidence: text=complete line, region=kind/text, "
+        "location=exact url, row=collection/index/typed fields/value. timeout_ms: 2000 "
+        "default, 5000 max. failure_evidence: text/region/location. Form columns: "
+        "label/role/disabled/checked/required, never values. Checks are window-scoped."
+    )
     assert BrowserActTool(provider).spec.description == (
-        "Perform one action, subject to approval, on an element of the latest page "
-        "revision. The result is the page after the action settles, with a new revision "
-        "and element refs; act on it directly without observing first. A click refused "
-        "with element_not_found may be covered by an overlay: observe again and inspect "
-        "the current controls before choosing an approved recovery action. Never repeat "
-        "a write whose outcome is uncertain."
+        "Act once with approval and current revision/ref; returns settled page and fresh refs. "
+        "Optional postcondition uses observe wait_for. On element_not_found, refresh for "
+        "overlays. Never repeat an uncertain write; observed success is not causal proof."
     )
     assert {
         tool.spec.version
         for tool in (
             BrowserNavigateTool(provider),
-            LegacyBrowserObserveTool(provider),
+            BrowserObserveTool(provider),
             BrowserActTool(provider),
         )
-    } == {"1.0.0"}
+    } == {"1.7.0"}
+
+
+async def test_observe_continuation_uses_the_bound_provider_without_refreshing() -> None:
+    class ExpandingProvider(FakeBrowserProvider):
+        async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+            assert self.execution_contexts
+            assert request.after == "element-1"
+            return self._observation("https://example.org/account").model_copy(
+                update={"revision": "expanded-revision"}
+            )
+
+    provider = ExpandingProvider()
+    result = await BrowserObserveTool(provider).execute({"after": "element-1"}, tool_context())
+    assert result.ok
+    assert result.structured is not None
+    assert result.structured["revision"] == "expanded-revision"
+    assert provider.observation_count == 0
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"after": "a", "cursor": "c" * 32},
+        {"after": ""},
+        {"cursor": "short"},
+        {"after": None},
+        {"after": "a", "cursor": None},
+        {"after": 1},
+        {"offset": 256},
+        {"selector": "button"},
+    ],
+)
+async def test_observe_rejects_malformed_expansion_before_binding(
+    arguments: dict[str, Any],
+) -> None:
+    provider = FakeBrowserProvider()
+    result = await BrowserObserveTool(provider).execute(arguments, tool_context())
+    assert result.failure is not None and result.failure.reason_code == "tool.arguments_invalid"
+    assert not provider.execution_contexts and provider.observation_count == 0
+
+
+async def test_legacy_provider_cannot_silently_drop_expansion() -> None:
+    provider = FakeBrowserProvider()
+    result = await BrowserObserveTool(provider).execute({"after": "element-1"}, tool_context())
+    assert result.failure is not None
+    assert result.failure.reason_code == "tool.browser.action_not_allowed"
+    assert provider.observation_count == 0
+
+
+def test_canonical_byte_bound_continues_after_the_retained_prefix() -> None:
+    from agent_core.domain.browser import BrowserObservationCoverage
+
+    observation = BrowserObservation(
+        url="https://example.org",
+        revision="current",
+        elements=tuple(
+            BrowserElement(ref=f"ref-{i}", role="button", name="雪" * 1024) for i in range(20)
+        ),
+        coverage=BrowserObservationCoverage(
+            candidate_offset=0, scanned_candidates=300, next_cursor="c" * 32
+        ),
+    )
+    payload, serialized = bounded_observation_payload(FakeBrowserProvider(), observation, 5000)
+    assert len(serialized.encode()) <= 5000
+    assert 0 < len(payload["elements"]) < 20
+    assert payload["next_observe"] == {"after": payload["elements"][-1]["ref"]}
+
+
+async def test_observe_waits_for_exact_visible_condition_without_acting() -> None:
+    provider = FakeBrowserProvider()
+    result = await BrowserObserveTool(provider).execute(
+        {"wait_for": {"role": "link", "name": "Open activity", "timeout_ms": 0}}, tool_context()
+    )
+    assert result.ok, "bounded visible postconditions are not supported"
+    assert result.structured is not None
+    assert result.structured["condition"]["status"] == "satisfied"
+    assert result.structured["condition"]["scope"] == "observation_window"
+    assert provider.observation_count == 1 and not provider.actions
+
+
+async def test_act_checks_postcondition_but_dispatches_only_once() -> None:
+    provider = FakeBrowserProvider()
+    result = await BrowserActTool(provider).execute(
+        {
+            "kind": "click",
+            "expected_revision": "revision-1",
+            "ref": "element-1",
+            "postcondition": {"role": "button", "name": "Never appeared", "timeout_ms": 0},
+        },
+        tool_context(),
+    )
+    assert result.ok and result.structured is not None
+    assert result.structured.get("condition", {}).get("status") == "not_observed"
+    assert len(provider.actions) == 1
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        {"role": "link", "name": "Open activity", "timeout_ms": 5001},
+        {"role": "link", "name": "Open activity", "timeout_ms": True},
+        {"role": "link", "name": "Open activity", "selector": "#secret"},
+        {"role": "link", "name": "Open activity", "checked": "yes"},
+    ],
+)
+async def test_invalid_conditions_refuse_before_binding_or_action(
+    predicate: dict[str, Any],
+) -> None:
+    provider = FakeBrowserProvider()
+    cases: list[tuple[BrowserObserveTool | BrowserActTool, dict[str, Any]]] = [
+        (BrowserObserveTool(provider), {"wait_for": predicate}),
+        (
+            BrowserActTool(provider),
+            {"kind": "click", "expected_revision": "r", "ref": "e", "postcondition": predicate},
+        ),
+    ]
+    for tool, args in cases:
+        result = await tool.execute(args, tool_context())
+        assert not result.ok and result.failure is not None
+        assert result.failure.kind == ToolFailureKind.INVALID_ARGUMENTS
+    assert not provider.execution_contexts and not provider.actions
+
+
+async def test_ambiguous_and_wrong_state_conditions_are_not_satisfied() -> None:
+    class Provider(FakeBrowserProvider):
+        duplicate = True
+
+        async def observe(self) -> BrowserObservation:
+            observed = await super().observe()
+            if self.duplicate:
+                observed = observed.model_copy(
+                    update={
+                        "elements": (
+                            *observed.elements,
+                            observed.elements[0].model_copy(update={"ref": "other"}),
+                        )
+                    }
+                )
+            return observed
+
+    provider = Provider()
+    for duplicate, status, state in [
+        (True, "ambiguous", {}),
+        (False, "not_observed", {"checked": True}),
+    ]:
+        provider.duplicate = duplicate
+        result = await BrowserObserveTool(provider).execute(
+            {"wait_for": {"role": "link", "name": "Open activity", "timeout_ms": 0, **state}},
+            tool_context(),
+        )
+        assert result.structured is not None and result.structured["condition"]["status"] == status
+    assert not provider.actions
+
+
+async def test_failed_post_action_read_is_uncertain_and_never_repeats_the_write() -> None:
+    class Provider(FakeBrowserProvider):
+        async def observe(self) -> BrowserObservation:
+            raise RuntimeError("secret-cookie-canary")
+
+    provider = Provider()
+    result = await BrowserActTool(provider).execute(
+        {
+            "kind": "click",
+            "expected_revision": "revision-1",
+            "ref": "element-1",
+            "postcondition": {"role": "button", "name": "Success", "timeout_ms": 500},
+        },
+        tool_context(),
+    )
+    assert result.failure is not None and result.failure.kind == ToolFailureKind.OUTCOME_UNKNOWN
+    assert not result.failure.retryable and not result.content
+    assert len(provider.actions) == 1
+
+
+async def test_wait_capture_timeout_discards_prior_references_and_does_not_act() -> None:
+    import asyncio
+
+    class Provider(FakeBrowserProvider):
+        captures = 0
+        cancelled = False
+
+        async def observe(self) -> BrowserObservation:
+            self.captures += 1
+            if self.captures > 1:
+                try:
+                    await asyncio.sleep(10)
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+            return await super().observe()
+
+    provider = Provider()
+    result = await BrowserObserveTool(provider).execute(
+        {"wait_for": {"role": "button", "name": "Not ready", "timeout_ms": 350}}, tool_context()
+    )
+    assert result.failure is not None and result.failure.reason_code == "tool.browser.page_changed"
+    assert not result.content and result.structured is None
+    assert provider.cancelled and not provider.actions
+
+
+@pytest.mark.parametrize("extra", [{"after": "ref"}, {"cursor": "cursor" * 8}])
+async def test_wait_and_expansion_cannot_be_combined(extra: dict[str, Any]) -> None:
+    provider = FakeBrowserProvider()
+    result = await BrowserObserveTool(provider).execute(
+        {"wait_for": {"role": "link", "name": "Open activity"}, **extra}, tool_context()
+    )
+    assert not result.ok and not provider.execution_contexts
+
+
+async def test_focus_refuses_a_provider_that_silently_ignores_region_scope() -> None:
+    class OldExpander(FakeBrowserProvider):
+        async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+            return self._observation("https://example.org/account")
+
+    result = await BrowserObserveTool(OldExpander()).execute(
+        {"region_ref": "current-region", "expected_revision": "current-revision"},
+        tool_context(),
+    )
+    assert not result.ok and result.failure is not None
+    assert result.failure.reason_code == "tool.browser.output_invalid"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"region_ref": "region"},
+        {"region_ref": "region", "expected_revision": "revision", "text_offset": -1},
+        {"region_ref": "region", "expected_revision": "revision", "text_offset": 262145},
+        {"region_ref": "region", "expected_revision": "revision", "after": "control"},
+        {"region_ref": "region", "expected_revision": "revision", "selector": "form"},
+        {"text_offset": 10},
+    ],
+)
+async def test_focus_validation_refuses_malformed_or_mixed_modes(arguments: dict[str, Any]) -> None:
+    provider = FakeBrowserProvider()
+    result = await BrowserObserveTool(provider).execute(arguments, tool_context())
+    assert not result.ok and result.failure is not None
+    assert result.failure.kind is ToolFailureKind.INVALID_ARGUMENTS
+    assert not provider.execution_contexts

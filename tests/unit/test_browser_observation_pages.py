@@ -20,7 +20,7 @@ from agent_core.domain.browser import (
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.tool_output import content_bytes
-from agent_core.tools.browser_observe import BrowserObserveTool
+from agent_core.tools.browser_observe import PagedBrowserObserveTool as BrowserObserveTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.validation import validate_output

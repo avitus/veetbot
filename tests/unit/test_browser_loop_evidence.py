@@ -179,6 +179,34 @@ async def test_observing_an_unchanged_page_five_times_is_still_a_loop() -> None:
     assert _observes(invocations) == 4
 
 
+async def test_unrelated_page_churn_does_not_reset_a_completion_wait() -> None:
+    provider = ChangingPageProvider()
+    waits = [
+        ScriptedTurn(
+            tool_calls=[
+                ScriptedToolCall(
+                    name="browser.observe",
+                    call_id=f"wait-{index}",
+                    arguments={
+                        "wait_for": {
+                            "evidence": {"kind": "text", "text": "Receipt confirmed"},
+                            "timeout_ms": 0,
+                        }
+                    },
+                )
+            ],
+            stop_reason=StopReason.TOOL_USE,
+        )
+        for index in range(6)
+    ]
+    run, invocations, _events = await _observe_run(provider, [_navigate(), *waits, _final()])
+    assert run.status is RunStatus.FAILED, (
+        "unrelated page changes kept a failed task predicate alive"
+    )
+    assert run.failure is not None and run.failure.reason is FailureReason.TOOL_LOOP_DETECTED
+    assert _observes(invocations) == 4
+
+
 async def test_evidence_restarts_are_capped_at_32_a_run() -> None:
     """1 first key + 32 restarts + 3 plain counts: the 37th observe fails the run."""
 
@@ -257,3 +285,19 @@ async def test_evidence_digest_never_reaches_events_or_invocations() -> None:
     assert all(digest not in stored for digest in digests if digest)
     assert "evidence_key" not in stored
     assert "tool_evidence" not in json.dumps([event.payload for event in events], default=str)
+
+
+def test_empty_candidate_windows_make_progress_but_rotating_cursors_do_not() -> None:
+    from agent_core.tools.browser_results import observation_evidence_key
+
+    first = {
+        "url": "https://example.org",
+        "revision": "one",
+        "text": "",
+        "elements": [],
+        "coverage": {"candidate_offset": 0, "next_cursor": "a" * 32},
+    }
+    same = first | {"revision": "two", "coverage": {"candidate_offset": 0, "next_cursor": "b" * 32}}
+    next_window = first | {"coverage": {"candidate_offset": 4096, "next_cursor": "c" * 32}}
+    assert observation_evidence_key(first) == observation_evidence_key(same)
+    assert observation_evidence_key(first) != observation_evidence_key(next_window)

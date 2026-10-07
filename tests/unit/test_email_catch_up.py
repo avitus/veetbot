@@ -516,7 +516,7 @@ async def _catching_up_mailbox(
 
 
 async def test_new_mail_is_read_while_inbox_catch_up_continues() -> None:
-    """New Gmail changes are read first, and catch-up and history still keep their shares."""
+    """New Gmail changes are read first, newest change first; catch-up and history keep shares."""
     inbox = {f"inbox-{index}": NOW - timedelta(days=10 + index) for index in range(8)}
     changes = [f"change-{index}" for index in range(6)]
     factory, reads = await _catching_up_mailbox(inbox, changes)
@@ -532,11 +532,11 @@ async def test_new_mail_is_read_while_inbox_catch_up_continues() -> None:
             account = await uow.email.get(app.principal, "account", "default")
             sync = await uow.email.get(app.principal, "sync", "default")
     assert account is not None and sync is not None
-    assert reads[:4] == changes[:4]
+    assert reads[:4] == changes[::-1][:4]
     assert len([item for item in reads if item.startswith("inbox-")]) >= 4
     assert {"history-0", "history-1"} <= set(reads)
     assert len(reads) <= 10
-    assert sync.payload["change_pending"] == ["change-4", "change-5"]
+    assert sync.payload["change_pending"] == ["change-1", "change-0"]
     assert account.payload["inbox_complete"] is False
 
 

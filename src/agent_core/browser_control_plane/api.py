@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import logging
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from typing import Any, cast
 from uuid import UUID
@@ -15,7 +15,7 @@ from uuid import UUID
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -36,9 +36,16 @@ from agent_core.domain.browser import (
     BrowserAuthenticationMode,
     BrowserDispatchConstraint,
     BrowserInteractiveEvent,
+    BrowserObservationExpansion,
     BrowserProviderError,
     BrowserSnapshot,
 )
+from agent_core.domain.browser_diagnostics import (
+    BrowserDiagnostics,
+    browser_phase,
+    collect_browser_diagnostics,
+)
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import MAX_BROWSER_UPLOAD_BODY_BYTES, BrowserImagePayload
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.errors import ConflictError
@@ -96,6 +103,17 @@ class _LeaseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     lease_ref: str = Field(min_length=32, max_length=128)
+
+
+class _ObserveRequest(_LeaseRequest):
+    expansion: BrowserObservationExpansion | None = None
+    extraction: BrowserExtractionRequest | None = None
+
+    @model_validator(mode="after")
+    def one_read_mode(self) -> _ObserveRequest:
+        if self.expansion is not None and self.extraction is not None:
+            raise ValueError("observation modes are exclusive")
+        return self
 
 
 class _RenewRequest(_LeaseRequest):
@@ -401,8 +419,8 @@ def create_profile_service_app(
 
     @app.exception_handler(BrowserProviderError)
     async def browser_error(request: Request, exc: BrowserProviderError) -> JSONResponse:
-        del request
-        return _error(409, exc.reason_code, "browser operation rejected")
+        response = _error(409, exc.reason_code, "browser operation rejected")
+        return _diagnostic_error_response(request, response)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
@@ -413,12 +431,13 @@ def create_profile_service_app(
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-        del request
         _LOGGER.error(
             "profile service request failed",
             extra={"failure_type": type(exc).__name__},
         )
-        return _error(500, "internal_error", "service unavailable")
+        return _diagnostic_error_response(
+            request, _error(500, "internal_error", "service unavailable")
+        )
 
     @app.get("/health/live")
     async def live() -> dict[str, str]:
@@ -493,25 +512,34 @@ def create_profile_service_app(
             rejected = _require_idempotency(request, expected)
             if rejected is not None:
                 return rejected
-            lease = await sessions.acquire(
-                payload.profile_id,
-                _principal(payload.tenant_id, payload.principal_id),
-                payload.provider_ref,
-                run_id=payload.run_id,
-                attempt_number=payload.attempt_number,
-                deadline_at=payload.deadline_at,
+            return await _diagnosed_response(
+                request,
+                sessions.acquire(
+                    payload.profile_id,
+                    _principal(payload.tenant_id, payload.principal_id),
+                    payload.provider_ref,
+                    run_id=payload.run_id,
+                    attempt_number=payload.attempt_number,
+                    deadline_at=payload.deadline_at,
+                ),
+                lambda lease: lease.model_dump(mode="json"),
             )
-            return lease.model_dump(mode="json")
 
         @app.post("/v1/browser-sessions:navigate", response_model=None)
-        async def navigate(payload: _NavigateRequest) -> dict[str, Any]:
-            result = await sessions.navigate_snapshot(payload.lease_ref, payload.url)
-            return _snapshot_response(result)
+        async def navigate(payload: _NavigateRequest, request: Request) -> dict[str, Any]:
+            return await _diagnosed_response(
+                request,
+                sessions.navigate_snapshot(payload.lease_ref, payload.url),
+                _snapshot_response,
+            )
 
         @app.post("/v1/browser-sessions:observe", response_model=None)
-        async def observe(payload: _LeaseRequest) -> dict[str, Any]:
-            result = await sessions.observe_snapshot(payload.lease_ref)
-            return _snapshot_response(result)
+        async def observe(payload: _ObserveRequest, request: Request) -> dict[str, Any]:
+            return await _diagnosed_response(
+                request,
+                sessions.observe_snapshot(payload.lease_ref, payload.expansion, payload.extraction),
+                _snapshot_response,
+            )
 
         @app.post("/v1/browser-sessions:act", response_model=None)
         async def act(payload: _ActRequest, request: Request) -> dict[str, Any] | JSONResponse:
@@ -521,13 +549,16 @@ def create_profile_service_app(
             rejected = _require_idempotency(request, expected)
             if rejected is not None:
                 return rejected
-            result = await sessions.act_snapshot(
-                payload.lease_ref,
-                payload.action,
-                sequence=payload.sequence,
-                constraint=payload.constraint,
+            return await _diagnosed_response(
+                request,
+                sessions.act_snapshot(
+                    payload.lease_ref,
+                    payload.action,
+                    sequence=payload.sequence,
+                    constraint=payload.constraint,
+                ),
+                _snapshot_response,
             )
-            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:upload", response_model=None)
         async def upload(
@@ -913,3 +944,30 @@ def _validate_lifecycle_request(
     if path_profile_id != body_profile_id:
         return _error(400, "invalid_request", "request identity is invalid")
     return _validate_idempotency(request, path_profile_id, operation)
+
+
+async def _diagnosed_response[ResponseT](
+    request: Request,
+    operation: Awaitable[ResponseT],
+    render: Callable[[ResponseT], dict[str, Any]],
+) -> dict[str, Any]:
+    with collect_browser_diagnostics(clock=asyncio.get_running_loop().time) as collector:
+        try:
+            with browser_phase("operation", "hosted"):
+                result = await operation
+            payload = render(result)
+        finally:
+            request.state.browser_diagnostics = collector.snapshot()
+    payload["browser_diagnostics"] = collector.snapshot().model_dump(mode="json")
+    return payload
+
+
+def _diagnostic_error_response(request: Request, response: JSONResponse) -> JSONResponse:
+    import json
+
+    report = getattr(request.state, "browser_diagnostics", None)
+    if not isinstance(report, BrowserDiagnostics):
+        return response
+    payload = json.loads(bytes(response.body))
+    payload["browser_diagnostics"] = report.model_dump(mode="json")
+    return JSONResponse(payload, status_code=response.status_code)

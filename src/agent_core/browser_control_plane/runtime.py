@@ -15,13 +15,23 @@ from agent_core.domain.browser import (
     BrowserDispatchConstraint,
     BrowserInteractiveEvent,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserVerificationStage,
+    ignore_verification_stage,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
+from agent_core.ports.browser import (
+    browser_action_interruption,
+    check_browser_interruption,
+    expand_browser_observation,
+    extract_browser_observation,
+)
 from agent_core.ports.browser_upload import upload_browser_image
 
 MAXIMUM_PROFILE_MATERIAL_BYTES = 2 * 1024 * 1024
@@ -50,7 +60,12 @@ class StatefulBrowserRuntime(Protocol):
         now: datetime | None = None,
     ) -> BrowserObservation: ...
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence: ...
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None],
+    ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
@@ -89,6 +104,11 @@ class HostedPlaywrightSessionRuntime:
         self._proxy_factory = proxy_factory
         self._proxy: HostedProxy | None = None
         self._started = False
+        self._interactive = False
+
+    def set_interactive_authentication(self) -> None:
+        """Allow login-page reads for a service-owned ceremony or its control loads."""
+        self._interactive = True
 
     async def start(
         self,
@@ -134,7 +154,9 @@ class HostedPlaywrightSessionRuntime:
     async def navigate(self, url: str) -> BrowserObservation:
         """Navigate within the bound origin policy and preserve stable failure codes."""
         try:
-            return await self._runtime.navigate(url)
+            observation = await self._runtime.navigate(url)
+            await self._check_automation()
+            return observation
         except BrowserProviderError:
             raise
         except Exception as exc:
@@ -144,10 +166,28 @@ class HostedPlaywrightSessionRuntime:
             ) from exc
 
     async def observe(self) -> BrowserObservation:
-        return await self._runtime.observe()
+        observation = await self._runtime.observe()
+        await self._check_automation()
+        return observation
+
+    async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+        observation = await expand_browser_observation(self._runtime, request)
+        await self._check_automation()
+        return observation
+
+    async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+        observation = await extract_browser_observation(self._runtime, request)
+        await self._check_automation()
+        return observation
+
+    async def _check_automation(self) -> None:
+        if not self._interactive:
+            await check_browser_interruption(self._runtime)
 
     async def act(self, action: BrowserAction) -> BrowserObservation:
-        return await self._runtime.act(action)
+        await self._check_automation()
+        observation = await self._runtime.act(action)
+        return await browser_action_interruption(self._runtime, observation)
 
     async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
         return await upload_browser_image(self._runtime, action, image)
@@ -160,16 +200,23 @@ class HostedPlaywrightSessionRuntime:
         now: datetime,
     ) -> BrowserObservation:
         """Act only if the live page is still covered by the grant (ADR-0129)."""
-        return await self._runtime.act(action, constraint=constraint, now=now)
+        await self._check_automation()
+        observation = await self._runtime.act(action, constraint=constraint, now=now)
+        return await browser_action_interruption(self._runtime, observation)
 
     def facts(self, revision: str) -> BrowserObservationFacts | None:
         """The element facts of ``revision``, while it is the current observation."""
         return self._runtime.facts(revision)
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+    ) -> BrowserPageEvidence:
         """Load one confirmed page and report what it showed (ADR-0128)."""
         try:
-            return await self._runtime.load_page_evidence(url)
+            return await self._runtime.load_page_evidence(url, on_stage=on_stage)
         except BrowserProviderError:
             raise
         except Exception as exc:

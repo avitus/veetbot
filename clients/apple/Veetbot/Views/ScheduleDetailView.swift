@@ -27,7 +27,10 @@ public struct ScheduleDetailView: View {
         }
         .navigationTitle(summary.title)
         .accessibilityIdentifier("schedule.detail")
-        .task { await model.loadDetail(summary.id) }
+        .task {
+            await model.loadDetail(summary.id)
+            await model.loadWebsiteAccessProfiles()
+        }
     }
 
     private func detail(_ record: ScheduleRecordView) -> some View {
@@ -61,6 +64,16 @@ public struct ScheduleDetailView: View {
                 ScheduleKeyValueRow(
                     key: "Revision",
                     value: String(record.schedule.currentRevision)
+                )
+            }
+
+            Section {
+                websiteAccess(record)
+            } header: {
+                Text("Website access")
+            } footer: {
+                Text(
+                    "Scheduled runs can read signed-in pages on the chosen site. Posting or scrolling still asks you first."
                 )
             }
 
@@ -111,6 +124,57 @@ public struct ScheduleDetailView: View {
                     value: record.revision.createdAt.formatted()
                 )
             }
+        }
+    }
+
+    /// The picker reads the server's record, so a refused change snaps back to
+    /// the binding the server still holds (ADR-0154).
+    @ViewBuilder
+    private func websiteAccess(_ record: ScheduleRecordView) -> some View {
+        let scheduleID = record.schedule.id
+        let bound = record.revision.browserProfileID
+        if let profiles = model.websiteAccessProfiles {
+            Picker(
+                "Signed-in site",
+                selection: Binding(
+                    get: { bound },
+                    set: { choice in
+                        Task { await model.setWebsiteAccess(scheduleID, browserProfileID: choice) }
+                    }
+                )
+            ) {
+                Text("None").tag(UUID?.none)
+                ForEach(
+                    scheduleWebsiteAccessOptions(profiles: profiles, boundProfileID: bound)
+                ) { option in
+                    Text(option.label).tag(UUID?.some(option.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(
+                !scheduleAllowsWebsiteAccessChange(record.schedule.stateKind)
+                    || model.isSavingWebsiteAccess(scheduleID)
+            )
+            .accessibilityIdentifier("schedule.websiteAccess")
+        } else if let message = model.websiteAccessProfilesError {
+            HStack(alignment: .firstTextBaseline) {
+                Text(message).appFont(.caption).foregroundColor(.secondary)
+                Spacer()
+                Button("Retry") {
+                    Task { await model.loadWebsiteAccessProfiles() }
+                }
+            }
+        } else {
+            ProgressView("Loading sign-ins…")
+        }
+        if model.isSavingWebsiteAccess(scheduleID) {
+            ProgressView("Saving…")
+        }
+        if let message = model.websiteAccessError(for: scheduleID) {
+            Text(message)
+                .appFont(.caption)
+                .foregroundColor(.red)
+                .accessibilityIdentifier("schedule.websiteAccess.error")
         }
     }
 

@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:900`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:903`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1272-1280`) run over every message body,
+   (`bootstrap-and-composition.md:1273-1281`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1285-1287`).
+(`bootstrap-and-composition.md:1286-1288`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -568,7 +568,7 @@ agent run export <run-id> --json   the ArtifactRef on stdout
 ```
 
 `export` becomes the fourth reserved word after `agent run`
-(`bootstrap-and-composition.md:1088`), which is cheaper than a thirteenth
+(`bootstrap-and-composition.md:1089`), which is cheaper than a thirteenth
 top-level command and follows the precedent `agent eval`'s five
 subcommands already set. It reuses the existing exit codes without
 addition: a refused consent check exits 1, an unknown run exits 2, an
@@ -1578,3 +1578,25 @@ lease-exhaustion `run.failed` events, never from total claims. It preserves
 actual crash history and never reopens terminal runs. Existing queued
 continuations with unused crash allowance become claimable with their saved
 answers, checkpoints, tool identities and approval requirements intact.
+
+
+### Browser recovery call receipts (ADR-0163)
+
+A `run.checkpointed` event with `trigger: browser_recovery` optionally extends
+its existing payload with `runtime_tool_call`, the complete queued read or
+owner-question call. Write that receipt in the same transaction as the checkpoint
+that marks it pending. Conversation projection reads the call from this receipt
+and its result from the ordinary tool event, preserving pairs in later runs and
+cold replay. Legacy checkpoint payloads are unchanged; no model response is
+invented, no required legacy field changes and no event type is added. Recovery
+receipts permit only `browser.observe` and `conversation.ask_user`.
+
+ADR-0164 adds `browser_auth_resume` checkpoint receipts for a fresh
+`browser.navigate`/`browser.observe` and `browser_workflow` receipts for one
+ordinary navigate/observe/act invocation. Receipt admission requires a runtime
+actor; all dispatched calls retain ordinary result events and authorization.
+The platform event `browser.authentication.resumed` records question/profile/
+ceremony identifiers and the bounded continuation content. It replaces neither
+an owner message nor authority. The matching `tool.call.completed`, working-state
+update, full checkpoint and run requeue commit atomically with it, using the
+question-derived idempotency key. Replay preserves exactly one call/result pair.

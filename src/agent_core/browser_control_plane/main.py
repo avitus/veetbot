@@ -33,6 +33,7 @@ def main() -> None:
         process_secret=settings.session_secret.reveal().encode(),
         ceremony_base_url=settings.ceremony_base_url,
         device_sign_in_enabled=settings.device_sign_in_enabled,
+        verification=settings.verification,
     )
     lifecycle = HostedProfileLifecycleService(
         store,

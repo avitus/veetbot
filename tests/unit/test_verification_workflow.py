@@ -77,7 +77,11 @@ def test_check_runs_each_required_command_once_even_with_redundant_goals(checkou
     result = run_make(checkout, "check", "docs-check", "test-static", "test-fast")
     assert result.returncode == 0, result.stdout + result.stderr
     recorded = commands(checkout)
-    for selector in ("static", "not static and not integration and not live"):
+    for selector in (
+        "static",
+        "not static and not integration and not live and not browser",
+        "browser",
+    ):
         assert sum(selector in command for command in recorded) == 1
     for token in (
         "mypy",
@@ -147,7 +151,7 @@ def test_contract_alone_does_not_rerun_static_tests(checkout: Path) -> None:
     assert len(commands(checkout)) == 1
 
 
-@pytest.mark.parametrize("stage", ["mypy", "static", "scripts/check_docs.py", "lint"])
+@pytest.mark.parametrize("stage", ["mypy", "static", "browser", "scripts/check_docs.py", "lint"])
 def test_parallel_check_propagates_failures(checkout: Path, stage: str) -> None:
     result = run_make(checkout, "check", FAIL_STAGE=stage)
     assert result.returncode != 0

@@ -1,6 +1,7 @@
 # ADR-0075: Native schedule browser over the existing control plane
 
-- Status: Proposed; decision 3 superseded by ADR-0089
+- Status: Proposed; decision 3 superseded by ADR-0089; decision 4 amended by
+  ADR-0154
 - Date: 2026-08-29
 - Related: Sections 16, 21, and 29 of the engineering plan; ADR-0049,
   ADR-0050, ADR-0059, ADR-0070, ADR-0073
@@ -47,6 +48,8 @@ does not decide.
    cancel, delete, occurrence, or run mutation. Those operations retain their
    existing authority and application-service paths; viewing never requests
    `schedule.write` or `schedule.cancel`.
+   **Amended by ADR-0154:** the detail may change a schedule's website access
+   through the existing full-definition update, and nothing else.
 5. **Server truth is refreshed, not copied into device authority.** Opening the
    browser reloads page one, list paging follows opaque cursors, duplicate IDs
    are ignored, repeated cursors stop pagination, and a detail request reads

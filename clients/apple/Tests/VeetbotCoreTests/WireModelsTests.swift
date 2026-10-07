@@ -230,6 +230,22 @@ import Testing
         #expect(detail.revision.limits.maxCost == "1.25")
         #expect(detail.revision.limits.synthesisReserveSteps == nil)
         #expect(detail.revision.requestedScopes.isEmpty)
+        #expect(detail.revision.browserProfileID == nil)
+    }
+
+    @Test
+    func testScheduleRevisionDecodesItsWebsiteBinding() throws {
+        let detailData = Data(
+            #"{"schedule":{"id":"00000000-0000-0000-0000-000000000703","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":2,"next_fire_at":"2026-10-07T14:00:00Z","consecutive_failures":0,"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-06T17:00:00Z"},"revision":{"schedule_id":"00000000-0000-0000-0000-000000000703","revision":2,"title":"Morning X trends summary","instruction":"Summarize my X home feed.","agent_id":"00000000-0000-0000-0000-000000000702","agent_version":"3","policy_profile":"default","requested_scopes":["browser.profile.read"],"browser_profile_id":"00000000-0000-0000-0000-0000000007aa","limits":{"max_steps":12,"max_model_calls":10,"max_tool_calls":20,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"5","deadline_at":null},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"07:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":2,"created_by_principal_id":"principal","created_at":"2026-10-06T17:00:00Z"},"replayed":false}"#
+                .utf8
+        )
+
+        let detail = try JSONDecoder.server.decode(ScheduleRecordView.self, from: detailData)
+
+        #expect(
+            detail.revision.browserProfileID
+                == UUID(uuidString: "00000000-0000-0000-0000-0000000007AA")
+        )
     }
 
     @Test

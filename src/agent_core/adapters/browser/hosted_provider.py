@@ -23,6 +23,7 @@ from agent_core.domain.browser import (
     BrowserElement,
     BrowserLease,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserObservationFacts,
     BrowserProfile,
     BrowserProfileStatus,
@@ -33,11 +34,18 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
 )
 from agent_core.domain.browser_classification import classify_browser_action
+from agent_core.domain.browser_diagnostics import browser_phase_call
+from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.tools import ToolExecutionContext
 from agent_core.ports.browser import GRANT_NOT_APPLICABLE
-from agent_core.ports.browser_sessions import BrowserSessionControlPlane, BrowserSessionPage
+from agent_core.ports.browser_sessions import (
+    BrowserSessionControlPlane,
+    BrowserSessionPage,
+    expand_browser_session,
+    extract_browser_session,
+)
 from agent_core.ports.browser_upload import BrowserImageSessionUploader
 
 ProfileLoader = Callable[[Principal, UUID], Awaitable[BrowserProfile]]
@@ -61,6 +69,8 @@ _LEASE_FAILURES = frozenset(
 # cached observation, so the model must observe again (D16).
 _ACTION_REFUSALS = frozenset(
     {
+        "tool.browser.needs_user",
+        "tool.browser.authentication_required",
         "tool.browser.page_changed",
         "tool.browser.element_not_found",
         "tool.browser.action_not_allowed",
@@ -219,6 +229,40 @@ class HostedBrowserProvider:
                 raise
             return self._cache_page(page)
 
+    async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+        async with self._lock:
+            lease = self._required_lease()
+            try:
+                page = await expand_browser_session(self._sessions, lease.lease_ref, request)
+            except BrowserProviderError as error:
+                if error.reason_code in _LEASE_FAILURES:
+                    await self._close_locked(strict=False)
+                elif error.reason_code == "tool.browser.page_changed":
+                    self._observation = None
+                    self._facts = None
+                raise
+            except Exception:
+                await self._close_locked(strict=False)
+                raise
+            return self._cache_page(page)
+
+    async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+        async with self._lock:
+            lease = self._required_lease()
+            try:
+                page = await extract_browser_session(self._sessions, lease.lease_ref, request)
+            except BrowserProviderError as error:
+                if error.reason_code in _LEASE_FAILURES:
+                    await self._close_locked(strict=False)
+                elif error.reason_code == "tool.browser.page_changed":
+                    self._observation = None
+                    self._facts = None
+                raise
+            except Exception:
+                await self._close_locked(strict=False)
+                raise
+            return self._cache_page(page)
+
     async def act(
         self,
         action: BrowserAction,
@@ -259,7 +303,11 @@ class HostedBrowserProvider:
                     )
             except BrowserProviderError as error:
                 if error.reason_code in _ACTION_REFUSALS:
-                    if error.reason_code == GRANT_NOT_APPLICABLE:
+                    if error.reason_code in {
+                        GRANT_NOT_APPLICABLE,
+                        "tool.browser.needs_user",
+                        "tool.browser.authentication_required",
+                    }:
                         # D16: the lease and sequence stay; the observation the
                         # refused action named does not.
                         self._observation = None
@@ -376,6 +424,7 @@ class HostedBrowserProvider:
             self._renewal_exhausted = renewed.expires_at <= lease.expires_at
             self._lease = renewed
 
+    @browser_phase_call("cleanup", "orchestrator")
     async def close(self) -> None:
         async with self._lock:
             await self._close_locked()
@@ -586,6 +635,12 @@ class SessionBoundHostedBrowserProvider:
     async def observe(self) -> BrowserObservation:
         return await self._required_provider().observe()
 
+    async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+        return await self._required_provider().expand(request)
+
+    async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+        return await self._required_provider().extract(request)
+
     async def act(
         self,
         action: BrowserAction,
@@ -652,6 +707,7 @@ class SessionBoundHostedBrowserProvider:
                 ):
                     del self._bindings[session_id]
 
+    @browser_phase_call("cleanup", "orchestrator")
     async def close(self) -> None:
         async with self._lock:
             providers = [binding.provider for binding in self._bindings.values()]

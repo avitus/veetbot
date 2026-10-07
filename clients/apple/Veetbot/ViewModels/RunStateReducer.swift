@@ -44,11 +44,14 @@ public struct ToolActivity: Identifiable, Sendable {
     public var sideEffect: SideEffectClass?
     public var risk: RiskLevel?
     public var approvalID: UUID?
+    public var browserDiagnostics: BrowserActivityDiagnostics? = nil
     /// How the call was allowed without a card, such as
     /// `browser_task_grant`, and the view of what it did (ADR-0129 G7).
     public var authorizationKind: String? = nil
     public var authorizationView: [String: JSONValue]? = nil
     fileprivate var hasKnownName: Bool
+    /// Whether the owner has already decided this call's approval.
+    fileprivate var approvalSettled = false
 
     public var id: String { callID }
 
@@ -85,9 +88,14 @@ public struct ToolActivity: Identifiable, Sendable {
         status == .completed && result?.isError == true
             ? .failed : status
     }
-    /// Select terminal tool outcomes that can be grouped without hiding approval state.
+    /// Select terminal tool outcomes that can be grouped without hiding a pending approval.
     fileprivate var isBundleCandidate: Bool {
-        guard hasKnownName, approvalID == nil else { return false }
+        guard hasKnownName else { return false }
+        if approvalID != nil {
+            guard approvalSettled else { return false }
+            // A refusal the owner made at the approval is no surprise to surface.
+            if presentationStatus == .denied { return true }
+        }
         return [
             .completed, .rejected, .unavailable, .failed, .needsCorrection, .correctedAndRetried,
         ].contains(presentationStatus)
@@ -115,6 +123,7 @@ public struct ToolActivityBundle: Identifiable, Sendable {
         let title = "\(count) tool calls"
         let statuses: [ToolActivityStatus] = [
             .completed, .correctedAndRetried, .needsCorrection, .rejected, .unavailable, .failed,
+            .denied,
         ]
         let outcomes = statuses.compactMap { status -> (Int, String)? in
             let matchingCount = activities.filter { $0.presentationStatus == status }.count
@@ -185,6 +194,8 @@ public final class RunStateReducer: ObservableObject {
     private var toolIndex: [String: Int] = [:]
     private var pendingApprovalIDs: Set<UUID> = []
     private var activityOrder: [ConversationActivityReference] = []
+    /// The durable event sequence behind each placed activity, when it has one.
+    private var activitySequences: [ConversationActivityReference: Int] = [:]
     private var summaryHeadings = ReasoningSummaryHeadings()
 
     public init() {}
@@ -247,6 +258,7 @@ public final class RunStateReducer: ObservableObject {
         toolIndex = [:]
         pendingApprovalIDs = []
         activityOrder = []
+        activitySequences = [:]
     }
 
     public func restore(messages: [SessionMessageView]) {
@@ -255,7 +267,7 @@ public final class RunStateReducer: ObservableObject {
             guard persistedSequences.insert(message.sequence).inserted else { continue }
             let id = "event-\(message.sequence)"
             let role: TimelineItem.Role = message.role == .user ? .user : .assistant
-            activityOrder.append(.message(id))
+            place(.message(id), sequence: message.sequence)
             timeline.append(
                 TimelineItem(id: id, role: role, content: message.content)
             )
@@ -314,6 +326,7 @@ public final class RunStateReducer: ObservableObject {
             runStatus = .queued
         case "run.started", "run.resumed", "run.claimed":
             runStatus = .running
+            clarifyingQuestion = nil
         case "message.delta":
             appendDelta(frame.data["text"]?.stringValue)
         case "reasoning.delta", "reasoning.summary.delta":
@@ -329,7 +342,7 @@ public final class RunStateReducer: ObservableObject {
         case "assistant.message.completed":
             endReasoning()
             if let message = frame.data["message"] {
-                reconcileAssistantMessage(message, fallbackID: frameID(frame))
+                reconcileAssistantMessage(message, from: frame)
             }
         case "model.response.completed":
             endReasoning()
@@ -360,7 +373,7 @@ public final class RunStateReducer: ObservableObject {
             reduceQuestion(frame, runID: runID)
         case "run.completed":
             if let final = frame.data["final_message"] {
-                reconcileAssistantMessage(final, fallbackID: frameID(frame))
+                reconcileAssistantMessage(final, from: frame)
             }
             transitionToTerminal(.completed)
         case "run.failed":
@@ -398,6 +411,7 @@ public final class RunStateReducer: ObservableObject {
                 tool.arguments = approval.arguments
                 tool.risk = RiskLevel(rawValue: approval.risk.lowercased())
                 tool.approvalID = approval.id
+                tool.approvalSettled = !approval.status.isPending
             }
         }
     }
@@ -422,11 +436,12 @@ public final class RunStateReducer: ObservableObject {
                 return false
             }) {
                 activityOrder[activityIndex] = .message(id)
+                activitySequences[.message(id)] = frame.id
             }
             self.pendingUserMessageID = nil
             return
         }
-        activityOrder.append(.message(id))
+        place(.message(id), sequence: frame.id)
         timeline.append(
             TimelineItem(id: id, role: .user, content: content)
         )
@@ -450,7 +465,7 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
-    private func reconcileAssistantMessage(_ value: JSONValue, fallbackID: String) {
+    private func reconcileAssistantMessage(_ value: JSONValue, from frame: SSEFrame) {
         guard let message = decode(AssistantMessagePayload.self, from: value) else { return }
         if let streamingMessageID,
             let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
@@ -462,9 +477,10 @@ public final class RunStateReducer: ObservableObject {
         }
         guard !timeline.contains(where: { $0.role == .assistant && $0.content == message.content })
         else { return }
-        activityOrder.append(.message(fallbackID))
+        let id = frameID(frame)
+        place(.message(id), sequence: frame.id)
         timeline.append(
-            TimelineItem(id: fallbackID, role: .assistant, content: message.content)
+            TimelineItem(id: id, role: .assistant, content: message.content)
         )
     }
 
@@ -482,7 +498,8 @@ public final class RunStateReducer: ObservableObject {
                 callID: callID,
                 name: name,
                 hasKnownName: suppliedName != nil,
-                status: .queued
+                status: .queued,
+                sequence: frame.id
             )
             updateTool(callID: callID) { tool in
                 tool.arguments = arguments
@@ -515,7 +532,8 @@ public final class RunStateReducer: ObservableObject {
             callID: callID,
             name: name,
             hasKnownName: suppliedName != nil,
-            status: presentedStatus
+            status: presentedStatus,
+            sequence: frame.id
         )
         updateTool(callID: callID) { tool in
             tool.status = presentedStatus
@@ -537,6 +555,11 @@ public final class RunStateReducer: ObservableObject {
             }
             if let view = frame.data["authorization_view"]?.objectValue {
                 tool.authorizationView = view
+            }
+            if let payload = frame.data["browser_diagnostics"] {
+                let report = decode(BrowserActivityDiagnostics.self, from: payload)
+                tool.browserDiagnostics = name.hasPrefix("browser.") && report?.isValid == true
+                    ? report : nil
             }
             if let result {
                 tool.result = ToolResultView(
@@ -580,11 +603,12 @@ public final class RunStateReducer: ObservableObject {
         callID: String,
         name: String,
         hasKnownName: Bool,
-        status: ToolActivityStatus
+        status: ToolActivityStatus,
+        sequence: Int?
     ) {
         guard toolIndex[callID] == nil else { return }
         toolIndex[callID] = tools.count
-        activityOrder.append(.tool(callID))
+        place(.tool(callID), sequence: sequence)
         tools.append(
             ToolActivity(
                 callID: callID,
@@ -598,6 +622,22 @@ public final class RunStateReducer: ObservableObject {
                 hasKnownName: hasKnownName
             )
         )
+    }
+
+    /// Place an activity by its durable event sequence. A reopened chat restores
+    /// its saved messages before replaying its last run, so a replayed call
+    /// belongs ahead of the restored answer it produced. Live and transient
+    /// activity arrives in order and lands at the end.
+    private func place(_ reference: ConversationActivityReference, sequence: Int?) {
+        guard let sequence else {
+            activityOrder.append(reference)
+            return
+        }
+        activitySequences[reference] = sequence
+        let index =
+            activityOrder.firstIndex { activitySequences[$0].map { $0 > sequence } ?? false }
+            ?? activityOrder.endIndex
+        activityOrder.insert(reference, at: index)
     }
 
     private func updateTool(callID: String, update: (inout ToolActivity) -> Void) {
@@ -697,7 +737,7 @@ public final class RunStateReducer: ObservableObject {
     }
 }
 
-private enum ConversationActivityReference {
+private enum ConversationActivityReference: Hashable {
     case message(String)
     case tool(String)
 }
@@ -760,12 +800,29 @@ private struct ToolOutcomePayload: Decodable {
 }
 
 /// The one-line status a chat shows while its run is in flight.
+/// The line under a conversation's title names only what the run needs from
+/// the owner. A run parked as waiting for approval with no approval left to
+/// decide is resuming, or waiting on a delegated child, and asks for nothing.
+public enum ConversationStatus {
+    public static func label(runStatus: RunStatus?, awaitingApproval: Bool) -> String? {
+        switch runStatus {
+        case .waitingForApproval where awaitingApproval: return "Needs your approval"
+        case .waitingForUser: return "Needs your answer"
+        default: return nil
+        }
+    }
+}
+
 public enum RunActivity {
     public static func label(
-        isSending: Bool, runStatus: RunStatus?, reasoningActive: Bool, reasoningTitle: String?
+        isSending: Bool, runStatus: RunStatus?, awaitingApproval: Bool = false,
+        reasoningActive: Bool, reasoningTitle: String?
     ) -> String? {
         if isSending { return "Sending…" }
-        guard runStatus == .running || runStatus == .queued else { return nil }
+        let working =
+            runStatus == .running || runStatus == .queued
+            || (runStatus == .waitingForApproval && !awaitingApproval)
+        guard working else { return nil }
         if let reasoningTitle { return "Thinking: \(reasoningTitle)" }
         return reasoningActive ? "Reasoning…" : "Working…"
     }
@@ -817,4 +874,78 @@ struct ReasoningSummaryHeadings {
         }
         return title
     }
+}
+
+/// Content-free terminal browser phase evidence (ADR-0158).
+public struct BrowserActivityDiagnostics: Decodable, Sendable {
+    public struct Phase: Decodable, Sendable {
+        public let phase: String
+        public let placement: String
+        public let outcome: String
+        public let failure: String
+        public let elapsedMS: Int
+        enum CodingKeys: String, CodingKey {
+            case phase, placement, outcome, failure
+            case elapsedMS = "elapsed_ms"
+        }
+    }
+    public let version: Int
+    public let phases: [Phase]
+    public let truncated: Bool
+    public let elapsedMS: Int
+    enum CodingKeys: String, CodingKey {
+        case version, phases, truncated
+        case elapsedMS = "elapsed_ms"
+    }
+
+    public var isValid: Bool {
+        version == 1 && phases.count <= 64 && (0...3_600_000).contains(elapsedMS)
+            && phases.allSatisfy {
+                Self.phaseLabels[$0.phase] != nil && Self.failureLabels[$0.failure] != nil
+                    && ["orchestrator", "hosted", "runtime"].contains($0.placement)
+                    && ["completed", "failed", "cancelled", "bound_expired"].contains($0.outcome)
+                    && (0...3_600_000).contains($0.elapsedMS)
+            }
+    }
+
+    public var summary: String {
+        let duration = String(format: "%.1f s", Double(elapsedMS) / 1000)
+        let failure = phases.first { $0.failure == "outcome_unknown" }
+            ?? phases.first { $0.failure != "none" }
+        if let failure, let message = Self.failureLabels[failure.failure] {
+            return "\(duration) · \(message)"
+        }
+        return duration
+    }
+
+    public var detail: String {
+        var rows = phases.map {
+            let label = Self.phaseLabels[$0.phase] ?? "Browser operation"
+            let duration = String(format: "%.1f s", Double($0.elapsedMS) / 1000)
+            let outcome = $0.outcome == "bound_expired" ? "wait limit reached" : $0.outcome
+            return "\(label): \(outcome) · \(duration)"
+        }
+        if truncated { rows.append("Additional phase details omitted.") }
+        rows.append("Nested phase times overlap.")
+        return rows.joined(separator: "\n")
+    }
+
+    private static let phaseLabels = [
+        "binding": "Website connection", "acquisition": "Browser session", "launch": "Browser launch",
+        "navigation": "Open page", "readiness": "Wait for page", "observation": "Read page",
+        "dispatch": "Send action", "projection": "Prepare result", "cleanup": "Close browser",
+        "operation": "Browser operation", "postcondition": "Check expected result",
+    ]
+    private static let failureLabels = [
+        "none": "", "stale_page": "Page changed; refresh before acting.",
+        "target_missing": "Control unavailable; refresh the page.", "login_needed": "Sign in again.",
+        "profile_unavailable": "Website profile unavailable.",
+        "browser_unavailable": "Browser connection unavailable.", "access_refused": "Website access refused.",
+        "unsupported": "This browser operation is unsupported.",
+        "outcome_unknown": "The action may have happened; check before repeating it.",
+        "output_invalid": "The browser returned an invalid result.",
+        "grant_refused": "Task permission does not cover this action.",
+        "timeout": "The browser operation timed out.", "internal": "The browser operation failed.",
+        "cancelled": "The browser operation was interrupted.",
+    ]
 }

@@ -26,12 +26,12 @@ are complete; ten are in progress and one is authorized but not started.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
-| 14 Inbound surfaces | In progress | Telegram smoke; review loop on a main pull request | Owner; engineering |
+| 14 Inbound surfaces | In progress | Main pull request for the paired `/pair` repair | Engineering, then owner |
 | 15 Operational hardening | Not started | All sixteen gates | Engineering, then owner |
 | 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
 | 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | Physical-iPhone verification | Owner |
-| 25 WhatsApp | In progress | Meta ceremony, live smoke; review loop on a main pull request | Owner; engineering |
+| 25 WhatsApp | In progress | Meta ceremony, live smoke | Owner |
 | 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance; expired-body drafting | Owner with engineering |
 | 27 Bland calling | In progress | Dashboard and live checks; final-head review | Owner; engineering |
 | 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
@@ -99,12 +99,13 @@ gained its own USD 10 budget, which admits it on PostgreSQL (ADR-0064
 amendment), and the findings were resolved on `dev`: fifteen fixed test-first,
 one answered as inapplicable. On 2026-09-29 the surface role gained its own
 least-privilege database login, `veetbot_surface`, whose exact grants the
-release validates. The
-[Telegram surface runbook](../telegram-surface-runbook.md) owns the owner's
-setup, including that login, and smoke. Remaining:
+release validates. Pull request 143 carried all of it to `main` with hosted CI
+and a clean CodeRabbit review. On 2026-10-06 the owner's production smoke with
+the [Telegram surface runbook](../telegram-surface-runbook.md) passed pairing, a
+run, a question, an approval, the commands, and revocation, and found that a
+paired sender's `/pair` reached the model; the repair is on `dev`. Remaining:
 
-- [ ] Owner Telegram bot provisioning and production pairing, run, question, approval, and revocation smoke, following docs/telegram-surface-runbook.md
-- [ ] Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
+- [ ] Ship the repair that answers a paired sender's /pair deterministically, found by the owner's production smoke, through a dev to main pull request with hosted CI and a clean CodeRabbit review
 
 ### Milestone 25 — WhatsApp business surface
 
@@ -120,7 +121,6 @@ remaining operator ceremony. Remaining:
 
 - [ ] Complete the owner Meta ceremony and obtain approval for the content-free utility template
 - [ ] Deploy and run the live-number webhook, pairing, reply, approval, window-boundary, and revocation smoke
-- [ ] Pass hosted CI and the CodeRabbit review loop on a dev to main pull request that carries the resolution of the sixteen findings pull request 104 left open on the surface code
 
 ### Milestone 18 — First-class email integration
 

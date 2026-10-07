@@ -48,6 +48,10 @@ The client reads run status before loading every transcript page, so a run
 that completes during loading cannot acknowledge an unseen final result.
 Hidden conversations, running results and failed transcript loads do not count
 as read; other devices pick up the receipt on their next notification sync.
+Returning to Chat from Email, or to the app from the background, makes the
+transcript count as viewed again. SwiftUI runs an iOS 15 `onChange` action as
+the closure from the previous render, so its environment reads still hold the
+old mode, scene phase or window state; those handlers pass the changed value in.
 
 Files can be attached to a chat message (ADR-0120). On Mac and iPad, drop files
 anywhere on the conversation or on the message field; plain text dropped on the

@@ -850,6 +850,82 @@ public struct VeetbotAPIClient: Sendable {
             TransportRequest(method: .get, path: "/v1/schedules/\(id.uuidString)")
         )
     }
+
+    /// Binds or clears the website sign-in a schedule's future occurrences may
+    /// read, through the full-definition update (ADR-0150, ADR-0154). Each
+    /// attempt re-reads the schedule and sends the server's own definition back
+    /// with only the binding and its `browser.profile.read` scope changed, so a
+    /// field this client does not model survives. A stale revision is read
+    /// again and retried once.
+    public func setScheduleWebsiteAccess(
+        _ scheduleID: UUID,
+        browserProfileID: UUID?
+    ) async throws -> ScheduleRecordView {
+        let path = "/v1/schedules/\(scheduleID.uuidString)"
+        var retried = false
+        while true {
+            let (data, _) = try await transport.sendData(
+                TransportRequest(method: .get, path: path)
+            )
+            let current = try JSONDecoder.server.decode(ScheduleRecordView.self, from: data)
+            if current.revision.browserProfileID == browserProfileID,
+                current.revision.requestedScopes.contains(scheduleWebsiteReadScope)
+                    == (browserProfileID != nil)
+            {
+                return current
+            }
+            let update = try scheduleWebsiteAccessUpdate(
+                from: JSONDecoder.server.decode(JSONValue.self, from: data),
+                browserProfileID: browserProfileID
+            )
+            do {
+                return try await transport.send(
+                    TransportRequest(
+                        method: .patch,
+                        path: path,
+                        body: try JSONEncoder.server.encode(update)
+                    )
+                )
+            } catch HTTPTransportError.api(let apiError)
+                where !retried && apiError.details.reason == "schedule.revision_conflict"
+            {
+                retried = true
+            }
+        }
+    }
+}
+
+private let scheduleWebsiteReadScope = "browser.profile.read"
+
+/// Revision fields the server derives or records; the definition it accepts
+/// forbids them.
+private let scheduleRevisionOnlyFields = [
+    "schedule_id", "revision", "timezone", "created_by_principal_id", "created_at",
+]
+
+private func scheduleWebsiteAccessUpdate(
+    from record: JSONValue,
+    browserProfileID: UUID?
+) throws -> JSONValue {
+    guard
+        let expectedRevision = record.objectValue?["schedule"]?.objectValue?["current_revision"],
+        expectedRevision.intValue != nil,
+        var definition = record.objectValue?["revision"]?.objectValue,
+        let scopes = definition["requested_scopes"]?.arrayValue
+    else {
+        throw HTTPTransportError.invalidResponse
+    }
+    for field in scheduleRevisionOnlyFields {
+        definition[field] = nil
+    }
+    var requestedScopes = scopes.filter { $0.stringValue != scheduleWebsiteReadScope }
+    if browserProfileID != nil {
+        requestedScopes.append(.string(scheduleWebsiteReadScope))
+    }
+    definition["requested_scopes"] = .array(requestedScopes)
+    definition["browser_profile_id"] =
+        browserProfileID.map { .string($0.uuidString.lowercased()) } ?? .null
+    return .object(["expected_revision": expectedRevision, "definition": .object(definition)])
 }
 
 private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientError? {

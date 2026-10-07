@@ -13,7 +13,9 @@ from pydantic import ValidationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.browser import (
+    BROWSER_AUTH_INTERRUPTION_MARKER,
     BrowserAction,
+    BrowserCondition,
     BrowserDispatchConstraint,
     BrowserObservation,
     BrowserProviderError,
@@ -42,15 +44,21 @@ from agent_core.ports.browser import (
     bind_browser_execution,
     browser_snapshot_in_session,
 )
+from agent_core.tools.browser_conditions import browser_condition_schema, check_browser_condition
 from agent_core.tools.browser_results import (
     OUTPUT_SCHEMA,
     browser_failure,
     observation_result,
 )
 
+_CONDITION_SCHEMA = browser_condition_schema()
+_CONDITION_DEFINITIONS = _CONDITION_SCHEMA.pop("$defs")
+
 INPUT_SCHEMA: dict[str, Any] = {
+    "$defs": _CONDITION_DEFINITIONS,
     "type": "object",
     "properties": {
+        "postcondition": _CONDITION_SCHEMA,
         "kind": {
             "type": "string",
             "enum": ["click", "type", "select", "check", "press", "scroll"],
@@ -148,14 +156,11 @@ class BrowserActApprovalPresenter:
 class BrowserActTool:
     spec = ToolSpec(
         name="browser.act",
-        version="1.0.0",
+        version="1.7.0",
         description=(
-            "Perform one action, subject to approval, on an element of the latest page "
-            "revision. The result is the page after the action settles, with a new revision "
-            "and element refs; act on it directly without observing first. A click refused "
-            "with element_not_found may be covered by an overlay: observe again and inspect "
-            "the current controls before choosing an approved recovery action. Never repeat "
-            "a write whose outcome is uncertain."
+            "Act once with approval and current revision/ref; returns settled page and fresh "
+            "refs. Optional postcondition uses observe wait_for. On element_not_found, refresh "
+            "for overlays. Never repeat an uncertain write; observed success is not causal proof."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
@@ -190,8 +195,17 @@ class BrowserActTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         try:
-            action = BrowserAction.model_validate(arguments)
-        except ValidationError:
+            if set(arguments) - set(self.spec.input_schema["properties"]):
+                raise ValueError("unknown action fields")
+            condition = (
+                BrowserCondition.model_validate(arguments["postcondition"])
+                if "postcondition" in arguments
+                else None
+            )
+            action = BrowserAction.model_validate(
+                {key: value for key, value in arguments.items() if key != "postcondition"}
+            )
+        except (ValidationError, ValueError):
             return browser_failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
                 "tool.arguments_invalid",
@@ -206,6 +220,21 @@ class BrowserActTool:
             observation = await _act(self._provider, action, constraint)
         except BrowserProviderError as error:
             return browser_failure(error)
+        if observation.interruption is not None:
+            interrupted = browser_failure(
+                BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
+            )
+            assert interrupted.failure is not None
+            interrupted.failure.external_text = BROWSER_AUTH_INTERRUPTION_MARKER
+            return interrupted
+        if condition is not None:
+            try:
+                observation = await check_browser_condition(self._provider, observation, condition)
+            except Exception:
+                # The action already returned; evidence loss cannot prove it was unsent.
+                return browser_failure(
+                    BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
+                )
         return observation_result(self._provider, observation, self.spec.maximum_output_bytes)
 
 
@@ -247,3 +276,29 @@ async def _act(
     if constraint is None:
         return await provider.act(action)
     return await provider.act(action, constraint=constraint)
+
+
+class LegacyBrowserActTool(BrowserActTool):
+    """Keep the original action input contract for already pinned chats."""
+
+    spec = BrowserActTool.spec.model_copy(
+        update={
+            "version": "1.0.0",
+            "description": (
+                "Perform one action, subject to approval, on an element of the latest page "
+                "revision. The result is the page after the action settles, with a new revision "
+                "and element refs; act on it directly without observing first. A click refused "
+                "with element_not_found may be covered by an overlay: observe again and inspect "
+                "the current controls before choosing an approved recovery action. Never repeat "
+                "a write whose outcome is uncertain."
+            ),
+            "input_schema": {
+                **INPUT_SCHEMA,
+                "properties": {
+                    key: value
+                    for key, value in INPUT_SCHEMA["properties"].items()
+                    if key != "postcondition"
+                },
+            },
+        }
+    )

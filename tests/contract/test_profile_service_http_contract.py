@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -38,6 +39,9 @@ from agent_core.domain.browser import (
     BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserTextCoverage,
+    BrowserVerificationStage,
+    ignore_verification_stage,
 )
 from agent_core.domain.credentials import SecretValue
 from tests.contract.support import NOW, principal
@@ -52,6 +56,9 @@ NO_SESSION = b'{"format_version":1}'
 
 
 class FakeRuntime:
+    def set_interactive_authentication(self) -> None:
+        """The HTTP fake has no automatic page guard."""
+
     def __init__(
         self,
         events: list[BrowserInteractiveEvent] | None = None,
@@ -76,7 +83,12 @@ class FakeRuntime:
         self.origins = allowed_origins
 
     async def navigate(self, url: str) -> BrowserObservation:
-        return BrowserObservation(url=url, revision="revision-1")
+        return BrowserObservation(
+            url=url,
+            revision="revision-1",
+            text="Fixture",
+            text_coverage=BrowserTextCoverage(scanned_nodes=2, scanned_text_characters=7),
+        )
 
     async def observe(self) -> BrowserObservation:
         return BrowserObservation(url=self.origins[0], revision="revision-1")
@@ -102,8 +114,14 @@ class FakeRuntime:
             elements={f"{revision}:0": BrowserElementFacts(field_kind=BrowserFieldKind.NONE)},
         )
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+    ) -> BrowserPageEvidence:
         """A public home page, and members' pages that send a visitor to sign in."""
+        on_stage(BrowserVerificationStage.NAVIGATE)
         if self.evidence_failure is not None:
             raise self.evidence_failure
         if self.material == NO_SESSION and urlsplit(url).path not in {"", "/"}:
@@ -486,6 +504,10 @@ async def test_profile_service_data_plane_and_authentication_are_wire_compatible
         cancelled = await sessions.cancel_authentication(ceremony.id, principal())
 
     assert observation.url == "https://example.org/lesson"
+    assert observation.text == "Fixture"
+    assert observation.text_coverage == BrowserTextCoverage(
+        scanned_nodes=2, scanned_text_characters=7
+    )
     assert acted.revision == "revision-2"
     assert renewed.lease_ref == lease.lease_ref
     assert renewed.expires_at == NOW + timedelta(minutes=10)
@@ -1171,6 +1193,13 @@ async def test_device_handoff_logs_nothing_from_the_payload(
     for response, _capability in answers:
         assert not any(secret in response.text for secret in _LOG_SENTINELS)
     assert any(record.getMessage() == "device handoff failed" for record in caplog.records)
+    # The provider failure is the one handoff whose verification could not
+    # finish; its record names loads and stages and nothing else.
+    assert [
+        record.args
+        for record in caplog.records
+        if record.msg == "device verification did not finish (%s) after %.1f s"
+    ] == [("with_session=navigate without_session=navigate", pytest.approx(0, abs=5))]
 
 
 @pytest.mark.parametrize("failure", injected_failures(), ids=lambda failure: type(failure).__name__)
@@ -1356,3 +1385,169 @@ async def test_facts_are_an_optional_sibling_of_the_observation(tmp_path: Path) 
                 }
             },
         }
+
+
+@pytest.mark.parametrize(
+    "expansion_arguments",
+    [
+        {"after": "revision-1:0"},
+        {"region_ref": "region-1", "expected_revision": "revision-1"},
+        {"region_ref": "region-1", "expected_revision": "revision-1", "text_offset": 42},
+    ],
+)
+async def test_expansion_crosses_authenticated_http_with_lease_and_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    expansion_arguments: dict[str, object],
+) -> None:
+    from agent_core.domain.browser import BrowserObservationExpansion, BrowserObservationFocus
+
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", runtimes=runtimes))
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://profiles.internal.example",
+        headers={"Authorization": f"Bearer {OPAQUE_AUTH_VALUE}"},
+    ) as http:
+        await _provision_over_http(http)
+        sessions = HostedBrowserSessionControlPlane(
+            base_url="https://profiles.internal.example",
+            credentials=MappingCredentialResolver(
+                {"browser_profile_control_plane": OPAQUE_AUTH_VALUE}
+            ),
+            client=http,
+        )
+        lease = await sessions.acquire(
+            PROFILE_ID,
+            principal(),
+            PROVIDER_REF,
+            run_id=RUN_ID,
+            attempt_number=1,
+            deadline_at=NOW + timedelta(minutes=5),
+        )
+        calls: list[BrowserObservationExpansion] = []
+
+        async def expand(request: BrowserObservationExpansion) -> BrowserObservation:
+            calls.append(request)
+            return BrowserObservation(
+                url="https://example.org",
+                revision="expanded",
+                focus=BrowserObservationFocus(
+                    region_ref="new-region",
+                    text_offset=request.text_offset,
+                    text_total_bytes=42,
+                    text_cursor="t" * 32,
+                )
+                if request.region_ref
+                else None,
+            )
+
+        # This runtime starts with no expansion capability, like an older service adapter.
+        request = BrowserObservationExpansion.model_validate(expansion_arguments)
+        with pytest.raises(BrowserProviderError, match="action_not_allowed"):
+            await sessions.expand(lease.lease_ref, request)
+        monkeypatch.setattr(runtimes[0], "expand", expand, raising=False)
+        page = await sessions.expand(lease.lease_ref, request)
+        assert page.revision == "expanded" and calls == [request]
+        response = await http.post(
+            "/v1/browser-sessions:observe",
+            json={
+                "lease_ref": lease.lease_ref,
+                "expansion": {"after": "a", "cursor": "b" * 32},
+            },
+        )
+        assert response.status_code == 400 and calls == [request]
+        response = await http.post(
+            "/v1/browser-sessions:observe",
+            json={
+                "lease_ref": lease.lease_ref,
+                "expansion": {"after": "a"},
+            },
+            headers={"Authorization": "Bearer invalid"},
+        )
+        assert response.status_code == 401 and calls == [request]
+        with pytest.raises(BrowserProviderError, match="profile_unavailable"):
+            await sessions.expand("foreign-lease-reference-0000000000000", request)
+        assert calls == [request]
+        await sessions.close(lease.lease_ref)
+        with pytest.raises(BrowserProviderError, match="profile_unavailable"):
+            await sessions.expand(lease.lease_ref, request)
+        assert calls == [request]
+
+
+async def test_extraction_crosses_authenticated_http_with_lease_and_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.domain.browser_extraction import BrowserExtractionRequest
+    from tests.unit.test_browser_extraction import extracted_page, extraction_arguments
+
+    runtimes: list[FakeRuntime] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", runtimes=runtimes))
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://profiles.internal.example",
+        headers={"Authorization": f"Bearer {OPAQUE_AUTH_VALUE}"},
+    ) as http:
+        await _provision_over_http(http)
+        sessions = HostedBrowserSessionControlPlane(
+            base_url="https://profiles.internal.example",
+            credentials=MappingCredentialResolver(
+                {"browser_profile_control_plane": OPAQUE_AUTH_VALUE}
+            ),
+            client=http,
+        )
+        lease = await sessions.acquire(
+            PROFILE_ID,
+            principal(),
+            PROVIDER_REF,
+            run_id=RUN_ID,
+            attempt_number=1,
+            deadline_at=NOW + timedelta(minutes=5),
+        )
+        calls: list[BrowserExtractionRequest] = []
+
+        async def extract(request: BrowserExtractionRequest) -> BrowserObservation:
+            calls.append(request)
+            return extracted_page(request)
+
+        # This runtime starts with no extraction capability, like an older service adapter.
+        request = BrowserExtractionRequest.model_validate(extraction_arguments()["extract"])
+        with pytest.raises(BrowserProviderError, match="action_not_allowed"):
+            await sessions.extract(lease.lease_ref, request)
+        monkeypatch.setattr(runtimes[0], "extract", extract, raising=False)
+        page = await sessions.extract(lease.lease_ref, request)
+        assert page.revision == "new-revision" and calls == [request]
+        response = await http.post(
+            "/v1/browser-sessions:observe",
+            json={
+                "lease_ref": lease.lease_ref,
+                "extraction": request.model_dump(mode="json"),
+                "expansion": {"after": "old-ref"},
+            },
+        )
+        assert response.status_code == 400 and calls == [request]
+        response = await http.post(
+            "/v1/browser-sessions:observe",
+            json={
+                "lease_ref": lease.lease_ref,
+                "extraction": {**request.model_dump(mode="json"), "script": "forbidden"},
+            },
+        )
+        assert response.status_code == 400 and calls == [request]
+        response = await http.post(
+            "/v1/browser-sessions:observe",
+            json={
+                "lease_ref": lease.lease_ref,
+                "extraction": request.model_dump(mode="json"),
+            },
+            headers={"Authorization": "Bearer invalid"},
+        )
+        assert response.status_code == 401 and calls == [request]
+        with pytest.raises(BrowserProviderError, match="profile_unavailable"):
+            await sessions.extract("foreign-lease-reference-0000000000000", request)
+        assert calls == [request]
+        await sessions.close(lease.lease_ref)
+        with pytest.raises(BrowserProviderError, match="profile_unavailable"):
+            await sessions.extract(lease.lease_ref, request)
+        assert calls == [request]

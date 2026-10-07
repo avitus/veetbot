@@ -12,6 +12,8 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agent_core.domain.browser_evidence import BrowserEvidence, BrowserSimpleEvidence
+from agent_core.domain.browser_extraction import BrowserExtractionResult
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.web import is_public_https_url
 
@@ -66,6 +68,10 @@ def require_service_origin(value: str, *, message: str) -> str:
     ):
         raise ValueError(message)
     return value.rstrip("/")
+
+
+# Fixed trusted-tool metadata, never a page-authored instruction or effect proof.
+BROWSER_AUTH_INTERRUPTION_MARKER = '{"browser_interruption":"needs_user"}'
 
 
 class BrowserActionKind(StrEnum):
@@ -163,6 +169,23 @@ class BrowserPageEvidence(BaseModel):
     on_allowed_origin: bool
     path: str = Field(max_length=4096, repr=False)
     challenge_visible: bool
+
+
+class BrowserVerificationStage(StrEnum):
+    """What one verification load is doing; all a diagnostic may say of it (ADR-0128)."""
+
+    START = "start"
+    NAVIGATE = "navigate"
+    IDLE = "idle"
+    INSPECT = "inspect"
+    SETTLE = "settle"
+    REINSPECT = "reinspect"
+    CAPTURE = "capture"
+
+
+def ignore_verification_stage(stage: BrowserVerificationStage) -> None:
+    """The stage observer of a caller that keeps no verification diagnostic."""
+    del stage
 
 
 class BrowserAuthenticationStatus(StrEnum):
@@ -350,6 +373,19 @@ class BrowserAuthenticationRecord(BaseModel):
         return self
 
 
+class BrowserAuthenticationWait(BaseModel):
+    """Trusted run checkpoint binding; never accepted from a model or page."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    profile_id: UUID
+    generation: int = Field(ge=1)
+    started_at: AwareDatetime
+    expires_at: AwareDatetime
+    question_id: UUID | None = None
+    resume_url: str | None = Field(default=None, max_length=4096, repr=False)
+
+
 TERMINAL_BROWSER_AUTHENTICATION_STATUSES = frozenset(
     {
         BrowserAuthenticationStatus.READY,
@@ -513,6 +549,117 @@ class BrowserElement(BaseModel):
     checked: bool | None = None
 
 
+class BrowserObservationExpansion(BaseModel):
+    """One continuation bound to a provider's current observation."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    after: str | None = Field(default=None, min_length=1, max_length=128)
+    cursor: str | None = Field(default=None, min_length=32, max_length=128)
+
+    region_ref: str | None = Field(default=None, min_length=1, max_length=128)
+    expected_revision: str | None = Field(default=None, min_length=1, max_length=128)
+    text_offset: int = Field(default=0, ge=0, le=262_144)
+
+    @model_validator(mode="after")
+    def exactly_one_continuation(self) -> BrowserObservationExpansion:
+        if self.region_ref is not None:
+            if self.expected_revision is None or not self.model_fields_set <= {
+                "region_ref",
+                "expected_revision",
+                "text_offset",
+            }:
+                raise ValueError("region expansion requires its revision and optional text offset")
+        elif len(self.model_fields_set) != 1 or (self.after is None) == (self.cursor is None):
+            raise ValueError("exactly one browser continuation is required")
+        return self
+
+
+class BrowserObservationCoverage(BaseModel):
+    """Bounds of one live candidate window, not a whole-page completeness claim."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    candidate_offset: int = Field(ge=0, le=65_536)
+    scanned_candidates: int = Field(ge=0, le=4_096)
+    next_cursor: str | None = Field(default=None, min_length=32, max_length=128)
+    scan_limit_reached: bool = False
+
+
+class BrowserCondition(BaseModel):
+    """A positive predicate over visible controls, never authorization or effect proof."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    role: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=1024)
+    disabled: bool | None = None
+    checked: bool | None = None
+    timeout_ms: int = Field(default=2000, ge=0, le=5000)
+    evidence: BrowserEvidence | None = None
+    failure_evidence: BrowserSimpleEvidence | None = None
+
+    @model_validator(mode="after")
+    def one_positive_predicate(self) -> BrowserCondition:
+        if self.evidence is None:
+            if self.role is None or self.name is None:
+                raise ValueError("a positive control or evidence predicate is required")
+        elif any(key in self.model_fields_set for key in ("role", "name", "disabled", "checked")):
+            raise ValueError("control and evidence predicates cannot be mixed")
+        return self
+
+
+class BrowserConditionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    status: Literal["satisfied", "not_observed", "ambiguous", "failed"]
+    scope: Literal["observation_window"] = "observation_window"
+    observations: int = Field(ge=1, le=21)
+    elapsed_ms: int = Field(ge=0, le=5000)
+
+
+class BrowserSemanticRegion(BaseModel):
+    """Visible page evidence, not an actionable element or continuation anchor."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    ref: str = Field(min_length=1, max_length=128)
+    kind: Literal["dialog", "alert", "status", "form", "heading", "main", "section"]
+    text: str = Field(max_length=512)
+    text_truncated: bool = False
+
+
+class BrowserRegionCoverage(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    version: Literal[1] = 1
+    scope: Literal["main_document"] = "main_document"
+    scanned_nodes: int = Field(ge=0, le=8192)
+    scan_limit_reached: bool = False
+    omitted_regions: int = Field(default=0, ge=0, le=8192)
+
+
+class BrowserTextCoverage(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    version: Literal[1] = 1
+    scope: Literal["main_document_and_open_shadow"] = "main_document_and_open_shadow"
+    scanned_nodes: int = Field(ge=0, le=8192)
+    scanned_text_characters: int = Field(ge=0, le=262_144)
+    node_limit_reached: bool = False
+    text_limit_reached: bool = False
+    omitted_text_bytes: int = Field(default=0, ge=0, le=262_144)
+
+
+class BrowserObservationFocus(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    region_ref: str = Field(min_length=1, max_length=128)
+    text_offset: int = Field(ge=0, le=262_144)
+    text_total_bytes: int = Field(ge=0, le=262_144)
+    text_cursor: str = Field(min_length=32, max_length=64)
+
+
 class BrowserObservation(BaseModel):
     """The safe subset of one rendered page revision."""
 
@@ -520,7 +667,39 @@ class BrowserObservation(BaseModel):
     title: str | None = Field(default=None, max_length=1024)
     revision: str = Field(min_length=1, max_length=128)
     text: str = Field(default="", max_length=262_144)
+    text_coverage: BrowserTextCoverage | None = None
+    focus: BrowserObservationFocus | None = None
     elements: tuple[BrowserElement, ...] = Field(default=(), max_length=256)
+    coverage: BrowserObservationCoverage | None = None
+    readiness: Literal["dom_quiet", "bound_expired"] | None = None
+    interruption: Literal["needs_user"] | None = None
+    condition: BrowserConditionResult | None = None
+    regions: tuple[BrowserSemanticRegion, ...] = Field(default=(), max_length=32)
+    region_coverage: BrowserRegionCoverage | None = None
+    extraction: BrowserExtractionResult | None = None
+
+    @model_validator(mode="after")
+    def region_evidence_is_distinct(self) -> BrowserObservation:
+        if self.text_coverage is not None and (
+            len(self.text.encode("utf-8")) + self.text_coverage.omitted_text_bytes > 262_144
+        ):
+            raise ValueError("readable text capture exceeds its byte limit")
+        if self.interruption is not None and (self.elements or self.regions or self.focus):
+            raise ValueError("interrupted observations cannot carry actionable references")
+        if self.focus is not None and (
+            self.focus.text_offset + len(self.text.encode("utf-8")) > self.focus.text_total_bytes
+        ):
+            raise ValueError("focused text exceeds its captured range")
+        if self.extraction is not None and self.extraction.revision != self.revision:
+            raise ValueError("extraction must describe the observation revision")
+        if self.regions and self.region_coverage is None:
+            raise ValueError("semantic regions require coverage")
+        references = {region.ref for region in self.regions}
+        if len(references) != len(self.regions) or references.intersection(
+            element.ref for element in self.elements
+        ):
+            raise ValueError("semantic references must be unique and distinct from controls")
+        return self
 
     @field_validator("url")
     @classmethod

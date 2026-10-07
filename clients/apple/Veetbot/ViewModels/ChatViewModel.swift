@@ -117,7 +117,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var connectionGeneration = UUID()
     @Published public private(set) var isReconfiguring = false
     public var currentAPIClient: VeetbotAPIClient? { api }
-    public var callNotificationHandler: (() -> Void)?
+    /// Brings Chat forward for a notification it answers: a call result, or a
+    /// run's session.
+    public var chatNotificationHandler: (() -> Void)?
     @Published public private(set) var callResult: CallResultViewData?
     public var emailNotificationHandler: ((UUID, UUID?) async -> Void)?
     @Published public private(set) var history: [SessionHistoryEntry] = []
@@ -172,6 +174,22 @@ public final class ChatViewModel: ObservableObject {
     /// under a new name; never the global banner.
     @Published public private(set) var folderEditorError: String?
     @Published public private(set) var pendingFolderProposalIDs: Set<UUID> = []
+    /// The decision on its way to the server for each approval the owner has
+    /// just answered; its card shows progress and accepts no second decision.
+    @Published public private(set) var approvalsInFlight: [UUID: ApprovalDecision] = [:]
+    /// Presented from the conversation's toolbar, which on the Mac belongs to the window.
+    @Published public var isPeopleLookupPresented = false
+
+    /// Whether an approval still waits on the owner; one whose decision is on its way does not.
+    public var awaitingOwnerApproval: Bool {
+        runState.needsApprovalIDs.contains { approvalsInFlight[$0] == nil }
+    }
+
+    /// The open conversation's sidebar title.
+    public var selectedConversationTitle: String {
+        guard let selectedSessionID else { return "New conversation" }
+        return history.first { $0.sessionID == selectedSessionID }?.title ?? "Conversation"
+    }
 
     public var groupedHistory: GroupedConversationHistory {
         .make(history: history, folders: folders, available: foldersAvailable)
@@ -194,6 +212,10 @@ public final class ChatViewModel: ObservableObject {
     private let urlSession: URLSession?
     private let deviceHandoffClient: DeviceSignInHandoffClient
     private let deviceSignInTiming: DeviceSignInTiming
+    /// How long after a watched reply ends the sidebar reads the list again,
+    /// for the title the server writes a few seconds later (ADR-0155).
+    private let titleRefreshDelay: TimeInterval
+    private var titleRefreshTask: Task<Void, Never>?
     /// The profile a device sign-in window created and that has not become
     /// ready, so closing the window can remove it.
     private var deviceSignInCreatedProfile: (requestID: UUID, profileID: UUID)?
@@ -282,8 +304,10 @@ public final class ChatViewModel: ObservableObject {
         runState: RunStateReducer? = nil,
         urlSession: URLSession? = nil,
         deviceHandoffClient: DeviceSignInHandoffClient? = nil,
-        deviceSignInTiming: DeviceSignInTiming = .standard
+        deviceSignInTiming: DeviceSignInTiming = .standard,
+        titleRefreshDelay: TimeInterval = 10
     ) {
+        self.titleRefreshDelay = titleRefreshDelay
         self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
@@ -448,7 +472,7 @@ public final class ChatViewModel: ObservableObject {
             do {
                 let result = try await api.callResult(callID)
                 guard generation == connectionGeneration, callResultRequestID == requestID else { return }
-                callNotificationHandler?()
+                chatNotificationHandler?()
                 callResult = result
             } catch {
                 guard generation == connectionGeneration, callResultRequestID == requestID else { return }
@@ -466,10 +490,13 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         do {
+            var fetched: SessionView?
             if let emailNotificationHandler {
                 let session = try await api.getSession(link.sessionID)
+                fetched = session
                 if let value = session.metadata["email_thread_id"]?.stringValue,
-                    let threadID = UUID(uuidString: value) {
+                    let threadID = UUID(uuidString: value),
+                    await emailAnswers(link.focus, threadID: threadID, api: api) {
                     let approvalID: UUID?
                     if case .approval(let id) = link.focus { approvalID = id } else { approvalID = nil }
                     await emailNotificationHandler(threadID, approvalID)
@@ -480,7 +507,8 @@ public final class ChatViewModel: ObservableObject {
             if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
             } else {
-                let session = try await api.getSession(link.sessionID)
+                let session: SessionView
+                if let fetched { session = fetched } else { session = try await api.getSession(link.sessionID) }
                 try await store(
                     session: session,
                     lastRunID: link.runID
@@ -494,6 +522,7 @@ public final class ChatViewModel: ObservableObject {
             guard selectedSessionID == link.sessionID, runState.activeRunID == link.runID else {
                 return
             }
+            chatNotificationHandler?()
             if case .approval(let approvalID) = link.focus {
                 let approval = try await api.getApproval(approvalID)
                 guard approval.sessionID == link.sessionID, approval.runID == link.runID else {
@@ -506,6 +535,30 @@ public final class ChatViewModel: ObservableObject {
             notificationNavigationID = UUID()
         } catch {
             present(error)
+        }
+    }
+
+    /// Email answers a notification from a thread's session only for the send
+    /// approval the thread's draft awaits (email-experience.md:148-150). Discuss
+    /// in Chat runs in that same session, so its questions and its other
+    /// approvals, such as `sandbox.run`, open the conversation in Chat. A thread
+    /// or draft that cannot be read leaves the approval to Chat, which can
+    /// resolve any approval.
+    private func emailAnswers(
+        _ focus: NotificationFocus?,
+        threadID: UUID,
+        api: VeetbotAPIClient
+    ) async -> Bool {
+        switch focus {
+        case nil:
+            return true
+        case .question:
+            return false
+        case .approval(let approvalID):
+            guard let thread = try? await api.emailThread(threadID) else { return false }
+            if let draft = thread.draft { return draft.approvalID == approvalID }
+            guard let draftID = thread.draftID else { return false }
+            return (try? await api.emailDraft(draftID))?.approvalID == approvalID
         }
     }
 
@@ -1471,13 +1524,16 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Resolve the owner's decision and refresh an offer that the server withdrew.
+    /// A decision already on its way makes any further tap on that card a no-op.
     public func resolveApproval(
         _ approval: ApprovalView,
         decision: ApprovalDecision,
         reason: String? = nil,
         taskGrant: TaskGrantEcho? = nil
     ) async {
-        guard let api else { return }
+        guard let api, approvalsInFlight[approval.id] == nil else { return }
+        approvalsInFlight[approval.id] = decision
+        defer { approvalsInFlight[approval.id] = nil }
         do {
             let stored = try await api.resolveApproval(
                 approval.id,
@@ -2568,6 +2624,7 @@ public final class ChatViewModel: ObservableObject {
                 guard let self else { return }
                 if touchHistoryOnCompletion {
                     await self.refreshHistoryAfterRun(runID)
+                    self.scheduleTitleRefresh()
                 }
             } catch is CancellationError {
                 return
@@ -2587,6 +2644,22 @@ public final class ChatViewModel: ObservableObject {
             } catch {
                 present(error)
             }
+        }
+    }
+
+    /// The server titles a conversation a few seconds after its reply ends
+    /// (ADR-0155); one more read of the list shows that title without waiting
+    /// for the next 30-second poll.
+    private func scheduleTitleRefresh() {
+        let generation = connectionGeneration
+        let delay = titleRefreshDelay
+        titleRefreshTask?.cancel()
+        titleRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.isConfigured,
+                self.connectionGeneration == generation
+            else { return }
+            await self.synchronizeHistory()
         }
     }
 

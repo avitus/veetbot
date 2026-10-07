@@ -235,11 +235,13 @@ SHIPPED_CONFIGS = (
     "context/plan.yaml",
     "tools/limits.yaml",
     "runtime/limits.yaml",
+    "runtime/browser-workflows.yaml",
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
     "folders/profiles.yaml",
+    "titles/profiles.yaml",
 )
-# The design corpus declares 184 operator-reviewable knobs. Metadata such as
+# The design corpus declares 199 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -451,6 +453,13 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "proposals.max_members",
             "proposals.judgment_matching_enabled",
             "proposals.judgment_match_threshold",
+        ),
+        "titles/profiles.yaml": (
+            "generation.enabled",
+            "generation.model_policy",
+            "generation.batch_size",
+            "generation.recent_messages",
+            "generation.message_chars",
         ),
     }
 )
@@ -962,6 +971,13 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
+    if relative == "runtime/browser-workflows.yaml":
+        from agent_core.domain.browser_workflows import BrowserWorkflowCatalog
+
+        try:
+            BrowserWorkflowCatalog.model_validate(merged)
+        except ValueError as exc:
+            raise ConfigurationError("invalid reviewed browser workflow catalog") from exc
     if relative == "runtime/limits.yaml":
         retry_delays = merged["notifications"]["retry_delays_seconds"]
         if (

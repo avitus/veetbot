@@ -27,7 +27,6 @@ public struct ChatView: View {
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
     @State private var textSelection: MessageTextSelection?
-    @State private var showingPeople = false
     @State private var isDropTargeted = false
     @State private var showingFileImporter = false
     #if os(iOS)
@@ -46,7 +45,7 @@ public struct ChatView: View {
     }
 
     private var notificationCovered: Bool {
-        var covered = artifactSelection != nil || textSelection != nil || showingPeople
+        var covered = artifactSelection != nil || textSelection != nil || model.isPeopleLookupPresented
             || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
         #if os(iOS)
         covered = covered || showingPhotoPicker || model.pendingSmsInvocation != nil
@@ -54,16 +53,16 @@ public struct ChatView: View {
         return covered
     }
 
-    private func updateNotificationVisibility() {
-        model.notificationTranscriptVisible = activeMode == .chat && !notificationCovered
+    /// An `onChange` action is the closure built for the previous body, so the
+    /// environment it reads still holds the old mode: callers pass the new value.
+    private func updateNotificationVisibility(mode: ClientMode? = nil, covered: Bool? = nil) {
+        model.notificationTranscriptVisible = (mode ?? activeMode) == .chat && !(covered ?? notificationCovered)
         if model.notificationTranscriptVisible { Task { await model.synchronizeNotifications() } }
     }
 
     /// Renders the live conversation and composer while the active mode controls the window title.
     public var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
@@ -87,6 +86,9 @@ public struct ChatView: View {
                                         $0.id == activity.approvalID
                                     },
                                     activeTaskGrant: model.activeTaskGrant,
+                                    approvalInFlight: activity.approvalID.flatMap {
+                                        model.approvalsInFlight[$0]
+                                    },
                                     resolve: { approval, decision, reason, taskGrant in
                                         Task {
                                             await model.resolveApproval(
@@ -109,10 +111,12 @@ public struct ChatView: View {
                             case .toolBundle(let bundle):
                                 ToolActivityBundleCard(
                                     bundle: bundle,
+                                    approvals: state.approvals,
                                     openArtifact: { artifactID in
                                         artifactSelection = ArtifactSelection(id: artifactID)
                                     }
                                 )
+                                .id(scrollID(for: bundle, fallback: item.id))
                             }
                         }
                         ForEach(
@@ -121,7 +125,8 @@ public struct ChatView: View {
                             }
                         ) { approval in
                             ApprovalCardView(
-                                approval: approval, activeTaskGrant: model.activeTaskGrant
+                                approval: approval, activeTaskGrant: model.activeTaskGrant,
+                                inFlight: model.approvalsInFlight[approval.id]
                             ) { decision, reason, taskGrant in
                                 Task {
                                     await model.resolveApproval(
@@ -183,8 +188,8 @@ public struct ChatView: View {
         }
         .onAppear { updateNotificationVisibility() }
         .onDisappear { model.notificationTranscriptVisible = false }
-        .onChange(of: notificationCovered) { _ in updateNotificationVisibility() }
-        .onChange(of: activeMode) { _ in updateNotificationVisibility() }
+        .onChange(of: notificationCovered) { covered in updateNotificationVisibility(covered: covered) }
+        .onChange(of: activeMode) { mode in updateNotificationVisibility(mode: mode) }
         // While the conversation is on screen, its task permission is re-read
         // every 30 seconds; a revoke or sweep elsewhere reaches no run stream.
         .task(id: model.selectedSessionID) {
@@ -224,7 +229,17 @@ public struct ChatView: View {
             }
         }
         #endif
-        .navigationTitle(activeMode == .chat ? "Conversation" : "Email")
+        .navigationTitle(activeMode == .chat ? model.selectedConversationTitle : "Email")
+        #if os(macOS)
+        // The window's one toolbar owner places People and Stop (RootView).
+        .navigationSubtitle(activeMode == .chat ? statusLabel ?? "" : "")
+        #else
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) { titleBlock }
+            ToolbarItemGroup(placement: .primaryAction) { ChatToolbarActions(model: model) }
+        }
+        #endif
         .sheet(item: Binding(get: { model.callResult }, set: { if $0 == nil { model.dismissCallResult() } })) { result in
             CallResultSheet(result: result, close: model.dismissCallResult) {
                 Task { await model.deleteCallResult() }
@@ -239,43 +254,37 @@ public struct ChatView: View {
             MessageTextSheet(selection: selection)
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $showingPeople) {
+        .fullScreenCover(isPresented: $model.isPeopleLookupPresented) {
             PeopleLookupSheet(lookup: PeopleLookup(), sessionID: model.selectedSessionID)
         }
         #else
-        .sheet(isPresented: $showingPeople) {
+        .sheet(isPresented: $model.isPeopleLookupPresented) {
             PeopleLookupSheet(lookup: PeopleLookup(), sessionID: model.selectedSessionID)
         }
         #endif
-        .onChange(of: model.connectionGeneration) { _ in showingPeople = false }
+        .onChange(of: model.connectionGeneration) { _ in model.isPeopleLookupPresented = false }
     }
 
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.selectedSessionID == nil ? "New conversation" : "Conversation")
-                    .appFont(.headline)
-                    .accessibilityIdentifier("chat.heading")
-                if let status = state.runStatus {
-                    Text(status.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .appFont(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            Spacer()
-            Button { showingPeople = true } label: { Label("People", systemImage: "person.2") }
-                .accessibilityIdentifier("chat.people")
-            if state.isRunActive {
-                Button(role: .destructive) {
-                    Task { await model.cancelActiveRun() }
-                } label: {
-                    Label("Stop", systemImage: "stop.fill")
-                }
+    #if os(iOS)
+    /// The conversation's title and, beneath it, only what the run needs from the owner.
+    private var titleBlock: some View {
+        VStack(spacing: 1) {
+            Text(model.selectedConversationTitle)
+                .appFont(.headline)
+                .lineLimit(1)
+                .accessibilityIdentifier("chat.heading")
+            if let statusLabel {
+                Text(statusLabel)
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.orange)
+                    .accessibilityIdentifier("chat.status")
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(AppTheme.brandGradient.opacity(0.42))
+    }
+    #endif
+
+    private var statusLabel: String? {
+        ConversationStatus.label(runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval)
     }
 
     private var composer: some View {
@@ -381,6 +390,7 @@ public struct ChatView: View {
         RunActivity.label(
             isSending: model.isSending,
             runStatus: state.runStatus,
+            awaitingApproval: model.awaitingOwnerApproval,
             reasoningActive: state.reasoningActive,
             reasoningTitle: state.reasoningTitle
         )
@@ -403,6 +413,14 @@ public struct ChatView: View {
         // Follow newly inserted activity, but leave the viewport fixed while an
         // existing assistant message grows so its beginning remains readable.
         "\(state.timeline.count):\(state.tools.count):\(state.approvals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none"):\(state.failure?.occurredAt.timeIntervalSince1970 ?? 0)"
+    }
+
+    /// A notification for an approval a bundle now holds scrolls to the bundle.
+    private func scrollID(for bundle: ToolActivityBundle, fallback: String) -> String {
+        guard case .approval(let approvalID) = model.notificationFocus,
+            bundle.activities.contains(where: { $0.approvalID == approvalID })
+        else { return fallback }
+        return NotificationFocus.approval(approvalID).scrollID
     }
 
     private func scroll(_ proxy: ScrollViewProxy) {
@@ -556,6 +574,35 @@ private struct TimelineBubble: View {
             openArtifact(id)
         } label: {
             Label(label, systemImage: "doc")
+        }
+    }
+}
+
+/// The open conversation's People and Stop controls. On the Mac the window's one
+/// toolbar owner places them; on iOS the conversation's navigation bar does.
+struct ChatToolbarActions: View {
+    @ObservedObject var model: ChatViewModel
+    @ObservedObject private var state: RunStateReducer
+
+    init(model: ChatViewModel) {
+        self.model = model
+        self.state = model.runState
+    }
+
+    var body: some View {
+        Button { model.isPeopleLookupPresented = true } label: {
+            Label("People", systemImage: "person.2")
+        }
+        .help("People")
+        .accessibilityIdentifier("chat.people")
+        if state.isRunActive {
+            Button(role: .destructive) {
+                Task { await model.cancelActiveRun() }
+            } label: {
+                Label("Stop", systemImage: "stop.circle")
+            }
+            .help("Stop")
+            .accessibilityIdentifier("chat.stop")
         }
     }
 }

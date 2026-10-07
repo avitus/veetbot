@@ -1,5 +1,5 @@
 # AGENTS.md
-Operating contract for coding agents working in this repository. This file is a
+Operating contract for this repository. This file is a
 router, not a copy of the plan. Read it fully before making changes.
 
 ## Project mission
@@ -82,7 +82,7 @@ checks it per commit; no trailer means lane A.
 | WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
 | Bland calling and public reception | `bland-calling.md` |
 | People, relationships, interaction history | `people-and-relationships.md` |
-| Thread folders, proposals; typed judgment | `thread-folders.md`, `typed-judgment.md` |
+| Chat folders, titles; typed judgment | `thread-folders.md`, `conversation-titles.md`, `typed-judgment.md` |
 | Email unsubscribe, bulk-sender census | `email-unsubscribe.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |

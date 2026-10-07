@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -25,6 +26,8 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from agent_core.adapters.browser import playwright as playwright_adapter
+from agent_core.adapters.browser.page_structure import REGION_SCRIPT
+from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
 from agent_core.adapters.browser.playwright import (
     PlaywrightBrowserProvider,
     PythonPlaywrightRuntime,
@@ -41,6 +44,7 @@ from agent_core.domain.browser import (
     BrowserPageEvidence,
     BrowserProviderError,
     BrowserTargetFacts,
+    BrowserVerificationStage,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
 from tests.real_browser_support import RealBrowserRuntime, local_https_site, require_real_browser
@@ -315,10 +319,19 @@ async def test_observation_pipelines_slow_controls_with_bounded_concurrency() ->
     body = Mock(spec=Locator)
     body.inner_text = AsyncMock(return_value="Login page")
     page = Mock(spec=Page)
+    page.evaluate_handle = AsyncMock(side_effect=partial(region_capture_for, page))
     page.url = "https://site.example/login"
     page.title = AsyncMock(return_value="Sign in")
     page.locator.side_effect = lambda selector: body if selector == "body" else controls
-    page.evaluate = AsyncMock(return_value=[True] * len(handles))
+    page.evaluate = AsyncMock(
+        side_effect=lambda script, *args: (
+            readable_text("Login page")
+            if script == READABLE_TEXT_SCRIPT
+            else empty_structure()
+            if script == REGION_SCRIPT
+            else [True] * len(handles)
+        )
+    )
 
     observation = await asyncio.wait_for(PythonPlaywrightRuntime()._observation(page), 1)
 
@@ -356,10 +369,19 @@ async def test_observation_keeps_the_element_snapshot_when_the_page_replaces_con
     body = Mock(spec=Locator)
     body.inner_text = AsyncMock(return_value="Welcome")
     page = Mock(spec=Page)
+    page.evaluate_handle = AsyncMock(side_effect=partial(region_capture_for, page))
     page.url = "https://site.example/login"
     page.title = AsyncMock(return_value="Sign in")
     page.locator.side_effect = lambda selector: body if selector == "body" else controls
-    page.evaluate = AsyncMock(return_value=[True])
+    page.evaluate = AsyncMock(
+        side_effect=lambda script, *args: (
+            readable_text("Welcome")
+            if script == READABLE_TEXT_SCRIPT
+            else empty_structure()
+            if script == REGION_SCRIPT
+            else [True]
+        )
+    )
     runtime = PythonPlaywrightRuntime()
 
     observation = await runtime._observation(page)
@@ -371,6 +393,23 @@ async def test_observation_keeps_the_element_snapshot_when_the_page_replaces_con
     assert runtime._elements[observation.elements[0].ref] is handle
 
 
+def readable_text(text: str) -> dict[str, Any]:
+    return {"text": text, "coverage": {"scanned_nodes": 1, "scanned_text_characters": len(text)}}
+
+
+async def region_capture_for(page: Any, *args: object) -> AsyncMock:
+    capture = AsyncMock()
+    capture.evaluate.return_value = await page.evaluate(REGION_SCRIPT)
+    nodes = AsyncMock()
+    nodes.get_properties.return_value = {}
+    capture.get_property.return_value = nodes
+    return capture
+
+
+def empty_structure() -> dict[str, Any]:
+    return {"regions": [], "coverage": {"scanned_nodes": 0, "omitted_regions": 0}}
+
+
 def observed_page(handles: list[AsyncMock], flags: list[bool]) -> Mock:
     """A page whose controls are ``handles`` and whose visibility pass returns ``flags``."""
 
@@ -379,10 +418,19 @@ def observed_page(handles: list[AsyncMock], flags: list[bool]) -> Mock:
     body = Mock(spec=Locator)
     body.inner_text = AsyncMock(return_value="Lesson")
     page = Mock(spec=Page)
+    page.evaluate_handle = AsyncMock(side_effect=partial(region_capture_for, page))
     page.url = "https://site.example/lesson"
     page.title = AsyncMock(return_value="Lesson")
     page.locator.side_effect = lambda selector: body if selector == "body" else controls
-    page.evaluate = AsyncMock(return_value=flags)
+    page.evaluate = AsyncMock(
+        side_effect=lambda script, *args: (
+            readable_text("Lesson")
+            if script == READABLE_TEXT_SCRIPT
+            else empty_structure()
+            if script == REGION_SCRIPT
+            else flags
+        )
+    )
     return page
 
 
@@ -482,9 +530,81 @@ async def test_observation_scans_at_most_4096_candidates() -> None:
 
     await PythonPlaywrightRuntime()._observation(page)
 
-    page.evaluate.assert_awaited_once()
-    scanned = page.evaluate.await_args.args[1]
+    visibility_calls = [
+        c
+        for c in page.evaluate.await_args_list
+        if c.args[0] not in {REGION_SCRIPT, READABLE_TEXT_SCRIPT}
+    ]
+    assert len(visibility_calls) == 1
+    scanned = visibility_calls[0].args[1]
     assert len(scanned) == 4096
+
+
+@pytest.mark.parametrize("stage", ["visibility", "capture", "structure", "title", "validation"])
+async def test_failed_observation_releases_all_handles_and_invalidates_revision(stage: str) -> None:
+    runtime = PythonPlaywrightRuntime()
+    previous = control("Old")
+    await runtime._observation(observed_page([previous], [True]))
+    current = [control("First"), control("Second")]
+    page = observed_page(current, [True, True])
+    error = PlaywrightError("capture failed")
+    if stage == "visibility":
+        page.evaluate.side_effect = [readable_text("Lesson"), error]
+    elif stage == "capture":
+        current[0].evaluate.side_effect = error
+    elif stage == "structure":
+        page.evaluate.side_effect = [readable_text("Lesson"), [True, True], error]
+    elif stage == "title":
+        page.title.side_effect = error
+    else:
+        page.title.return_value = "x" * 1025
+    with pytest.raises((PlaywrightError, ValueError)):
+        await runtime._observation(page)
+    for handle in [previous, *current]:
+        handle.dispose.assert_awaited_once()
+    assert runtime._revision is None and runtime._facts is None and runtime._elements == {}
+    assert runtime._element_offsets == {} and runtime._continuation is None
+
+
+async def test_cancelled_observation_joins_captures_before_disposal() -> None:
+    started = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def slow_capture() -> bool:
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            finished.set()
+        return True
+
+    handle = control("Pending")
+    handle.is_visible.side_effect = slow_capture
+    runtime = PythonPlaywrightRuntime()
+    task = asyncio.create_task(runtime._observation(observed_page([handle], [True])))
+    await asyncio.wait_for(started.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert finished.is_set()
+    handle.dispose.assert_awaited_once()
+    assert runtime._revision is None and runtime._elements == {}
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_readable_capture_failure_invalidates_previous_observation(cancelled: bool) -> None:
+    runtime = PythonPlaywrightRuntime()
+    previous = control("Old")
+    await runtime._observation(observed_page([previous], [True]))
+    page = observed_page([control("New")], [True])
+    failure = asyncio.CancelledError() if cancelled else PlaywrightError("text capture failed")
+    page.evaluate.side_effect = failure
+    with pytest.raises(type(failure)):
+        await runtime._observation(page)
+    page.locator.assert_not_called()
+    previous.dispose.assert_awaited_once()
+    assert runtime._revision is None and runtime._facts is None and runtime._elements == {}
+    assert runtime._element_offsets == {} and runtime._continuation is None
 
 
 @dataclass
@@ -823,6 +943,7 @@ class FakeChromiumLaunches:
         playwright = Mock()
         playwright.chromium.launch = launch
         playwright.stop = AsyncMock()
+        playwright.selectors.register = AsyncMock()
         manager = Mock()
         manager.start = AsyncMock(return_value=playwright)
         monkeypatch.setattr(
@@ -1228,11 +1349,14 @@ async def test_page_evidence_reports_origin_path_and_challenge() -> None:
     signed_out.password_visible = True
     refused = FakeEvidencePage(refused_hop="https://accounts.example.net/login")
 
-    kept = await evidence_runtime(members).load_page_evidence("https://www.duolingo.com/learn")
-    challenged = await evidence_runtime(signed_out).load_page_evidence(
-        "https://www.duolingo.com/learn"
-    )
-    left = await evidence_runtime(refused).load_page_evidence("https://www.duolingo.com/learn")
+    pages = (members, signed_out, refused)
+    runtimes = tuple(evidence_runtime(page) for page in pages)
+    permanent = [
+        {event: list(handlers) for event, handlers in page.handlers.items()} for page in pages
+    ]
+    kept = await runtimes[0].load_page_evidence("https://www.duolingo.com/learn")
+    challenged = await runtimes[1].load_page_evidence("https://www.duolingo.com/learn")
+    left = await runtimes[2].load_page_evidence("https://www.duolingo.com/learn")
 
     assert kept == BrowserPageEvidence(
         on_allowed_origin=True, path="/learn", challenge_visible=False
@@ -1244,10 +1368,10 @@ async def test_page_evidence_reports_origin_path_and_challenge() -> None:
     assert members.loads == [("https://www.duolingo.com/learn", "domcontentloaded", 30_000)]
     assert members.idle_waits == [("networkidle", 5_000)]
     assert "learn" not in repr(kept)
-    for page in (members, signed_out, refused):
-        assert len(page.handlers["request"]) == 1  # Only the permanent origin guard remains.
-        assert not page.handlers["requestfinished"]
-        assert not page.handlers["requestfailed"]
+    for page, baseline in zip(pages, permanent, strict=True):
+        # Verification must remove exactly its own listeners, preserving the
+        # origin guard and the runtime's bounded readiness tracking unchanged.
+        assert page.handlers == baseline
 
 
 async def test_verification_cancellation_removes_its_request_listeners() -> None:
@@ -1263,20 +1387,87 @@ async def test_verification_cancellation_removes_its_request_listeners() -> None
             started.set()
 
     page = PendingEvidencePage()
-    checking = asyncio.create_task(
-        evidence_runtime(page).load_page_evidence("https://www.duolingo.com/learn")
-    )
+    runtime = evidence_runtime(page)
+    permanent = {event: list(handlers) for event, handlers in page.handlers.items()}
+    checking = asyncio.create_task(runtime.load_page_evidence("https://www.duolingo.com/learn"))
     try:
         async with asyncio.timeout(1):
             await started.wait()
+        for event in ("request", "response", "requestfinished", "requestfailed"):
+            assert len(page.handlers[event]) == len(permanent[event]) + 1
     finally:
         checking.cancel()
         with pytest.raises(asyncio.CancelledError):
             await checking
-    assert len(page.handlers["request"]) == 1
-    assert not page.handlers["requestfinished"]
-    assert not page.handlers["requestfailed"]
-    assert not page.handlers["response"]
+    assert page.handlers == permanent
+
+
+async def test_page_evidence_reports_each_stage_as_it_begins() -> None:
+    """ADR-0128 amendment: a load says which stage it is in, and nothing about the page."""
+
+    learn = "https://www.duolingo.com/learn"
+    members = FakeEvidencePage()
+    signed_out = FakeEvidencePage(lands_on="https://www.duolingo.com/log-in?next=/learn")
+    signed_out.password_visible = True
+    refused = FakeEvidencePage(refused_hop="https://accounts.example.net/login")
+    stayed: list[BrowserVerificationStage] = []
+    challenged: list[BrowserVerificationStage] = []
+    left: list[BrowserVerificationStage] = []
+
+    await evidence_runtime(members).load_page_evidence(learn, on_stage=stayed.append)
+    await evidence_runtime(signed_out).load_page_evidence(learn, on_stage=challenged.append)
+    await evidence_runtime(refused).load_page_evidence(learn, on_stage=left.append)
+
+    # Only a page that may be signed in waits for its application to settle.
+    assert stayed == [
+        BrowserVerificationStage.NAVIGATE,
+        BrowserVerificationStage.IDLE,
+        BrowserVerificationStage.INSPECT,
+        BrowserVerificationStage.SETTLE,
+        BrowserVerificationStage.REINSPECT,
+    ]
+    assert challenged == [
+        BrowserVerificationStage.NAVIGATE,
+        BrowserVerificationStage.IDLE,
+        BrowserVerificationStage.INSPECT,
+    ]
+    assert left == [BrowserVerificationStage.NAVIGATE]
+
+
+async def test_a_load_cancelled_while_its_application_settles_last_reported_settle() -> None:
+    """The service's deadline cancels a load; its last stage is where the time went."""
+
+    class PendingEvidencePage(FakeEvidencePage):
+        async def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+            await super().goto(url, wait_until=wait_until, timeout=timeout)
+            request = FakeNavigationRequest(url, resource_type="fetch")
+            for handler in self.handlers["request"]:
+                handler(request)
+
+    stages: list[BrowserVerificationStage] = []
+    checking = asyncio.create_task(
+        evidence_runtime(PendingEvidencePage()).load_page_evidence(
+            "https://www.duolingo.com/learn", on_stage=stages.append
+        )
+    )
+    for _ in range(200):
+        if BrowserVerificationStage.SETTLE in stages or checking.done():
+            break
+        await asyncio.sleep(0.005)
+    # Longer than the 500 ms of quiet a settled page needs: the request holds it.
+    await asyncio.sleep(0.6)
+    still_checking = not checking.done()
+    checking.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await checking
+
+    assert still_checking
+    assert stages == [
+        BrowserVerificationStage.NAVIGATE,
+        BrowserVerificationStage.IDLE,
+        BrowserVerificationStage.INSPECT,
+        BrowserVerificationStage.SETTLE,
+    ]
 
 
 async def test_page_evidence_normalizes_other_load_failures() -> None:
@@ -1370,10 +1561,19 @@ class FakeSettlingPage:
             located.element_handles = AsyncMock(side_effect=lambda: list(self.buttons))
         return located
 
+    async def evaluate_handle(self, *args: object) -> AsyncMock:
+        return await region_capture_for(self, *args)
+
     async def title(self) -> str:
         return "Lesson"
 
     async def evaluate(self, script: str, argument: Any = None) -> Any:
+        if script == "() => undefined":
+            return None
+        if script == READABLE_TEXT_SCRIPT:
+            return readable_text(self.text)
+        if script == REGION_SCRIPT:
+            return empty_structure()
         if "getBoundingClientRect" in script:
             return [True] * len(argument)
         assert "MutationObserver" in script
@@ -1384,7 +1584,7 @@ class FakeSettlingPage:
             await asyncio.sleep(3600)
         if self.settles_to is not None:
             self.text = self.settles_to
-        return None
+        return True
 
     async def wait_for_load_state(self, state: str, *, timeout: float) -> None:
         del timeout
@@ -1451,7 +1651,7 @@ async def test_navigation_observes_the_page_after_it_settles() -> None:
     observation = await settling_runtime(page).navigate("https://site.example/lesson")
 
     assert observation.text == "Exercise 1"
-    assert page.load_waits[:1] == ["networkidle"]
+    assert page.load_waits[:1] == ["domcontentloaded"]
 
 
 @pytest.mark.usefixtures("quick_settle")
@@ -1979,7 +2179,8 @@ async def test_an_arrow_key_on_a_radio_is_refused_before_dispatch() -> None:
 
     async with lesson_pages({"/lesson/1": RADIO_PAGE}) as (runtime, visit, _left):
         page = await visit("/lesson/1")
-        refusal = await _refused(runtime, _press(page, "", "ArrowDown", role="radio"))
+        assert page.elements[0].name == "Keep learning"
+        refusal = await _refused(runtime, _press(page, "Keep learning", "ArrowDown", role="radio"))
         state = await runtime._current_page().evaluate(
             "[document.getElementById('keep').checked, document.getElementById('trial').checked]"
         )
@@ -2044,3 +2245,19 @@ async def test_only_an_established_event_stream_is_exempt_from_verification(
         async with asyncio.timeout(1.5):
             await wait()
     assert all(not handlers for handlers in page.handlers.values())
+
+
+async def test_document_change_during_title_capture_cannot_publish_a_revision() -> None:
+    runtime = PythonPlaywrightRuntime()
+    handle = control("Before navigation")
+    page = observed_page([handle], [True])
+
+    async def changed_title() -> str:
+        runtime._main_frame_navigations += 1
+        return "After navigation"
+
+    page.title.side_effect = changed_title
+    with pytest.raises(BrowserProviderError, match="page_changed"):
+        await runtime._observation(page)
+    assert runtime._revision is None and runtime._continuation is None
+    handle.dispose.assert_awaited_once()

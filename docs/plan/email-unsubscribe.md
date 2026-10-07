@@ -111,7 +111,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:762-778).
+  (email-experience.md:773-789).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -128,7 +128,7 @@ not find it here should find the reason here.
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
   exclusion of Spam and Trash, apply unchanged
-  (email-experience.md:258-272).
+  (email-experience.md:267-281).
 
 Nothing in the platform dials an arbitrary public host today. `web.fetch`
 hands its URL to a hosted provider, which owns resolution and redirects
@@ -273,7 +273,7 @@ without any of them carrying it.
 ### How records form
 
 The refresh task already pages thread summaries for each account, up to 100
-per slice (email-experience.md:282-287). The census reads the `bulk` block on
+per slice (email-experience.md:291-296). The census reads the `bulk` block on
 the summaries refresh was already reading. It issues no query of its own and
 adds no page. A summary whose block says anything but `none`, or that carries
 a `List-Id`, creates or updates its subscription; owner-sent mail, Spam, and

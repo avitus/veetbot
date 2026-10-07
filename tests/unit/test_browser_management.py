@@ -672,7 +672,9 @@ class RefusingControlPlane(FakeAuthenticationControlPlane):
 def profile_service(
     uow: FakeUnitOfWorkFactory,
     authentication: FakeAuthenticationControlPlane,
-    **options: float,
+    *,
+    authentication_timeout_seconds: float = 30.0,
+    authentication_lock_timeout_seconds: float = 5.0,
 ) -> BrowserProfileManagementService:
     return BrowserProfileManagementService(
         uow_factory=cast(BrowserUnitOfWorkFactory, uow),
@@ -680,7 +682,8 @@ def profile_service(
         authentications=authentication,
         clock=FixedClock(NOW),
         ids=SequenceIdFactory([PROFILE_ID]),
-        **options,
+        authentication_timeout_seconds=authentication_timeout_seconds,
+        authentication_lock_timeout_seconds=authentication_lock_timeout_seconds,
     )
 
 
@@ -696,6 +699,30 @@ async def ready_profile_generation(uow: FakeUnitOfWorkFactory, subject: Principa
         updated_at=NOW,
     )
     return ready.generation
+
+
+async def test_old_ready_ceremony_cannot_supersede_newer_sign_in() -> None:
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    service = profile_service(uow, authentication)
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await ready_profile_generation(uow, subject)
+    await service.begin_authentication(subject, PROFILE_ID, login_url="https://example.org/")
+    current = await uow.uow.browser_authentications.get(CEREMONY_ID, subject)
+    await uow.uow.browser_authentications.create(
+        current.model_copy(
+            update={
+                "id": UUID(int=9931),
+                "created_at": NOW + timedelta(seconds=1),
+                "updated_at": NOW + timedelta(seconds=1),
+            }
+        )
+    )
+    before = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+    authentication.status = BrowserAuthenticationStatus.READY
+    await service.authentication_status(subject, CEREMONY_ID)
+    assert await uow.uow.browser_profiles.get(PROFILE_ID, subject) == before
 
 
 @pytest.mark.parametrize("mode", list(BrowserAuthenticationMode))

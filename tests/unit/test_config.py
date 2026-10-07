@@ -1209,13 +1209,21 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_194_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_199_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 194
+    assert len(qualified_paths) == 199
+    # ADR-0155 adds the title pass's five knobs.
+    assert {
+        "titles/profiles.yaml:generation.enabled",
+        "titles/profiles.yaml:generation.model_policy",
+        "titles/profiles.yaml:generation.batch_size",
+        "titles/profiles.yaml:generation.recent_messages",
+        "titles/profiles.yaml:generation.message_chars",
+    } <= qualified_paths
     assert {
         "tools/limits.yaml:output.inline_maximum_bytes",
         "runtime/limits.yaml:browser_task.max_steps",

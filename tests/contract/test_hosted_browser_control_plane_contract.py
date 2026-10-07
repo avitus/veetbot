@@ -135,14 +135,20 @@ def _page(revision: str) -> dict[str, object]:
         ({"revision": "r-1", "elements": {"r-1:0": {"field_kind": "rocket"}}}, None),
     ],
 )
+@pytest.mark.parametrize("regions", [False, True])
 async def test_old_and_new_session_response_shapes_parse(
-    facts: dict[str, object] | None, expected: BrowserObservationFacts | None
+    facts: dict[str, object] | None, expected: BrowserObservationFacts | None, regions: bool
 ) -> None:
     """ADR-0129 D26: facts are an optional sibling of the observation's fields."""
 
+    expected_page = _page("r-1")
+    if regions:
+        expected_page["regions"] = [{"ref": "r-1:region:0", "kind": "status", "text": "Saved"}]
+        expected_page["region_coverage"] = {"scanned_nodes": 12, "omitted_regions": 0}
+
     def service(request: httpx.Request) -> httpx.Response:
         del request
-        body = _page("r-1")
+        body = dict(expected_page)
         if facts is not None:
             body["facts"] = facts
         return httpx.Response(200, json=body)
@@ -167,5 +173,5 @@ async def test_old_and_new_session_response_shapes_parse(
         # Still an observation to every caller that knows nothing of facts.
         assert isinstance(page, BrowserObservation)
         assert page.snapshot() == BrowserSnapshot(
-            observation=BrowserObservation.model_validate(_page("r-1")), facts=expected
+            observation=BrowserObservation.model_validate(expected_page), facts=expected
         )

@@ -39,11 +39,10 @@ class BrowserUploadTool:
         name="browser.upload",
         version="1.0.0",
         description=(
-            "Upload one PNG/JPEG/WebP image (up to 5 MiB) from this chat's attachment or "
-            "generated artifact ID. Target a visible file input or Add image control that "
-            "opens a file chooser, using the latest revision and ref. Requires individual "
-            "approval: the website may send the image immediately. Does not click Post. "
-            "Returns the updated page; never repeat an uncertain upload blindly."
+            "Upload one chat image artifact (PNG/JPEG/WebP, <=5 MiB) to a current revision/ref "
+            "file input or chooser control. Requires individual approval; selection may transfer "
+            "bytes immediately. Returns the updated page without clicking Post. Never repeat an "
+            "uncertain upload."
         ),
         input_schema=BrowserUploadArguments.model_json_schema(),
         output_schema=OUTPUT_SCHEMA,

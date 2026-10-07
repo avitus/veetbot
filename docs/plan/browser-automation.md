@@ -69,6 +69,7 @@ exactly one profile and origin policy. It exposes:
 ```text
 navigate(BrowserNavigateRequest) -> BrowserObservation
 observe() -> BrowserObservation
+expand(BrowserObservationExpansion) -> BrowserObservation  # optional capability, ADR-0157
 act(BrowserActionRequest) -> BrowserObservation
 close() -> None
 ```
@@ -83,6 +84,7 @@ A `BrowserObservation` contains only:
 - bounded readable text;
 - bounded interactive elements with opaque reference, role, accessible name,
   and state needed to choose an action;
+- optional candidate-window coverage and an opaque continuation (ADR-0157);
 - an optional screenshot artifact reference added by a later slice.
 
 It excludes HTML, scripts, styles, hidden inputs, password values, request and
@@ -123,7 +125,7 @@ The stable builtin namespace is `browser`:
 | Tool | Operation | Side effect | Risk | Idempotency |
 | --- | --- | --- | --- | --- |
 | `browser.navigate` | Open one allowed public HTTPS URL | `NETWORK_READ` | `LOW` | `READ_ONLY` |
-| `browser.observe` | Read the current rendered page | `NETWORK_READ` | `LOW` | `READ_ONLY` |
+| `browser.observe` | Refresh the page or expand its current observation | `NETWORK_READ` | `LOW` | `READ_ONLY` |
 | `browser.act` | Click, type, select, check, press, or scroll | `EXTERNAL_WRITE` | `HIGH` | `NON_IDEMPOTENT` |
 | `browser.upload` | Select one conversation image in a file control | `EXTERNAL_WRITE` | `HIGH` | `NON_IDEMPOTENT` |
 
@@ -163,10 +165,11 @@ its own classified contract. Cross-origin popups are closed and reported.
 The ephemeral provider also refuses typing into password fields or controls
 whose autocomplete semantics identify a current password, new password, or
 one-time code. Opaque references bind stable element handles rather than
-selectors that could retarget after DOM reordering. Observation first checks the
-visibility of at most 4,096 candidate nodes in one browser call, by the same
+selectors that could retarget after DOM reordering. Observation obtains at most
+4,097 candidate handles using an isolated-world selector, including one lookahead,
+then checks visibility of at most 4,096 candidate nodes in one browser call, by the same
 rule as Playwright's `is_visible` (a `display: contents` control counts when a
-child is visible), and keeps the first 256 visible ones in document order, so
+child is visible), and keeps the first 256 visible ones in traversal order, so
 hidden nodes never take an element slot; it releases every other handle and
 those of the observation it replaces.
 It then reads bounded metadata from each kept handle in one browser call,
@@ -913,6 +916,39 @@ every failure with a fixed response, and the service's log configuration
 replaces the text, traceback, and causes of any logged exception, including
 the web server's own records, with a fixed message and the exception's class.
 
+The handoff path writes one diagnostic of its own (ADR-0128, amendment of
+2026-10-06). A verification that started its two loads and ends
+`409 tool.browser.provider_unavailable` writes a single warning record to the
+service log, so an operator can tell where it stopped. The message is always
+`device verification did not finish`, followed by only these values:
+
+- The load that stopped it, `with_session` or `without_session`, with the
+  stage that load was in. A load that failed is named alone. Otherwise every
+  load the deadline interrupted is named. When both pages had loaded,
+  `with_session` is named at `capture`.
+- The seconds since the loads were started, to one decimal place.
+
+The stages are, in order:
+
+| Stage | What the load is doing |
+| --- | --- |
+| `start` | starting the egress proxy and the browser |
+| `navigate` | loading the confirmed page until `DOMContentLoaded` |
+| `idle` | waiting up to five seconds for the network to be briefly idle |
+| `inspect` | reading where the page landed and whether it shows a sign-in challenge |
+| `settle` | waiting for the application's requests to finish and stay idle |
+| `reinspect` | looking for a sign-in challenge again after that wait |
+| `capture` | reading the verifying browser's storage state |
+
+The record holds nothing else: no ceremony, profile, tenant, or principal
+identifier; no URL, origin, path, or page content; no cookie, storage value, or
+capability; and no exception class or text. The runtime reports each stage as
+it begins, because the deadline reaches a load as a cancellation, which cannot
+say where it landed. The service keeps only a value from the table; any other
+value fails that load and is not recorded. A verification that ends `ready` or
+with a `422` code writes no record, and neither does a handoff refused before
+its loads start. The response is the same fixed body in every case.
+
 The handoff crosses TLS 1.2 or later to the ceremony host and then host
 loopback, the path the remote ceremony's keystrokes already take, and adds no
 application-layer encryption (ADR-0128). The device ceremony cannot sign in to a
@@ -1211,15 +1247,18 @@ creation still selects no profile.
 Readable text, element count, accessible names, URLs, titles, screenshots, and
 provider responses have independent byte and count ceilings. The first slice
 limits readable text to 256 KiB and interactive elements to the first 256
-visible ones in document order, chosen from at most 4,096 candidate nodes.
+visible ones in traversal order, chosen from at most 4,096 candidate nodes per
+window. ADR-0157 defines bounded continuation and explicit terminal scan coverage.
 Provider responses are validated before they enter a tool result.
 
 Navigation and every action wait for the page to settle before the provider
-observes it (ADR-0130). After a document load the provider waits for the
-network to be idle for 500 ms, then for the document to go 300 ms without a DOM
-mutation; an action that starts a main-frame navigation first waits for the new
+observes it (ADR-0130). After a document load the provider waits for
+document readiness, then for the finite application requests already in flight
+at settling entry to finish, then for the document to go 300 ms without a DOM mutation
+(ADR-0159); an action that starts a main-frame navigation first waits for the new
 document. The whole wait is bounded by 2 seconds. Settling never fails a call:
-a page still changing at the bound is observed as it is.
+a page still changing at the bound is observed as it is, with `bound_expired`
+readiness metadata.
 
 Before a `browser.act` click, Playwright checks actionability with a trial bounded by
 5 seconds. A trial timeout sends no click and returns the existing
@@ -1357,3 +1396,355 @@ These ten registry-backed gates are the browser tranche's blocking delivery
 contract. All ten resolve to executable Milestone 10 checks. Milestone 11
 scheduling consumes the resulting profile and grant references but owns its own
 future gates and is not part of this Milestone 10 gate area.
+
+## Browser improvement program
+
+ADR-0156 records the owner's instruction to implement the
+[self-hosted improvement program](../browser-automation-improvement-proposal.md).
+Its first construction slice requires real-browser verification and repairs
+model presentation without changing action authority or provider observations.
+
+At tool-output admission, a large successful builtin browser result is projected
+as bounded valid JSON for the model. The projection retains the exact page
+revision and whole element records, counts omitted elements and text bytes,
+and states any omitted location/title. Prefer at least one complete control
+that can fit over optional metadata and prose. If even the complete revision
+and coverage cannot fit, emit an explicit whole-observation omission with no
+actionable elements, never a shortened revision. Its serialized content and capture
+reference fit the ordinary inline byte budget. Canonical content and the
+owner-scoped full artifact remain unchanged. Projection uses only validated
+result data inside the trusted pipeline; it never trusts an alternate result
+supplied by a tool. The persisted projection replays without recomputation.
+
+The projection preserves observation order and prevents broken JSON and lost
+revisions. ADR-0157 adds bounded continuation through the same `browser.observe`
+tool; it does not claim complete coverage of a changing page. Legacy history
+retains its persisted presentation until it has a newly admitted browser result.
+
+Observation capture publishes a revision and its handle map only after the
+whole bounded result validates. Any capture or title failure, validation error,
+or cancellation joins outstanding captures, releases acquired handles, and
+invalidates the preceding revision. A failed observation leaves no actionable
+references, continuation, or retained candidate offsets. ADR-0157 bounds handle
+acquisition before the visibility scan as well.
+
+
+### Bounded live expansion and synthetic component tasks (ADR-0157)
+
+`browser.observe` version 1.7.0 accepts `{}`, or exactly one of `after` (a
+current element reference, 1–128 characters) and `cursor` (a current opaque
+provider continuation, 32–128 characters). Unknown fields and invalid types
+are rejected before binding or dispatch. `browser.navigate` and `browser.act`
+also use version 1.7.0 for their additive observation output contract. No
+selector, script, offset, or profile is model selectable. An adapter without
+expansion support returns `tool.browser.action_not_allowed`.
+
+The published `browser.observe` 1.0.0 and offset-paged 1.1.0 contracts remain
+registered for pinned chats, alongside `browser.navigate` and `browser.act`
+1.0.0. New chats receive 1.7.0 and its provider-bound continuations. The older
+offset pages continue to fit the configured inline budget. All ephemeral
+expansion and extraction calls share the page-operation lock used by navigation,
+actions and uploads.
+
+Production providers implement this optional port capability throughout the
+hosted path. The authenticated observe route accepts an optional `expansion`
+object; the lease is validated and its lock held before the runtime is called.
+Read expansion never advances the action sequence or grants action permission.
+Observation facts are cached with the new revision under the same session.
+Old services may reject this additive request; workers must not silently drop it.
+
+The trusted selector walks the main document and open shadow roots depth first,
+visiting shadow children before light children. It returns at most 4,097 handles,
+then the runtime checks at most 4,096 candidates and retains at most 256 visible
+controls. An `after` request includes its anchor in that scan window, validates
+that it is still the same connected node at its recorded position, and excludes
+it from the returned controls. Removed or moved anchors fail with
+`tool.browser.page_changed`. The cursor moves beyond the last selected control
+or the scanned window when no visible controls exist. Candidate positions stop
+at 65,536. Every result includes `coverage` with `candidate_offset`,
+`scanned_candidates`, optional `next_cursor`, and `scan_limit_reached`.
+
+The output's `next_observe` is the next request object. Context projection
+continues after the last contiguous control actually exposed to the model,
+including when canonical output bounding retained only a prefix. It uses the
+provider cursor only after exposing the whole window, or an empty one. If an
+oversized first record cannot fit, it exposes other usable records but declares
+`expansion_blocked: inline_control_too_large`; it never silently skips the gap.
+The full owner-scoped artifact remains available. Continuation and coverage
+are included in byte accounting. The progress digest includes candidate offset
+so moving through empty windows is not classified as an identical observation.
+
+References and cursors belong to the current runtime/document and expire on
+observation replacement, capture failure, close, and main-frame navigation.
+Expansion publishes a fresh revision and references. A stale or foreign cursor
+fails with `tool.browser.page_changed`. Cursor windows read a live DOM; edits
+before the offset can repeat or omit controls, so coverage never claims a frozen
+whole-page snapshot. Frames, closed shadow roots, semantic relevance ranking,
+and oversized-control recovery remain outside this slice.
+
+Control names now prefer bounded `aria-labelledby`, `aria-label`, and native
+HTML label text before the existing title, placeholder, and rendered-text
+fallbacks. Stored input values remain excluded; independent label facts and
+live task-grant checks still apply. This is not a complete accessible-name
+algorithm.
+
+`tests/browser_task_manifest.json` defines twelve scripted component tasks,
+including lessons, multilingual names, dense and hidden controls, open shadows,
+a slow SPA, and forms. Drivers consume observations at 1,024 or 4,096 bytes and
+follow model-visible continuation. An independent synthetic server checks the
+number and payload of effects; dispatch success alone is insufficient. The
+mandatory browser baseline version 2 includes per-task IDs, outcomes, operation
+counts, durations, effect counts, and budgets, without page text or values.
+Missing tasks or mismatched effects prevent a verified report. Model calls are
+zero and live task quality and model cost remain unmeasured. This complements,
+not replaces, the existing policy, isolation, and hostile-page verification.
+
+### Content-free operation diagnostics (ADR-0158)
+
+Terminal builtin browser tool events may carry `browser_diagnostics` version 1.
+Trusted execution collects at most 64 phase summaries, in completion order,
+with total elapsed milliseconds and explicit truncation. Each record has a
+closed phase, placement, outcome and failure category plus bounded elapsed
+milliseconds. Nested durations overlap. Provider response content, exception
+text and class names, URLs, page labels, input values and secret material are
+excluded by the typed contract. Collection is task-local and has no effect on
+authorization, write uncertainty or retry decisions. The hosted session protocol
+may return the summary as optional metadata; invalid summaries are discarded as
+a whole. Existing clients and services may omit it. Existing event retention,
+access and deletion rules apply; no new raw tracing or capture store is enabled.
+
+### Bounded readiness and visible postconditions (ADR-0159)
+
+Version 1.2.0 adds optional `readiness` (`dom_quiet` or `bound_expired`) to
+navigation/action observations. Settling waits for document readiness, drains a
+snapshot of at most 256 pending document, script, stylesheet, fetch and XHR
+requests, then waits for 300 ms without DOM mutation within the same two-second
+budget. Later requests do not extend the snapshot; failed requests finish it
+and successful event streams finish at their headers without body reads. A
+tracking overflow or deadline expiry reports `bound_expired`; the set resets
+with a new document. A bounded page round trip before the snapshot lets initial
+request events queued after DOMContentLoaded enter the set. It does not require network silence. Explicit observation does not claim a settling check.
+
+`browser.observe` may instead accept `wait_for`; `browser.act` may include
+`postcondition`. Each is an exact visible-control predicate with nonempty role
+(up to 64 characters), name (up to 1,024), optional disabled/checked booleans and
+`timeout_ms` (0–5,000, default 2,000). Wait and expansion cannot be combined.
+The trusted tool reads the current observation window, with at most twenty
+additional observations spaced at least 250 ms apart. The predicate's deadline
+and existing tool/run deadline bound all reads. A result reports `satisfied`,
+`ambiguous` or `not_observed`, window scope, observation count and elapsed time.
+It proves only the visible predicate, not the causal effect of an action.
+
+Exactly one role/name match must also meet the requested state. Hidden values,
+selectors, scripts and frame traversal are unavailable. Cancellation of an
+in-flight capture returns no stale observation. Evidence loss after dispatch
+retains `outcome_unknown`; unmet predicates never prove a write was unsent.
+An outer tool timeout after the browser action effect watermark is also
+uncertain and non-retryable. There is no automatic action retry or target substitution. Existing approval,
+grant consumption and effect watermark behavior is unchanged.
+
+### Bounded semantic page structure (ADR-0160)
+
+Browser tools version 1.3.0 optionally return `regions` and `region_coverage`.
+Regions are visible dialogs, alerts, status messages, forms and headings,
+prioritized in that order within a main-document scan of at most 8,192 nodes.
+At most 32 whole records are retained; each text summary inspects at most 256
+nodes and contains at most 512 characters, with explicit truncation. Hidden
+subtrees and input, textarea, select and editable content do not contribute.
+Frames and shadow roots are outside this region scope. The existing general
+readable-text field and control capture are unchanged.
+
+Version 1 coverage records scope, scanned nodes, scan exhaustion and the known
+omitted-region count within the scanned prefix. A bound is not whole-page
+completeness. Region references bind to the enclosing revision but are evidence
+identifiers only: `browser.act` and `browser.observe(after=...)` cannot use them.
+Capture failures discard the entire observation as before. All region content
+is external-untrusted and conveys no approval, authentication or effect proof.
+
+Canonical byte bounding and model admission count omitted whole regions. The
+model projection retains room for a usable control before optional summaries,
+then favors bounded region evidence over duplicated prose. Hosted transport and
+artifact replay preserve the fields; legacy observations may omit them. The
+progress digest includes semantic evidence, excluding fresh opaque references.
+
+### Deterministic collection extraction (ADR-0161)
+
+Browser tools version 1.4.0 add `browser.observe(extract=...)`, exclusive with
+wait/continuation. The request names the current revision, collection kind
+(table/list/form), visible index 0–15, one to eight named primitive typed columns
+and a 1–50 row limit. This reads the current collection at that position; it does
+not promise that a dynamic site's collection kept its identity. A stale or
+foreign revision fails before capture. A successful read replaces the ordinary
+observation and its action references, adding revision-bound evidence references
+that cannot be used for actions or expansion.
+
+The optional provider capability uses the existing hosted observe route, lease,
+lock and origin binding. It does not dispatch or consume action authority.
+Capture failure/cancellation uses atomic cleanup; unsupported adapters refuse.
+Collection discovery scans at most 8,192 main-document nodes; row discovery at
+most 4,096 descendants; frames and shadow roots are excluded. Requested cell
+summaries inspect at most 256 nodes and retain 256 UTF-16 code units without
+splitting a character. Hidden and editable values are excluded. Table spanning
+cells are unsupported; lists expose text; forms expose label, role, disabled,
+checked and required columns, never entered or selected values.
+
+Results retain bounded source text and typed values, explicit missing/invalid/
+truncated statuses and row schema validity. Required missing and all invalid or
+truncated cells invalidate the row. Numeric conversion is locale-independent,
+finite and bounded to exact JSON integers; only true/false booleans are coerced.
+Schema validity conveys neither truth nor action completion. Collection and
+row scan bounds, row limits and known omissions are reported. The 64 KiB
+extraction ceiling and smaller model budgets drop whole rows with counts;
+otherwise the whole extraction is explicitly omitted. In extraction mode,
+requested rows precede optional controls, regions and ordinary prose, with exact
+revision, coverage, untrusted framing and durable artifact/replay preserved.
+Fresh reference bytes never count as progress.
+
+### Bounded readable snapshots (ADR-0162)
+
+Version 1.5.0 replaces whole-body readable-text acquisition with a filtered,
+iterative collector inspired by Stagehand's snapshot-before-inference design.
+Read the main document and open shadow roots, excluding frames and closed roots.
+Visit at most 8,192 nodes, inspect 262,144 UTF-16 text units and emit at most
+256 KiB of UTF-8. Hidden, ARIA-hidden and editable subtrees, input/textarea/select
+values, custom editable roles, scripts and embedded documents supply no text.
+
+To preserve ADR-0148 draft continuation, an individually approved rich-text type
+may retain one submitted value (at most 4,096 characters) in the runtime until
+closure, replacement or loss of its live binding. An observation may echo this
+already-known value as `Confirmed submitted draft` only after a boolean check
+that the same visible, non-credential editor in the same document still renders
+exactly that value. The comparison bounds the editor to 256 nodes and 4,096 text
+units before rendering; no editable page text crosses the browser boundary.
+A focused read outside the editor omits a still-valid receipt without clearing it.
+Hidden, changed, oversized or credential editors invalidate the receipt, which
+cannot later reappear. The confirmation fits within the existing 256 KiB text
+ceiling or is omitted. It does not expose pre-existing drafts, read other input
+values, authorize publication or prove that a server accepted a submission.
+Normalize whitespace while preserving block and table-cell boundaries and
+adjacent inline text. Do not duplicate slotted content or split Unicode.
+
+Optional `text_coverage` version 1 carries scope, scanned nodes and text units,
+node/text limit flags, and known bytes omitted by canonical bounding. Model
+projection preserves it alongside its separate omission count, or explicitly
+omits the whole observation when essential metadata cannot fit. Its compact
+model view retains text/region scope/version and uses typed defaults for absent
+false flags, null cursors and zero text-omission counts in provider coverage.
+For observations supporting continuation, reserve the first control that can
+fit after removing optional location/title context before admitting that context
+or prose, keeping prefix discovery usable. Hosted transport and replay retain it; legacy providers may omit it. Limits describe incomplete
+evidence, never absence. Failed capture invalidates handles and revision through
+the existing cleanup; action authority and control continuation are unchanged.
+
+### Focus and bounded recovery (ADR-0163)
+
+`browser.observe` accepts `region_ref` and `expected_revision`, with optional
+`text_offset`, exclusively of other modes. A current semantic reference selects
+one stable main-document region. Focused controls and text share that region;
+control expansion retains it. `focus` metadata identifies the current region,
+byte offset and captured text size. `next_text` advances only over text actually
+returned, including when the model budget is smaller than the canonical result.
+Text continuation rechecks unchanged captured text. Detached regions, stale
+revisions and changed continuation text fail with `tool.browser.page_changed`.
+Main and section regions are discoverable; active dialog controls precede general
+navigation. Existing node, candidate, UTF-8, privacy and origin limits apply.
+
+A stale observation failure permits one separately audited fresh read, at most
+three automatic recovery reads per run, within tool and run budgets and deadlines.
+It never permits action replay. The original failure remains visible alongside
+any fresh read evidence. Authentication challenges discard references and require
+owner-controlled sign-in. The runtime may suspend for that owner action twice;
+the failed call is already complete and is not replayed on resume. Existing
+profile generation checks invalidate old leases, approvals and grants. Uncertain
+writes retain `tool.browser.outcome_unknown` and are never automatically resent.
+
+For small model budgets, retain coverage scope/version, limit flags and omission
+counts inline. Scan counters stay in the canonical artifact with
+`diagnostics_in_artifact: true`; this amends ADR-0162's counter projection only.
+Reserve a compact region label so the next focused read remains discoverable.
+Focused model output names `coverage.scope: focused_region`; full range metadata
+remains canonical and `next_text` uses the current opaque text cursor and admitted
+byte count. Cursor rotation binds every continuation to the latest observation.
+A sign-in challenge after an already dispatched action returns `interruption:
+needs_user` without controls and can suspend the run; it does not prove the write
+completed. `browser.act` records that case as `outcome_unknown` with a fixed,
+content-free sign-in marker; the runtime may ask the owner without retrying it.
+CAPTCHA detection excludes the passive reCAPTCHA badge and its descendants;
+credential fields still interrupt there. Detection is bounded negative evidence, not
+positive login verification.
+
+### Autonomous verification and continuation (ADR-0164)
+
+The owner-authorized minimal-user-involvement tranche extends visible conditions
+with positive rendered text, exact location, semantic regions and typed rows.
+Success and optional failure predicates share one bounded read budget; conflicting
+evidence remains ambiguous. Missing evidence cannot authorize a repeated write.
+Site authentication definitions are maintained and versioned by the trusted
+implementation, never supplied by page content. Positive protected-state checks
+and the existing challenge guard determine readiness; valid sessions are reused.
+
+Authentication waits retain the trusted run/profile/generation binding. A
+verified service outcome may resolve the matching wait and queue a fresh read
+without a user reply. The authentication record and its profile update share
+one timestamp, so a real clock cannot make verified evidence appear stale.
+Resolution is durable and idempotent, preserves cancellation
+and run limits, and never transfers a grant across a sign-in generation. Ordinary
+recovery and workflow steps use the same authorization and effect pipeline.
+Repeated notices of one blocker are consolidated; unresolved work ends with a
+truthful bounded outcome. The detailed decisions are in
+[ADR-0164](../adr/0164-browser-autonomy-and-verified-resumption.md).
+
+Completion conditions accept exactly one legacy role/name predicate or an
+`evidence` predicate: one complete normalized rendered-text line, one complete
+semantic region, an exact public HTTPS URL, or a unique schema-valid collection
+row with typed expected cells. A simple `failure_evidence` predicate may accompany
+success. Conflicting predicates or duplicate matches are ambiguous; hidden,
+truncated or absent evidence cannot prove completion. Row checks use fresh
+revision-bound extraction. A stale verification read permits one fresh capture
+within the shared five-second/21-read limit, never another action. Condition
+status, rather than unrelated page churn, drives repeated-wait detection.
+
+The isolated service optionally loads `BROWSER_PROFILE_VERIFICATION_FILE`, a
+private absolute mode-0600 JSON file of at most 64 KiB. Its version-1 `sites`
+catalog contains at most 32 closed definitions: `id`, `version`, `profile_id`,
+`origin`, `protected_path`, positive text/region `ready` evidence and exact region
+`account` evidence. Each profile has one definition. The protected path is a
+literal path, not a selector, script, credential or permission. Both device and
+remote sign-in compare isolated signed-in and empty-session loads. A configured
+site must show the intended account and protected state only in the signed-in
+load. Stored configured sessions undergo another bounded protected-page check
+before lease publication. Wrong accounts and public-page matches fail closed.
+Lease startup and protected-page verification reserve capacity and exclude other
+acquisitions for that profile without holding the service-wide admission lock.
+Publication rechecks the profile identity, revocation and deadline; failure or
+cancellation releases capacity only after the runtime closes.
+Readiness is recorded only after sealing succeeds. An older ceremony cannot
+change a profile once a newer ceremony exists.
+
+`runtime/browser-workflows.yaml` is a closed version-1 catalog of reviewed
+definitions. A recipe binds ID/version, exact origin, explicit task-intent
+phrases, at most 16 navigate/observe/act/extract steps and a maximum 900-second
+duration. Selection requires one unambiguous matching owner request and a ready
+selected profile. Actions require unique fresh role/name targets and a positive
+postcondition. Every tool call uses normal validation, policy, approvals, current
+budgets, cancellation and invocation persistence. Recipe/profile/agent/policy
+bindings and verified progress survive suspension; generation changes invalidate
+pending actions. An uncertain dispatched action gets read-only reconciliation,
+then a verified or explicitly unverified stop. Final reporting cannot issue more
+tools. The workflow cap is 64 calls and reserves one ordinary run step for the
+report. These are ceilings, not additional budget allowances.
+
+The shipped recipe catalog and site definitions are empty. Engineering-owned
+definitions require site-specific fixtures and review before activation; this
+tranche proves the mechanism using controlled account/report fixtures and makes
+no claim of configured live-site coverage. Users do not author or maintain these
+technical definitions. Unknown sites retain protected-page differential sign-in
+verification and the ordinary agent execution path.
+
+All hosted browsers remain headed (ADR-0145). A trusted ceremony or differential
+verification explicitly permits login-page reads; headed agent leases still
+check authentication interruptions. Remote verification reserves two additional
+browsers within the existing service-wide cap of three, until both loads close,
+including after cancellation. Frame and input requests wait for the ceremony
+operation lock without holding the service admission lock, then revalidate the
+capability before accessing the page.

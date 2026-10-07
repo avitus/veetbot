@@ -309,7 +309,8 @@ For each update the surface role opens one short transaction and:
 5. Handles commands deterministically, never through the model: `/pair`,
    `/new`, `/stop`, `/status`, `/approve`, `/deny`, `/help`. `/approve` or
    `/deny` without an identifier matches no approval, however many are
-   pending.
+   pending. A paired sender's `/pair` is answered `surface.already_paired`;
+   its code is neither verified nor stored.
 6. Resolves fresh authority for the pairing's principal through the principal
    directory, records the authority version, and computes
    `scopes = pairing.granted_scopes ∩ principal.scopes`.

@@ -15,6 +15,7 @@ from agent_core.domain.messages import (
     ContentPart,
     ConversationItem,
     TextPart,
+    ToolCallItem,
     ToolResultItem,
     UserMessage,
 )
@@ -142,6 +143,24 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
                 update={"source_event_sequence": event.sequence}
             )
         ]
+    if (
+        event.event_type == "run.checkpointed"
+        and event.actor_type == "runtime"
+        and payload.get("trigger")
+        in {"browser_recovery", "browser_auth_resume", "browser_workflow"}
+    ):
+        raw_call = payload.get("runtime_tool_call")
+        if not isinstance(raw_call, dict):
+            raise ValueError(f"browser recovery checkpoint has no queued call: {event.id}")
+        call = ToolCallItem.model_validate(raw_call)
+        permitted = {
+            "browser_auth_resume": {"browser.navigate", "browser.observe"},
+            "browser_recovery": {"browser.observe", "conversation.ask_user"},
+            "browser_workflow": {"browser.navigate", "browser.observe", "browser.act"},
+        }[str(payload.get("trigger"))]
+        if call.name not in permitted:
+            raise ValueError("browser recovery cannot queue an effect")
+        return [call.model_copy(update={"source_event_sequence": event.sequence})]
     if event.event_type == "model.response.completed":
         raw_items = payload.get("conversation_items")
         if not isinstance(raw_items, list):

@@ -1193,7 +1193,13 @@ async def test_a_file_dropped_into_chat_reaches_the_provider_and_answers_a_later
         auth_roles=frozenset({"user"}),
         auth_scopes=PLATFORM_SCOPES,
     )
-    wire = _OpenAIWire([openai_text_events("I have your garden plan and the photo.")])
+    wire = _OpenAIWire(
+        [
+            openai_text_events("I have your garden plan and the photo."),
+            # ADR-0155: the maintenance round titles the conversation.
+            openai_text_events('{"decision": "replace", "title": "Garden plan and photo"}'),
+        ]
+    )
     async with (
         # A sibling process of the same configuration lends the provider its
         # attachment resolver; production composes each provider with its own.
@@ -1259,10 +1265,18 @@ async def test_a_file_dropped_into_chat_reaches_the_provider_and_answers_a_later
             await cast(MaintenanceWorker, composition.maintenance_factory()).run_once()
             async with composition.uow_factory() as uow:
                 ingested = await uow.artifacts.get(UUID(note_id), composition.principal)
+                titled = await uow.sessions.get(session_id, composition.principal)
             assert ingested.metadata["auto_ingest"] == "ingested", ingested.metadata
+            assert titled.title == "Garden plan and photo"
 
     # The provider received the image bytes and the note's text, fenced as data.
-    [request] = wire.requests
+    # The maintenance round's title call follows it (ADR-0155): it reads only
+    # the owner's words, so neither file's contents reach it.
+    request, title_request = wire.requests
+    title_wire = json.dumps(title_request)
+    assert "Title a chat conversation" in title_wire
+    assert base64.b64encode(PNG).decode() not in title_wire
+    assert "Water the tomatoes" not in title_wire
     parts = request["input"][-1]["content"]
     image_url = f"data:image/png;base64,{base64.b64encode(PNG).decode()}"
     assert [part["image_url"] for part in parts if part["type"] == "input_image"] == [image_url]

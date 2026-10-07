@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 SESSION_TITLE_MAX_LENGTH = 64
 SESSION_BROWSER_PROFILE_METADATA_KEY = "browser_profile_id"
@@ -63,6 +63,31 @@ def conversation_title(text: str) -> str | None:
 class SessionStatus(StrEnum):
     ACTIVE = "ACTIVE"
     CLOSED = "CLOSED"
+
+
+class SessionTitleSource(StrEnum):
+    """Where a session's title came from (ADR-0155)."""
+
+    FIRST_MESSAGE = "first_message"
+    GENERATED = "generated"
+    FIXED = "fixed"
+
+
+# Only a title derived from the owner's words is ever regenerated.
+REGENERABLE_TITLE_SOURCES = frozenset(
+    {SessionTitleSource.FIRST_MESSAGE, SessionTitleSource.GENERATED}
+)
+
+
+class TitleRequest(BaseModel):
+    """A session waiting for the title pass, as the pass found it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    session_id: UUID
+    title: str
+    title_source: SessionTitleSource
+    requested_at: datetime
 
 
 class Session(BaseModel):

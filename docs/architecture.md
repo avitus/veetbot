@@ -119,6 +119,13 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   `agent_core.browser_control_plane` as a separately deployed secret-bearing
   process, supply provider-neutral public-web search and fetch and
   authenticated browser automation, all external-untrusted (Milestone 10).
+  Region focus and text/control continuation retain private stable handles and
+  bounded model evidence. The runtime records separate recovery reads and uses
+  ordinary user-input suspension for sign-in interruptions (ADR-0163). Verified
+  service outcomes resolve bound waits atomically without a second user reply.
+  Trusted site definitions verify protected state and account identity; finite
+  reviewed workflows use fresh targets and the ordinary per-action authorization
+  and effect ledger (ADR-0164).
 - `agent_core.scheduling` owns recurrence, civil time, atomic occurrence
   materialization into ordinary runs, admission, and the least-privilege
   schedule worker role (Milestone 11). An explicitly bound website schedule

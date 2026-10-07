@@ -13,6 +13,8 @@ struct ToolActivityCard: View {
     let activity: ToolActivity
     let approval: ApprovalView?
     var activeTaskGrant: BrowserTaskGrantView? = nil
+    /// The decision on its way for this card's approval, if any.
+    var approvalInFlight: ApprovalDecision? = nil
     let resolve: (ApprovalView, ApprovalDecision, String?, TaskGrantEcho?) -> Void
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
@@ -51,6 +53,9 @@ struct ToolActivityCard: View {
                 if let summary = activity.taskGrantSummary {
                     DetailBlock(title: "What it did", text: summary)
                 }
+                if let diagnostics = activity.browserDiagnostics {
+                    DetailBlock(title: "Browser activity", text: diagnostics.summary + "\n" + diagnostics.detail)
+                }
                 if !activity.arguments.isEmpty {
                     DetailBlock(
                         title: "Arguments", text: JSONValue.object(activity.arguments).prettyPrinted
@@ -65,8 +70,9 @@ struct ToolActivityCard: View {
                 }
             }
             if let approval {
-                ApprovalCardView(approval: approval, activeTaskGrant: activeTaskGrant) {
-                    decision, reason, taskGrant in
+                ApprovalCardView(
+                    approval: approval, activeTaskGrant: activeTaskGrant, inFlight: approvalInFlight
+                ) { decision, reason, taskGrant in
                     resolve(approval, decision, reason, taskGrant)
                 }
             }
@@ -83,6 +89,8 @@ struct ToolActivityCard: View {
 
 struct ToolActivityBundleCard: View {
     let bundle: ToolActivityBundle
+    /// The settled approvals some bundled calls carry.
+    var approvals: [ApprovalView] = []
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
@@ -115,6 +123,7 @@ struct ToolActivityBundleCard: View {
                         BundledToolActivityRow(
                             index: index + 1,
                             activity: activity,
+                            approval: approvals.first { $0.id == activity.approvalID },
                             openArtifact: openArtifact
                         )
                     }
@@ -136,6 +145,7 @@ struct ToolActivityBundleCard: View {
 private struct BundledToolActivityRow: View {
     let index: Int
     let activity: ToolActivity
+    let approval: ApprovalView?
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
@@ -155,6 +165,11 @@ private struct BundledToolActivityRow: View {
                         }
                         if activity.allowedByTaskGrant {
                             Text("Allowed by task permission")
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        if let approval {
+                            Text(approval.settledTitle)
                                 .appFont(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -178,6 +193,9 @@ private struct BundledToolActivityRow: View {
                 if let summary = activity.taskGrantSummary {
                     DetailBlock(title: "What it did", text: summary)
                 }
+                if let diagnostics = activity.browserDiagnostics {
+                    DetailBlock(title: "Browser activity", text: diagnostics.summary + "\n" + diagnostics.detail)
+                }
                 if !activity.arguments.isEmpty {
                     DetailBlock(
                         title: "Arguments",
@@ -190,6 +208,10 @@ private struct BundledToolActivityRow: View {
                         result: result,
                         openArtifact: openArtifact
                     )
+                }
+                if let approval {
+                    // A bundle holds only settled approvals, which offer no controls.
+                    ApprovalCardView(approval: approval) { _, _, _ in }
                 }
             }
         }
@@ -227,20 +249,23 @@ private struct RiskBadge: View {
 struct ApprovalCardView: View {
     let approval: ApprovalView
     var activeTaskGrant: BrowserTaskGrantView? = nil
+    /// The decision on its way, which disables every control until the server answers.
+    var inFlight: ApprovalDecision? = nil
     let resolve: (ApprovalDecision, String?, TaskGrantEcho?) -> Void
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if approval.status == .approved {
+            // Only a pending approval needs its details and controls in view.
+            if !approval.status.isPending {
                 Button {
                     expanded.toggle()
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                        Image(systemName: approval.settledSymbol)
+                            .foregroundColor(approval.settledColor)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(approval.decision == .approveForTask ? "Allowed for this task" : "Approved")
+                            Text(approval.settledTitle)
                                 .appFont(.subheadline, weight: .semibold)
                             Text(verbatim: approval.actionSummary)
                                 .appFont(.caption)
@@ -268,17 +293,52 @@ struct ApprovalCardView: View {
     @ViewBuilder
     private var details: some View {
         if let presentation = BrowserActionApprovalPresentation(approval: approval, activeGrant: activeTaskGrant) {
-            BrowserActionApprovalCard(approval: approval, presentation: presentation, resolve: resolve)
+            BrowserActionApprovalCard(
+                approval: approval, presentation: presentation, inFlight: inFlight, resolve: resolve
+            )
         } else {
-            ApprovalCard(approval: approval) { decision, reason in
+            ApprovalCard(approval: approval, inFlight: inFlight) { decision, reason in
                 resolve(decision, reason, nil)
             }
         }
     }
 }
 
+private extension ApprovalView {
+    /// How a settled approval reads in its collapsed row.
+    var settledTitle: String {
+        switch status {
+        case .approved: decision == .approveForTask ? "Allowed for this task" : "Approved"
+        case .denied: "Denied"
+        case .expired: "Expired"
+        case .cancelled: "Cancelled"
+        case .pending: "Approval checkpoint"
+        }
+    }
+
+    var settledSymbol: String {
+        switch status {
+        case .approved: "checkmark.circle.fill"
+        case .denied: "xmark.circle.fill"
+        case .expired: "clock"
+        case .cancelled: "slash.circle"
+        case .pending: "hand.raised.fill"
+        }
+    }
+
+    var settledColor: Color {
+        switch status {
+        case .approved: .green
+        case .denied: .red
+        case .expired, .cancelled: .secondary
+        case .pending: AppTheme.orange
+        }
+    }
+}
+
 struct ApprovalCard: View {
     let approval: ApprovalView
+    var inFlight: ApprovalDecision? = nil
     let resolve: (ApprovalDecision, String?) -> Void
     @State private var denialReason = ""
 
@@ -301,14 +361,20 @@ struct ApprovalCard: View {
             }
             if approval.status.isPending {
                 TextField("Reason for denial (optional)", text: $denialReason)
+                    .disabled(inFlight != nil)
                 HStack {
-                    Button("Approve once") { resolve(.approveOnce, nil) }
-                        .buttonStyle(.borderedProminent)
-                    Button("Deny", role: .destructive) {
+                    Button { resolve(.approveOnce, nil) } label: {
+                        ApprovalDecisionLabel(title: "Approve once", decision: .approveOnce, inFlight: inFlight)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button(role: .destructive) {
                         let reason = denialReason.trimmingCharacters(in: .whitespacesAndNewlines)
                         resolve(.deny, reason.isEmpty ? nil : reason)
+                    } label: {
+                        ApprovalDecisionLabel(title: "Deny", decision: .deny, inFlight: inFlight)
                     }
                 }
+                .disabled(inFlight != nil)
             } else {
                 Text("Resolved: \(approval.decision?.rawValue ?? approval.status.displayName)")
                     .appFont(.caption)
@@ -321,6 +387,25 @@ struct ApprovalCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(AppTheme.orange.opacity(0.45))
         )
+    }
+}
+
+/// A decision control's own title, or progress once that decision is on its way.
+struct ApprovalDecisionLabel: View {
+    let title: String
+    let decision: ApprovalDecision
+    let inFlight: ApprovalDecision?
+    var websiteCard = false
+
+    var body: some View {
+        if inFlight == decision {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(decision.progressLabel(websiteCard: websiteCard))
+            }
+        } else {
+            Text(title)
+        }
     }
 }
 

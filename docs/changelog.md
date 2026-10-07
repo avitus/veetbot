@@ -4,6 +4,72 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-07 — Browser and mailbox recovery stay responsive
+
+- New email is discovered even while earlier changed conversations are still
+  waiting to be read.
+- A passive reCAPTCHA badge no longer interrupts browser work for sign-in,
+  and reading another page region preserves an unchanged approved draft.
+- Verified sign-in can resume a waiting conversation with a live clock. A slow
+  protected-page check no longer blocks other browser sessions.
+- Reopening schedule details keeps the newest website-access choices even
+  when an older request finishes later.
+- Browser navigation waits for initial data requests even when Chromium
+  reports document readiness before their request events arrive.
+
+## 2026-10-07 — Conversation titles say what the conversation is about
+
+- A chat's title was the first 64 characters of its first message and never
+  changed. After the first reply, Veetbot now asks a model for a short title
+  written from your own messages, and asks again after later replies, changing
+  the title only when the conversation has clearly moved to a new subject.
+  Email threads, schedules and background conversations keep their names.
+  The model never sees Veetbot's replies, tool output or anything flagged as a
+  secret or an injected instruction; a failed attempt leaves the title as it
+  was, and each attempt is recorded without its text (ADR-0155).
+- The chat pane's header is gone: the conversation's title is the window title
+  on the Mac and the navigation title on iPhone and iPad, with a line beneath
+  it only when the conversation needs your approval or answer. People and Stop
+  moved to the toolbar.
+- Approve, Allow and Deny now show a spinner on the button you pressed and
+  accept no second tap until the server answers.
+
+## 2026-10-07 — A scheduled report you read on iPad loses its dot
+
+- On iPhone and iPad, a scheduled report opened after a visit to Email, or after
+  the app came back from the background, kept its New report dot however long
+  you read it. The app judged whether you could see the conversation from the
+  screen as it was before the switch, so it never told the server you had read
+  the report. The dot now clears as soon as the report is loaded, and new
+  reports appear again without first switching modes.
+
+## 2026-10-06 — A sign-in check that cannot finish says where it stopped
+
+- When Veetbot could not finish checking a sign-in you made on your device,
+  its browser service recorded nothing, so nobody could tell why. It now logs
+  one line that says which of its two page loads stopped the check, what that
+  load was doing, and after how many seconds. The line holds nothing about the
+  website, the page or your session, and the app shows the same message as
+  before. An amendment to ADR-0128 records the change.
+
+## 2026-10-06 — Choose a schedule's website access in the app
+
+- A schedule's detail now has a Website access picker. Choosing one of your
+  ready sign-ins, such as x.com, lets that schedule's runs read the signed-in
+  site; None removes it. The app saves through the existing schedule update and
+  changes nothing else about the schedule. A sign-in that stopped working stays
+  shown with its state, and a refused change is explained while the schedule
+  keeps its server setting. Posting and scrolling still ask first (ADR-0154).
+
+## 2026-10-06 — Telegram is live, and `/pair` stays a command
+
+- The Telegram channel passed its production smoke: pairing, a run, a
+  question, an approval, the chat commands, and revocation all work from the
+  phone, and no token or pairing code reached a log.
+- Sending `/pair` from a chat that is already paired went to the model as an
+  ordinary message. It now answers "This chat is already paired with Veetbot."
+  and the code is neither checked nor stored.
+
 ## 2026-10-05 — CI checks that the Website Access browser stays quiet
 
 - The browser that Website Access uses is kept from contacting Google on its

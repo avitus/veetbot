@@ -232,12 +232,12 @@ async def test_a_refusal_is_a_409_with_the_grant_code(tmp_path: Path) -> None:
         refused = await http.post(**_act_request(lease_ref, sequence=1, constraint=expired))
 
     assert refused.status_code == 409
-    assert refused.json() == {
-        "error": {
-            "code": "tool.browser.grant_not_applicable",
-            "message": "browser operation rejected",
-        }
+    assert refused.json()["error"] == {
+        "code": "tool.browser.grant_not_applicable",
+        "message": "browser operation rejected",
     }
+    assert set(refused.json()) == {"error", "browser_diagnostics"}
+    assert refused.json()["browser_diagnostics"]["phases"][-1]["failure"] == "grant_refused"
     assert runtime.actions == []
 
 

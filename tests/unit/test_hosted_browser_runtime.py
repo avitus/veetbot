@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
@@ -25,6 +26,8 @@ from agent_core.domain.browser import (
     BrowserObservationFacts,
     BrowserPageEvidence,
     BrowserProviderError,
+    BrowserVerificationStage,
+    ignore_verification_stage,
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
 
@@ -78,7 +81,13 @@ class FakeStatefulRuntime:
         del revision
         return None
 
-    async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+    async def load_page_evidence(
+        self,
+        url: str,
+        *,
+        on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+    ) -> BrowserPageEvidence:
+        on_stage(BrowserVerificationStage.NAVIGATE)
         return BrowserPageEvidence(
             on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
         )
@@ -247,10 +256,15 @@ async def test_hosted_runtime_forwards_page_evidence_and_normalizes_failures() -
     class FailingEvidenceRuntime(FakeStatefulRuntime):
         error: Exception | None = None
 
-        async def load_page_evidence(self, url: str) -> BrowserPageEvidence:
+        async def load_page_evidence(
+            self,
+            url: str,
+            *,
+            on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        ) -> BrowserPageEvidence:
             if self.error is not None:
                 raise self.error
-            return await super().load_page_evidence(url)
+            return await super().load_page_evidence(url, on_stage=on_stage)
 
     low_level = FailingEvidenceRuntime()
     runtime = HostedPlaywrightSessionRuntime(
@@ -267,6 +281,21 @@ async def test_hosted_runtime_forwards_page_evidence_and_normalizes_failures() -
     assert evidence.path == "/learn"
     assert raised.value.reason_code == "tool.browser.provider_unavailable"
     assert "provider-private-diagnostic" not in str(raised.value)
+
+
+async def test_hosted_runtime_passes_the_stage_observer_to_its_browser() -> None:
+    """ADR-0128 amendment: the service hears each stage the browser enters."""
+
+    runtime = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=FakeStatefulRuntime(),
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+    stages: list[BrowserVerificationStage] = []
+
+    await runtime.load_page_evidence("https://example.org/learn", on_stage=stages.append)
+
+    assert stages == [BrowserVerificationStage.NAVIGATE]
 
 
 async def test_observation_carries_facts_beside_it() -> None:
@@ -315,3 +344,78 @@ async def test_a_constrained_act_reaches_the_playwright_runtime() -> None:
     await runtime.act(action)
 
     assert low_level.constrained == [(constraint, now), (None, None)]
+
+
+async def test_hosted_runtime_forwards_typed_extraction_and_checks_automation_guard() -> None:
+    from agent_core.domain.browser_extraction import BrowserExtractionRequest
+    from tests.unit.test_browser_extraction import extracted_page, extraction_arguments
+
+    class ExtractingRuntime(FakeStatefulRuntime):
+        checked = False
+
+        async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+            return extracted_page(request)
+
+        async def check_automation_ready(self) -> None:
+            self.checked = True
+
+    low_level = ExtractingRuntime()
+    hosted = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=low_level,
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+    request = BrowserExtractionRequest.model_validate(extraction_arguments()["extract"])
+    result = await hosted.extract(request)
+    assert result.extraction is not None and low_level.checked
+
+
+async def test_evidence_failure_after_dispatch_stays_uncertain() -> None:
+    class UnavailableAfterAction(FakeStatefulRuntime):
+        checks = 0
+
+        async def check_automation_ready(self) -> None:
+            self.checks += 1
+            if self.checks > 1:
+                raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
+
+    low_level = UnavailableAfterAction()
+    hosted = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=low_level,
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+    with pytest.raises(BrowserProviderError, match="outcome_unknown"):
+        await hosted.act(
+            BrowserAction(kind=BrowserActionKind.CLICK, expected_revision="r", ref="x")
+        )
+    assert low_level.checks == 2
+
+
+async def test_headed_agent_checks_authentication_but_ceremony_can_load_login() -> None:
+    """Headed is a launch mode, independent of an interactive sign-in ceremony."""
+
+    class LoginRuntime(FakeStatefulRuntime):
+        async def check_automation_ready(self) -> None:
+            raise BrowserProviderError("tool.browser.authentication_required", retryable=False)
+
+    async def proxy_factory(*args: object, **kwargs: object) -> FakeProxy:
+        return FakeProxy()
+
+    for interactive in (False, True):
+        low_level = LoginRuntime()
+        hosted = HostedPlaywrightSessionRuntime(
+            tenant_id="tenant-a", runtime=low_level, proxy_factory=proxy_factory
+        )
+        await hosted.start(b'{"format_version":1}', ("https://example.org",), headed=True)
+        if interactive:
+            # The service opts into this mode only for its trusted ceremony/verification.
+            enable_ceremony = getattr(hosted, "set_interactive_authentication", None)
+            if enable_ceremony is not None:
+                enable_ceremony()
+            assert (await hosted.navigate("https://example.org/login")).url.endswith("/login")
+        else:
+            with pytest.raises(BrowserProviderError, match="authentication_required"):
+                await hosted.navigate("https://example.org/login")
+        assert low_level.started is not None and low_level.started[3] is True
+        await hosted.close()

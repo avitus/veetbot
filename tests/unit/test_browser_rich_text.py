@@ -171,6 +171,74 @@ async def test_approved_rich_text_typing_updates_the_composer_without_submitting
         assert stale.value.reason_code == "tool.browser.page_changed"
 
 
+@pytest.mark.parametrize("change", ["value", "hidden", "credential", "oversized", "nodes"])
+async def test_draft_confirmation_never_reads_unknown_or_changed_editable_values(
+    change: str,
+) -> None:
+    """Only the bounded text the agent submitted may return after a live equality check."""
+    editor = '<div contenteditable="true" role="textbox" aria-label="Post text">Private draft</div>'
+    async with lesson_pages({"/compose/post": COMPOSER.format(editor=editor)}) as (
+        runtime,
+        visit,
+        _left,
+    ):
+        before = await visit("/compose/post")
+        assert "Private draft" not in before.text
+        after = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.TYPE,
+                expected_revision=before.revision,
+                ref=_ref(before, "Post text"),
+                value="Known approved draft",
+            )
+        )
+        assert "Known approved draft" in after.text
+        page = runtime._current_page()
+        mutations = {
+            "value": "node => node.innerText = 'A different private value'",
+            "hidden": "node => node.hidden = true",
+            "credential": "node => node.setAttribute('autocomplete', 'current-password')",
+            "oversized": "node => node.innerText = 'private'.repeat(10000)",
+            "nodes": "node => node.append(...Array.from({length:257}, "
+            "() => document.createElement('span')))",
+        }
+        await page.locator("[contenteditable]").evaluate(mutations[change])
+        changed = await runtime.observe()
+        assert "Known approved draft" not in changed.text
+        assert "A different private value" not in changed.text
+        await page.locator("[contenteditable]").evaluate("""node => {
+            node.hidden = false; node.removeAttribute('autocomplete');
+            node.innerText = 'Known approved draft';
+        }""")
+        assert "Known approved draft" not in (await runtime.observe()).text
+
+
+async def test_focus_elsewhere_preserves_an_unchanged_approved_draft() -> None:
+    from agent_core.domain.browser import BrowserObservationExpansion
+
+    editor = '<div contenteditable="true" role="textbox" aria-label="Post text"></div>'
+    page = COMPOSER.format(editor=editor) + "<section><button>Elsewhere</button></section>"
+    async with lesson_pages({"/compose/post": page}) as (runtime, visit, _left):
+        before = await visit("/compose/post")
+        after = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.TYPE,
+                expected_revision=before.revision,
+                ref=_ref(before, "Post text"),
+                value="Known approved draft",
+            )
+        )
+        region = next(item for item in after.regions if item.kind == "section")
+        focused = await runtime.expand(
+            BrowserObservationExpansion(
+                region_ref=region.ref,
+                expected_revision=after.revision,
+            )
+        )
+        assert "Known approved draft" not in focused.text
+        assert "Known approved draft" in (await runtime.observe()).text
+
+
 @pytest.mark.parametrize("grant_kind", ["task", "standing"])
 async def test_rich_text_typing_remains_refused_under_grants(grant_kind: str) -> None:
     editor = '<div contenteditable="true" role="textbox" aria-label="Answer">Unchanged</div>'

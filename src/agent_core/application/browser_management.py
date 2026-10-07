@@ -6,7 +6,9 @@ import asyncio
 import base64
 import builtins
 import json
+import logging
 import math
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from types import TracebackType
 from typing import Protocol, Self
@@ -113,6 +115,7 @@ class BrowserProfileManagementService:
         ids: IdFactory,
         authentication_timeout_seconds: float = 30.0,
         authentication_lock_timeout_seconds: float = 5.0,
+        on_verified: Callable[[Principal, UUID], Awaitable[None]] | None = None,
     ) -> None:
         if not math.isfinite(authentication_timeout_seconds) or authentication_timeout_seconds <= 0:
             raise ValueError("authentication timeout must be positive and finite")
@@ -128,6 +131,7 @@ class BrowserProfileManagementService:
         self._ids = ids
         self._authentication_timeout_seconds = authentication_timeout_seconds
         self._authentication_lock_timeout_seconds = authentication_lock_timeout_seconds
+        self._on_verified = on_verified
 
     async def create(
         self,
@@ -429,6 +433,7 @@ class BrowserProfileManagementService:
             raise ConflictError("browser authentication response identity changed")
         async with self._uow_factory() as uow:
             current = await self._record_remote_status(uow, principal, remote)
+        await self._notify_verified(principal, current)
         return _authentication_view(current)
 
     async def list_authentications(
@@ -454,7 +459,20 @@ class BrowserProfileManagementService:
             raise ConflictError("browser authentication response identity changed")
         async with self._uow_factory() as uow:
             current = await self._record_remote_status(uow, principal, remote)
+        await self._notify_verified(principal, current)
         return _authentication_view(current)
+
+    async def _notify_verified(
+        self, principal: Principal, record: BrowserAuthenticationRecord
+    ) -> None:
+        if record.status is BrowserAuthenticationStatus.READY and self._on_verified is not None:
+            try:
+                await self._on_verified(principal, record.profile_id)
+            except Exception as error:
+                # The recorded outcome is durable; maintenance retries delivery.
+                logging.getLogger(__name__).warning(
+                    "Browser continuation deferred (%s)", type(error).__name__
+                )
 
     async def _record_remote_status(
         self,
@@ -467,6 +485,7 @@ class BrowserProfileManagementService:
         a ceremony the service already sealed records the ready outcome too."""
 
         current = await uow.browser_authentications.get(remote.id, principal)
+        now = self._clock.now()
         entered_ready = False
         if current.status is not remote.status:
             current = await uow.browser_authentications.transition(
@@ -474,10 +493,17 @@ class BrowserProfileManagementService:
                 principal,
                 expected_status=current.status,
                 status=remote.status,
-                updated_at=self._clock.now(),
+                updated_at=now,
             )
             entered_ready = current.status is BrowserAuthenticationStatus.READY
-        await self._synchronize_profile_status(uow, principal, current, entered_ready=entered_ready)
+        records = await uow.browser_authentications.list(principal, profile_id=current.profile_id)
+        if not any(
+            record.id != current.id and record.created_at >= current.created_at
+            for record in records
+        ):
+            await self._synchronize_profile_status(
+                uow, principal, current, entered_ready=entered_ready, updated_at=now
+            )
         return current
 
     async def _advance_generation(
@@ -519,6 +545,7 @@ class BrowserProfileManagementService:
         authentication: BrowserAuthenticationRecord,
         *,
         entered_ready: bool,
+        updated_at: datetime,
     ) -> None:
         profiles = uow.browser_profiles
         target = {
@@ -535,9 +562,7 @@ class BrowserProfileManagementService:
             if entered_ready and target is BrowserProfileStatus.READY:
                 # A new session replaced a ready one: grants pinned to the old
                 # generation must not carry over to it.
-                await self._advance_generation(
-                    uow, principal, profile, updated_at=self._clock.now()
-                )
+                await self._advance_generation(uow, principal, profile, updated_at=updated_at)
             return
         if target not in ALLOWED_BROWSER_PROFILE_TRANSITIONS.get(profile.status, frozenset()):
             return
@@ -546,7 +571,7 @@ class BrowserProfileManagementService:
             principal,
             expected_generation=profile.generation,
             status=target,
-            updated_at=self._clock.now(),
+            updated_at=updated_at,
         )
 
 

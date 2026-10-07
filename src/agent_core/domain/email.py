@@ -336,6 +336,8 @@ class EmailSyncState(EmailValue):
     change_history: str | None = None
     change_cursor: str | None = None
     change_page_open: bool = False
+    # History pages the unfinished change lookahead has read; the runtime bounds them.
+    change_pages: int = Field(default=0, ge=0)
     history_pending: list[str] = Field(default_factory=list)
     history_next: str | None = None
     history_page_open: bool = False

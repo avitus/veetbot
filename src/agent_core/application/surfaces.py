@@ -73,6 +73,7 @@ type SurfaceResumeApproval = Callable[[RepositoryUnitOfWork, Run], Awaitable[Run
 
 _NOTICE_TEXT: dict[str, str] = {
     "surface.active_run": "Still working; /stop to cancel.",
+    "surface.already_paired": "This chat is already paired with Veetbot.",
     "surface.approval_already_resolved": "That approval was already resolved.",
     "surface.approval_not_found": "That pending approval was not found.",
     "surface.approval_resolved": "Approval resolved.",
@@ -642,6 +643,17 @@ class SurfaceIngressService:
                 update={
                     "disposition": InboundDisposition.REJECTED_UNPAIRED,
                     "reason_code": "surface.unpaired",
+                }
+            )
+            await uow.surfaces.receipts.replace(final)
+            return final, None, final.reason_code
+        if update.text.split(maxsplit=1)[0] == "/pair":
+            # A command for every sender: a paired one is told so, and the code
+            # is neither verified nor stored as message content.
+            final = placeholder.model_copy(
+                update={
+                    "disposition": InboundDisposition.COMMAND_HANDLED,
+                    "reason_code": "surface.already_paired",
                 }
             )
             await uow.surfaces.receipts.replace(final)

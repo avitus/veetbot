@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "kind": "scripted_browser_component_tasks",
+  "scenarios": [
+    {"id": "lesson-sequence", "fixture": "sequence", "target": "Continue", "expected_effects": 3, "budget": 4096},
+    {"id": "arabic-choice", "fixture": "button", "target": "التالي", "expected_effects": 1, "budget": 1024},
+    {"id": "japanese-choice", "fixture": "button", "target": "次へ進む", "expected_effects": 1, "budget": 1024},
+    {"id": "mixed-script-choice", "fixture": "button", "target": "Choose 雪 — اختر", "expected_effects": 1, "budget": 1024},
+    {"id": "quoted-label", "fixture": "button", "target": "Choose \"yes\" \\ continue", "expected_effects": 1, "budget": 1024},
+    {"id": "long-page-text", "fixture": "long-text", "target": "Continue", "expected_effects": 1, "budget": 1024},
+    {"id": "dense-controls", "fixture": "dense", "target": "Continue", "expected_effects": 1, "budget": 4096},
+    {"id": "hidden-window", "fixture": "hidden", "target": "Continue", "expected_effects": 1, "budget": 1024},
+    {"id": "open-shadow-root", "fixture": "shadow", "target": "Continue", "expected_effects": 1, "budget": 1024},
+    {"id": "slow-spa", "fixture": "slow", "target": "Continue", "expected_effects": 1, "budget": 1024},
+    {"id": "typed-form", "fixture": "text", "target": "Answer", "expected_effects": 1, "budget": 1024},
+    {"id": "select-and-check-form", "fixture": "select-check", "target": "Answer", "expected_effects": 1, "budget": 1024}
+  ]
+}

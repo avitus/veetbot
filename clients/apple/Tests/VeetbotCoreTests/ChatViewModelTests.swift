@@ -355,6 +355,11 @@ import UserNotifications
                     {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Email discussion","metadata":{"email_thread_id":"\(threadID)","email_account_id":"work"},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":null}
                     """)
             }
+            if request.url?.path == "/v1/email/threads/\(threadID)" {
+                return try response(for: request, statusCode: 200, body: Self.emailThreadJSON(
+                    threadID, sessionID: sessionID, runID: runID, draftApprovalID: approvalID
+                ))
+            }
             Issue.record("Email notification unexpectedly replaced Chat: \(request.url?.path ?? "")")
             return try response(for: request, statusCode: 500, body: "{}")
         }
@@ -380,6 +385,81 @@ import UserNotifications
         #expect(model.composerText == "Keep the unfinished Chat message")
         #expect(model.selectedSessionID == nil)
         #expect(model.runState.activeRunID == nil)
+    }
+
+    /// Discuss in Chat runs in the thread's own session, so a tool approval the
+    /// conversation raises arrives with that session. Email acts only on the
+    /// approval its draft awaits; this one is answered in Chat, even when the
+    /// owner tapped it from Email.
+    @Test
+    func testThreadSessionApprovalTheDraftDoesNotAwaitOpensTheDiscussionInChat() async throws {
+        let ids = ThreadSessionIDs()
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_APPROVAL")
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let coordinator = AppCoordinator(chat: model)
+        coordinator.mode = .email
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "approval_requested", "title": "Approval needed",
+            "status": "WAITING_FOR_APPROVAL", "tool_name": "sandbox.run",
+            "session_id": ids.session.uuidString, "run_id": ids.run.uuidString,
+            "approval_id": ids.approval.uuidString, "notification_id": UUID().uuidString,
+        ]]))
+
+        await model.openNotification(payload)
+
+        #expect(coordinator.mode == .chat)
+        #expect(coordinator.email.selectedThreadID == nil)
+        #expect(model.selectedSessionID == ids.session)
+        #expect(model.runState.approvals.map(\.id) == [ids.approval])
+        #expect(model.notificationFocus == .approval(ids.approval))
+    }
+
+    /// A thread that cannot be read cannot show that Email owns the approval,
+    /// so the tap falls back to Chat, which can resolve any approval.
+    @Test
+    func testThreadSessionApprovalOpensChatWhenTheThreadCannotBeRead() async throws {
+        let ids = ThreadSessionIDs()
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_APPROVAL", threadReadFails: true)
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let coordinator = AppCoordinator(chat: model)
+        coordinator.mode = .email
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "approval_requested", "title": "Approval needed",
+            "status": "WAITING_FOR_APPROVAL", "tool_name": "sandbox.run",
+            "session_id": ids.session.uuidString, "run_id": ids.run.uuidString,
+            "approval_id": ids.approval.uuidString, "notification_id": UUID().uuidString,
+        ]]))
+
+        await model.openNotification(payload)
+
+        #expect(coordinator.mode == .chat)
+        #expect(model.selectedSessionID == ids.session)
+        #expect(model.notificationFocus == .approval(ids.approval))
+        #expect(model.errorMessage == nil)
+    }
+
+    /// Email has no question card, so a question from the thread's discussion
+    /// opens in Chat, where the owner can answer it.
+    @Test
+    func testThreadSessionQuestionOpensTheDiscussionInChat() async throws {
+        let ids = ThreadSessionIDs()
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_USER")
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let coordinator = AppCoordinator(chat: model)
+        coordinator.mode = .email
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "question_asked", "title": "The agent has a question",
+            "status": "WAITING_FOR_USER", "session_id": ids.session.uuidString,
+            "run_id": ids.run.uuidString, "question_id": ids.question.uuidString,
+            "notification_id": UUID().uuidString,
+        ]]))
+
+        await model.openNotification(payload)
+
+        #expect(coordinator.mode == .chat)
+        #expect(coordinator.email.selectedThreadID == nil)
+        #expect(model.selectedSessionID == ids.session)
+        #expect(model.notificationFocus == .question(ids.question))
     }
 
     /// The Mac window observes the coordinator while account capabilities arrive asynchronously.
@@ -537,6 +617,72 @@ import UserNotifications
         #expect(model.errorMessage == "temporarily unavailable")
     }
 
+    /// ADR-0155: the server titles a conversation a few seconds after a reply
+    /// ends, so the sidebar reads the list once more after a watched run ends.
+    @Test
+    func testTheSidebarRereadsTitlesShortlyAfterAWatchedReplyEnds() async throws {
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000321"))
+        let runID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000654"))
+        let lock = NSLock()
+        var listReads = 0
+        func sessionBody(_ title: String) -> String {
+            """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"\(title)","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
+            """
+        }
+        let model = try configuredModel(titleRefreshDelay: 0.05) { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                // The first read predates the reply; later ones carry the server's title.
+                let read = lock.withLock { () -> Int in
+                    listReads += 1
+                    return listReads
+                }
+                let title = read == 1 ? "can you help with the garden" : "Shade garden planting"
+                return try response(
+                    for: request, statusCode: 200,
+                    body: "{\"items\":[\(sessionBody(title))],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(
+                    for: request, statusCode: 200, body: sessionBody("can you help with the garden")
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(
+                    for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)"):
+                return try response(
+                    for: request, statusCode: 200,
+                    body: """
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"RUNNING","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(
+                    for: request, statusCode: 200,
+                    body: "id: 3\nevent: run.completed\ndata: {\"run_id\":\"\(runID.uuidString)\"}\n\n"
+                )
+            default:
+                return try response(
+                    for: request, statusCode: 404,
+                    body: #"{"error":{"code":"not_found","message":"not found","details":{},"request_id":"t"}}"#
+                )
+            }
+        }
+        defer { model.newSession() }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "token"))
+        let entry = try #require(model.history.first)
+        #expect(entry.title == "can you help with the garden")
+
+        await model.selectSession(entry)
+        for _ in 0 ..< 200 where model.history.first?.title != "Shade garden planting" {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(model.history.first?.title == "Shade garden planting")
+    }
+
     @Test
     func testSelectingHistoricalSessionAfterRelaunchRestoresEveryCompletedTurn() async throws {
         let sessionID = try #require(
@@ -668,6 +814,157 @@ import UserNotifications
             "Second answer",
         ])
         #expect(lock.withLock { messageRequests } == 3)
+    }
+
+    /// Reopening a chat whose answer followed three approved commands lands on
+    /// the answer, with the commands in one collapsed summary above it.
+    @Test
+    func testReopenedChatShowsTheAnswerBelowTheApprovedCommandsItRan() async throws {
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000123")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000456")
+        )
+        let approvalIDs = (1...3).map { index in
+            UUID(uuidString: "00000000-0000-0000-0000-00000000070\(index)")!
+        }
+        let sessionBody = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Fwd: Intro","metadata":{},"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
+            """
+        var events = """
+            id: 2
+            event: user.message.created
+            data: {"content":[{"type":"text","text":"Is Polargrid being tracked?"}]}
+
+
+            """
+        for (index, approvalID) in approvalIDs.enumerated() {
+            let base = 3 + index * 7
+            let call = "{\"name\":\"sandbox.run_command\",\"call_id\":\"command-\(index + 1)\""
+            events += """
+                id: \(base)
+                event: tool.call.proposed
+                data: \(call)}
+
+                id: \(base + 1)
+                event: approval.requested
+                data: {"approval_id":"\(approvalID.uuidString)"}
+
+                id: \(base + 2)
+                event: run.waiting_for_approval
+                data: {"approval_id":"\(approvalID.uuidString)"}
+
+                id: \(base + 3)
+                event: approval.resolved
+                data: {"approval_id":"\(approvalID.uuidString)","resolution":"approve_once"}
+
+                id: \(base + 4)
+                event: run.resumed
+                data: {}
+
+                id: \(base + 5)
+                event: tool.call.started
+                data: \(call)}
+
+                id: \(base + 6)
+                event: tool.call.completed
+                data: \(call),"result_item":{"content":[{"type":"text","text":"exit 0"}],"is_error":false,"trust":"external_untrusted"}}
+
+
+                """
+        }
+        events += """
+            id: 24
+            event: assistant.message.completed
+            data: {"message":{"kind":"assistant","content":[{"kind":"text","text":"Two partners track Polargrid."}]}}
+
+            id: 25
+            event: run.completed
+            data: {"run_id":"\(runID.uuidString)"}
+
+
+            """
+        let model = try configuredModel { request in
+            let path = request.url?.path ?? ""
+            switch (request.httpMethod, path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[
+                          {"sequence":2,"role":"user","content":[{"type":"text","text":"Is Polargrid being tracked?"}]},
+                          {"sequence":24,"role":"assistant","content":[{"type":"text","text":"Two partners track Polargrid."}]}
+                        ],"next_cursor":null}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":4,"model_call_count":4,"tool_call_count":3,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z"}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(for: request, statusCode: 200, body: events)
+            case ("GET", "/v1/approvals"):
+                return try response(
+                    for: request, statusCode: 200, body: "{\"items\":[],\"next_cursor\":null}"
+                )
+            case ("GET", _) where path.hasPrefix("/v1/approvals/"):
+                let approvalID = String(path.dropFirst("/v1/approvals/".count))
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(approvalID)","run_id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","status":"APPROVED","tool_name":"sandbox.run_command","action_summary":"Run a command in the sandbox","arguments":{"command":["python3","parse.py"]},"risk":"HIGH","policy_reason":"policy.matrix.code_execution","expires_at":null,"created_at":"2026-10-07T15:34:00Z","resolved_at":"2026-10-07T15:34:56Z","resolved_by":"owner","decision":"approve_once"}
+                        """
+                )
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "nil") \(path)")
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        defer { model.newSession() }
+        #expect(
+            await model.configure(baseURLString: "https://veetbot.test", token: "replacement-token")
+        )
+
+        let entry = try #require(model.history.first)
+        await model.selectSession(entry)
+        // The stored run is already complete; wait for its replay to settle.
+        for _ in 0 ..< 2_000 {
+            if model.runState.approvals.count == 3,
+                model.runState.tools.count == 3,
+                model.runState.tools.allSatisfy({ $0.status == .completed })
+            {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        #expect(model.runState.tools.map(\.status) == [.completed, .completed, .completed])
+        #expect(model.runState.activityTimeline.map(\.id) == [
+            "message:event-2",
+            "tool:command-1",
+            "message:event-24",
+        ])
+        guard case .toolBundle(let bundle) = model.runState.activityTimeline[1] else {
+            Issue.record("expected the approved commands in one collapsed summary")
+            return
+        }
+        #expect(bundle.summary == "3 tool calls · Completed")
+        #expect(bundle.activities.map(\.approvalID) == approvalIDs)
     }
 
     @Test
@@ -2627,7 +2924,69 @@ import UserNotifications
         model.newSession()
     }
 
+    private struct ThreadSessionIDs {
+        let session = UUID()
+        let thread = UUID()
+        let run = UUID()
+        let approval = UUID()
+        let question = UUID()
+        /// The send approval the thread's draft awaits, distinct from the
+        /// discussion's own approval.
+        let draftApproval = UUID()
+    }
+
+    private static func emailThreadJSON(
+        _ threadID: UUID, sessionID: UUID, runID: UUID, draftApprovalID: UUID
+    ) -> String {
+        let draftID = UUID()
+        return """
+            {"id":"\(threadID)","account_id":"work","subject":"Board discussion","senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the agenda","reason":"A colleague","needs_reply":true,"draft_id":"\(draftID)","session_id":"\(sessionID)","priority":0.9,"complete":true,"messages":[],"draft":{"id":"\(draftID)","thread_id":"\(threadID)","account_id":"work","revision":1,"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"Thanks","status":"awaiting_approval","stale":false,"run_id":"\(runID)","approval_id":"\(draftApprovalID)","session_id":"\(sessionID)","updated_at":"2026-09-11T00:00:00Z"}}
+            """
+    }
+
+    /// Serves one thread-bound session whose run waits on the discussion's own
+    /// approval or question, while the thread's draft awaits a different approval.
+    private func threadSessionModel(
+        _ ids: ThreadSessionIDs, runStatus: String, threadReadFails: Bool = false
+    ) throws -> ChatViewModel {
+        try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("GET", "/v1/sessions/\(ids.session)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(ids.session)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Board discussion","metadata":{"email_thread_id":"\(ids.thread)","email_account_id":"work"},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":"\(ids.run)","last_run_id":"\(ids.run)"}
+                    """)
+            case ("GET", "/v1/sessions/\(ids.session)/messages"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("GET", "/v1/runs/\(ids.run)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(ids.run)","session_id":"\(ids.session)","parent_run_id":null,"status":"\(runStatus)","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
+                    """)
+            case ("GET", "/v1/runs/\(ids.run)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            case ("GET", "/v1/approvals/\(ids.approval)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(ids.approval)","run_id":"\(ids.run)","session_id":"\(ids.session)","status":"PENDING","tool_name":"sandbox.run","action_summary":"Run code","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+                    """)
+            case ("GET", "/v1/email/threads/\(ids.thread)"):
+                if threadReadFails {
+                    return try response(for: request, statusCode: 404, body: #"{"error":{"code":"not_found","message":"Not found"}}"#)
+                }
+                return try response(for: request, statusCode: 200, body: Self.emailThreadJSON(
+                    ids.thread, sessionID: ids.session, runID: UUID(), draftApprovalID: ids.draftApproval
+                ))
+            case ("GET", "/v1/email/accounts"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[]}"#)
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+    }
+
     private func configuredModel(
+        titleRefreshDelay: TimeInterval = 10,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
         let session = urlSession(handler: handler)
@@ -2638,7 +2997,8 @@ import UserNotifications
             tokenStore: InMemoryTokenStore(),
             configurationStore: ConnectionConfigurationStore(defaults: defaults),
             historyStore: VolatileSessionHistoryStore(),
-            urlSession: session
+            urlSession: session,
+            titleRefreshDelay: titleRefreshDelay
         )
     }
 

@@ -437,6 +437,15 @@ public enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
     /// Approve this action and allow the offered task permission (ADR-0129).
     case approveForTask = "approve_for_task"
     case deny
+
+    /// What the tapped control says while this decision is on its way; a
+    /// website card's controls say Allow rather than Approve.
+    public func progressLabel(websiteCard: Bool) -> String {
+        switch self {
+        case .approveOnce, .approveForTask: return websiteCard ? "Allowing…" : "Approving…"
+        case .deny: return "Denying…"
+        }
+    }
 }
 
 public enum ApprovalStatus: String, Codable, CaseIterable, Sendable {
@@ -709,6 +718,9 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
     public let agentVersion: String
     public let policyProfile: String
     public let requestedScopes: [String]
+    /// The website sign-in future occurrences may read (ADR-0150); absent on
+    /// servers that predate scheduled website access.
+    public let browserProfileID: UUID?
     public let limits: ScheduleRunLimitsView
     public let runTimeoutSeconds: Int
     public let cadence: ScheduleCadenceView
@@ -725,6 +737,7 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
         case agentVersion = "agent_version"
         case policyProfile = "policy_profile"
         case requestedScopes = "requested_scopes"
+        case browserProfileID = "browser_profile_id"
         case runTimeoutSeconds = "run_timeout_seconds"
         case misfireGraceSeconds = "misfire_grace_seconds"
         case maxConsecutiveFailures = "max_consecutive_failures"

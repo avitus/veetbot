@@ -21,6 +21,14 @@ from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest, A
 from agent_core.domain.argument_views import approval_argument_digests, approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.browser_act_views import TASK_GRANT_AUTHORIZATION_KIND
+from agent_core.domain.browser_diagnostics import (
+    BrowserDiagnostics,
+    browser_failure_category,
+    browser_phase,
+    browser_phase_call,
+    collect_browser_diagnostics,
+)
+from agent_core.domain.browser_projection import browser_context_projection
 from agent_core.domain.browser_task_grants import (
     TASK_GRANT_NOT_COVERED_REASONS,
     BrowserTaskGrantOffer,
@@ -1319,122 +1327,136 @@ class ToolPipeline:
             raise RuntimeError("tool execution cannot begin while a unit of work is open")
         if progress[-1] == 9:
             progress.append(10)
-        try:
-            if effective_timeout <= 0:
-                raise TimeoutError
-            async with asyncio.timeout_at(monotonic_deadline):
-                if tool.spec.side_effect is not SideEffectClass.NONE:
-                    await mark_effect_sent()
-                try:
-                    result = await tool.execute(arguments, execution_context)
-                except ToolTrustRejectedError:
-                    result = ToolResult(
-                        ok=False,
-                        content=[],
-                        failure=ToolFailure(
-                            kind=ToolFailureKind.INVALID_ARGUMENTS,
-                            reason_code="tool.trust_rejected",
-                            detail="tool rejected content with insufficient provenance trust",
-                            retryable=False,
-                        ),
+        browser_operation = tool.spec.target_kind == "browser_provider" and tool.spec.name in {
+            "browser.navigate",
+            "browser.observe",
+            "browser.act",
+            "browser.upload",
+        }
+        with collect_browser_diagnostics(clock=loop.time, enabled=browser_operation) as diagnostics:
+            try:
+                if effective_timeout <= 0:
+                    raise TimeoutError
+                async with asyncio.timeout_at(monotonic_deadline):
+                    if tool.spec.side_effect is not SideEffectClass.NONE:
+                        await mark_effect_sent()
+                    try:
+                        with browser_phase("operation", "orchestrator") as phase:
+                            result = await tool.execute(arguments, execution_context)
+                            if result.failure is not None:
+                                phase.outcome = "failed"
+                                phase.failure = browser_failure_category(result.failure.reason_code)
+                    except ToolTrustRejectedError:
+                        result = ToolResult(
+                            ok=False,
+                            content=[],
+                            failure=ToolFailure(
+                                kind=ToolFailureKind.INVALID_ARGUMENTS,
+                                reason_code="tool.trust_rejected",
+                                detail="tool rejected content with insufficient provenance trust",
+                                retryable=False,
+                            ),
+                        )
+                    except ToolValidationError:
+                        result = ToolResult(
+                            ok=False,
+                            content=[],
+                            failure=ToolFailure(
+                                kind=ToolFailureKind.INVALID_ARGUMENTS,
+                                reason_code="tool.arguments_invalid",
+                                detail="tool rejected the validated arguments",
+                                retryable=False,
+                            ),
+                        )
+                if result.ok:
+                    validate_output(result.structured, tool.spec.output_schema)
+                    if progress[-1] == 10:
+                        progress.append(11)
+                if result.ok:
+                    result = await self._artifactize_large_output(
+                        result=result,
+                        tool=tool,
+                        run=run,
+                        principal=principal,
                     )
-                except ToolValidationError:
-                    result = ToolResult(
-                        ok=False,
-                        content=[],
-                        failure=ToolFailure(
-                            kind=ToolFailureKind.INVALID_ARGUMENTS,
-                            reason_code="tool.arguments_invalid",
-                            detail="tool rejected the validated arguments",
-                            retryable=False,
-                        ),
-                    )
-            if result.ok:
-                validate_output(result.structured, tool.spec.output_schema)
-                if progress[-1] == 10:
-                    progress.append(11)
-            if result.ok:
-                result = await self._artifactize_large_output(
-                    result=result,
-                    tool=tool,
-                    run=run,
-                    principal=principal,
+                    if progress[-1] == 11:
+                        progress.append(12)
+                if result.ok:
+                    validate_output(result.structured, tool.spec.output_schema)
+            except TimeoutError:
+                media_generation = tool.spec.name in {"image.generate", "video.generate"}
+                timeout_uncertain = (
+                    invocation.effect_sent_at is not None
+                    and invocation.idempotency_class is IdempotencyClass.NON_IDEMPOTENT
+                    and not media_generation
                 )
-                if progress[-1] == 11:
-                    progress.append(12)
-            if result.ok:
-                validate_output(result.structured, tool.spec.output_schema)
-        except TimeoutError:
-            media_generation = tool.spec.name in {"image.generate", "video.generate"}
-            timeout_uncertain = (
-                invocation.effect_sent_at is not None
-                and invocation.idempotency_class is IdempotencyClass.NON_IDEMPOTENT
-                and not media_generation
-            )
-            result = ToolResult(
-                ok=False,
-                content=[],
-                failure=ToolFailure(
-                    kind=(
-                        ToolFailureKind.OUTCOME_UNKNOWN
-                        if timeout_uncertain
-                        else ToolFailureKind.TIMEOUT
+                browser_uncertain = timeout_uncertain and browser_operation
+                result = ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=(
+                            ToolFailureKind.OUTCOME_UNKNOWN
+                            if timeout_uncertain
+                            else ToolFailureKind.TIMEOUT
+                        ),
+                        reason_code=(
+                            "tool.browser.outcome_unknown"
+                            if browser_uncertain
+                            else "tool.outcome_unknown"
+                            if timeout_uncertain
+                            else "tool.media.timeout"
+                            if media_generation
+                            else "tool.timeout"
+                        ),
+                        detail="tool timeout elapsed",
+                        retryable=not (media_generation or timeout_uncertain),
                     ),
-                    reason_code=(
-                        "tool.outcome_unknown"
-                        if timeout_uncertain
-                        else "tool.media.timeout"
-                        if media_generation
-                        else "tool.timeout"
+                )
+            except WorkspaceEscape:
+                result = ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.INVALID_ARGUMENTS,
+                        reason_code="tool.arguments_invalid",
+                        detail="workspace path failed containment validation",
+                        retryable=False,
                     ),
-                    detail="tool timeout elapsed",
-                    retryable=not (media_generation or timeout_uncertain),
-                ),
-            )
-        except WorkspaceEscape:
-            result = ToolResult(
-                ok=False,
-                content=[],
-                failure=ToolFailure(
-                    kind=ToolFailureKind.INVALID_ARGUMENTS,
-                    reason_code="tool.arguments_invalid",
-                    detail="workspace path failed containment validation",
-                    retryable=False,
-                ),
-            )
-        except ToolValidationError:
-            result = ToolResult(
-                ok=False,
-                content=[],
-                failure=ToolFailure(
-                    kind=ToolFailureKind.OUTPUT_INVALID,
-                    reason_code="tool.output_invalid",
-                    detail="tool output schema validation failed",
-                    retryable=False,
-                ),
-            )
-        except (RunCancelledError, BudgetExceededError, NotFoundError):
-            raise
-        # Tool implementation failures are deliberately normalized at this boundary.
-        except Exception as exc:
-            # Exception text may contain private upstream bodies or credentials.
-            logger.error(
-                "tool_execution_failed",
-                extra={
-                    "tool_name": tool.spec.name,
-                    "error_class": type(exc).__name__,
-                },
-            )
-            result = ToolResult(
-                ok=False,
-                content=[],
-                failure=ToolFailure(
-                    kind=ToolFailureKind.INTERNAL,
-                    reason_code="tool.internal_error",
-                    detail="tool raised an unexpected exception",
-                    retryable=False,
-                ),
-            )
+                )
+            except ToolValidationError:
+                result = ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.OUTPUT_INVALID,
+                        reason_code="tool.output_invalid",
+                        detail="tool output schema validation failed",
+                        retryable=False,
+                    ),
+                )
+            except (RunCancelledError, BudgetExceededError, NotFoundError):
+                raise
+            # Tool implementation failures are deliberately normalized at this boundary.
+            except Exception as exc:
+                # Exception text may contain private upstream bodies or credentials.
+                logger.error(
+                    "tool_execution_failed",
+                    extra={
+                        "tool_name": tool.spec.name,
+                        "error_class": type(exc).__name__,
+                    },
+                )
+                result = ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.INTERNAL,
+                        reason_code="tool.internal_error",
+                        detail="tool raised an unexpected exception",
+                        retryable=False,
+                    ),
+                )
         prepared_update = _PreparedContextUpdate()
         if result.ok:
             try:
@@ -1454,7 +1476,15 @@ class ToolPipeline:
                         retryable=False,
                     ),
                 )
-        result_item = await self._finish(run, call, tool, invocation, result, lease)
+        result_item = await self._finish(
+            run,
+            call,
+            tool,
+            invocation,
+            result,
+            lease,
+            browser_diagnostics=diagnostics.snapshot() if browser_operation else None,
+        )
         if progress[-1] == 12:
             progress.extend((13, 14))
         if result.ok:
@@ -1467,6 +1497,7 @@ class ToolPipeline:
                     evidence[call.call_id] = result.evidence_key
         return result_item
 
+    @browser_phase_call("projection", "orchestrator")
     async def _artifactize_large_output(
         self,
         *,
@@ -1566,6 +1597,16 @@ class ToolPipeline:
             capture_label=capture_label,
             reference=reference,
         )
+        if (
+            result.ok
+            and tool.spec.name in {"browser.navigate", "browser.observe", "browser.act"}
+            and tool.spec.target_kind == "browser_provider"
+            and structured is not None
+            and not partial_capture
+        ):
+            projected = browser_context_projection(structured, budget=budget, reference=reference)
+            if projected is not None:
+                excerpt = projected
         # Preserve the pre-existing canonical result for provenance validators
         # and machine callers. Only a per-tool oversize result loses canonical
         # inline bytes, exactly as it did before the smaller context allowance.
@@ -2085,6 +2126,8 @@ class ToolPipeline:
         invocation: ToolInvocation,
         result: ToolResult,
         lease: WorkerLease | None,
+        *,
+        browser_diagnostics: BrowserDiagnostics | None = None,
     ) -> ToolResultItem:
         if result.ok:
             outcome = ToolOutcome(
@@ -2192,6 +2235,11 @@ class ToolPipeline:
                     "call_id": call.call_id,
                     "reason_code": outcome.reason_code,
                     "result_item": result_item.model_dump(mode="json"),
+                    **(
+                        {"browser_diagnostics": browser_diagnostics.model_dump(mode="json")}
+                        if browser_diagnostics is not None
+                        else {}
+                    ),
                 },
                 lease,
             )

@@ -45,7 +45,7 @@ from agent_core.domain.runs import (
     RunUsage,
     Step,
 )
-from agent_core.domain.sessions import Session, SessionCursor
+from agent_core.domain.sessions import Session, SessionCursor, TitleRequest
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 
@@ -67,6 +67,28 @@ class SessionRepository(Protocol):
         self, session_id: UUID, principal: Principal, title: str
     ) -> Session: ...
 
+    async def request_title(
+        self, session_id: UUID, principal: Principal, requested_at: datetime
+    ) -> bool:
+        """Mark a regenerable title for the title pass; False when not eligible."""
+        ...
+
+    async def pending_title_requests(
+        self, principal: Principal, *, limit: int
+    ) -> list[TitleRequest]: ...
+
+    async def write_generated_title(
+        self, session_id: UUID, principal: Principal, *, expected_title: str, title: str
+    ) -> bool:
+        """Replace a regenerable title still equal to `expected_title`."""
+        ...
+
+    async def clear_title_request(
+        self, session_id: UUID, principal: Principal, *, requested_at: datetime
+    ) -> bool:
+        """Clear the request only if no later reply moved it."""
+        ...
+
     async def list(
         self,
         principal: Principal,
@@ -82,6 +104,12 @@ class SessionRepository(Protocol):
 
 
 class RunRepository(Protocol):
+    async def waiting_for_user(
+        self, principal: Principal, *, limit: int, after_id: UUID | None = None
+    ) -> list[Run]:
+        """Bounded ascending-ID scan of one owner's suspended runs."""
+        ...
+
     async def create(self, run: Run) -> None: ...
 
     async def get(self, run_id: UUID, principal: Principal) -> Run: ...

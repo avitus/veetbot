@@ -1395,8 +1395,18 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         openApprovalChat()
         XCTAssertTrue(app.staticTexts["Approval checkpoint"].waitForExistence(timeout: 10))
+        #if os(iOS)
+        let status = app.staticTexts["chat.status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertEqual(status.label, "Needs your approval")
+        #endif
         activate(app.buttons["Approve once"])
         assertCollapsedApproval(detail: "Approval checkpoint")
+        // The run is resuming: the header asks for nothing and the activity row shows work.
+        XCTAssertTrue(app.staticTexts["Working…"].waitForExistence(timeout: 5))
+        #if os(iOS)
+        XCTAssertFalse(status.exists)
+        #endif
     }
 
     func testChatApprovalLoadedApprovedStartsCollapsed() {
@@ -1802,9 +1812,16 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(newConversationRow.waitForExistence(timeout: 5))
         newConversationRow.tap()
 
+        // The conversation's title is the window's on the Mac and the navigation bar's on iOS.
+        #if os(macOS)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        XCTAssertEqual(window.title, "New conversation")
+        #else
         let heading = app.staticTexts["chat.heading"]
         XCTAssertTrue(heading.waitForExistence(timeout: 5))
         XCTAssertEqual(heading.label, "New conversation")
+        #endif
         XCTAssertTrue(app.descendants(matching: .any)["chat.composer"].exists)
     }
 
@@ -1831,6 +1848,84 @@ final class ConversationNavigationUITests: XCTestCase {
             app.staticTexts["Second historical answer loaded"].waitForExistence(timeout: 10)
         )
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
+    }
+
+    /// The owner reads the morning's scheduled briefing on an iPad after
+    /// triaging Email. Opening it from Chat must acknowledge it, so the
+    /// schedule's new-report dot clears while the report is on screen.
+    func testReadingAScheduledReportAfterEmailClearsItsNewReportDot() {
+        app.launchArguments.append("--ui-testing-unread-report")
+        app.launch()
+        let group = app.descendants(matching: .any)[
+            "sidebar.schedule.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(group.waitForExistence(timeout: 10))
+        waitForLabel(of: group, toContain: "New report", true)
+
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 5))
+        emailMode.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["email.inbox"].waitForExistence(timeout: 5))
+        app.buttons["mode.chat"].tap()
+
+        let report = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A1"
+        ]
+        // The mode switch can still be settling, so expand until the row shows.
+        for _ in 0..<3 where !report.waitForExistence(timeout: 2) {
+            if group.value as? String != "Expanded" { group.tap() }
+        }
+        XCTAssertTrue(report.waitForExistence(timeout: 5))
+        report.tap()
+        XCTAssertTrue(app.staticTexts["Weekday briefing loaded"].waitForExistence(timeout: 10))
+
+        // A compact window stacks the report over the sidebar; reading it
+        // first leaves the acknowledgement time to land before going back.
+        if !group.isHittable { sleep(3) }
+        revealSidebarIfNeeded(for: group)
+        waitForLabel(of: group, toContain: "New report", false)
+    }
+
+    /// The owner opens the app from the background each morning; the report
+    /// read after returning must still be acknowledged.
+    func testReadingAScheduledReportAfterReturningToTheAppClearsItsNewReportDot() {
+        app.launchArguments.append("--ui-testing-unread-report")
+        app.launch()
+        let group = app.descendants(matching: .any)[
+            "sidebar.schedule.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(group.waitForExistence(timeout: 10))
+        waitForLabel(of: group, toContain: "New report", true)
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+
+        let report = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A1"
+        ]
+        for _ in 0..<3 where !report.waitForExistence(timeout: 2) {
+            if group.value as? String != "Expanded" { group.tap() }
+        }
+        XCTAssertTrue(report.waitForExistence(timeout: 5))
+        report.tap()
+        XCTAssertTrue(app.staticTexts["Weekday briefing loaded"].waitForExistence(timeout: 10))
+
+        if !group.isHittable { sleep(3) }
+        revealSidebarIfNeeded(for: group)
+        waitForLabel(of: group, toContain: "New report", false)
+    }
+
+    private func waitForLabel(
+        of element: XCUIElement, toContain text: String, _ contains: Bool, timeout: TimeInterval = 15
+    ) {
+        let predicate = NSPredicate(format: contains ? "label CONTAINS %@" : "NOT (label CONTAINS %@)", text)
+        let met = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [met], timeout: timeout), .completed,
+            "\(element.identifier) label is \"\(element.label)\""
+        )
     }
 
     private func submitSlowChatMessage(fails: Bool = false, useReturn: Bool = false, holdSubmission: Bool = false) {
@@ -1986,6 +2081,35 @@ final class ConversationNavigationUITests: XCTestCase {
             app.descendants(matching: .any)["schedule.detail"].waitForExistence(timeout: 5)
         )
         XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
+    }
+
+    func testScheduleDetailBindsAReadySignInThroughTheServer() {
+        app.launchArguments.append("--ui-testing-schedule-website-access")
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.schedules")
+
+        let scheduleRow = app.descendants(matching: .any)[
+            "schedule.row.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
+        scheduleRow.tap()
+
+        let picker = app.buttons["schedule.websiteAccess"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), app.debugDescription)
+        picker.tap()
+        let choice = app.buttons["x.com"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        choice.tap()
+
+        // The picker shows the server's record, so it only reads x.com once the
+        // fixture accepted the update; a rejected one snaps back to None.
+        let bound = NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "x.com", "x.com")
+        expectation(for: bound, evaluatedWith: picker)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["schedule.websiteAccess.error"].exists,
+            app.debugDescription
+        )
     }
 
     func testScheduleBrowserMakesRecentTerminalHistoryAccessible() {

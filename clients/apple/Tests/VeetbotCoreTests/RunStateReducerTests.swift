@@ -6,6 +6,52 @@ import Testing
 @MainActor
 @Suite struct RunStateReducerTests {
     @Test
+    func testBrowserActivityKeepsUncertainOutcomeAheadOfAnInnerReadFailure() {
+        let reducer = RunStateReducer()
+        func phase(_ failure: String) -> JSONValue {
+            .object([
+                "phase": .string("postcondition"), "placement": .string("orchestrator"),
+                "outcome": .string("failed"), "failure": .string(failure),
+                "elapsed_ms": .number(10),
+            ])
+        }
+        reducer.reduce(SSEFrame(id: 1, event: "tool.call.uncertain", data: [
+            "call_id": .string("browser-step"), "name": .string("browser.act"),
+            "browser_diagnostics": .object([
+                "version": .number(1), "elapsed_ms": .number(1000), "truncated": .bool(false),
+                "phases": .array([phase("internal"), phase("outcome_unknown")]),
+            ]),
+        ]))
+        #expect(reducer.tools[0].status == .uncertain)
+        #expect(reducer.tools[0].browserDiagnostics?.summary ==
+            "1.0 s · The action may have happened; check before repeating it.")
+    }
+
+    @Test
+    func testBrowserDiagnosticsSurviveReplayAndRejectUnknownFailureText() {
+        let reducer = RunStateReducer()
+        func frame(_ failure: String, id: Int) -> SSEFrame {
+            SSEFrame(id: id, event: "tool.call.failed", data: [
+                "call_id": .string("browser-step"), "name": .string("browser.act"),
+                "browser_diagnostics": .object([
+                    "version": .number(1), "elapsed_ms": .number(1251), "truncated": .bool(false),
+                    "phases": .array([.object([
+                        "phase": .string("dispatch"), "placement": .string("runtime"),
+                        "outcome": .string("failed"), "failure": .string(failure),
+                        "elapsed_ms": .number(500),
+                    ])]),
+                ]),
+            ])
+        }
+        reducer.reduce(frame("outcome_unknown", id: 1))
+        #expect(reducer.tools[0].browserDiagnostics?.summary ==
+            "1.3 s · The action may have happened; check before repeating it.")
+        #expect(reducer.tools[0].status == .failed)
+        reducer.reduce(frame("secret-cookie-canary", id: 2))
+        #expect(reducer.tools[0].browserDiagnostics == nil)
+    }
+
+    @Test
     func testFailedRunPresentsThePublicMessageReasonAndLocation() {
         let reducer = RunStateReducer()
 
@@ -174,6 +220,26 @@ import Testing
         reducer.reduce(frame)
         reducer.reduce(frame)
         #expect(reducer.timeline.count == 1)
+    }
+
+    @Test
+    func verifiedResumeClearsSignInPromptWithoutInventingAUserMessage() {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        reducer.begin(runID: runID, status: .running)
+        reducer.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "question": .string("Sign in to continue automatically."),
+        ]))
+        #expect(reducer.clarifyingQuestion != nil)
+        let count = reducer.timeline.count
+        reducer.reduce(SSEFrame(id: 2, event: "run.resumed", data: [
+            "run_id": .string(runID.uuidString),
+        ]))
+        #expect(reducer.runStatus == .running)
+        #expect(reducer.clarifyingQuestion == nil)
+        #expect(reducer.timeline.count == count)
     }
 
     @Test
@@ -616,55 +682,115 @@ import Testing
         }
     }
 
-    /// Preserve the individual card for calls carrying an approval reference.
-    @Test(arguments: ["web.search", "web.fetch"])
-    func testApprovalBoundCompletedToolBreaksCompletedToolBundles(name: String) {
+    /// Group a call whose approval the owner already settled with its neighbours.
+    @Test(arguments: ["web.search", "sandbox.run_command"])
+    func testSettledApprovalJoinsTheAdjacentToolBundle(name: String) {
         let reducer = RunStateReducer()
-        reducer.reduce(toolFrame(id: 1, callID: "search-1", name: name))
-        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: name))
+        reducer.reduce(toolFrame(id: 1, callID: "call-1", name: name))
+        reducer.reduce(toolFrame(id: 2, callID: "call-2", name: name))
         reducer.reduce(
-            toolFrame(
-                id: 3,
-                event: "tool.call.proposed",
-                callID: "search-approved",
-                name: name
-            )
+            toolFrame(id: 3, event: "tool.call.proposed", callID: "call-approved", name: name)
         )
-        let approval = ApprovalView(
-            id: UUID(),
-            runID: UUID(),
-            sessionID: UUID(),
-            status: .approved,
-            toolName: name,
-            actionSummary: "Search the web",
-            arguments: ["query": .string("approved query")],
-            argumentDigests: nil,
-            risk: "high",
-            policyReason: "explicit approval required",
-            expiresAt: nil,
-            createdAt: Date(),
-            resolvedAt: Date(),
-            resolvedBy: "test",
-            decision: .approveOnce
-        )
+        let approval = approvalView(toolName: name, status: .approved, decision: .approveOnce)
         reducer.mergeApproval(approval)
-        reducer.reduce(toolFrame(id: 4, callID: "search-approved", name: name))
-        reducer.reduce(toolFrame(id: 5, callID: "search-3", name: name))
-        reducer.reduce(toolFrame(id: 6, callID: "search-4", name: name))
+        reducer.reduce(toolFrame(id: 4, callID: "call-approved", name: name))
+        reducer.reduce(toolFrame(id: 5, callID: "call-3", name: name))
 
-        #expect(
-            reducer.activityTimeline.map(\.id) == [
-                "tool:search-1",
-                "tool:search-approved",
-                "tool:search-3",
-            ]
-        )
-        guard case .tool(let approved) = reducer.activityTimeline[1] else {
-            Issue.record("expected approved completed tool to remain standalone")
+        #expect(reducer.activityTimeline.map(\.id) == ["tool:call-1"])
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected the approved call inside the adjacent summary")
             return
         }
-        #expect(approved.status == .completed)
-        #expect(approved.approvalID == approval.id)
+        #expect(bundle.summary == "4 tool calls · Completed")
+        #expect(bundle.activities.map(\.callID) == ["call-1", "call-2", "call-approved", "call-3"])
+        #expect(bundle.activities.map(\.approvalID) == [nil, nil, approval.id, nil])
+    }
+
+    /// A call the owner refused joins the summary; the refusal stays counted.
+    @Test
+    func testCallDeniedAtItsApprovalJoinsTheBundleAsDenied() {
+        let reducer = RunStateReducer()
+        let name = "sandbox.run_command"
+        reducer.reduce(toolFrame(id: 1, callID: "call-1", name: name))
+        reducer.reduce(
+            toolFrame(id: 2, event: "tool.call.proposed", callID: "call-refused", name: name)
+        )
+        reducer.mergeApproval(approvalView(toolName: name, status: .denied, decision: .deny))
+        reducer.reduce(
+            toolFrame(id: 3, event: "tool.call.denied", callID: "call-refused", name: name)
+        )
+        reducer.reduce(toolFrame(id: 4, callID: "call-2", name: name))
+
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first,
+            reducer.activityTimeline.count == 1
+        else {
+            Issue.record("expected the refused call inside the adjacent summary")
+            return
+        }
+        #expect(bundle.summary == "3 tool calls · 2 Completed · 1 Denied")
+    }
+
+    /// Keep a call waiting on the owner's decision outside every bundle.
+    @Test
+    func testPendingApprovalRemainsAStandaloneCard() {
+        let reducer = RunStateReducer()
+        let name = "sandbox.run_command"
+        reducer.reduce(toolFrame(id: 1, callID: "call-1", name: name))
+        reducer.reduce(toolFrame(id: 2, callID: "call-2", name: name))
+        reducer.reduce(
+            toolFrame(id: 3, event: "tool.call.proposed", callID: "call-waiting", name: name)
+        )
+        let approval = approvalView(toolName: name, status: .pending, decision: nil)
+        reducer.mergeApproval(approval)
+
+        #expect(reducer.activityTimeline.map(\.id) == ["tool:call-1", "tool:call-waiting"])
+        guard case .tool(let waiting) = reducer.activityTimeline.last else {
+            Issue.record("expected the pending approval to remain a standalone card")
+            return
+        }
+        #expect(waiting.status == .awaitingApproval)
+        #expect(waiting.approvalID == approval.id)
+    }
+
+    /// Reopening a chat restores its saved messages, then replays the last run:
+    /// the replayed calls belong before the answer they produced, not after it.
+    @Test
+    func testReplayedRunPlacesItsToolCallsBeforeTheRestoredAnswer() throws {
+        let reducer = RunStateReducer()
+        let messages = try JSONDecoder().decode([SessionMessageView].self, from: Data(#"""
+            [
+              {"sequence":1,"role":"user","content":[{"type":"text","text":"Earlier question"}]},
+              {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Earlier answer"}]},
+              {"sequence":3,"role":"user","content":[{"type":"text","text":"Is it tracked?"}]},
+              {"sequence":9,"role":"assistant","content":[{"type":"text","text":"Yes, by two people."}]}
+            ]
+            """#.utf8))
+        reducer.restore(messages: messages)
+        reducer.reduce(SSEFrame(id: 3, event: "user.message.created", data: [
+            "content": .array([.object(["type": .string("text"), "text": .string("Is it tracked?")])]),
+        ]))
+        for (proposed, callID) in [(4, "command-1"), (6, "command-2")] {
+            reducer.reduce(toolFrame(
+                id: proposed, event: "tool.call.proposed", callID: callID,
+                name: "sandbox.run_command"
+            ))
+            reducer.reduce(toolFrame(id: proposed + 1, callID: callID, name: "sandbox.run_command"))
+        }
+        reducer.reduce(assistantMessageFrame(id: 9, text: "Yes, by two people."))
+        reducer.reduce(SSEFrame(id: 10, event: "run.completed", data: [:]))
+
+        #expect(reducer.activityTimeline.map(\.id) == [
+            "message:event-1",
+            "message:event-2",
+            "message:event-3",
+            "tool:command-1",
+            "message:event-9",
+        ])
+        guard case .toolBundle(let bundle) = reducer.activityTimeline[3] else {
+            Issue.record("expected the replayed commands in one summary above the answer")
+            return
+        }
+        #expect(bundle.activities.map(\.callID) == ["command-1", "command-2"])
     }
 
     @Test
@@ -742,6 +868,30 @@ import Testing
         #expect(bundle.activities[19].name == "mcp.gmail_read.get_thread")
         #expect(bundle.activities[19].arguments["query"]?.stringValue == "example 20")
         #expect(bundle.highestRisk == .high)
+    }
+
+    private func approvalView(
+        toolName: String,
+        status: ApprovalStatus,
+        decision: ApprovalDecision?
+    ) -> ApprovalView {
+        ApprovalView(
+            id: UUID(),
+            runID: UUID(),
+            sessionID: UUID(),
+            status: status,
+            toolName: toolName,
+            actionSummary: "Run a command",
+            arguments: ["command": .array([.string("true")])],
+            argumentDigests: nil,
+            risk: "high",
+            policyReason: "explicit approval required",
+            expiresAt: nil,
+            createdAt: Date(),
+            resolvedAt: status.isPending ? nil : Date(),
+            resolvedBy: status.isPending ? nil : "test",
+            decision: decision
+        )
     }
 
     private func assistantMessageFrame(id: Int, text: String) -> SSEFrame {
@@ -1016,5 +1166,44 @@ import Testing
                 isSending: true, runStatus: .running, reasoningActive: true, reasoningTitle: "X"
             ) == "Sending…"
         )
+    }
+
+    /// A run parked with nothing left for the owner to decide is still working:
+    /// an answered approval resuming, or a delegated child, whose wait reuses
+    /// the waiting-for-approval status (runtime-loop.md).
+    @Test
+    func aParkedRunWithNothingLeftToDecideShowsItIsWorking() {
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .waitingForApproval, awaitingApproval: false,
+                reasoningActive: false, reasoningTitle: nil
+            ) == "Working…"
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .waitingForApproval, awaitingApproval: true,
+                reasoningActive: false, reasoningTitle: nil
+            ) == nil
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: .waitingForUser, awaitingApproval: false,
+                reasoningActive: false, reasoningTitle: nil
+            ) == nil
+        )
+    }
+
+    @Test
+    func theConversationStatusNamesOnlyWhatTheRunNeedsFromTheOwner() {
+        #expect(
+            ConversationStatus.label(runStatus: .waitingForApproval, awaitingApproval: true)
+                == "Needs your approval"
+        )
+        #expect(ConversationStatus.label(runStatus: .waitingForApproval, awaitingApproval: false) == nil)
+        #expect(ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false) == "Needs your answer")
+        // A pending card left behind by a run that moved on asks for nothing.
+        for status: RunStatus? in [nil, .queued, .running, .completed, .failed, .cancelled] {
+            #expect(ConversationStatus.label(runStatus: status, awaitingApproval: true) == nil)
+        }
     }
 }
