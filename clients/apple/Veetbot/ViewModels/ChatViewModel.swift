@@ -117,7 +117,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var connectionGeneration = UUID()
     @Published public private(set) var isReconfiguring = false
     public var currentAPIClient: VeetbotAPIClient? { api }
-    public var callNotificationHandler: (() -> Void)?
+    /// Brings Chat forward for a notification it answers: a call result, or a
+    /// run's session.
+    public var chatNotificationHandler: (() -> Void)?
     @Published public private(set) var callResult: CallResultViewData?
     public var emailNotificationHandler: ((UUID, UUID?) async -> Void)?
     @Published public private(set) var history: [SessionHistoryEntry] = []
@@ -448,7 +450,7 @@ public final class ChatViewModel: ObservableObject {
             do {
                 let result = try await api.callResult(callID)
                 guard generation == connectionGeneration, callResultRequestID == requestID else { return }
-                callNotificationHandler?()
+                chatNotificationHandler?()
                 callResult = result
             } catch {
                 guard generation == connectionGeneration, callResultRequestID == requestID else { return }
@@ -466,10 +468,13 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         do {
+            var fetched: SessionView?
             if let emailNotificationHandler {
                 let session = try await api.getSession(link.sessionID)
+                fetched = session
                 if let value = session.metadata["email_thread_id"]?.stringValue,
-                    let threadID = UUID(uuidString: value) {
+                    let threadID = UUID(uuidString: value),
+                    await emailAnswers(link.focus, threadID: threadID, api: api) {
                     let approvalID: UUID?
                     if case .approval(let id) = link.focus { approvalID = id } else { approvalID = nil }
                     await emailNotificationHandler(threadID, approvalID)
@@ -480,7 +485,8 @@ public final class ChatViewModel: ObservableObject {
             if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
             } else {
-                let session = try await api.getSession(link.sessionID)
+                let session: SessionView
+                if let fetched { session = fetched } else { session = try await api.getSession(link.sessionID) }
                 try await store(
                     session: session,
                     lastRunID: link.runID
@@ -494,6 +500,7 @@ public final class ChatViewModel: ObservableObject {
             guard selectedSessionID == link.sessionID, runState.activeRunID == link.runID else {
                 return
             }
+            chatNotificationHandler?()
             if case .approval(let approvalID) = link.focus {
                 let approval = try await api.getApproval(approvalID)
                 guard approval.sessionID == link.sessionID, approval.runID == link.runID else {
@@ -506,6 +513,30 @@ public final class ChatViewModel: ObservableObject {
             notificationNavigationID = UUID()
         } catch {
             present(error)
+        }
+    }
+
+    /// Email answers a notification from a thread's session only for the send
+    /// approval the thread's draft awaits (email-experience.md:148-150). Discuss
+    /// in Chat runs in that same session, so its questions and its other
+    /// approvals, such as `sandbox.run`, open the conversation in Chat. A thread
+    /// or draft that cannot be read leaves the approval to Chat, which can
+    /// resolve any approval.
+    private func emailAnswers(
+        _ focus: NotificationFocus?,
+        threadID: UUID,
+        api: VeetbotAPIClient
+    ) async -> Bool {
+        switch focus {
+        case nil:
+            return true
+        case .question:
+            return false
+        case .approval(let approvalID):
+            guard let thread = try? await api.emailThread(threadID) else { return false }
+            if let draft = thread.draft { return draft.approvalID == approvalID }
+            guard let draftID = thread.draftID else { return false }
+            return (try? await api.emailDraft(draftID))?.approvalID == approvalID
         }
     }
 

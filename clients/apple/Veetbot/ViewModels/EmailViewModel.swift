@@ -21,7 +21,7 @@ public final class AppCoordinator: ObservableObject {
         connectionSubscription = chat.$connectionGeneration.dropFirst().sink { [weak self] _ in
             self?.email.resetConnection()
         }
-        chat.callNotificationHandler = { [weak self] in self?.mode = .chat }
+        chat.chatNotificationHandler = { [weak self] in self?.mode = .chat }
         chat.emailNotificationHandler = { [weak self] threadID, approvalID in
             guard let self else { return }
             self.mode = .email

@@ -355,6 +355,11 @@ import UserNotifications
                     {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Email discussion","metadata":{"email_thread_id":"\(threadID)","email_account_id":"work"},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":null}
                     """)
             }
+            if request.url?.path == "/v1/email/threads/\(threadID)" {
+                return try response(for: request, statusCode: 200, body: Self.emailThreadJSON(
+                    threadID, sessionID: sessionID, runID: runID, draftApprovalID: approvalID
+                ))
+            }
             Issue.record("Email notification unexpectedly replaced Chat: \(request.url?.path ?? "")")
             return try response(for: request, statusCode: 500, body: "{}")
         }
@@ -380,6 +385,81 @@ import UserNotifications
         #expect(model.composerText == "Keep the unfinished Chat message")
         #expect(model.selectedSessionID == nil)
         #expect(model.runState.activeRunID == nil)
+    }
+
+    /// Discuss in Chat runs in the thread's own session, so a tool approval the
+    /// conversation raises arrives with that session. Email acts only on the
+    /// approval its draft awaits; this one is answered in Chat, even when the
+    /// owner tapped it from Email.
+    @Test
+    func testThreadSessionApprovalTheDraftDoesNotAwaitOpensTheDiscussionInChat() async throws {
+        let ids = ThreadSessionIDs()
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_APPROVAL")
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let coordinator = AppCoordinator(chat: model)
+        coordinator.mode = .email
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "approval_requested", "title": "Approval needed",
+            "status": "WAITING_FOR_APPROVAL", "tool_name": "sandbox.run",
+            "session_id": ids.session.uuidString, "run_id": ids.run.uuidString,
+            "approval_id": ids.approval.uuidString, "notification_id": UUID().uuidString,
+        ]]))
+
+        await model.openNotification(payload)
+
+        #expect(coordinator.mode == .chat)
+        #expect(coordinator.email.selectedThreadID == nil)
+        #expect(model.selectedSessionID == ids.session)
+        #expect(model.runState.approvals.map(\.id) == [ids.approval])
+        #expect(model.notificationFocus == .approval(ids.approval))
+    }
+
+    /// A thread that cannot be read cannot show that Email owns the approval,
+    /// so the tap falls back to Chat, which can resolve any approval.
+    @Test
+    func testThreadSessionApprovalOpensChatWhenTheThreadCannotBeRead() async throws {
+        let ids = ThreadSessionIDs()
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_APPROVAL", threadReadFails: true)
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let coordinator = AppCoordinator(chat: model)
+        coordinator.mode = .email
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "approval_requested", "title": "Approval needed",
+            "status": "WAITING_FOR_APPROVAL", "tool_name": "sandbox.run",
+            "session_id": ids.session.uuidString, "run_id": ids.run.uuidString,
+            "approval_id": ids.approval.uuidString, "notification_id": UUID().uuidString,
+        ]]))
+
+        await model.openNotification(payload)
+
+        #expect(coordinator.mode == .chat)
+        #expect(model.selectedSessionID == ids.session)
+        #expect(model.notificationFocus == .approval(ids.approval))
+        #expect(model.errorMessage == nil)
+    }
+
+    /// Email has no question card, so a question from the thread's discussion
+    /// opens in Chat, where the owner can answer it.
+    @Test
+    func testThreadSessionQuestionOpensTheDiscussionInChat() async throws {
+        let ids = ThreadSessionIDs()
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_USER")
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let coordinator = AppCoordinator(chat: model)
+        coordinator.mode = .email
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "question_asked", "title": "The agent has a question",
+            "status": "WAITING_FOR_USER", "session_id": ids.session.uuidString,
+            "run_id": ids.run.uuidString, "question_id": ids.question.uuidString,
+            "notification_id": UUID().uuidString,
+        ]]))
+
+        await model.openNotification(payload)
+
+        #expect(coordinator.mode == .chat)
+        #expect(coordinator.email.selectedThreadID == nil)
+        #expect(model.selectedSessionID == ids.session)
+        #expect(model.notificationFocus == .question(ids.question))
     }
 
     /// The Mac window observes the coordinator while account capabilities arrive asynchronously.
@@ -2625,6 +2705,67 @@ import UserNotifications
             #expect((json["seen_run_ids"] as? [String]) == [])
         }
         model.newSession()
+    }
+
+    private struct ThreadSessionIDs {
+        let session = UUID()
+        let thread = UUID()
+        let run = UUID()
+        let approval = UUID()
+        let question = UUID()
+        /// The send approval the thread's draft awaits, distinct from the
+        /// discussion's own approval.
+        let draftApproval = UUID()
+    }
+
+    private static func emailThreadJSON(
+        _ threadID: UUID, sessionID: UUID, runID: UUID, draftApprovalID: UUID
+    ) -> String {
+        let draftID = UUID()
+        return """
+            {"id":"\(threadID)","account_id":"work","subject":"Board discussion","senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the agenda","reason":"A colleague","needs_reply":true,"draft_id":"\(draftID)","session_id":"\(sessionID)","priority":0.9,"complete":true,"messages":[],"draft":{"id":"\(draftID)","thread_id":"\(threadID)","account_id":"work","revision":1,"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"Thanks","status":"awaiting_approval","stale":false,"run_id":"\(runID)","approval_id":"\(draftApprovalID)","session_id":"\(sessionID)","updated_at":"2026-09-11T00:00:00Z"}}
+            """
+    }
+
+    /// Serves one thread-bound session whose run waits on the discussion's own
+    /// approval or question, while the thread's draft awaits a different approval.
+    private func threadSessionModel(
+        _ ids: ThreadSessionIDs, runStatus: String, threadReadFails: Bool = false
+    ) throws -> ChatViewModel {
+        try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("GET", "/v1/sessions/\(ids.session)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(ids.session)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Board discussion","metadata":{"email_thread_id":"\(ids.thread)","email_account_id":"work"},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":"\(ids.run)","last_run_id":"\(ids.run)"}
+                    """)
+            case ("GET", "/v1/sessions/\(ids.session)/messages"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("GET", "/v1/runs/\(ids.run)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(ids.run)","session_id":"\(ids.session)","parent_run_id":null,"status":"\(runStatus)","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
+                    """)
+            case ("GET", "/v1/runs/\(ids.run)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            case ("GET", "/v1/approvals/\(ids.approval)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(ids.approval)","run_id":"\(ids.run)","session_id":"\(ids.session)","status":"PENDING","tool_name":"sandbox.run","action_summary":"Run code","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+                    """)
+            case ("GET", "/v1/email/threads/\(ids.thread)"):
+                if threadReadFails {
+                    return try response(for: request, statusCode: 404, body: #"{"error":{"code":"not_found","message":"Not found"}}"#)
+                }
+                return try response(for: request, statusCode: 200, body: Self.emailThreadJSON(
+                    ids.thread, sessionID: ids.session, runID: UUID(), draftApprovalID: ids.draftApproval
+                ))
+            case ("GET", "/v1/email/accounts"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[]}"#)
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
     }
 
     private func configuredModel(
