@@ -45,7 +45,7 @@ from agent_core.domain.runs import (
     RunUsage,
     Step,
 )
-from agent_core.domain.sessions import Session, SessionCursor
+from agent_core.domain.sessions import Session, SessionCursor, TitleRequest
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 
@@ -66,6 +66,28 @@ class SessionRepository(Protocol):
     async def set_title_if_missing(
         self, session_id: UUID, principal: Principal, title: str
     ) -> Session: ...
+
+    async def request_title(
+        self, session_id: UUID, principal: Principal, requested_at: datetime
+    ) -> bool:
+        """Mark a regenerable title for the title pass; False when not eligible."""
+        ...
+
+    async def pending_title_requests(
+        self, principal: Principal, *, limit: int
+    ) -> list[TitleRequest]: ...
+
+    async def write_generated_title(
+        self, session_id: UUID, principal: Principal, *, expected_title: str, title: str
+    ) -> bool:
+        """Replace a regenerable title still equal to `expected_title`."""
+        ...
+
+    async def clear_title_request(
+        self, session_id: UUID, principal: Principal, *, requested_at: datetime
+    ) -> bool:
+        """Clear the request only if no later reply moved it."""
+        ...
 
     async def list(
         self,

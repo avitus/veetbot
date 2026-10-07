@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-07 — Conversation titles say what the conversation is about
+
+- A chat's title was the first 64 characters of its first message and never
+  changed. After the first reply, Veetbot now asks a model for a short title
+  written from your own messages, and asks again after later replies, changing
+  the title only when the conversation has clearly moved to a new subject.
+  Email threads, schedules and background conversations keep their names.
+  The model never sees Veetbot's replies, tool output or anything flagged as a
+  secret or an injected instruction; a failed attempt leaves the title as it
+  was, and each attempt is recorded without its text (ADR-0155).
+- The chat pane's header is gone: the conversation's title is the window title
+  on the Mac and the navigation title on iPhone and iPad, with a line beneath
+  it only when the conversation needs your approval or answer. People and Stop
+  moved to the toolbar.
+- Approve, Allow and Deny now show a spinner on the button you pressed and
+  accept no second tap until the server answers.
+
 ## 2026-10-07 — A scheduled report you read on iPad loses its dot
 
 - On iPhone and iPad, a scheduled report opened after a visit to Email, or after

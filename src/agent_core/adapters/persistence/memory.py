@@ -71,12 +71,15 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.sessions import (
     PEOPLE_OPERATIONAL_SESSION_PURPOSES,
+    REGENERABLE_TITLE_SOURCES,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
     Session,
     SessionCursor,
     SessionStatus,
+    SessionTitleSource,
+    TitleRequest,
     conversation_title,
 )
 from agent_core.domain.tools import (
@@ -161,6 +164,9 @@ class InMemorySessionRepository:
     def __init__(self) -> None:
         self._sessions: dict[UUID, Session] = {}
         self._chat_sessions: set[UUID] = set()
+        # Internal title state (ADR-0155); neither is part of `Session`.
+        self._title_sources: dict[UUID, SessionTitleSource] = {}
+        self._title_requests: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
     async def create(self, session: Session) -> None:
@@ -168,6 +174,17 @@ class InMemorySessionRepository:
             if session.id in self._sessions:
                 raise ConflictError("session already exists")
             self._sessions[session.id] = session.model_copy(deep=True)
+            if session.title is not None:
+                self._title_sources[session.id] = SessionTitleSource.FIXED
+
+    def _owned(self, session_id: UUID, principal: Principal) -> Session | None:
+        session = self._sessions.get(session_id)
+        if session is None or (
+            session.tenant_id != principal.tenant_id
+            or session.principal_id != principal.principal_id
+        ):
+            return None
+        return session
 
     async def get(self, session_id: UUID, principal: Principal) -> Session:
         async with self._lock:
@@ -201,7 +218,71 @@ class InMemorySessionRepository:
             if session.title is None:
                 session = session.model_copy(update={"title": normalized}, deep=True)
                 self._sessions[session_id] = session
+                self._title_sources[session_id] = SessionTitleSource.FIRST_MESSAGE
             return session.model_copy(deep=True)
+
+    async def request_title(
+        self, session_id: UUID, principal: Principal, requested_at: datetime
+    ) -> bool:
+        async with self._lock:
+            session = self._owned(session_id, principal)
+            if (
+                session is None
+                or session.title is None
+                or self._title_sources.get(session_id) not in REGENERABLE_TITLE_SOURCES
+            ):
+                return False
+            self._title_requests[session_id] = requested_at
+            return True
+
+    async def pending_title_requests(
+        self, principal: Principal, *, limit: int
+    ) -> list[TitleRequest]:
+        async with self._lock:
+            pending = [
+                TitleRequest(
+                    session_id=session_id,
+                    title=session.title,
+                    title_source=source,
+                    requested_at=requested_at,
+                )
+                for session_id, requested_at in self._title_requests.items()
+                if (session := self._owned(session_id, principal)) is not None
+                and session.title is not None
+                and (source := self._title_sources.get(session_id)) in REGENERABLE_TITLE_SOURCES
+            ]
+        pending.sort(key=lambda request: (request.requested_at, request.session_id.int))
+        return pending[:limit]
+
+    async def write_generated_title(
+        self, session_id: UUID, principal: Principal, *, expected_title: str, title: str
+    ) -> bool:
+        normalized = conversation_title(title)
+        if normalized is None:
+            raise ValueError("session title must contain text")
+        async with self._lock:
+            session = self._owned(session_id, principal)
+            if (
+                session is None
+                or session.title != expected_title
+                or self._title_sources.get(session_id) not in REGENERABLE_TITLE_SOURCES
+            ):
+                return False
+            self._sessions[session_id] = session.model_copy(update={"title": normalized}, deep=True)
+            self._title_sources[session_id] = SessionTitleSource.GENERATED
+            return True
+
+    async def clear_title_request(
+        self, session_id: UUID, principal: Principal, *, requested_at: datetime
+    ) -> bool:
+        async with self._lock:
+            if (
+                self._owned(session_id, principal) is None
+                or self._title_requests.get(session_id) != requested_at
+            ):
+                return False
+            del self._title_requests[session_id]
+            return True
 
     async def list(
         self,

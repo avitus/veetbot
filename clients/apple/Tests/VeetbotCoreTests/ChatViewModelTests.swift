@@ -617,6 +617,72 @@ import UserNotifications
         #expect(model.errorMessage == "temporarily unavailable")
     }
 
+    /// ADR-0155: the server titles a conversation a few seconds after a reply
+    /// ends, so the sidebar reads the list once more after a watched run ends.
+    @Test
+    func testTheSidebarRereadsTitlesShortlyAfterAWatchedReplyEnds() async throws {
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000321"))
+        let runID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000654"))
+        let lock = NSLock()
+        var listReads = 0
+        func sessionBody(_ title: String) -> String {
+            """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"\(title)","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
+            """
+        }
+        let model = try configuredModel(titleRefreshDelay: 0.05) { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                // The first read predates the reply; later ones carry the server's title.
+                let read = lock.withLock { () -> Int in
+                    listReads += 1
+                    return listReads
+                }
+                let title = read == 1 ? "can you help with the garden" : "Shade garden planting"
+                return try response(
+                    for: request, statusCode: 200,
+                    body: "{\"items\":[\(sessionBody(title))],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(
+                    for: request, statusCode: 200, body: sessionBody("can you help with the garden")
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(
+                    for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)"):
+                return try response(
+                    for: request, statusCode: 200,
+                    body: """
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"RUNNING","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(
+                    for: request, statusCode: 200,
+                    body: "id: 3\nevent: run.completed\ndata: {\"run_id\":\"\(runID.uuidString)\"}\n\n"
+                )
+            default:
+                return try response(
+                    for: request, statusCode: 404,
+                    body: #"{"error":{"code":"not_found","message":"not found","details":{},"request_id":"t"}}"#
+                )
+            }
+        }
+        defer { model.newSession() }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "token"))
+        let entry = try #require(model.history.first)
+        #expect(entry.title == "can you help with the garden")
+
+        await model.selectSession(entry)
+        for _ in 0 ..< 200 where model.history.first?.title != "Shade garden planting" {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(model.history.first?.title == "Shade garden planting")
+    }
+
     @Test
     func testSelectingHistoricalSessionAfterRelaunchRestoresEveryCompletedTurn() async throws {
         let sessionID = try #require(
@@ -2920,6 +2986,7 @@ import UserNotifications
     }
 
     private func configuredModel(
+        titleRefreshDelay: TimeInterval = 10,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
         let session = urlSession(handler: handler)
@@ -2930,7 +2997,8 @@ import UserNotifications
             tokenStore: InMemoryTokenStore(),
             configurationStore: ConnectionConfigurationStore(defaults: defaults),
             historyStore: VolatileSessionHistoryStore(),
-            urlSession: session
+            urlSession: session,
+            titleRefreshDelay: titleRefreshDelay
         )
     }
 

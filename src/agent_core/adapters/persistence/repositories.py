@@ -144,12 +144,15 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.sessions import (
     PEOPLE_OPERATIONAL_SESSION_PURPOSES,
+    REGENERABLE_TITLE_SOURCES,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
     Session,
     SessionCursor,
     SessionStatus,
+    SessionTitleSource,
+    TitleRequest,
     conversation_title,
 )
 from agent_core.domain.tools import (
@@ -237,13 +240,22 @@ class PostgresAgentRepository:
         return agent_to_domain(row)
 
 
+_REGENERABLE_TITLE_SOURCES = tuple(source.value for source in REGENERABLE_TITLE_SOURCES)
+
+
 class PostgresSessionRepository:
     def __init__(self, session: AsyncSession, *, created: set[UUID] | None = None) -> None:
         self._session = session
         self._created = created
 
     async def create(self, session: Session) -> None:
-        statement = pg_insert(SessionRow).values(**session_values(session)).on_conflict_do_nothing()
+        # ADR-0155: a title chosen at creation belongs to the feature that chose it.
+        title_source = SessionTitleSource.FIXED.value if session.title is not None else None
+        statement = (
+            pg_insert(SessionRow)
+            .values(**session_values(session), title_source=title_source)
+            .on_conflict_do_nothing()
+        )
         if not _rowcount(await self._session.execute(statement)):
             raise ConflictError("session already exists")
         if self._created is not None:
@@ -300,7 +312,10 @@ class PostgresSessionRepository:
                     SessionRow.principal_id == principal.principal_id,
                     SessionRow.title.is_(None),
                 )
-                .values(title=case(titles, value=SessionRow.id))
+                .values(
+                    title=case(titles, value=SessionRow.id),
+                    title_source=SessionTitleSource.FIRST_MESSAGE.value,
+                )
             )
             stored_rows = (
                 await self._session.execute(
@@ -348,13 +363,106 @@ class PostgresSessionRepository:
                     SessionRow.principal_id == principal.principal_id,
                     SessionRow.title.is_(None),
                 )
-                .values(title=normalized)
+                .values(title=normalized, title_source=SessionTitleSource.FIRST_MESSAGE.value)
                 .returning(SessionRow)
             )
         ).one_or_none()
         if row is not None:
             return session_to_domain(row)
         return await self.get(session_id, principal)
+
+    def _owned_session(self, session_id: UUID, principal: Principal) -> list[Any]:
+        return [
+            SessionRow.id == session_id,
+            SessionRow.tenant_id == principal.tenant_id,
+            SessionRow.principal_id == principal.principal_id,
+        ]
+
+    async def request_title(
+        self, session_id: UUID, principal: Principal, requested_at: datetime
+    ) -> bool:
+        # None of the title writes touch updated_at, so the sidebar order holds.
+        return bool(
+            _rowcount(
+                await self._session.execute(
+                    update(SessionRow)
+                    .where(
+                        *self._owned_session(session_id, principal),
+                        SessionRow.title.is_not(None),
+                        SessionRow.title_source.in_(_REGENERABLE_TITLE_SOURCES),
+                    )
+                    .values(title_requested_at=requested_at)
+                )
+            )
+        )
+
+    async def pending_title_requests(
+        self, principal: Principal, *, limit: int
+    ) -> list[TitleRequest]:
+        rows = (
+            await self._session.execute(
+                select(
+                    SessionRow.id,
+                    SessionRow.title,
+                    SessionRow.title_source,
+                    SessionRow.title_requested_at,
+                )
+                .where(
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                    SessionRow.title_requested_at.is_not(None),
+                    SessionRow.title.is_not(None),
+                    SessionRow.title_source.in_(_REGENERABLE_TITLE_SOURCES),
+                )
+                .order_by(SessionRow.title_requested_at, SessionRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return [
+            TitleRequest(
+                session_id=session_id,
+                title=title,
+                title_source=SessionTitleSource(source),
+                requested_at=requested_at,
+            )
+            for session_id, title, source, requested_at in rows
+        ]
+
+    async def write_generated_title(
+        self, session_id: UUID, principal: Principal, *, expected_title: str, title: str
+    ) -> bool:
+        normalized = conversation_title(title)
+        if normalized is None:
+            raise ValueError("session title must contain text")
+        return bool(
+            _rowcount(
+                await self._session.execute(
+                    update(SessionRow)
+                    .where(
+                        *self._owned_session(session_id, principal),
+                        SessionRow.title == expected_title,
+                        SessionRow.title_source.in_(_REGENERABLE_TITLE_SOURCES),
+                    )
+                    .values(title=normalized, title_source=SessionTitleSource.GENERATED.value)
+                )
+            )
+        )
+
+    async def clear_title_request(
+        self, session_id: UUID, principal: Principal, *, requested_at: datetime
+    ) -> bool:
+        return bool(
+            _rowcount(
+                await self._session.execute(
+                    update(SessionRow)
+                    .where(
+                        *self._owned_session(session_id, principal),
+                        SessionRow.title_requested_at == requested_at,
+                    )
+                    .values(title_requested_at=None)
+                )
+            )
+        )
 
     async def list(
         self,

@@ -58,7 +58,7 @@ stores `first_message`. `title_source` is not part of `SessionView`.
 
 The migration that adds the column backfills existing rows. A titled session
 whose metadata carries `email_thread_id`, `email_operational`, `schedule_id`,
-`run_kind` or `device_triage` is `fixed`; every other titled session is
+`run_kind`, `device_triage` or `purpose` is `fixed`; every other titled session is
 `first_message`; an untitled session stays null. The metadata keys are the
 ones every fixed-title creator writes today, so the backfill reproduces what
 the repository would have recorded.

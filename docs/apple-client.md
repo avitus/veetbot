@@ -215,7 +215,11 @@ the API's public failure message inside the conversation together with its
 stable reason and available step and attempt numbers.
 
 The conversation's sidebar title is the window title on the Mac and the
-navigation title on iOS, with no repeated heading in the pane. Beneath it, a
+navigation title on iOS, with no repeated heading in the pane. The server
+writes a model-generated title a few seconds after a reply ends and changes it
+only when the subject moves (ADR-0155), so the client reads the session list
+once more ten seconds after a reply it watched ends, besides its 30-second
+poll. Beneath it, a
 status names only what the run needs from the owner: Needs your approval while
 an unanswered approval is pending, and Needs your answer for a question. A run
 still parked as waiting for approval with nothing left to decide, because an

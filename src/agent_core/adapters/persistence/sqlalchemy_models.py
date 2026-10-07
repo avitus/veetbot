@@ -75,6 +75,18 @@ class SessionRow(Base):
     __table_args__ = (
         Index("ix_sessions_tenant_principal_updated", "tenant_id", "principal_id", "updated_at"),
         Index("ix_sessions_agent_created", "agent_id", "created_at"),
+        # ADR-0155: the title pass reads only rows with a pending request.
+        Index(
+            "ix_sessions_title_requested",
+            "tenant_id",
+            "principal_id",
+            "title_requested_at",
+            postgresql_where=text("title_requested_at IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "title_source IN ('first_message', 'generated', 'fixed')",
+            name="session_title_source",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -84,6 +96,8 @@ class SessionRow(Base):
     agent_version: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32))
     title: Mapped[str | None] = mapped_column(Text)
+    title_source: Mapped[str | None] = mapped_column(String(32))
+    title_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, server_default=text("'{}'::jsonb")
     )

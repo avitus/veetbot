@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from agent_core.adapters.persistence.memory import InMemorySessionRepository
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
-from agent_core.domain.sessions import SessionCursor
+from agent_core.domain.sessions import SessionCursor, SessionTitleSource, TitleRequest
 from agent_core.ports.events import EventRepository
 from agent_core.ports.repositories import SessionRepository
 from tests.contract.support import NOW, SESSION_ID, principal, session
@@ -61,6 +62,99 @@ async def test_session_title_is_normalized_and_bounded() -> None:
     assert titled.title is not None
     assert titled.title.startswith("A title ")
     assert len(titled.title) == 64
+
+
+async def assert_generated_title_lifecycle(repository: SessionRepository) -> None:
+    """ADR-0155: only first-message and generated titles are requested and rewritten;
+    every write is guarded, principal-scoped, and leaves `updated_at` alone."""
+
+    owner = principal()
+    stranger = Principal(tenant_id="other", principal_id="other", roles=set(), scopes=set())
+    chat = session().model_copy(update={"id": UUID(int=801), "title": None})
+    older_chat = session().model_copy(update={"id": UUID(int=802), "title": None})
+    fixed = session().model_copy(update={"id": UUID(int=803), "title": "Daily review"})
+    untitled = session().model_copy(update={"id": UUID(int=804), "title": None})
+    for row in (chat, older_chat, fixed, untitled):
+        await repository.create(row)
+    await repository.set_title_if_missing(chat.id, owner, "can you look at this")
+    await repository.set_title_if_missing(older_chat.id, owner, "and this one")
+
+    later = NOW + timedelta(seconds=5)
+    assert await repository.request_title(chat.id, owner, NOW) is True
+    assert await repository.request_title(chat.id, owner, later) is True
+    assert await repository.request_title(older_chat.id, owner, NOW) is True
+    assert await repository.request_title(fixed.id, owner, NOW) is False
+    assert await repository.request_title(untitled.id, owner, NOW) is False
+    assert await repository.request_title(chat.id, stranger, NOW) is False
+
+    pending = await repository.pending_title_requests(owner, limit=10)
+    assert pending == [
+        TitleRequest(
+            session_id=older_chat.id,
+            title="and this one",
+            title_source=SessionTitleSource.FIRST_MESSAGE,
+            requested_at=NOW,
+        ),
+        TitleRequest(
+            session_id=chat.id,
+            title="can you look at this",
+            title_source=SessionTitleSource.FIRST_MESSAGE,
+            requested_at=later,
+        ),
+    ]
+    assert len(await repository.pending_title_requests(owner, limit=1)) == 1
+    assert await repository.pending_title_requests(stranger, limit=10) == []
+
+    # A title another writer already changed is never overwritten.
+    assert not await repository.write_generated_title(
+        chat.id, owner, expected_title="something else", title="Trip planning"
+    )
+    assert not await repository.write_generated_title(
+        fixed.id, owner, expected_title="Daily review", title="Trip planning"
+    )
+    assert not await repository.write_generated_title(
+        chat.id, stranger, expected_title="can you look at this", title="Trip planning"
+    )
+    assert await repository.write_generated_title(
+        chat.id, owner, expected_title="can you look at this", title="  Trip   planning "
+    )
+    stored = await repository.get(chat.id, owner)
+    assert stored.title == "Trip planning"
+    assert stored.updated_at == chat.updated_at
+    # Keeping a first-message title adopts it as generated.
+    assert await repository.write_generated_title(
+        older_chat.id, owner, expected_title="and this one", title="and this one"
+    )
+    assert (await repository.get(fixed.id, owner)).title == "Daily review"
+
+    # The clear answers only the request it read; a later reply survives it.
+    assert not await repository.clear_title_request(chat.id, owner, requested_at=NOW)
+    assert await repository.pending_title_requests(owner, limit=10) == [
+        TitleRequest(
+            session_id=older_chat.id,
+            title="and this one",
+            title_source=SessionTitleSource.GENERATED,
+            requested_at=NOW,
+        ),
+        TitleRequest(
+            session_id=chat.id,
+            title="Trip planning",
+            title_source=SessionTitleSource.GENERATED,
+            requested_at=later,
+        ),
+    ]
+    assert not await repository.clear_title_request(chat.id, stranger, requested_at=later)
+    assert await repository.clear_title_request(chat.id, owner, requested_at=later)
+    assert await repository.clear_title_request(older_chat.id, owner, requested_at=NOW)
+    assert await repository.pending_title_requests(owner, limit=10) == []
+
+    # A generated title stays eligible for the next reply.
+    assert await repository.request_title(chat.id, owner, later) is True
+    assert (await repository.get(chat.id, owner)).updated_at == chat.updated_at
+
+
+async def test_generated_title_lifecycle() -> None:
+    await assert_generated_title_lifecycle(InMemorySessionRepository())
 
 
 async def assert_session_index_filters_before_pagination(repository: SessionRepository) -> None:

@@ -212,6 +212,10 @@ public final class ChatViewModel: ObservableObject {
     private let urlSession: URLSession?
     private let deviceHandoffClient: DeviceSignInHandoffClient
     private let deviceSignInTiming: DeviceSignInTiming
+    /// How long after a watched reply ends the sidebar reads the list again,
+    /// for the title the server writes a few seconds later (ADR-0155).
+    private let titleRefreshDelay: TimeInterval
+    private var titleRefreshTask: Task<Void, Never>?
     /// The profile a device sign-in window created and that has not become
     /// ready, so closing the window can remove it.
     private var deviceSignInCreatedProfile: (requestID: UUID, profileID: UUID)?
@@ -300,8 +304,10 @@ public final class ChatViewModel: ObservableObject {
         runState: RunStateReducer? = nil,
         urlSession: URLSession? = nil,
         deviceHandoffClient: DeviceSignInHandoffClient? = nil,
-        deviceSignInTiming: DeviceSignInTiming = .standard
+        deviceSignInTiming: DeviceSignInTiming = .standard,
+        titleRefreshDelay: TimeInterval = 10
     ) {
+        self.titleRefreshDelay = titleRefreshDelay
         self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
@@ -2618,6 +2624,7 @@ public final class ChatViewModel: ObservableObject {
                 guard let self else { return }
                 if touchHistoryOnCompletion {
                     await self.refreshHistoryAfterRun(runID)
+                    self.scheduleTitleRefresh()
                 }
             } catch is CancellationError {
                 return
@@ -2637,6 +2644,22 @@ public final class ChatViewModel: ObservableObject {
             } catch {
                 present(error)
             }
+        }
+    }
+
+    /// The server titles a conversation a few seconds after its reply ends
+    /// (ADR-0155); one more read of the list shows that title without waiting
+    /// for the next 30-second poll.
+    private func scheduleTitleRefresh() {
+        let generation = connectionGeneration
+        let delay = titleRefreshDelay
+        titleRefreshTask?.cancel()
+        titleRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.isConfigured,
+                self.connectionGeneration == generation
+            else { return }
+            await self.synchronizeHistory()
         }
     }
 

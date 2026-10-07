@@ -1,0 +1,12 @@
+schema_version: 1
+generation:
+  # Title chat conversations after a completed reply (ADR-0155).
+  enabled: true
+  # A non-routed policy (deterministic, fake-balanced) keeps first-message titles.
+  model_policy: balanced
+  # Conversations titled per maintenance round.
+  batch_size: 4
+  # The owner's latest messages read beside the first one.
+  recent_messages: 3
+  # Characters kept from each message before the scans.
+  message_chars: 400

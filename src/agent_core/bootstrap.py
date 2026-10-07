@@ -588,6 +588,9 @@ from agent_core.scheduling.materializer import ScheduleMaterializer
 from agent_core.scheduling.worker import ScheduleWorker
 from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
+from agent_core.titles.generator import ConversationTitleGenerator
+from agent_core.titles.profiles import TitleProfiles
+from agent_core.titles.titling import ConversationTitlePass, request_title_after_run
 from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import BrowserActApprovalPresenter, BrowserActTool
@@ -2391,6 +2394,7 @@ async def _compose(
     context_config: Mapping[str, object],
     memory_profiles: MemoryProfiles,
     folder_profiles: FolderProfiles,
+    title_profiles: TitleProfiles,
     mcp_config: Mapping[str, object],
     max_compactions_per_step: int,
     skill_store: SkillPackageStore,
@@ -3670,6 +3674,11 @@ async def _compose(
                     )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
+            if completed is not None:
+                try:
+                    await request_title_after_run(uow_factory, principal, completed, clock.now())
+                except Exception:
+                    logger.exception("title_request_failed", extra={"run_id": str(run_id)})
             # What the answer cited is only knowable once the answer exists, so
             # usage feedback is the completion's own step: its own error
             # boundary, its own units of work, and no external call inside one.
@@ -4220,6 +4229,27 @@ async def _compose(
                 profile=folder_profiles.proposals,
                 grouper=thread_grouper,
             )
+        # ADR-0155: a non-routed policy keeps first-message titles, so no pass runs.
+        title_pass: ConversationTitlePass | None = None
+        title_generation = title_profiles.generation
+        if (
+            title_generation.enabled
+            and title_generation.model_policy not in NON_ROUTED_MODEL_POLICIES
+        ):
+            title_pass = ConversationTitlePass(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                profile=title_generation,
+                titler=ConversationTitleGenerator(
+                    router=model_router,
+                    providers=model_providers,
+                    clock=clock,
+                    ids=ids,
+                    model_policy=title_generation.model_policy,
+                ),
+            )
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=public_run_service,
@@ -4409,6 +4439,9 @@ async def _compose(
                     sweep_terminal_schedules=sweep_terminal_schedules,
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
+                    ),
+                    sweep_conversation_titles=(
+                        title_pass.run_once if title_pass is not None else None
                     ),
                     sweep_upload_ingests=UploadAutoIngest(
                         uow_factory=uow_factory, knowledge=knowledge_service, principal=principal
@@ -5011,6 +5044,9 @@ async def build(
     folder_profiles = FolderProfiles.from_document(
         load_config_document(effective_settings, "folders/profiles.yaml")
     )
+    title_profiles = TitleProfiles.from_document(
+        load_config_document(effective_settings, "titles/profiles.yaml")
+    )
     run_defaults = runtime_config["run_defaults"]
     browser_task_limits = _browser_task_limits(run_defaults, runtime_config["browser_task"])
     email_budget_limits = EmailBudgetLimits.model_validate(runtime_config["email"])
@@ -5476,6 +5512,7 @@ async def build(
             context_config=context_config,
             memory_profiles=memory_profiles,
             folder_profiles=folder_profiles,
+            title_profiles=title_profiles,
             mcp_config=tool_config["mcp"],
             max_compactions_per_step=int(runtime_config["context"]["max_compactions_per_step"]),
             skill_store=skill_store,
