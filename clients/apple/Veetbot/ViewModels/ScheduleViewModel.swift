@@ -78,6 +78,7 @@ public final class ScheduleViewModel: ObservableObject {
     private var seenCursors: Set<String> = []
     private var reloadRequestID: UUID?
     private var detailRequestIDs: [UUID: UUID] = [:]
+    private var websiteAccessRequestID: UUID?
     private var lastFailedListOperation: FailedListOperation?
 
     private enum FailedListOperation {
@@ -232,8 +233,11 @@ public final class ScheduleViewModel: ObservableObject {
     }
 
     public func loadWebsiteAccessProfiles() async {
+        let requestID = UUID()
+        websiteAccessRequestID = requestID
         websiteAccessProfilesError = nil
         guard let api = await makeAPIClient() else {
+            guard websiteAccessRequestID == requestID else { return }
             websiteAccessProfilesError = "Connect to a Veetbot server to choose website access."
             return
         }
@@ -246,8 +250,10 @@ public final class ScheduleViewModel: ObservableObject {
                 profiles.append(contentsOf: page.items)
                 cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             } while cursor != nil
+            guard websiteAccessRequestID == requestID else { return }
             websiteAccessProfiles = profiles
         } catch {
+            guard websiteAccessRequestID == requestID else { return }
             websiteAccessProfilesError = displayMessage(for: error)
         }
     }

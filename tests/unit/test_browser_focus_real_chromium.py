@@ -128,12 +128,26 @@ async def test_active_dialog_controls_precede_navigation() -> None:
         assert observation.elements[0].name == "Continue task"
 
 
+async def test_passive_recaptcha_badge_does_not_interrupt_automation() -> None:
+    async def home(request: Request) -> Response:
+        del request
+        return html(
+            '<button>Continue</button><div class="grecaptcha-badge">'
+            '<iframe title="reCAPTCHA"></iframe></div>'
+        )
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        await runtime.navigate(site.url("/"))
+        await runtime.check_automation_ready()
+
+
 @pytest.mark.parametrize(
     "challenge",
     [
         '<input type="password" value="SECRET_CANARY">',
         '<input autocomplete="one-time-code" value="SECRET_CANARY">',
         '<iframe title="CAPTCHA"></iframe>',
+        '<div class="grecaptcha-badge"><input type="password" value="SECRET_CANARY"></div>',
         "<form>Use a passkey</form>",
     ],
 )

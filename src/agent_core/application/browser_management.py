@@ -485,6 +485,7 @@ class BrowserProfileManagementService:
         a ceremony the service already sealed records the ready outcome too."""
 
         current = await uow.browser_authentications.get(remote.id, principal)
+        now = self._clock.now()
         entered_ready = False
         if current.status is not remote.status:
             current = await uow.browser_authentications.transition(
@@ -492,7 +493,7 @@ class BrowserProfileManagementService:
                 principal,
                 expected_status=current.status,
                 status=remote.status,
-                updated_at=self._clock.now(),
+                updated_at=now,
             )
             entered_ready = current.status is BrowserAuthenticationStatus.READY
         records = await uow.browser_authentications.list(principal, profile_id=current.profile_id)
@@ -501,7 +502,7 @@ class BrowserProfileManagementService:
             for record in records
         ):
             await self._synchronize_profile_status(
-                uow, principal, current, entered_ready=entered_ready
+                uow, principal, current, entered_ready=entered_ready, updated_at=now
             )
         return current
 
@@ -544,6 +545,7 @@ class BrowserProfileManagementService:
         authentication: BrowserAuthenticationRecord,
         *,
         entered_ready: bool,
+        updated_at: datetime,
     ) -> None:
         profiles = uow.browser_profiles
         target = {
@@ -560,9 +562,7 @@ class BrowserProfileManagementService:
             if entered_ready and target is BrowserProfileStatus.READY:
                 # A new session replaced a ready one: grants pinned to the old
                 # generation must not carry over to it.
-                await self._advance_generation(
-                    uow, principal, profile, updated_at=self._clock.now()
-                )
+                await self._advance_generation(uow, principal, profile, updated_at=updated_at)
             return
         if target not in ALLOWED_BROWSER_PROFILE_TRANSITIONS.get(profile.status, frozenset()):
             return
@@ -571,7 +571,7 @@ class BrowserProfileManagementService:
             principal,
             expected_generation=profile.generation,
             status=target,
-            updated_at=self._clock.now(),
+            updated_at=updated_at,
         )
 
 

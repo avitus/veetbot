@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent_core.domain.browser import (
     BrowserAction,
@@ -77,9 +77,13 @@ class BrowserWorkflowRecipe(BaseModel):
     steps: list[BrowserWorkflowStep] = Field(min_length=1, max_length=16)
     maximum_seconds: int = Field(default=900, ge=1, le=900, strict=True)
 
+    @field_validator("origin")
+    @classmethod
+    def normalized_origin(cls, value: str) -> str:
+        return normalize_browser_origin(value)
+
     @model_validator(mode="after")
     def confined_recipe(self) -> BrowserWorkflowRecipe:
-        normalize_browser_origin(self.origin)
         if any(not intent.strip() or len(intent) > 512 for intent in self.intents):
             raise ValueError("workflow intent is empty or too long")
         if self.steps[0].kind != "navigate":

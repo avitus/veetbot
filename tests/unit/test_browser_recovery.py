@@ -22,6 +22,7 @@ from tests.unit.test_config import base_environment
     "change",
     [
         "none",
+        "recorded_ready",
         "wrong_profile",
         "old_ceremony",
         "newer_ceremony",
@@ -96,7 +97,11 @@ async def test_verified_browser_authentication_resumes_once(
                 tenant_id=profile.tenant_id,
                 principal_id=profile.principal_id,
                 profile_id=PROFILE_ID,
-                status=BrowserAuthenticationStatus.READY,
+                status=(
+                    BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+                    if change == "recorded_ready"
+                    else BrowserAuthenticationStatus.READY
+                ),
                 expires_at=now + timedelta(minutes=5),
                 created_at=now,
                 updated_at=now,
@@ -116,7 +121,7 @@ async def test_verified_browser_authentication_resumes_once(
                         }
                     )
                 )
-            if change != "unchanged_generation":
+            if change not in {"unchanged_generation", "recorded_ready"}:
                 profile = await uow.browser_profiles.advance_generation(
                     PROFILE_ID,
                     composition.principal,
@@ -135,6 +140,33 @@ async def test_verified_browser_authentication_resumes_once(
                 checkpoint.working_state["browser_auth_wait"]["expires_at"] = now.isoformat()
                 checkpoint.version += 1
                 await uow.checkpoints.write(run_id, checkpoint, full=True)
+        if change == "recorded_ready":
+            from datetime import datetime
+
+            from agent_core.adapters.browser.profiles import InMemoryBrowserProfileControlPlane
+            from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+            from agent_core.application.browser_management import (
+                BrowserProfileManagementService,
+                BrowserUnitOfWorkFactory,
+            )
+            from tests.unit.test_browser_management import FakeAuthenticationControlPlane
+
+            class AdvancingClock(FixedClock):
+                def now(self) -> datetime:
+                    self.advance(timedelta(microseconds=1))
+                    return super().now()
+
+            profiles = BrowserProfileManagementService(
+                uow_factory=cast(BrowserUnitOfWorkFactory, composition.uow_factory),
+                lifecycle=InMemoryBrowserProfileControlPlane(),
+                authentications=FakeAuthenticationControlPlane(
+                    status=BrowserAuthenticationStatus.READY,
+                    profile_id=PROFILE_ID,
+                ),
+                clock=AdvancingClock(now),
+                ids=SequenceIdFactory([]),
+            )
+            await profiles.authentication_status(composition.principal, ceremony.id)
         if change == "cancelled":
             await composition.services.runs.cancel(composition.principal, run_id)
         # A new service instance must be able to recover a missed delivery from persisted state.
@@ -153,9 +185,9 @@ async def test_verified_browser_authentication_resumes_once(
         delivered = await asyncio.gather(
             continuation.sweep(), continuation.resume_profile(composition.principal, PROFILE_ID)
         )
-        assert sum(delivered) == int(change == "none")
+        assert sum(delivered) == int(change in {"none", "recorded_ready"})
         assert await continuation.sweep() == 0
-        if change != "none":
+        if change not in {"none", "recorded_ready"}:
             assert provider.observation_count == 0 and len(provider.navigations) == 1
             return
         if worker is not None:

@@ -1,5 +1,5 @@
 # AGENTS.md
-Operating contract for coding agents working in this repository. This file is a
+Operating contract for this repository. This file is a
 router, not a copy of the plan. Read it fully before making changes.
 
 ## Project mission
@@ -21,7 +21,7 @@ Read, in this order, before starting an assignment:
 6. Relevant ADRs in `docs/adr/` (index at `docs/adr/index.md`)
 7. Existing code and tests related to the assignment
 
-Also read `milestone-map.md` when a gate could move, and `readiness.md` before calling anything undesigned.
+Also read `docs/plan/milestone-map.md` when a gate could move, and `docs/plan/readiness.md` before calling anything undesigned.
 
 ## Reading lanes
 

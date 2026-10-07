@@ -462,7 +462,7 @@ job           target invoked         needs     runs on
 11 browser    make test-browser      Chromium  main, on request
 ```
 
-Jobs 1, 2, 9, and 10 partition `make check`, split so the cheap lanes fail
+Jobs 1, 2, 9, and 11 partition `make check`, split so the cheap lanes fail
 first. The union of those jobs' `make` targets is exactly
 `make check`, including `test-deploy` in both the static lane and the
 local aggregate; job 1's reading-lane step below is the one check
@@ -474,7 +474,7 @@ Job 1 uses a two-vCPU CircleCI executor and runs only `test-static` with two
 processes and load-scope scheduling, matching the local target's default.
 The selected tests and required checks are unchanged. Its Makefile
 targets are separate CircleCI steps so timing data identifies the remaining
-bottleneck. Jobs 1 through 3, job 5, and job 10 publish their pytest JUnit XML through
+bottleneck. Jobs 1 through 3, job 5, and job 11 publish their pytest JUnit XML through
 CircleCI's test-results collector so failed and slow tests are visible without
 searching raw logs.
 Job 6 is an additional native-client gate outside `make check`, split across

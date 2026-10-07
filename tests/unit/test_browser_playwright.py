@@ -1568,6 +1568,8 @@ class FakeSettlingPage:
         return "Lesson"
 
     async def evaluate(self, script: str, argument: Any = None) -> Any:
+        if script == "() => undefined":
+            return None
         if script == READABLE_TEXT_SCRIPT:
             return readable_text(self.text)
         if script == REGION_SCRIPT:

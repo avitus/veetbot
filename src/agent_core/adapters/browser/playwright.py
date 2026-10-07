@@ -741,6 +741,14 @@ class PythonPlaywrightRuntime:
 
         if after_document:
             await load_state("domcontentloaded")
+        # Chromium can report DOMContentLoaded before Playwright dispatches
+        # the initial fetch events. A page round trip delivers those events
+        # before we freeze the finite request set.
+        try:
+            async with asyncio.timeout(remaining()):
+                await page.evaluate("() => undefined")
+        except (PlaywrightError, TimeoutError):
+            return False
         if not await self._readiness_requests.drain(remaining()):
             return False
         for attempt in range(2):
@@ -1468,7 +1476,10 @@ class PythonPlaywrightRuntime:
         weak, submitted, document = self._known_draft
         if document == self._main_frame_navigations:
             with suppress(PlaywrightError):
-                if await weak.evaluate(CONFIRM_DRAFT_SCRIPT, [submitted, root]) is True:
+                confirmed = await weak.evaluate(CONFIRM_DRAFT_SCRIPT, [submitted, root])
+                if confirmed is None:
+                    return ""
+                if confirmed is True:
                     return "Confirmed submitted draft:\n" + submitted + "\n"
         # A changed document or value cannot later resurrect an old draft receipt.
         await self._forget_draft()

@@ -213,6 +213,32 @@ async def test_draft_confirmation_never_reads_unknown_or_changed_editable_values
         assert "Known approved draft" not in (await runtime.observe()).text
 
 
+async def test_focus_elsewhere_preserves_an_unchanged_approved_draft() -> None:
+    from agent_core.domain.browser import BrowserObservationExpansion
+
+    editor = '<div contenteditable="true" role="textbox" aria-label="Post text"></div>'
+    page = COMPOSER.format(editor=editor) + "<section><button>Elsewhere</button></section>"
+    async with lesson_pages({"/compose/post": page}) as (runtime, visit, _left):
+        before = await visit("/compose/post")
+        after = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.TYPE,
+                expected_revision=before.revision,
+                ref=_ref(before, "Post text"),
+                value="Known approved draft",
+            )
+        )
+        region = next(item for item in after.regions if item.kind == "section")
+        focused = await runtime.expand(
+            BrowserObservationExpansion(
+                region_ref=region.ref,
+                expected_revision=after.revision,
+            )
+        )
+        assert "Known approved draft" not in focused.text
+        assert "Known approved draft" in (await runtime.observe()).text
+
+
 @pytest.mark.parametrize("grant_kind", ["task", "standing"])
 async def test_rich_text_typing_remains_refused_under_grants(grant_kind: str) -> None:
     editor = '<div contenteditable="true" role="textbox" aria-label="Answer">Unchanged</div>'

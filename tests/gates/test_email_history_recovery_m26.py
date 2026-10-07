@@ -327,3 +327,31 @@ async def test_history_backlog_past_the_page_ceiling_resynchronizes_from_the_inb
     assert sync.change_events == {} and sync.change_pending == []
     assert sync.change_cursor is None and sync.change_pages == 0
     assert threads["newest"]["in_inbox"] is True
+
+
+async def test_refresh_discovers_new_mail_before_draining_older_change_reads() -> None:
+    """A completed history page with pending reads cannot hide the next delta."""
+    factory, pages, reads = await _backlog_mailbox(
+        lambda number: (
+            [_change(101 + index, f"old-{index}") for index in range(12)]
+            if number == 1
+            else [_change(201, "fresh")],
+            None,
+        )
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(20)]),
+    ) as app:
+        first = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(first.run_id)).status is RunStatus.COMPLETED
+        _, before, _ = await _state(app)
+        assert before.change_pending and before.change_page_open
+        read_count = len(reads)
+        second = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(second.run_id)).status is RunStatus.COMPLETED
+        _, after, _ = await _state(app)
+    assert pages == [None, None]
+    assert reads[read_count] == "fresh"
+    assert set(after.change_pending) | set(reads) == {"fresh", *(f"old-{i}" for i in range(12))}

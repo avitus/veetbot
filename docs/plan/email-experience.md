@@ -243,7 +243,9 @@ reinterpret existing source receipts or send through another Google identity.
 
 Refresh current inbox threads within the latest ninety days first (ADR-0096).
 Every refresh reads new Gmail changes, the most recently changed conversation
-first, before continuing that catch-up. While catch-up is unfinished, new mail
+first, before continuing that catch-up. An exhausted change page with pending
+thread reads still admits the next delta from its captured watermark and
+coalesces it with the retained work before reading those threads. While catch-up is unfinished, new mail
 takes at most four of the slice's full-thread reads and catch-up the rest of
 eight, so neither waits for the other. A resynchronization resumes changes
 from a watermark read before its inbox re-listing.

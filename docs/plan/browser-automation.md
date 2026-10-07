@@ -1522,7 +1522,8 @@ requests, then waits for 300 ms without DOM mutation within the same two-second
 budget. Later requests do not extend the snapshot; failed requests finish it
 and successful event streams finish at their headers without body reads. A
 tracking overflow or deadline expiry reports `bound_expired`; the set resets
-with a new document. It does not require network silence. Explicit observation does not claim a settling check.
+with a new document. A bounded page round trip before the snapshot lets initial
+request events queued after DOMContentLoaded enter the set. It does not require network silence. Explicit observation does not claim a settling check.
 
 `browser.observe` may instead accept `wait_for`; `browser.act` may include
 `postcondition`. Each is an exact visible-control predicate with nonempty role
@@ -1615,6 +1616,7 @@ already-known value as `Confirmed submitted draft` only after a boolean check
 that the same visible, non-credential editor in the same document still renders
 exactly that value. The comparison bounds the editor to 256 nodes and 4,096 text
 units before rendering; no editable page text crosses the browser boundary.
+A focused read outside the editor omits a still-valid receipt without clearing it.
 Hidden, changed, oversized or credential editors invalidate the receipt, which
 cannot later reappear. The confirmation fits within the existing 256 KiB text
 ceiling or is omitted. It does not expose pre-existing drafts, read other input
@@ -1667,7 +1669,9 @@ A sign-in challenge after an already dispatched action returns `interruption:
 needs_user` without controls and can suspend the run; it does not prove the write
 completed. `browser.act` records that case as `outcome_unknown` with a fixed,
 content-free sign-in marker; the runtime may ask the owner without retrying it.
-Detection is bounded negative evidence, not positive login verification.
+CAPTCHA detection excludes the passive reCAPTCHA badge and its descendants;
+credential fields still interrupt there. Detection is bounded negative evidence, not
+positive login verification.
 
 ### Autonomous verification and continuation (ADR-0164)
 
@@ -1681,7 +1685,9 @@ and the existing challenge guard determine readiness; valid sessions are reused.
 
 Authentication waits retain the trusted run/profile/generation binding. A
 verified service outcome may resolve the matching wait and queue a fresh read
-without a user reply. Resolution is durable and idempotent, preserves cancellation
+without a user reply. The authentication record and its profile update share
+one timestamp, so a real clock cannot make verified evidence appear stale.
+Resolution is durable and idempotent, preserves cancellation
 and run limits, and never transfers a grant across a sign-in generation. Ordinary
 recovery and workflow steps use the same authorization and effect pipeline.
 Repeated notices of one blocker are consolidated; unresolved work ends with a
@@ -1708,6 +1714,10 @@ remote sign-in compare isolated signed-in and empty-session loads. A configured
 site must show the intended account and protected state only in the signed-in
 load. Stored configured sessions undergo another bounded protected-page check
 before lease publication. Wrong accounts and public-page matches fail closed.
+Lease startup and protected-page verification reserve capacity and exclude other
+acquisitions for that profile without holding the service-wide admission lock.
+Publication rechecks the profile identity, revocation and deadline; failure or
+cancellation releases capacity only after the runtime closes.
 Readiness is recorded only after sealing succeeds. An older ceremony cannot
 change a profile once a newer ceremony exists.
 

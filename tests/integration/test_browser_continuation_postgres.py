@@ -13,7 +13,9 @@ async def test_postgres_waiting_browser_runs_are_scoped_and_paginated() -> None:
         await waiting_runs_contract(app.uow_factory)
 
 
-@pytest.mark.parametrize("change", ["none", "cancelled", "revoked", "newer_ceremony"])
+@pytest.mark.parametrize(
+    "change", ["none", "recorded_ready", "cancelled", "revoked", "newer_ceremony"]
+)
 async def test_postgres_verified_continuation_is_durable_and_fenced(change: str) -> None:
     await test_browser_recovery.test_verified_browser_authentication_resumes_once(
         change, settings=database_settings(), storage="postgres"

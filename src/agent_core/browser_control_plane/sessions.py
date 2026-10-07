@@ -246,6 +246,7 @@ class HostedProfileSessionService:
         self._terminal_ceremonies: dict[UUID, _TerminalCeremonyState] = {}
         self._lock = asyncio.Lock()
         self._verification_browsers = 0
+        self._pending_acquisitions: dict[UUID, object] = {}
 
     @browser_phase_call("acquisition", "hosted")
     async def acquire(
@@ -292,44 +293,71 @@ class HostedProfileSessionService:
                 )
             if self._active_ceremony_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile has an active authentication ceremony")
+            if profile_id in self._pending_acquisitions:
+                raise ConflictError("browser profile already has a pending lease")
             self._admit_browsers_locked(1)
-            identity = metadata.identity()
+            marker = object()
+            self._pending_acquisitions[profile_id] = marker
+            self._verification_browsers += 1
+        identity = metadata.identity()
+        runtime: BrowserSessionRuntime | None = None
+        published = False
+        try:
             material = await self._store.load(identity)
             runtime = self._runtime_factory(principal.tenant_id)
-            try:
-                await runtime.start(material, metadata.allowed_origins, headed=True)
-                definition = next(
-                    (site for site in self._verification.sites if site.profile_id == profile_id),
-                    None,
-                )
-                if definition is not None:
-                    if definition.origin not in metadata.allowed_origins:
+            await runtime.start(material, metadata.allowed_origins, headed=True)
+            definition = next(
+                (site for site in self._verification.sites if site.profile_id == profile_id),
+                None,
+            )
+            if definition is not None:
+                if definition.origin not in metadata.allowed_origins:
+                    raise BrowserProviderError(
+                        "tool.browser.authentication_required", retryable=False
+                    )
+                async with asyncio.timeout(min(self._verification_seconds, 10.0)):
+                    evidence = await runtime.load_page_evidence(
+                        definition.origin + definition.protected_path,
+                        on_stage=_VerificationLoad("with_session").enter,
+                    )
+                    if (
+                        not evidence.on_allowed_origin
+                        or evidence.challenge_visible
+                        or not definition.confirms(await runtime.observe())
+                    ):
                         raise BrowserProviderError(
                             "tool.browser.authentication_required", retryable=False
                         )
-                    async with asyncio.timeout(min(self._verification_seconds, 10.0)):
-                        evidence = await runtime.load_page_evidence(
-                            definition.origin + definition.protected_path,
-                            on_stage=_VerificationLoad("with_session").enter,
-                        )
-                        if (
-                            not evidence.on_allowed_origin
-                            or evidence.challenge_visible
-                            or not definition.confirms(await runtime.observe())
-                        ):
-                            raise BrowserProviderError(
-                                "tool.browser.authentication_required", retryable=False
-                            )
-            except BaseException:
-                await runtime.close()
-                raise
-            self._leases[self._lookup_digest(lease_ref)] = _LeaseState(
-                scope=scope,
-                identity=identity,
-                runtime=runtime,
-                acquired_at=now,
-                expires_at=expires_at,
-            )
+            async with self._lock:
+                current = await self._owned_metadata(profile_id, principal, provider_ref)
+                if (
+                    current.revoked
+                    or current.identity() != identity
+                    or self._pending_acquisitions.get(profile_id) is not marker
+                    or expires_at <= self._now()
+                ):
+                    raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+                self._leases[self._lookup_digest(lease_ref)] = _LeaseState(
+                    scope=scope,
+                    identity=identity,
+                    runtime=runtime,
+                    acquired_at=now,
+                    expires_at=expires_at,
+                )
+                published = True
+                self._verification_browsers -= 1
+                self._pending_acquisitions.pop(profile_id)
+        finally:
+            if not published:
+                try:
+                    if runtime is not None:
+                        await runtime.close()
+                finally:
+                    # Capacity remains reserved until the browser has stopped.
+                    async with self._lock:
+                        self._verification_browsers -= 1
+                        if self._pending_acquisitions.get(profile_id) is marker:
+                            self._pending_acquisitions.pop(profile_id)
         return BrowserLease(lease_ref=lease_ref, expires_at=expires_at)
 
     async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
@@ -479,6 +507,7 @@ class HostedProfileSessionService:
     async def invalidate_profile(self, profile_id: UUID) -> None:
         leases: list[_LeaseState] = []
         async with self._lock:
+            self._pending_acquisitions.pop(profile_id, None)
             for key, lease_state in tuple(self._leases.items()):
                 if lease_state.scope.profile_id == profile_id:
                     self._leases.pop(key)
@@ -522,8 +551,11 @@ class HostedProfileSessionService:
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
         await self._expire()
         async with self._lock:
-            if self._lease_for_profile(profile_id) is not None:
-                raise ConflictError("browser profile already has an active lease")
+            if (
+                self._lease_for_profile(profile_id) is not None
+                or profile_id in self._pending_acquisitions
+            ):
+                raise ConflictError("browser profile already has an active or pending lease")
             if self._active_ceremony_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile already has an authentication ceremony")
             capability = _ceremony_capability()

@@ -316,6 +316,30 @@ import FoundationNetworking
         #expect(model.websiteAccessProfilesError == "Missing browser.profile.read.")
     }
 
+    @Test(arguments: ["noClient", "error", "success"])
+    func testOlderWebsiteProfileLoadCannotOverwriteNewerLoad(outcome: String) async throws {
+        let newID = UUID()
+        let oldClient = try makeClient { request in
+            Self.response(request, statusCode: outcome == "error" ? 403 : 200,
+                body: outcome == "error"
+                    ? #"{"error":{"code":"authorization_error","message":"Old failure","details":{},"request_id":"old"}}"#
+                    : #"{"items":[],"next_cursor":null}"#)
+        }
+        let newClient = try makeClient { request in
+            Self.response(request,
+                body: #"{"items":[\#(Self.profileJSON(id: newID, origin: "https://x.com", status: "ready"))],"next_cursor":null}"#)
+        }
+        let clients = SuspendedProfileClients(old: outcome == "noClient" ? nil : oldClient, new: newClient)
+        let model = ScheduleViewModel(makeAPIClient: { await clients.load() })
+        let older = Task { await model.loadWebsiteAccessProfiles() }
+        await clients.waitUntilSuspended()
+        await model.loadWebsiteAccessProfiles()
+        await clients.release()
+        await older.value
+        #expect(model.websiteAccessProfiles?.map(\.id) == [newID])
+        #expect(model.websiteAccessProfilesError == nil)
+    }
+
     @Test
     func testOptionsOfferReadySignInsAndKeepTheCurrentOneVisible() throws {
         let ready = try Self.profile("00000000-0000-0000-0000-0000000007B1", ["https://x.com"], .ready)
@@ -375,6 +399,13 @@ import FoundationNetworking
     private func makeModel(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ScheduleViewModel {
+        let client = try makeClient(handler: handler)
+        return ScheduleViewModel(makeAPIClient: { client })
+    }
+
+    private func makeClient(
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) throws -> VeetbotAPIClient {
         let configuration = try ConnectionConfiguration(
             baseURLString: "https://schedule-view-model.invalid"
         )
@@ -389,8 +420,7 @@ import FoundationNetworking
             tokenStore: InMemoryTokenStore(token: "valid"),
             session: URLSession(configuration: sessionConfiguration)
         )
-        let client = VeetbotAPIClient(transport: transport)
-        return ScheduleViewModel(makeAPIClient: { client })
+        return VeetbotAPIClient(transport: transport)
     }
 
     nonisolated private static func response(
@@ -490,5 +520,33 @@ private final class ScheduleViewModelURLProtocolHandlerStore: @unchecked Sendabl
 
     func handler(for id: String) -> Handler? {
         lock.withLock { handlers[id] }
+    }
+}
+
+private actor SuspendedProfileClients {
+    let old: VeetbotAPIClient?
+    let new: VeetbotAPIClient
+    var continuation: CheckedContinuation<Void, Never>?
+    var started = false
+
+    init(old: VeetbotAPIClient?, new: VeetbotAPIClient) {
+        self.old = old
+        self.new = new
+    }
+
+    func load() async -> VeetbotAPIClient? {
+        if started { return new }
+        started = true
+        await withCheckedContinuation { continuation = $0 }
+        return old
+    }
+
+    func waitUntilSuspended() async {
+        while continuation == nil { await Task.yield() }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
     }
 }

@@ -9,10 +9,12 @@ AUTHENTICATION_SCRIPT = (
     let node = document.body, scanned = 0;
     while (node && scanned++ < 8192) {
         const element = node.nodeType === 1;
-        const challenge = element && node.matches(
-            'input[type="password"],input[autocomplete="one-time-code"],'
-            + 'iframe[src*="captcha" i],iframe[title*="captcha" i],'
+        const credential = element && node.matches(
+            'input[type="password"],input[autocomplete="one-time-code"]');
+        const captcha = element && !node.closest('.grecaptcha-badge') && node.matches(
+            'iframe[src*="captcha" i],iframe[title*="captcha" i],'
             + '[id*="captcha" i],[class*="captcha" i]');
+        const challenge = credential || captcha;
         if (challenge) {
             const box = node.getBoundingClientRect(), style = getComputedStyle(node);
             if (box.width > 0 && box.height > 0 && style.visibility === 'visible'

@@ -3,7 +3,7 @@
 CONFIRM_DRAFT_SCRIPT = """(weak, [expected, root]) => {
     const node = weak.deref();
     if (!node || !node.isConnected || node.ownerDocument !== document
-        || !node.isContentEditable || (root && !root.contains(node))) return false;
+        || !node.isContentEditable) return false;
     let parent = node, ancestors = 0;
     while (parent) {
         if (++ancestors > 256) return false;
@@ -33,5 +33,7 @@ CONFIRM_DRAFT_SCRIPT = """(weak, [expected, root]) => {
         if (characters > 4096) return false;
         current = walker.nextNode();
     }
-    return node.innerText === expected;
+    if (node.innerText !== expected) return false;
+    // A valid receipt outside this observation's scope remains available later.
+    return root && !root.contains(node) ? null : true;
 }"""

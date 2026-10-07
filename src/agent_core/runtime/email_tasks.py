@@ -1131,6 +1131,9 @@ class _TaskIO:
         self, account: EmailAccount, sync: EmailSyncState, *, read_limit: int = 8
     ) -> tuple[EmailAccount, EmailSyncState]:
         further = False
+        # An exhausted history page may still have unread threads. Admit the
+        # next delta from its watermark before draining those retained reads.
+        sync.change_page_open = False
         while not sync.change_page_open:
             if further:
                 # A backlog keeps paging in this slice. Each further page spends one of

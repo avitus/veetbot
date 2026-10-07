@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-07 — Browser and mailbox recovery stay responsive
+
+- New email is discovered even while earlier changed conversations are still
+  waiting to be read.
+- A passive reCAPTCHA badge no longer interrupts browser work for sign-in,
+  and reading another page region preserves an unchanged approved draft.
+- Verified sign-in can resume a waiting conversation with a live clock. A slow
+  protected-page check no longer blocks other browser sessions.
+- Reopening schedule details keeps the newest website-access choices even
+  when an older request finishes later.
+- Browser navigation waits for initial data requests even when Chromium
+  reports document readiness before their request events arrive.
+
 ## 2026-10-07 — Conversation titles say what the conversation is about
 
 - A chat's title was the first 64 characters of its first message and never

@@ -45,6 +45,14 @@ CATALOG: dict[str, Any] = {
 }
 
 
+@pytest.mark.parametrize("origin", ["https://Example.org", "https://example.org/"])
+def test_recipe_stores_normalized_origin(origin: str) -> None:
+    from agent_core.domain.browser_workflows import BrowserWorkflowRecipe
+
+    recipe = BrowserWorkflowRecipe.model_validate({**CATALOG["recipes"][0], "origin": origin})
+    assert recipe.origin == "https://example.org"
+
+
 @pytest.mark.parametrize("lost_response", [False, True])
 @pytest.mark.parametrize("receipt", [False, True])
 @pytest.mark.parametrize("reason", ["outcome_unknown", "needs_user"])
