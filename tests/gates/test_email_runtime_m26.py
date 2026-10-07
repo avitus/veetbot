@@ -493,8 +493,8 @@ async def test_refresh_reserves_history_progress_and_bounds_full_reads_per_accou
         assert len(full_reads) <= 10
         assert all(args["max_results"] <= 50 for name, args in calls if name == "sync_changes")
         assert {"history-0", "history-1"} <= set(full_reads)
-        # New mail is read first, within its share of an unfinished catch-up.
-        assert full_reads[:3] == ["change-0", "change-1", "change-2"]
+        # New mail is read first, newest change first, within its catch-up share.
+        assert full_reads[:3] == ["change-2", "change-1", "change-0"]
         assert any(item.startswith("inbox-") for item in full_reads)
         async with app.uow_factory() as uow:
             sync = await uow.email.get(app.principal, "sync", "default")

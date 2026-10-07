@@ -36,6 +36,7 @@ class Mailbox:
         self.requests: list[httpx.Request] = []
         self.revision = "100"
         self.history_status = 200
+        self.thread_status = 200
         self.messages: list[dict[str, Any]] = []
         for index in range(3):
             raw = _thread()["messages"]
@@ -103,6 +104,8 @@ class Mailbox:
                 },
             )
         if path.endswith("/threads/thread-1"):
+            if self.thread_status != 200:
+                return httpx.Response(self.thread_status, json={"error": "private upstream text"})
             return httpx.Response(
                 200,
                 json={
@@ -252,6 +255,49 @@ async def test_m26_thread_continuation_refuses_changed_source() -> None:
     assert result.structured_content["source_changed"] is True
     assert result.structured_content["messages"] == []
     assert result.structured_content["complete"] is False
+
+
+async def test_m26_vanished_thread_is_reported_missing_without_upstream_error_text() -> None:
+    result = await invoke(Mailbox(), "get_thread_page", {"thread_id": "thread-gone"})
+    assert result.is_error is False
+    assert result.structured_content == {
+        "schema_version": 1,
+        "thread_id": "thread-gone",
+        "thread_missing": True,
+        "history_id": None,
+        "total_messages": 0,
+        "returned_messages": 0,
+        "messages": [],
+        "next_page_token": None,
+        "complete": False,
+        "source_changed": False,
+    }
+    assert "private upstream" not in str(result)
+
+
+async def test_m26_rejected_thread_read_is_not_evidence_of_deletion() -> None:
+    mailbox = Mailbox()
+    mailbox.thread_status = 403
+    result = await invoke(mailbox, "get_thread_page", {"thread_id": "thread-1"})
+    assert result.is_error is True
+    assert [item.text for item in result.content if item.type == "text"] == [
+        "gmail.provider_rejected"
+    ]
+
+
+async def test_m26_vanished_pinned_message_is_a_changed_source() -> None:
+    result = await invoke(
+        Mailbox(),
+        "get_message_body",
+        {"message_id": "vanished-1", "offset": 1024, "expected_history_id": "100"},
+    )
+    assert result.is_error is False
+    output = result.structured_content
+    assert output is not None
+    assert output["source_changed"] is True
+    assert output["body"] == "" and output["complete"] is False
+    unpinned = await invoke(Mailbox(), "get_message_body", {"message_id": "vanished-1"})
+    assert unpinned.is_error is True
 
 
 async def test_m26_body_continuation_preserves_unicode_and_revision() -> None:

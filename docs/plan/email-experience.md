@@ -222,12 +222,18 @@ corresponding projection updates commit; process duplicate or reordered change
 observations idempotently. A bounded lookahead coalesces each message's final
 change across history pages before reading live projections, so a later
 deletion can cancel an earlier addition even when that message is no longer
-retrievable. Retain at most 1,000 message change records; exceeding that ceiling
-starts the existing bounded inbox resynchronization while preserving cached
-mail and independent historical learning. Handle new mail, replies sent elsewhere, label
-changes, removed messages, throttling, revoked credentials, and partial account
-failure. An expired history cursor triggers a bounded resynchronization. Gmail
-explicitly requires a full resync when its retained history no longer covers
+retrievable. Within one slice the lookahead continues through further pages,
+each spending one of that account's full-thread reads. Retain at most 1,000
+message change records and read at most ten history pages per lookahead;
+exceeding either ceiling starts the existing bounded inbox resynchronization
+while preserving cached mail and independent historical learning. A thread read
+reports `thread_missing` when Gmail no longer has the conversation; it leaves the
+change, catch-up and history queues as removed mail, as deletions of its
+messages would. A pinned body revision Gmail no longer has is a changed source.
+Any other provider rejection is not evidence of deletion, so that work stays
+pending. Handle new mail, replies sent elsewhere, label changes, removed
+messages, throttling, revoked credentials, and partial account failure. An
+expired history cursor triggers a bounded resynchronization. Gmail explicitly requires a full resync when its retained history no longer covers
 the client's cursor. [Google synchronization contract](https://developers.google.com/workspace/gmail/api/guides/sync)
 
 Verified mailbox identity is distinct from a manifest default or capability
@@ -236,10 +242,11 @@ for new work while retaining the immutable binding on old history. It must not
 reinterpret existing source receipts or send through another Google identity.
 
 Refresh current inbox threads within the latest ninety days first (ADR-0096).
-Every refresh reads new Gmail changes before continuing that catch-up. While
-catch-up is unfinished, new mail takes at most four of the slice's full-thread
-reads and catch-up the rest of eight, so neither waits for the other. A
-resynchronization resumes changes from a watermark read before its inbox re-listing.
+Every refresh reads new Gmail changes, the most recently changed conversation
+first, before continuing that catch-up. While catch-up is unfinished, new mail
+takes at most four of the slice's full-thread reads and catch-up the rest of
+eight, so neither waits for the other. A resynchronization resumes changes
+from a watermark read before its inbox re-listing.
 The first display may be partial while pagination completes; report that state
 and keep useful results visible. Invalidate assessments when the source or a
 relevant feedback/profile/model revision changes. Rerank affected existing mail

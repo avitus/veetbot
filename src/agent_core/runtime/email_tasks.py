@@ -78,6 +78,7 @@ EMAIL_MESSAGE_WINDOW = 100
 EMAIL_BODY_WINDOW_BYTES = 512 * 1024
 EMAIL_ASSESSMENT_PASSAGE_CHARACTERS = 8192
 EMAIL_CHANGE_EVENT_LIMIT = 1000
+EMAIL_CHANGE_PAGE_LIMIT = 10
 EMAIL_HISTORY_POLICY = "email-history@2:90d"
 # The account server modes each task kind calls. Drafts call only the model.
 EMAIL_TASK_SERVER_MODES: dict[str, tuple[str, ...]] = {
@@ -637,6 +638,11 @@ class _TaskIO:
             )
             if page.get("source_changed"):
                 result = {}
+            elif page.get("thread_missing") is True:
+                # Gmail no longer has the conversation; nothing remains to read.
+                if not fresh:
+                    await self._erase_progress(progress_key)
+                return {"thread_id": provider_id, "thread_missing": True}, False
             else:
                 if progress and progress.get("history_id") != page.get("history_id"):
                     previous = []
@@ -807,7 +813,10 @@ class _TaskIO:
             return False, None
         value, pending = await self.read_thread(account_id, provider_id, read_limit=read_limit)
         thread = None
-        if value is not None:
+        if value is not None and value.get("thread_missing") is True:
+            # Remove what was cached, exactly as deletions of its messages would.
+            await self._remove_message(account_id, provider_id, None)
+        elif value is not None:
             thread = await self.service.import_thread(
                 self.context.principal,
                 account_id,
@@ -1116,7 +1125,15 @@ class _TaskIO:
     async def _changes(
         self, account: EmailAccount, sync: EmailSyncState, *, read_limit: int = 8
     ) -> tuple[EmailAccount, EmailSyncState]:
-        if not sync.change_page_open:
+        further = False
+        while not sync.change_page_open:
+            if further:
+                # A backlog keeps paging in this slice. Each further page spends one of
+                # the account's reads, so pages and reads stay within the slice bound.
+                if self.full_reads.get(account.id, 0) >= read_limit:
+                    return account, sync
+                self.full_reads[account.id] = self.full_reads.get(account.id, 0) + 1
+            further = True
             sync.change_start = sync.change_start or sync.change_history or account.history_id
             page = await self.call(
                 account.id,
@@ -1133,8 +1150,14 @@ class _TaskIO:
                 ).hexdigest()
                 for item in page["changes"]
             }
-            if page["resync_required"] or (
-                len(discovered | sync.change_events.keys()) > EMAIL_CHANGE_EVENT_LIMIT
+            if (
+                page["resync_required"]
+                or len(discovered | sync.change_events.keys()) > EMAIL_CHANGE_EVENT_LIMIT
+                # A backlog this long resynchronizes; the re-listing reads newest mail first.
+                or (
+                    page.get("next_page_token") is not None
+                    and sync.change_pages + 1 >= EMAIL_CHANGE_PAGE_LIMIT
+                )
             ):
                 account = account.model_copy(
                     update={
@@ -1152,6 +1175,7 @@ class _TaskIO:
                 sync.change_cursor = sync.change_history = sync.change_start = None
                 sync.change_next = None
                 sync.change_page_open = False
+                sync.change_pages = 0
                 await self._save_sync(account, sync)
                 return account, sync
             changed: set[str] = set()
@@ -1187,25 +1211,25 @@ class _TaskIO:
                     await self._remove_message(
                         account.id, change["thread_id"], change["message_id"]
                     )
-            sync.change_pending = list(
-                dict.fromkeys(
-                    change["thread_id"]
-                    for change in sync.change_events.values()
-                    if change["kind"] != "message_deleted"
-                )
-            )
+            # Read the most recently changed conversations first.
+            latest: dict[str, int] = {}
+            for change in sync.change_events.values():
+                if change["kind"] != "message_deleted":
+                    latest[change["thread_id"]] = max(
+                        latest.get(change["thread_id"], 0), int(change["sequence"])
+                    )
+            sync.change_pending = sorted(latest, key=lambda thread_id: -latest[thread_id])
             sync.change_next = page.get("next_page_token")
             sync.change_history = page["history_id"]
             sync.change_cursor = sync.change_next
             sync.change_page_open = sync.change_next is None
+            # Later pages may delete a target that no longer exists; collect their
+            # final message state before reading live threads. Keep the admitted
+            # history watermark until every page is read.
+            sync.change_pages = 0 if sync.change_page_open else sync.change_pages + 1
             if sync.change_page_open:
                 sync.change_start = None
             await self._save_sync(account, sync)
-            if not sync.change_page_open:
-                # One normalized page per active slice. Later pages may delete a
-                # target that no longer exists; collect their final message state
-                # before reading live threads. Keep the admitted history watermark.
-                return account, sync
         for provider_id in list(sync.change_pending[:50]):
             if self.full_reads.get(account.id, 0) >= read_limit:
                 break
@@ -1234,8 +1258,10 @@ class _TaskIO:
             await self._save_sync(account, sync)
         return account, sync
 
-    async def _remove_message(self, account_id: str, provider_id: str, message_id: str) -> None:
-        """Remove a deleted source message and invalidate its cached assessment and evidence."""
+    async def _remove_message(
+        self, account_id: str, provider_id: str, message_id: str | None
+    ) -> None:
+        """Remove a deleted source message, or all of them when ``message_id`` is None."""
         c = self.context
         key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
         async with c.uow_factory() as uow, uow.email.lock(c.principal):
@@ -1246,10 +1272,16 @@ class _TaskIO:
             thread = await read_value(
                 uow.email, c.principal, "thread", str(index.payload["thread_id"]), EmailThread
             )
-            if thread is None or not any(message.id == message_id for message in thread.messages):
+            if thread is None or not any(
+                message_id in {None, message.id} for message in thread.messages
+            ):
                 return
             thread = retained_thread(thread, body_cutoff(c.clock.now()))
-            messages = [message for message in thread.messages if message.id != message_id]
+            messages = [
+                message
+                for message in thread.messages
+                if message_id is not None and message.id != message_id
+            ]
             complete = (
                 thread.complete and bool(messages) and all(message.complete for message in messages)
             )

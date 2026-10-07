@@ -369,7 +369,23 @@ class GmailSync:
         thread_id = self.client._required_text(thread_id, "thread_id", maximum=1024)
         limit = _integer(max_messages, 1, 10)
         position = self._page_position(page_token, thread_id) if page_token is not None else None
-        revision, identifiers = await self._thread_index(thread_id)
+        try:
+            revision, identifiers = await self._thread_index(thread_id)
+        except GmailResourceNotFoundError:
+            # Gmail no longer has this conversation. Only this typed absence crosses
+            # MCP as such; every other rejection stays an ordinary failure.
+            return {
+                "schema_version": 1,
+                "thread_id": thread_id,
+                "thread_missing": True,
+                "history_id": None,
+                "total_messages": 0,
+                "returned_messages": 0,
+                "messages": [],
+                "next_page_token": None,
+                "complete": False,
+                "source_changed": False,
+            }
         result: dict[str, Any] = {
             "schema_version": 1,
             "thread_id": thread_id,
@@ -487,16 +503,10 @@ class GmailSync:
             self._history_argument(expected_history_id)
         elif offset:
             raise GmailError("gmail.arguments_invalid")
-        raw = await self.client._request(
-            "GET", f"/messages/{quote(message_id, safe='')}", params={"format": "full"}
-        )
-        if raw.get("id") != message_id:
-            raise GmailError("gmail.provider_output_invalid")
-        revision = _history(raw.get("historyId"))
         result: dict[str, Any] = {
             "schema_version": 1,
             "message_id": message_id,
-            "history_id": revision,
+            "history_id": None,
             "body": "",
             "offset": offset,
             "next_offset": None,
@@ -504,6 +514,20 @@ class GmailSync:
             "source_changed": False,
             "body_available": False,
         }
+        try:
+            raw = await self.client._request(
+                "GET", f"/messages/{quote(message_id, safe='')}", params={"format": "full"}
+            )
+        except GmailResourceNotFoundError:
+            if expected_history_id is None:
+                raise
+            # A pinned revision that no longer exists is a changed source.
+            result["source_changed"] = True
+            return result
+        if raw.get("id") != message_id:
+            raise GmailError("gmail.provider_output_invalid")
+        revision = _history(raw.get("historyId"))
+        result["history_id"] = revision
         if expected_history_id is not None and revision != expected_history_id:
             result["source_changed"] = True
             return result
