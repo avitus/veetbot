@@ -496,7 +496,7 @@ def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelReque
 
 def _fit_tool_batch(
     run: Run, calls: list[ToolCallItem]
-) -> tuple[list[ToolCallItem], list[ToolResultItem]]:
+) -> tuple[list[ToolCallItem], list[tuple[ToolCallItem, ToolResultItem]]]:
     """Split a batch into the calls that fit the tool-call budget and refusals.
 
     A refused call never reaches the tool executor, so nothing runs
@@ -505,7 +505,7 @@ def _fit_tool_batch(
 
     remaining = max(0, run.limits.max_tool_calls - run.tool_call_count)
     fitted = calls[:remaining]
-    refused: list[ToolResultItem] = []
+    refused: list[tuple[ToolCallItem, ToolResultItem]] = []
     for call in calls[remaining:]:
         outcome = ToolOutcome(
             status=ToolOutcomeStatus.FAILED,
@@ -519,14 +519,51 @@ def _fit_tool_batch(
             remediation="none",
         )
         refused.append(
-            ToolResultItem(
-                call_id=call.call_id,
-                content=[TextPart(text=outcome.model_dump_json())],
-                is_error=True,
-                trust=TrustLevel.PLATFORM,
+            (
+                call,
+                ToolResultItem(
+                    call_id=call.call_id,
+                    content=[TextPart(text=outcome.model_dump_json())],
+                    is_error=True,
+                    trust=TrustLevel.PLATFORM,
+                ),
             )
         )
     return fitted, refused
+
+
+async def _record_refusals(
+    context: RunContext, refused: list[tuple[ToolCallItem, ToolResultItem]]
+) -> None:
+    """Append each budget refusal to the log, then to the conversation.
+
+    A checkpoint stores its conversation as session history, which is built
+    from events, so a refusal held only in memory leaves its call unanswered
+    for every later reader of that history. A refusal is a pipeline failure,
+    not a policy denial, so it is recorded as `tool.call.failed` in the shape
+    of the tool pipeline's own refusals. It is not tool usage.
+    """
+
+    if not refused:
+        return
+    async with context.uow_factory() as uow:
+        for call, result in refused:
+            await uow.events.append(
+                NewEvent(
+                    session_id=context.run.session_id,
+                    run_id=context.run.id,
+                    event_type="tool.call.failed",
+                    actor_type="runtime",
+                    payload={
+                        "name": call.name,
+                        "call_id": call.call_id,
+                        "reason_code": "tool.budget_exhausted",
+                        "result_item": result.model_dump(mode="json"),
+                    },
+                ),
+                lease=context.lease,
+            )
+    context.checkpoint.conversation.extend(result for _call, result in refused)
 
 
 def _denied_outcome(result: ToolResultItem) -> ToolOutcome | None:
@@ -1145,10 +1182,11 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 )
 
         # Fit the batch to the remaining budget before anything runs. Refusals
-        # join the conversation now, so a resumed step re-dispatches only the
-        # calls that fit and the model still receives a result for every call.
-        fitted_calls, refused_results = _fit_tool_batch(context.run, turn.tool_calls)
-        context.checkpoint.conversation.extend(refused_results)
+        # join the log and the conversation now, so a resumed step re-dispatches
+        # only the calls that fit and the model still receives a result for
+        # every call.
+        fitted_calls, refusals = _fit_tool_batch(context.run, turn.tool_calls)
+        await _record_refusals(context, refusals)
         context.checkpoint.pending_tool_calls = [
             call.model_dump(mode="json") for call in fitted_calls
         ]

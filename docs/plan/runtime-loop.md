@@ -728,9 +728,15 @@ would fail it before the model's turn is wrong for the model loop. The loop
 enforces the limit by construction instead: before dispatch it fits the batch
 to the remaining budget, runs only the calls that fit, and answers each
 refused call with a platform-trusted `tool.budget_exhausted` result. A refused
-call never reaches the tool executor, so nothing runs unaccounted for, and the
-refusals join the conversation before the `tool_pending` checkpoint so a
-resumed step re-dispatches only the fitted calls. `BudgetScope.TOOL_CALL`
+call never reaches the tool executor, so nothing runs unaccounted for, and it
+is not tool usage. Each refusal is a pipeline failure, not a policy denial, so
+the loop appends it as `tool.call.failed` carrying its result item, as the tool
+pipeline records its own refusals, and only then adds it to the conversation.
+Checkpoints store the conversation as session history built from events, so a
+refusal held only in memory would leave its call unanswered for a resumed step
+and for the session's next run. The refusals are in the log before the
+`tool_pending` checkpoint, so a resumed step re-dispatches only the fitted
+calls. `BudgetScope.TOOL_CALL`
 carries the pre-call rule for flows that dispatch one call at a time outside
 the model loop — the email tasks — and cannot fit a batch.
 
