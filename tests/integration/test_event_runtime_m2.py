@@ -809,22 +809,23 @@ async def _reclaim_and_resume(composition: Any, clock: FixedClock, worker_id: st
 
 
 @pytest.mark.parametrize(
-    ("interrupted_at", "lost"),
+    ("interrupted_at", "lost", "restored_trigger"),
     [
         # The second step's model turn is committed; its tool_pending is not.
-        ("second_tool_pending", 1),  # restore the first step's tool_call
-        ("second_tool_pending", 2),  # restore its tool_pending (run b642e4d7)
-        ("second_tool_pending", 3),  # restore its model_response
-        ("second_tool_pending", 4),  # restore the submission seed
-        ("second_tool_pending", 5),  # no checkpoint survives
+        ("second_tool_pending", 1, "tool_call"),
+        ("second_tool_pending", 2, "tool_pending"),  # run b642e4d7
+        ("second_tool_pending", 3, "model_response"),
+        ("second_tool_pending", 4, "seed"),
+        ("second_tool_pending", 5, None),
         # The first step's results are committed and the second step has begun.
-        ("second_model_call", 1),  # restore the first step's tool_pending
+        ("second_model_call", 1, "tool_pending"),
     ],
 )
 async def test_lost_checkpoints_cost_time_not_information(
     monkeypatch: pytest.MonkeyPatch,
     interrupted_at: str,
     lost: int,
+    restored_trigger: str | None,
 ) -> None:
     """Resuming behind work the log already holds reaches the same terminal state.
 
@@ -907,6 +908,32 @@ async def test_lost_checkpoints_cost_time_not_information(
                         CheckpointRow.version > newest - lost,
                     )
                 )
+
+            interrupted_run = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                surviving = await uow.checkpoints.latest(run_id)
+                events = await uow.events.list_after(
+                    interrupted_run.session_id,
+                    0,
+                    PRINCIPAL,
+                    run_id=run_id,
+                )
+            if restored_trigger is None:
+                assert surviving is None
+            else:
+                assert surviving is not None
+                assert surviving.version == newest - lost
+                if restored_trigger == "seed":
+                    assert surviving.version == 1
+                    assert surviving.budget_state["step_count"] == 0
+                else:
+                    receipt = next(
+                        event
+                        for event in events
+                        if event.event_type == "run.checkpointed"
+                        and event.payload["version"] == surviving.version
+                    )
+                    assert receipt.payload["trigger"] == restored_trigger
 
             await _reclaim_and_resume(composition, clock, "resuming-worker")
             recovered = await composition.runs.get(run_id)

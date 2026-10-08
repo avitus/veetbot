@@ -739,10 +739,19 @@ and for the session's next run. The refusals are in the log before the
 calls. A resumed run that has lost that checkpoint rebuilds the batch from the
 model's turn in its conversation, and fits the whole turn again against the
 count the batch was proposed under: the restored checkpoint's tool-usage
-watermark, or, for a turn adopted from the log, the run's own count, which
-never recorded that batch (ADR-0166). It records a refusal only for a refused
-call the log does not already answer, dispatches only the fitted calls, and
-counts only those as usage. `BudgetScope.TOOL_CALL`
+watermark, or, for a turn adopted from the log, the
+`tool_call_count_before_turn` watermark on `model.response.completed`
+(ADR-0166). For a fully answered batch, recovery raises usage to that watermark
+plus the fitted batch size only if the counter is lower, without redispatching
+an adopted batch's answered calls. This also works after every checkpoint is
+lost and does not count a recorded batch twice. Legacy events without the
+watermark retain the prior accounting fallback and its undercount limitation.
+Recovery records a refusal only for a refused call the log does not already
+answer, dispatches only the fitted calls, and counts only those as usage.
+A recovered model turn with no result and no saved pending batch passes the
+same synthesis-reserve and repeated-call guards as a fresh turn. A pending
+batch or a turn with recorded results already passed them, so recovery does
+not increment its identical-call counters again. `BudgetScope.TOOL_CALL`
 carries the pre-call rule for flows that dispatch one call at a time outside
 the model loop — the email tasks — and cannot fit a batch.
 

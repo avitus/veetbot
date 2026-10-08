@@ -1021,6 +1021,9 @@ async def _invoke_model(
                 "time_to_first_event_ms": _elapsed_ms(issued_at, first_event_at),
                 "time_to_first_text_ms": _elapsed_ms(issued_at, first_text_at),
                 "tool_names": [call.name for call in terminal.turn.tool_calls],
+                # This survives checkpoint loss and distinguishes an answered
+                # batch from one whose usage was already committed.
+                "tool_call_count_before_turn": context.run.tool_call_count,
                 "conversation_items": [
                     item.model_dump(mode="json")
                     for item in [
@@ -1068,6 +1071,69 @@ async def _invoke_model(
         "the model attempt limit was reached",
         step,
     )
+
+
+def guard_tool_turn(
+    context: RunContext,
+    calls: Sequence[ToolCallItem],
+    step: Step,
+    *,
+    loop_synthesis: bool | None = None,
+) -> RunOutcome | None:
+    """Apply the same pre-dispatch guards to fresh and recovered model turns."""
+
+    if loop_synthesis is None:
+        loop_synthesis = _loop_synthesis_needed(context)
+    synthesis_reserve = _synthesis_reserve_dimension(
+        context.run,
+        step_in_progress=True,
+    )
+    if context.checkpoint.working_state.get("browser_workflow_report_only"):
+        synthesis_reserve = "browser_workflow"
+    if synthesis_reserve is not None:
+        return _failure(
+            context,
+            FailureReason.BUDGET_EXCEEDED,
+            "SynthesisReserveViolation",
+            "the model requested another tool inside its final synthesis reserve",
+            step,
+            {"synthesis_reserve": synthesis_reserve},
+        )
+
+    if loop_synthesis:
+        return _failure(
+            context,
+            FailureReason.TOOL_LOOP_DETECTED,
+            "ToolLoopDetected",
+            "the model requested another tool during repeated-tool synthesis",
+            step,
+            {"identical_call_threshold": context.identical_call_threshold},
+        )
+
+    call_counts = context.checkpoint.working_state.setdefault("identical_calls", {})
+    if not isinstance(call_counts, dict):
+        return _failure(
+            context,
+            FailureReason.INTERNAL_ERROR,
+            "WorkingStateError",
+            "the identical-call counter was malformed",
+            step,
+        )
+    for call in calls:
+        fingerprint = f"{call.name}:{call.raw_arguments}"
+        count = int(call_counts.get(fingerprint, 0)) + 1
+        call_counts[fingerprint] = count
+        if count >= context.identical_call_threshold:
+            return _failure(
+                context,
+                FailureReason.TOOL_LOOP_DETECTED,
+                "ToolLoopDetected",
+                "the model repeated an identical tool call "
+                f"{context.identical_call_threshold} times",
+                step,
+            )
+
+    return None
 
 
 async def run_loop(context: RunContext) -> RunOutcome:
@@ -1135,54 +1201,9 @@ async def run_loop(context: RunContext) -> RunOutcome:
             message = await _complete_reply(context, message)
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
 
-        synthesis_reserve = _synthesis_reserve_dimension(
-            context.run,
-            step_in_progress=True,
-        )
-        if context.checkpoint.working_state.get("browser_workflow_report_only"):
-            synthesis_reserve = "browser_workflow"
-        if synthesis_reserve is not None:
-            return _failure(
-                context,
-                FailureReason.BUDGET_EXCEEDED,
-                "SynthesisReserveViolation",
-                "the model requested another tool inside its final synthesis reserve",
-                step,
-                {"synthesis_reserve": synthesis_reserve},
-            )
-
-        if loop_synthesis:
-            return _failure(
-                context,
-                FailureReason.TOOL_LOOP_DETECTED,
-                "ToolLoopDetected",
-                "the model requested another tool during repeated-tool synthesis",
-                step,
-                {"identical_call_threshold": context.identical_call_threshold},
-            )
-
-        call_counts = context.checkpoint.working_state.setdefault("identical_calls", {})
-        if not isinstance(call_counts, dict):
-            return _failure(
-                context,
-                FailureReason.INTERNAL_ERROR,
-                "WorkingStateError",
-                "the identical-call counter was malformed",
-                step,
-            )
-        for call in turn.tool_calls:
-            fingerprint = f"{call.name}:{call.raw_arguments}"
-            count = int(call_counts.get(fingerprint, 0)) + 1
-            call_counts[fingerprint] = count
-            if count >= context.identical_call_threshold:
-                return _failure(
-                    context,
-                    FailureReason.TOOL_LOOP_DETECTED,
-                    "ToolLoopDetected",
-                    "the model repeated an identical tool call "
-                    f"{context.identical_call_threshold} times",
-                    step,
-                )
+        guarded = guard_tool_turn(context, turn.tool_calls, step, loop_synthesis=loop_synthesis)
+        if guarded is not None:
+            return guarded
 
         # Fit the batch to the remaining budget before anything runs. Refusals
         # join the log and the conversation now, so a resumed step re-dispatches

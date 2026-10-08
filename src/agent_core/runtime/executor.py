@@ -78,6 +78,7 @@ from agent_core.runtime.loop import (
     apply_tool_evidence,
     bind_browser_auth_question,
     checkpoint,
+    guard_tool_turn,
     recover_browser_failure,
     run_loop,
 )
@@ -1071,6 +1072,33 @@ class RunExecutor:
         )
         return fitted
 
+    async def _turn_usage_baseline(
+        self, context: RunContext, calls: list[ToolCallItem]
+    ) -> int | None:
+        """Read the pre-batch usage watermark even when its checkpoint was lost."""
+
+        if not calls:
+            return None
+        async with context.uow_factory() as uow:
+            event = await uow.events.latest_before(
+                context.run.session_id,
+                context.checkpoint.last_event_sequence + 1,
+                "model.response.completed",
+                context.principal,
+                run_id=context.run.id,
+            )
+        if event is None:
+            return None
+        recorded_calls = [
+            item.get("call_id")
+            for item in event.payload.get("conversation_items", [])
+            if isinstance(item, dict) and item.get("kind") == "tool_call"
+        ]
+        if recorded_calls != [call.call_id for call in calls]:
+            return None
+        baseline = event.payload.get("tool_call_count_before_turn")
+        return baseline if type(baseline) is int and baseline >= 0 else None
+
     async def _resume_pending_tools(self, context: RunContext) -> RunOutcome | None:
         restored = context.checkpoint
         # The checkpoint's own batch: recorded as pending or, for a checkpoint
@@ -1083,6 +1111,23 @@ class RunExecutor:
                 turn = []
         adopted = await self._adopt_committed_history(context)
         latest, answered = self._latest_turn(restored.conversation)
+        durable_baseline = await self._turn_usage_baseline(context, latest)
+        step = Step(
+            run_id=context.run.id,
+            step_number=max(1, context.run.step_count),
+            started_at=self._clock.now(),
+        )
+        # A fully answered turn can be present even in a freshly seeded
+        # checkpoint. Its pre-batch watermark makes repair idempotent.
+        if (
+            latest
+            and durable_baseline is not None
+            and all(call.call_id in answered for call in latest)
+        ):
+            fitted, _ = _fit_tool_batch(context.run, latest, used=durable_baseline)
+            missing = durable_baseline + len(fitted) - context.run.tool_call_count
+            if missing > 0:
+                await context.budgets.record_tool_usage(context.run, missing, step=step)
         unrecorded_batch: int | None = None
         if any(isinstance(item, (AssistantMessage, ToolCallItem)) for item in adopted):
             # The log holds a turn the checkpoint never saw. Its own batch
@@ -1094,9 +1139,14 @@ class RunExecutor:
             # The loop records a batch only once every call returns, so the
             # run's count is still the one a batch with an unanswered call was
             # fitted to.
-            fitted = await self._fit_resumed_batch(
-                context, latest, context.run.tool_call_count, answered
+            if latest and not answered:
+                guarded = guard_tool_turn(context, latest, step)
+                if guarded is not None:
+                    return guarded
+            adopted_baseline = (
+                context.run.tool_call_count if durable_baseline is None else durable_baseline
             )
+            fitted = await self._fit_resumed_batch(context, latest, adopted_baseline, answered)
             calls = [call for call in fitted if call.call_id not in answered]
             if not calls:
                 restored.pending_tool_calls = []
@@ -1106,13 +1156,17 @@ class RunExecutor:
                     return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=adopted[-1])
                 return None
             # This batch was never recorded, though its answered calls ran.
-            unrecorded_batch = len(fitted)
+            unrecorded_batch = max(0, adopted_baseline + len(fitted) - context.run.tool_call_count)
             step_number = context.run.step_count
         else:
             baseline = restored.budget_state.get("tool_call_count", 0)
             if not isinstance(baseline, int):
                 raise ConflictError("checkpoint tool-usage watermark is malformed")
             if turn:
+                if not answered:
+                    guarded = guard_tool_turn(context, turn, step)
+                    if guarded is not None:
+                        return guarded
                 # The checkpoint's tool-usage watermark is the count the turn
                 # was fitted to. A fitted call that already ran is dispatched
                 # again so the batch is counted whole.

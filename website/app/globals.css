@@ -5,6 +5,7 @@
   --ink-soft: #48605a;
   --line: #c8c1b4;
   --teal: #0e8b78;
+  --teal-text: #086657;
   --teal-bright: #36d5bb;
   --teal-wash: rgba(14, 139, 120, 0.1);
   --amber: #f2a93b;
@@ -103,7 +104,7 @@ a { color: inherit; }
   margin: 0 0 24px;
   padding: 7px 14px;
   border-radius: 999px;
-  color: var(--teal);
+  color: var(--teal-text);
   background: var(--teal-wash);
   font-size: 0.85rem;
   font-weight: 600;
@@ -209,7 +210,7 @@ h1 em {
 
 .chat-header small {
   margin-top: 2px;
-  color: var(--teal);
+  color: var(--teal-text);
   font-size: 0.8rem;
   font-weight: 500;
 }

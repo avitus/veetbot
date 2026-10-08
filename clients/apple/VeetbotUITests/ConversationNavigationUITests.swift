@@ -1181,7 +1181,28 @@ final class ConversationNavigationUITests: XCTestCase {
         }
         #endif
         XCTAssertTrue(app.buttons["email.thread.00000000-0000-0000-0000-000000000801"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["email.thread.\(Self.spamThreadID)"].waitForNonExistence(timeout: 20),
+        // The initial removal is optimistic. Observe the confirmed state in
+        // Other mail before returning to the inbox and asserting it stays out.
+        #if os(macOS)
+        activate(app.radioButtons["Other mail"])
+        #else
+        activate(app.buttons["Other mail"])
+        #endif
+        let reported = app.buttons["email.thread.\(Self.spamThreadID)"]
+        XCTAssertTrue(reported.waitForExistence(timeout: 10))
+        activate(reported)
+        XCTAssertTrue(texts("Reported as spam. Gmail empties Spam after thirty days.").firstMatch
+            .waitForExistence(timeout: Self.archiveOutcomeTimeout), app.debugDescription)
+        XCTAssertTrue(app.buttons["email.spam.restore"].exists)
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        }
+        activate(app.buttons["Important"])
+        #else
+        activate(app.radioButtons["Important"])
+        #endif
+        XCTAssertTrue(reported.waitForNonExistence(timeout: 10),
                       "A confirmed report keeps the conversation out of the inbox")
     }
 

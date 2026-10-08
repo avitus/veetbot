@@ -300,3 +300,170 @@ async def test_a_resume_behind_lost_checkpoints_never_runs_a_refused_call(
     assert recovered.usage.tool_calls == 1
     validate_tool_pairs(history.items)
     assert _reason_codes(history.items, REFUSED) == ["tool.budget_exhausted"]
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+@pytest.mark.parametrize("lost", [0, 1, 2, 3])
+async def test_answered_recovered_batch_is_counted_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, recorded: bool, lost: int
+) -> None:
+    """A result/usage crash repairs the count even if every checkpoint is lost."""
+    from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
+
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    clock = FixedClock(NOW)
+    original = UnitOfWorkBudgetLedger.record_tool_usage
+
+    async def interrupt_usage(self: Any, run: Any, count: int, *, step: Any) -> None:
+        if recorded:
+            await original(self, run, count, step=step)
+        raise _InjectedWorkerCrash
+
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            script=_script("recovered"),
+            clock=clock,
+            limits=LIMITS,
+        ) as composition:
+            run_id = await composition.runs.submit("use the one available tool call")
+            monkeypatch.setattr(UnitOfWorkBudgetLedger, "record_tool_usage", interrupt_usage)
+            with pytest.raises(_InjectedWorkerCrash):
+                await _run_worker(composition, clock, "usage-crash")
+            monkeypatch.setattr(UnitOfWorkBudgetLedger, "record_tool_usage", original)
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                assert newest == 3
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id,
+                        CheckpointRow.version > newest - lost,
+                    )
+                )
+            from tests.integration.test_event_runtime_m2 import _reclaim_and_resume
+
+            await _reclaim_and_resume(composition, clock, "usage-recovery")
+            run = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                history = await uow.history.catch_up(run.session_id)
+            async with engine.connect() as connection:
+                executed = await connection.scalar(
+                    select(func.count())
+                    .select_from(ToolInvocationRow)
+                    .where(ToolInvocationRow.run_id == run_id)
+                )
+        assert run.failure is None
+        assert run.status is RunStatus.COMPLETED
+        assert run.tool_call_count == run.usage.tool_calls == 1
+        assert executed == 1
+        validate_tool_pairs(history.items)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("lost", [0, 1])
+@pytest.mark.parametrize("guard", ["reserve", "repetition", "repeated_synthesis", "pending"])
+async def test_recovered_model_turn_obeys_dispatch_guards(
+    monkeypatch: pytest.MonkeyPatch, lost: int, guard: str
+) -> None:
+    from agent_core.domain.runs import FailureReason
+    from tests.integration.test_event_runtime_m2 import _reclaim_and_resume
+
+    repeated = [
+        ScriptedToolCall(
+            name="math.calculate", arguments={"expression": "1+1"}, call_id=f"repeat-{index}"
+        )
+        for index in range(5)
+    ]
+    turns = [
+        ScriptedTurn(
+            tool_calls=repeated if guard == "repetition" else repeated[:1],
+            stop_reason=StopReason.TOOL_USE,
+        )
+    ]
+    if guard == "repeated_synthesis":
+        turns = [
+            ScriptedTurn(tool_calls=repeated[:4], stop_reason=StopReason.TOOL_USE),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate", arguments={"expression": "2+2"}, call_id="one-more"
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+        ]
+    if guard == "pending":
+        turns = [ScriptedTurn(tool_calls=repeated[:4], stop_reason=StopReason.TOOL_USE)]
+    target_turn = len(turns)
+    turns.append(ScriptedTurn(text="must not bypass the guard"))
+    limits = RunLimits(
+        max_steps=5,
+        max_model_calls=2 if guard == "reserve" else 5,
+        max_tool_calls=10,
+        synthesis_reserve_model_calls=1 if guard == "reserve" else 0,
+    )
+    original = runtime_loop.checkpoint
+    responses = 0
+
+    async def interrupt(context: Any, trigger: str) -> None:
+        nonlocal responses
+        await original(context, trigger)
+        if trigger == ("tool_pending" if guard == "pending" else "model_response"):
+            responses += 1
+            if responses == target_turn:
+                raise _InjectedWorkerCrash
+
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    clock = FixedClock(NOW)
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            clock=clock,
+            limits=limits,
+            script=FakeModelScript(turns=turns),
+        ) as composition:
+            run_id = await composition.runs.submit("research within the execution guards")
+            monkeypatch.setattr(runtime_loop, "checkpoint", interrupt)
+            with pytest.raises(_InjectedWorkerCrash):
+                await _run_worker(composition, clock, "guard-crash")
+            monkeypatch.setattr(runtime_loop, "checkpoint", original)
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                assert newest is not None
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id, CheckpointRow.version > newest - lost
+                    )
+                )
+            await _reclaim_and_resume(composition, clock, "guard-recovery")
+            run = await composition.runs.get(run_id)
+            async with engine.connect() as connection:
+                executed = await connection.scalar(
+                    select(func.count())
+                    .select_from(ToolInvocationRow)
+                    .where(ToolInvocationRow.run_id == run_id)
+                )
+        if guard == "pending":
+            assert run.status is RunStatus.COMPLETED
+            assert run.tool_call_count == 4
+            assert executed == 4
+            return
+        assert run.status is RunStatus.FAILED
+        assert run.failure is not None
+        assert run.failure.reason is (
+            FailureReason.BUDGET_EXCEEDED
+            if guard == "reserve"
+            else FailureReason.TOOL_LOOP_DETECTED
+        )
+        assert executed == (4 if guard == "repeated_synthesis" else 0)
+    finally:
+        await engine.dispose()

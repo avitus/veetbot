@@ -142,7 +142,7 @@ is the same "zero rows updated means stop, not retry" discipline that
 An append that carries no state change has no guarded `UPDATE` to inspect and is
 not subject to the check. The diagnostic `run.fenced` is the case in point: a
 fenced worker performs no transition, no lease release, and no checkpoint write,
-and appends exactly one event, which must commit (`runtime-loop.md:881-890`).
+and appends exactly one event, which must commit (`runtime-loop.md:890-899`).
 
 ### Gaps are normal; missing writes are not
 
@@ -635,6 +635,13 @@ after its checkpoint's `last_event_sequence`** before it does anything else
   the count it was proposed under. A call past `max_tool_calls` still never
   runs, and only the calls that fit count as usage (`runtime-loop.md`,
   "Budget").
+- `model.response.completed` records `tool_call_count_before_turn`, an
+  additive accounting watermark. Recovery uses it to count an answered fitted
+  batch exactly once even after all checkpoints are lost. Historical events
+  without it keep their previous accounting fallback.
+- A recovered turn with no result and no saved pending batch must pass the
+  normal synthesis-reserve and repeated-call guards before dispatch. A batch
+  already pending or returning results is not counted in those guards again.
 - If the adopted history ends with the final reply, the run finalizes with it
   instead of asking the model again.
 

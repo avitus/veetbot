@@ -72,7 +72,7 @@ const features = [
   },
   {
     title: "Reminders in plain words",
-    body: "“Remind me every other Tuesday to water the plants.” Just say it, and change it the same way.",
+    body: "“Remind me every Tuesday to water the plants.” Just say it, and change it the same way.",
     icon: (
       <Icon>
         <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z" />

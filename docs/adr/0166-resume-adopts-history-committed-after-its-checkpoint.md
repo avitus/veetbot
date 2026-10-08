@@ -92,9 +92,9 @@ the log after it.
   for adopted steps: loop counters, tool evidence, and context updates such as
   loaded skills. The run repeats that work if it needs it. This is time, not
   information.
-- If an adopted turn's whole batch returned but the attempt died before
-  recording its usage, the batch is treated as recorded, so the tool-call
-  counter can undercount by that batch.
+- Historical model-response events without a pre-batch accounting watermark
+  can undercount a fully answered adopted batch whose usage was never recorded.
+  The review amendment below closes that window for newly recorded turns.
 - Resume reads the session history once more. A long session pays for one
   extra projection read per resumed execution.
 
@@ -134,3 +134,25 @@ checkpoint and is unchanged.
 interrupts that run after its `tool_pending` checkpoint and before its
 refusals are logged, and resumes from every surviving checkpoint. Before the
 fix, five of the six restore points failed with `BUDGET_EXCEEDED`.
+
+## Review amendment: recovered guards and answered-batch accounting (2026-10-08)
+
+A recovered model turn without a saved pending batch or recorded results now
+passes the same synthesis-reserve and repeated-call guards as the normal
+loop. Pending batches and turns with recorded results have already passed
+those checks, and their identical-call counters are not incremented again.
+
+`model.response.completed` records the additive `tool_call_count_before_turn`
+watermark before dispatch. Recovery fits an adopted batch against it and
+repairs a missing count up to the watermark plus the fitted size. It never
+adds the count twice or redispatches an answered adopted call. Recovery from
+no checkpoints uses the same receipt. Historical events without the watermark
+retain their prior fallback; the missing old accounting cannot be guessed.
+
+The PostgreSQL tests in `test_tool_budget_refusal_history_postgres.py` reproduce
+the reserve and repeated-call bypasses at both a model-response checkpoint and
+a lost checkpoint, and the fully answered batch before and after its usage
+commit with zero through three lost checkpoints. Before the repair, eight
+cases failed: six dispatched forbidden calls, and two left completed work
+uncounted. These changes satisfy the existing budget and loop-guard contracts;
+no milestone, gate, scope, or effect authorization changes.
