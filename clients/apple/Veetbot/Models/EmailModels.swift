@@ -24,6 +24,8 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let writeServerID: String?
     /// Absent support on an older server shows no Subscriptions surface at all.
     public let unsubscribeSupported: Bool?
+    /// Absent support on an older server shows no spam tag action and never falls back to Archive.
+    public let spamSupported: Bool?
     /// Whether the inbox catch-up has reached its floor; absent on an older server.
     public let inboxComplete: Bool?
     /// The oldest date the automatic catch-up covers.
@@ -42,6 +44,7 @@ public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
         case archiveSupported = "archive_supported"
         case writeServerID = "write_server_id"
         case unsubscribeSupported = "unsubscribe_supported"
+        case spamSupported = "spam_supported"
         case inboxComplete = "inbox_complete"
         case catchUpSince = "catch_up_since"
         case inboxReachedAt = "inbox_reached_at"
@@ -121,6 +124,12 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
     public var archiveOperation: EmailArchiveOperation?
     /// Present only when this conversation's newest received message belongs to a bulk sender.
     public let subscription: EmailThreadSubscription?
+    /// The server flagged this conversation as suspected spam; absent on older servers.
+    public var suspectedSpam: Bool?
+    /// The owner said this flagged conversation is not spam.
+    public var spamCleared: Bool?
+    /// The owner reported this conversation as spam; it sits in Gmail's Spam.
+    public var inSpam: Bool?
     public let summary: String
     public let reason: String
     public let needsReply: Bool
@@ -136,6 +145,11 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
 
     /// Only the server's confirmed mailbox projection determines the checkbox state.
     public var isArchived: Bool { inInbox == false }
+
+    /// A flag never moves mail; a reported conversation shows its Spam state instead.
+    public var isSuspectedSpam: Bool { suspectedSpam == true && inSpam != true }
+
+    public var isInSpam: Bool { inSpam == true }
 
     /// Preserve exact server values while hiding empty or duplicate picker entries.
     public var feedbackTopics: [String] {
@@ -154,6 +168,9 @@ public struct EmailThreadView: Codable, Identifiable, Equatable, Sendable {
         case dismissedRevision = "dismissed_revision"
         case inInbox = "in_inbox"
         case archiveOperation = "archive_operation"
+        case suspectedSpam = "suspected_spam"
+        case spamCleared = "spam_cleared"
+        case inSpam = "in_spam"
         case draftID = "draft_id"
         case sessionID = "session_id"
     }
@@ -164,14 +181,19 @@ public struct EmailArchiveOperation: Codable, Equatable, Sendable {
     public let operationID: UUID
     public let runID: UUID
     public let targetArchived: Bool
+    /// A spam report or its reversal; absent on older servers and for a plain archive.
+    public var targetSpam: Bool?
     public let status: String
     public let error: String?
+
+    public var isSpamAction: Bool { targetSpam == true }
 
     enum CodingKeys: String, CodingKey {
         case status, error
         case operationID = "operation_id"
         case runID = "run_id"
         case targetArchived = "target_archived"
+        case targetSpam = "target_spam"
     }
 }
 

@@ -276,6 +276,7 @@ request 131 with a clean review, and its flag was switched on in production by
 
 - [ ] Pass the five native Subscriptions journeys (added 2026-09-28 and passing locally on the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
 - [ ] Show the Subscriptions detail beside its list on regular-width iPad as email-unsubscribe.md requires; the iPad sheet is a 580-point compact-width form sheet, so the detail pushes as on iPhone
+- [ ] Add a native suspected-spam journey (tag, Report spam, Not spam) and pass it in the hosted Mac, iPhone and iPad UI lanes
 - [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, sender and thread spam each with Not spam, and cleanup
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 

@@ -770,6 +770,154 @@ import SwiftUI
         #expect(model.currentEdit?.isDirty == false)
     }
 
+    /// Report spam is Archive's gesture with its own route: the row leaves at once and only a
+    /// confirmed report keeps it away; failed, uncertain and unreadable outcomes restore it.
+    @Test(arguments: ["completed", "failed", "uncertain", "unreadable"])
+    func testReportSpamRestoresOnlyUnconfirmedOutcomes(outcome: String) async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.spamAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("/spam") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("/spam") }
+            let reported = requested && outcome == "completed"
+            let row = self.spamThreadJSON(inInbox: !reported, inSpam: reported, suspected: true,
+                status: requested ? outcome : nil)
+            if request.url!.path.hasSuffix("threads") {
+                return (200, "{\"items\":[\(reported ? "" : row)],\"next_cursor\":null}", nil)
+            }
+            if requested && outcome == "unreadable" {
+                return (400, Self.error("malformed_request", "Could not check Gmail status."), statusRead)
+            }
+            return (200, row, requested ? statusRead : nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        #expect(row.isSuspectedSpam)
+        #expect(model.spamSupported(for: row.accountID))
+        #expect(model.canReportSpam(row))
+        let reporting = Task { await model.setThreadSpam(row, spam: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        #expect(model.items.isEmpty)
+        statusRead.release()
+        await reporting.value
+        #expect(model.items.count == (outcome == "completed" ? 0 : 1))
+        #expect((model.items.first.flatMap(model.archiveMessage(for:)) == nil) == (outcome == "completed"))
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(posts.map { $0.url!.path } == ["/v1/email/threads/\(threadID.uuidString)/spam"])
+        let body = try Self.archiveRequestBody(try #require(posts.first))
+        #expect(body["spam"] as? Bool == true)
+        #expect(body["expected_revision"] as? Int == 1)
+        #expect((body["idempotency_key"] as? String)?.isEmpty == false)
+        #expect(posts.first?.value(forHTTPHeaderField: "Idempotency-Key") == body["idempotency_key"] as? String)
+    }
+
+    /// Spam actions need the thread's own account to advertise them, and a missing route never becomes Archive.
+    @Test func testSpamActionsNeedTheThreadsOwnAccountSupport() async throws {
+        let requests = EmailRequestRecorder()
+        var supported = false
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") {
+                return (200, supported ? Self.spamAccountsJSON : Self.archiveAccountsJSON)
+            }
+            if request.httpMethod == "POST" { return (404, Self.error("not_found", "Not found")) }
+            let row = self.spamThreadJSON(inInbox: true, inSpam: false, suspected: true)
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(row)],\"next_cursor\":null}") }
+            return (200, row)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        #expect(!model.spamSupported(for: row.accountID))
+        #expect(!model.canReportSpam(row))
+        await model.setThreadSpam(row, spam: true)
+        await model.clearSpamFlag(row)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.isEmpty)
+        #expect(model.archiveErrors[row.id] != nil)
+        #expect(model.spamFlagErrors[row.id] != nil)
+        supported = true
+        model.resetConnection()
+        await model.reload()
+        let current = try #require(model.items.first)
+        #expect(model.spamSupported(for: current.accountID))
+        await model.setThreadSpam(current, spam: true)
+        #expect(!model.spamSupported(for: current.accountID), "A missing route marks the account unsupported")
+        #expect(model.items.map(\.id) == [current.id], "The row returns with an actionable error")
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }.map { $0.url!.path }
+        #expect(posts == ["/v1/email/threads/\(threadID.uuidString)/spam"], "Never falls back to Archive")
+    }
+
+    /// Not spam on a flagged conversation clears the flag and writes nothing to Gmail.
+    @Test func testNotSpamClearsTheFlagWithoutAMailboxWrite() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.spamAccountsJSON) }
+            let cleared = requests.snapshot.contains { $0.url!.path.hasSuffix("spam-flag") }
+            let row = self.spamThreadJSON(inInbox: true, inSpam: false, suspected: !cleared, cleared: cleared)
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(row)],\"next_cursor\":null}") }
+            return (200, row)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        let row = try #require(model.items.first)
+        #expect(row.isSuspectedSpam)
+        await model.clearSpamFlag(row)
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(posts.map { $0.url!.path } == ["/v1/email/threads/\(threadID.uuidString)/spam-flag"])
+        #expect(try Self.archiveRequestBody(try #require(posts.first)) as NSDictionary == ["cleared": true])
+        #expect(model.items.first?.isSuspectedSpam == false)
+        #expect(model.items.first?.spamCleared == true)
+        #expect(model.thread?.isSuspectedSpam == false)
+        #expect(model.spamFlagErrors[row.id] == nil)
+    }
+
+    /// A conversation in Spam returns through Not spam, never through Move to Inbox.
+    @Test func testReportedThreadRestoresThroughNotSpam() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.spamAccountsJSON) }
+            if request.url!.path.hasSuffix("/spam") { return (202, self.operationJSON(status: "QUEUED")) }
+            let restored = requests.snapshot.contains { $0.url!.path.hasSuffix("/spam") }
+            let row = self.spamThreadJSON(inInbox: restored, inSpam: !restored, suspected: false,
+                status: restored ? "completed" : nil, targetArchived: false)
+            if request.url!.path.hasSuffix("threads") { return (200, "{\"items\":[\(row)],\"next_cursor\":null}") }
+            return (200, row)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        #expect(row.isInSpam && !row.isSuspectedSpam)
+        #expect(!model.canArchive(row))
+        #expect(!model.canReportSpam(row, spam: true))
+        #expect(model.canReportSpam(row, spam: false))
+        await model.setThreadSpam(row, spam: false)
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(posts.map { $0.url!.path } == ["/v1/email/threads/\(threadID.uuidString)/spam"])
+        #expect(try Self.archiveRequestBody(try #require(posts.first))["spam"] as? Bool == false)
+        #expect(model.items.first?.isInSpam == false)
+        #expect(model.items.first?.inInbox == true)
+    }
+
+    /// Advertises Report spam beside Archive on both accounts.
+    private static var spamAccountsJSON: String {
+        archiveAccountsJSON.replacingOccurrences(of: "\"archive_supported\":true",
+            with: "\"archive_supported\":true,\"spam_supported\":true")
+    }
+
+    /// Supplies the spam projection and a spam operation through the real JSON decoder.
+    private func spamThreadJSON(inInbox: Bool, inSpam: Bool, suspected: Bool, cleared: Bool = false,
+        status: String? = nil, targetArchived: Bool = true) -> String {
+        let operation = status.map { "{\"operation_id\":\"\(threadID)\",\"run_id\":\"\(runID)\",\"target_archived\":\(targetArchived),\"target_spam\":true,\"status\":\"\($0)\",\"error\":null}" } ?? "null"
+        return threadJSON().replacingOccurrences(of: "\"account_id\":\"personal\"",
+            with: "\"account_id\":\"personal\",\"in_inbox\":\(inInbox),\"in_spam\":\(inSpam),\"suspected_spam\":\(suspected),\"spam_cleared\":\(cleared),\"archive_operation\":\(operation)")
+    }
+
     /// Builds an isolated transport whose selected response can be delivered after an independent request finishes.
     private func makeArchiveRaceModel(
         handler: @escaping (URLRequest) throws -> (Int, String, EmailArchiveResponseGate?)

@@ -69,6 +69,21 @@ extension VeetbotAPIClient {
                      "idempotency_key": .string(idempotencyKey)], key: idempotencyKey)
     }
 
+    /// Archive's gesture with the Spam delta: `true` reports the conversation, `false` restores it.
+    public func reportEmailThreadSpam(_ thread: EmailThreadView, spam: Bool, idempotencyKey: String) async throws -> EmailOperationView {
+        try await emailCommand(path: "/threads/\(thread.id.uuidString)/spam",
+            values: ["expected_revision": .number(Double(thread.revision)), "spam": .bool(spam),
+                     "idempotency_key": .string(idempotencyKey)], key: idempotencyKey)
+    }
+
+    /// Clears, or restores, a suspected-spam flag; it changes nothing in Gmail.
+    public func clearEmailThreadSpamFlag(_ threadID: UUID, cleared: Bool) async throws -> EmailThreadView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/email/threads/\(threadID.uuidString)/spam-flag",
+            body: try JSONEncoder.server.encode(["cleared": JSONValue.bool(cleared)]), retryAttempts: 2
+        ))
+    }
+
     public func generateEmailDraft(
         threadID: UUID, instruction: String?, idempotencyKey: String
     ) async throws -> EmailDraftOperation {

@@ -34,6 +34,46 @@ import Testing
         #expect(accounts[2]["write_server_id"] as? String == "gmail_work_write")
     }
 
+    /// An older server's thread and account carry no spam state, so nothing is tagged or offered.
+    @Test func testOlderServerOmitsSpamState() throws {
+        let thread = try decode(EmailThreadView.self, payload: threadPayload())
+        let encoded = try encodedObject(thread)
+        let account = try decode(EmailAccountView.self, payload: accountPayload(id: "legacy"))
+
+        #expect(thread.suspectedSpam == nil && thread.spamCleared == nil && thread.inSpam == nil)
+        #expect(!thread.isSuspectedSpam && !thread.isInSpam)
+        #expect(encoded["suspected_spam"] == nil && encoded["in_spam"] == nil && encoded["spam_cleared"] == nil)
+        #expect(account.spamSupported == nil)
+        #expect(try encodedObject(account)["spam_supported"] == nil)
+    }
+
+    /// The flag, the owner's clearing, Spam membership and a spam operation survive the round trip.
+    @Test(arguments: [true, false])
+    func testSpamStateSurvivesRoundTrip(inSpam: Bool) throws {
+        var payload = threadPayload()
+        payload["in_inbox"] = !inSpam
+        payload["in_spam"] = inSpam
+        payload["suspected_spam"] = true
+        payload["spam_cleared"] = false
+        payload["archive_operation"] = [
+            "operation_id": "00000000-0000-0000-0000-000000000901",
+            "run_id": "00000000-0000-0000-0000-000000000902",
+            "target_archived": inSpam,
+            "target_spam": true,
+            "status": "completed",
+            "error": NSNull()
+        ]
+        let thread = try decode(EmailThreadView.self, payload: payload)
+        let encoded = try encodedObject(thread)
+
+        #expect(thread.isInSpam == inSpam)
+        #expect(thread.isSuspectedSpam == !inSpam, "A reported conversation shows its Spam state, not the flag")
+        #expect(thread.archiveOperation?.isSpamAction == true)
+        #expect(encoded["suspected_spam"] as? Bool == true)
+        #expect(encoded["in_spam"] as? Bool == inSpam)
+        #expect((encoded["archive_operation"] as? [String: Any])?["target_spam"] as? Bool == true)
+    }
+
     /// Legacy handled state is preserved without inventing Inbox membership or a completed Gmail operation.
     @Test func testLegacyThreadDoesNotAcquireArchiveState() throws {
         let thread = try decode(EmailThreadView.self, payload: threadPayload())
