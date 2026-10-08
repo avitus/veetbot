@@ -2328,6 +2328,12 @@ class EmailExperienceService:
                         "in_spam": in_spam,
                         "archive_operation": archive_operation,
                         "spam_cleared": previous.spam_cleared or restored_from_spam,
+                        "assessment_version": ""
+                        if any(
+                            before.sender_check != after.sender_check
+                            for before, after in zip(previous.messages, messages, strict=True)
+                        )
+                        else previous.assessment_version,
                     }
                 )
                 await save_value(uow.email, principal, "thread", str(updated.id), updated, now)

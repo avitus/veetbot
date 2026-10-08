@@ -599,7 +599,8 @@ evidence, not as a verdict of its own: a misconfigured legitimate sender, such
 as a founder writing through an outreach tool or a list that rewrites mail,
 fails it too. Like labels it is mailbox metadata, so it changes neither the
 content revision nor the source fingerprint, and mail cached before it
-existed reads `none`.
+existed reads `none`. A changed sender check invalidates the cached assessment
+for the next bounded refresh slice; label-only changes keep it current.
 
 **The flag.** A thread is *suspected spam* when the feature is enabled, its
 newest grounded assessment says `spam`, the owner has not cleared it, and its

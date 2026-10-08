@@ -27,7 +27,7 @@ from agent_core.domain.credentials import SecretValue
 from agent_core.domain.email import EmailAccount, EmailTask, EmailThread
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
-from agent_core.domain.messages import FakeModelScript
+from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.policies import PolicyDecisionType
 from agent_core.domain.runs import RunStatus
 from tests.contract.memory_fixtures import browse_query
@@ -375,6 +375,64 @@ async def test_sender_check_is_metadata_outside_the_content_identity() -> None:
     ) as fresh:
         imported = await _seed(fresh, checked)
         assert imported.source_fingerprint == thread.source_fingerprint
+
+
+@pytest.mark.parametrize("before,after", [("none", "fail"), ("pass", "fail"), ("fail", "pass")])
+async def test_changed_sender_check_reassesses_cached_spam_verdict(before: str, after: str) -> None:
+    """gate.email.spam_sender_check: metadata changes renew the verdict, not content identity."""
+    page = _page(changed=True)
+    page["messages"][1]["to"] = "Colleague <colleague@example.test>"
+    page["messages"][1]["body"] = EVIDENCE
+    page["messages"][0]["sender_check"] = before
+    base = await _current_mail_factory()
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            if name == "get_thread_page":
+                return MCPCallResult(content=(json.dumps(page),), structured=page)
+            return await original(name, arguments)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    assessment = _assessment(needs_reply=False)
+    del assessment["grounded"], assessment["profile_revision"]
+    turn = ScriptedTurn(text=json.dumps(assessment))
+    async with build(
+        settings=_settings(),
+        script=FakeModelScript(turns=[turn, turn, turn]),
+        mcp_client_factory=factory,
+    ) as app:
+        thread = await _seed(app, page)
+        # Refresh assesses one message passage per slice until the thread is complete.
+        for _ in range(2):
+            first = await app.services.email.submit_task(app.principal, kind="refresh")
+            assert (await app.runs.get(first.run_id)).model_call_count == 1
+        assert (await app.services.email.thread(app.principal, thread.id))["suspected_spam"] is (
+            before == "fail"
+        )
+        session = await app.sessions.create()
+        # Labels alone keep the completed assessment current.
+        page["messages"][0]["label_ids"].append("STARRED")
+        await app.services.email.import_thread(app.principal, "default", page, session)
+        unchanged = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(unchanged.run_id)).model_call_count == 0
+        page["messages"][0]["sender_check"] = after
+        refreshed = await app.services.email.import_thread(app.principal, "default", page, session)
+        assert refreshed.revision == thread.revision
+        assert refreshed.source_fingerprint == thread.source_fingerprint
+        second = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(second.run_id)
+        assert run.status is RunStatus.COMPLETED
+        assert run.model_call_count == 1
+        assert (await app.services.email.thread(app.principal, thread.id))["suspected_spam"] is (
+            after == "fail"
+        )
 
 
 def _spam_factory(
