@@ -37,6 +37,7 @@ export function SiteFooter() {
         <Link href="/privacy">Privacy</Link>
         <Link href="/tos">Terms</Link>
         <a href="https://docs.veetbot.com/">Docs</a>
+        <a href="https://github.com/avitus/veetbot">GitHub</a>
       </nav>
     </footer>
   );

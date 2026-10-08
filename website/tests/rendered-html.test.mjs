@@ -189,5 +189,6 @@ test("each legal page is dated and reachable from every page's footer", async ()
     const footer = (await htmlFor(pathname)).match(/<footer[\s\S]*?<\/footer>/)?.[0] ?? "";
     assert.match(footer, /href="\/privacy"/, `${pathname} footer omits the privacy policy`);
     assert.match(footer, /href="\/tos"/, `${pathname} footer omits the terms`);
+    assert.match(footer, /href="https:\/\/github\.com\/avitus\/veetbot"/, `${pathname} footer omits the source repository`);
   }
 });
