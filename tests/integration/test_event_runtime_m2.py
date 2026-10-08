@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
+from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select, text, update
@@ -14,6 +15,7 @@ from agent_core.adapters.persistence.database import (
     create_engine,
     create_session_factory,
 )
+from agent_core.adapters.persistence.repositories import PostgresCheckpointRepository
 from agent_core.adapters.persistence.sqlalchemy_models import (
     CheckpointRow,
     ProjectionWatermarkRow,
@@ -316,6 +318,78 @@ async def test_terminal_prune_preserves_the_latest_delta_chain() -> None:
             assert expected is not None
             assert await uow.checkpoints.prune(run_id, terminal=True) == 4
             assert await uow.checkpoints.latest(run_id) == expected
+
+
+async def test_nonterminal_prune_keeps_a_checkpoint_committed_after_it_read_the_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Production run b642e4d7 (2026-10-07): maintenance pruned while the worker
+    # committed its next delta, the delta vanished, and the run's following
+    # write failed with "checkpoint version 14 does not follow 12".
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        run_id = await composition.runs.submit("keep a concurrent checkpoint")
+        worker = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=composition.clock,
+            worker_id="checkpoint-worker",
+        )
+        claimed = await worker.claim()
+        assert claimed is not None
+
+        async def write(version: int, *, full: bool) -> None:
+            async with composition.uow_factory() as uow:
+                event = await uow.events.append(
+                    NewEvent(
+                        session_id=claimed.run.session_id,
+                        run_id=run_id,
+                        event_type="run.checkpointed",
+                        actor_type="test",
+                        payload={"version": version, "full": full},
+                    ),
+                    lease=claimed.lease,
+                )
+                await uow.checkpoints.write(
+                    run_id,
+                    RunCheckpoint(
+                        run_id=run_id,
+                        version=version,
+                        status=RunStatus.RUNNING,
+                        working_state={"checkpoint": version},
+                        last_event_sequence=event.sequence,
+                        created_at=composition.clock.now(),
+                    ),
+                    full=full,
+                    lease=claimed.lease,
+                )
+
+        async with composition.uow_factory() as uow:
+            assert await uow.checkpoints.delete_nonterminal(run_id) == 1
+        await write(1, full=True)
+        await write(2, full=False)
+
+        async with composition.uow_factory() as uow:
+            checkpoints = cast(PostgresCheckpointRepository, uow.checkpoints)
+            read_chain = checkpoints._rows
+            raced = False
+
+            async def read_then_commit_the_next_delta(target: UUID) -> list[CheckpointRow]:
+                nonlocal raced
+                rows = await read_chain(target)
+                if not raced:
+                    raced = True
+                    await write(3, full=False)
+                return rows
+
+            monkeypatch.setattr(checkpoints, "_rows", read_then_commit_the_next_delta)
+            assert await checkpoints.prune(run_id, terminal=False) == 0
+        assert raced
+
+        async with composition.uow_factory() as uow:
+            latest = await uow.checkpoints.latest(run_id)
+        assert latest is not None
+        assert latest.version == 3
+        await write(4, full=False)
 
 
 class _InjectedWorkerCrash(BaseException):
