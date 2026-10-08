@@ -1281,12 +1281,14 @@ class PostgresCheckpointRepository:
         if terminal:
             if not rows[-1].full:
                 raise ConflictError("terminal checkpoint retention requires a final full snapshot")
-            keep = {rows[-1].version}
+            keep_from = rows[-1].version
         else:
-            keep = {row.version for row in rows if row.version >= latest_full}
+            keep_from = latest_full
+        # Bound the delete below the versions read: a writer may commit a newer
+        # checkpoint after the read, and that row must survive this prune.
         result = await self._session.execute(
             delete(CheckpointRow).where(
-                CheckpointRow.run_id == run_id, CheckpointRow.version.not_in(keep)
+                CheckpointRow.run_id == run_id, CheckpointRow.version < keep_from
             )
         )
         return _rowcount(result)

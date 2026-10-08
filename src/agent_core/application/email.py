@@ -155,6 +155,21 @@ class PreparedSession:
     claimed: bool = False
 
 
+def archive_gesture(
+    task_id: UUID, thread_id: UUID | None, consent: EmailArchiveConsent
+) -> dict[str, object]:
+    """The authenticated gesture event; a plain archive's payload predates spam (ADR-0165)."""
+    payload: dict[str, object] = {
+        "task_id": str(task_id),
+        "thread_id": str(thread_id),
+        "archived": consent.archived,
+        "consent_digest": consent.digest,
+    }
+    if consent.spam:
+        payload["spam"] = True
+    return payload
+
+
 def thread_summary(thread: EmailThread) -> dict[str, object]:
     return thread.model_dump(
         mode="json",
@@ -272,6 +287,8 @@ class EmailExperienceService:
                         "unsubscribe_supported": self.subscriptions.supported(
                             principal, account_id
                         ),
+                        "spam_supported": self.subscriptions.enabled
+                        and self._archive_supported(principal, account_id),
                     }
                 )
         return {"items": items, "next_cursor": None}
@@ -987,6 +1004,7 @@ class EmailExperienceService:
         idempotency_key: str | None = None,
         archived: bool | None = None,
         subscription: SubscriptionRequest | None = None,
+        spam: bool = False,
     ) -> EmailOperation:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         # Typed owner gestures: no model, no catalog, no automatic-email dollars.
@@ -1048,6 +1066,8 @@ class EmailExperienceService:
             intent = [kind, str(thread_id), str(draft_id), expected_revision, instruction]
             if kind == "archive":
                 intent.append(archived)
+                if spam:
+                    intent.append("spam")
             if subscription is not None:
                 intent.append(subscription.digest)
             digest = hashlib.sha256(json.dumps(intent).encode()).hexdigest()
@@ -1080,7 +1100,10 @@ class EmailExperienceService:
                             "check Gmail before retrying an uncertain archive operation"
                         )
                     if previous_archive.status == "pending":
-                        if previous_archive.target_archived != archived:
+                        if (
+                            previous_archive.target_archived != archived
+                            or previous_archive.target_spam != spam
+                        ):
                             raise ConflictError("wait for the current Inbox operation to finish")
                         prior_run = await uow.runs.get(previous_archive.run_id, principal)
                         if replay_key is not None:
@@ -1093,6 +1116,12 @@ class EmailExperienceService:
                             status=prior_run.status.value,
                             replayed=True,
                         )
+                if spam and archived == thread.in_spam:
+                    raise ConflictError(
+                        "this conversation is already in Spam"
+                        if archived
+                        else "only a conversation in Spam can be restored"
+                    )
             async for row in task_records(uow.email, principal):
                 old = EmailTask.model_validate(row.payload)
                 try:
@@ -1116,6 +1145,14 @@ class EmailExperienceService:
                     continue
                 if kind == "send" and old.expected_revision != expected_revision:
                     raise ConflictError("another draft revision already has a send operation")
+                if (
+                    kind == "archive"
+                    and old.archive_consent is not None
+                    and (
+                        old.archive_consent.archived != archived or old.archive_consent.spam != spam
+                    )
+                ):
+                    raise ConflictError("wait for the current Inbox operation to finish")
                 if kind == "archive" and replay_key is not None:
                     await self._archive_replay_in(
                         uow.email, principal, replay_key, digest, old.run_id, now
@@ -1212,6 +1249,7 @@ class EmailExperienceService:
                         expected_revision=thread.revision,
                         archived=archived,
                         expires_at=now + timedelta(seconds=120),
+                        spam=spam,
                     )
                     if kind == "archive" and thread is not None and archived is not None
                     else None
@@ -1238,6 +1276,7 @@ class EmailExperienceService:
                                 operation_id=task.id,
                                 run_id=run.id,
                                 target_archived=task.archive_consent.archived,
+                                target_spam=task.archive_consent.spam,
                             )
                         }
                     ),
@@ -1293,14 +1332,7 @@ class EmailExperienceService:
                         event_type="email.archive.requested",
                         actor_type="principal",
                         actor_id=principal.principal_id,
-                        payload={
-                            "task_id": str(task.id),
-                            "thread_id": str(thread_id),
-                            "archived": task.archive_consent.archived,
-                            "consent_digest": hashlib.sha256(
-                                task.archive_consent.model_dump_json().encode()
-                            ).hexdigest(),
-                        },
+                        payload=archive_gesture(task.id, thread_id, task.archive_consent),
                         derivation_key=f"email-archive:{task.id}",
                     )
                 )
@@ -1450,6 +1482,62 @@ class EmailExperienceService:
             idempotency_key=idempotency_key,
         )
 
+    async def report_thread_spam(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        expected_revision: int,
+        *,
+        spam: bool,
+        idempotency_key: str,
+    ) -> EmailOperation:
+        """Admit Report spam or Not spam for one thread as Archive's gesture (ADR-0165)."""
+        if type(spam) is not bool or not idempotency_key or len(idempotency_key) > 200:
+            raise ValueError("invalid spam request")
+        if not self.subscriptions.enabled:
+            raise NotFoundError("email thread not found")
+        return await self.submit_task(
+            principal,
+            kind="archive",
+            thread_id=thread_id,
+            expected_revision=expected_revision,
+            archived=spam,
+            idempotency_key=idempotency_key,
+            spam=True,
+        )
+
+    async def clear_spam_flag(
+        self, principal: Principal, thread_id: UUID, *, cleared: bool
+    ) -> dict[str, object]:
+        """Record the owner's Not spam on a flagged thread; no mailbox changes (ADR-0165)."""
+        require_scope(principal, "email.write")
+        if type(cleared) is not bool:
+            raise ValueError("invalid spam flag request")
+        if not self.subscriptions.enabled:
+            raise NotFoundError("email thread not found")
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            thread = await self._thread(uow.email, principal, thread_id)
+            thread = thread.model_copy(
+                update={
+                    "spam_cleared": cleared,
+                    "suspected_spam": thread.suspected_spam and not cleared,
+                }
+            )
+            now = self.clock.now()
+            await save_value(uow.email, principal, "thread", str(thread.id), thread, now)
+            assessment = await uow.email.get(principal, "assessment", str(thread.id))
+            if cleared and assessment is not None and assessment.payload.get("suspected_spam"):
+                await self._put_data(
+                    uow.email,
+                    principal,
+                    "assessment",
+                    str(thread.id),
+                    {**assessment.payload, "suspected_spam": False},
+                )
+            return thread_summary(
+                apply_feedback(thread, await self._feedback(uow.email, principal), now=now)
+            )
+
     async def validate_archive(
         self,
         principal: Principal,
@@ -1494,15 +1582,7 @@ class EmailExperienceService:
                 or event.run_id != run.id
                 or event.actor_type != "principal"
                 or event.actor_id != principal.principal_id
-                or event.payload
-                != {
-                    "task_id": str(task.id),
-                    "thread_id": str(task.thread_id),
-                    "archived": consent.archived,
-                    "consent_digest": hashlib.sha256(
-                        consent.model_dump_json().encode()
-                    ).hexdigest(),
-                }
+                or event.payload != archive_gesture(task.id, task.thread_id, consent)
             ):
                 raise ConflictError("archive consent has no matching authenticated gesture")
             for invocation in await uow.invocations.list_for_run(run.id, principal):
@@ -1633,17 +1713,24 @@ class EmailExperienceService:
         }
         if status == "completed" and thread.revision == task.expected_revision:
             archived = operation.target_archived
+            arrives, leaves = ("SPAM", "INBOX") if archived else ("INBOX", "SPAM")
+
+            def moved(labels: list[str]) -> list[str]:
+                if operation.target_spam:
+                    return [label for label in dict.fromkeys([*labels, arrives]) if label != leaves]
+                if archived:
+                    return [label for label in labels if label != "INBOX"]
+                return list(dict.fromkeys([*labels, "INBOX"]))
+
             update["in_inbox"] = not archived
             update["messages"] = [
-                m.model_copy(
-                    update={
-                        "labels": [label for label in m.labels if label != "INBOX"]
-                        if archived
-                        else list(dict.fromkeys([*m.labels, "INBOX"]))
-                    }
-                )
-                for m in thread.messages
+                m.model_copy(update={"labels": moved(m.labels)}) for m in thread.messages
             ]
+            if operation.target_spam:
+                update["in_spam"] = archived
+                if not archived:
+                    # Not spam is the owner's verdict; later assessments never flag it again.
+                    update.update(spam_cleared=True, suspected_spam=False)
         thread = thread.model_copy(update=update)
         await save_value(uow.email, principal, "thread", str(thread.id), thread, self.clock.now())
         return thread
@@ -2008,6 +2095,7 @@ class EmailExperienceService:
             or consent.account_id != thread.account_id
             or consent.provider_thread_id != thread.provider_thread_id
             or consent.archived != operation.target_archived
+            or consent.spam != operation.target_spam
         ):
             return operation
         try:
@@ -2089,6 +2177,10 @@ class EmailExperienceService:
         observed_inbox = any("INBOX" in value for value in labels.values())
         if observed_inbox == operation.target_archived:
             return operation
+        if operation.target_spam and (
+            any("SPAM" in value for value in labels.values()) != operation.target_archived
+        ):
+            return operation
         return operation.model_copy(update={"status": "completed", "error": None})
 
     async def import_thread(
@@ -2148,13 +2240,20 @@ class EmailExperienceService:
                     references=str(raw.get("references", "")).split(),
                     labels=list(raw.get("label_ids", [])),
                     direction="sent" if raw.get("direction") == "sent" else "received",
+                    sender_check=raw["sender_check"]
+                    if raw.get("sender_check") in {"pass", "fail"}
+                    else "none",
                 )
             )
         messages.sort(key=lambda item: (item.sent_at, item.id))
+        # Like labels, Gmail's sender check is mailbox metadata, not content (ADR-0165).
         fingerprint = hashlib.sha256(
             json.dumps(
                 {
-                    "messages": [message.model_dump(mode="json") for message in messages],
+                    "messages": [
+                        message.model_dump(mode="json", exclude={"sender_check"})
+                        for message in messages
+                    ],
                     "complete": normalized.get("complete", False),
                 },
                 sort_keys=True,
@@ -2164,6 +2263,7 @@ class EmailExperienceService:
             message.complete for message in messages
         )
         in_inbox = any("INBOX" in message.labels for message in messages)
+        in_spam = any("SPAM" in message.labels for message in messages)
         source_key = hashlib.sha256(f"{account_id}:{provider_id}".encode()).hexdigest()
         now = self.clock.now()
         async with self.uow_factory() as uow, uow.email.lock(principal):
@@ -2188,17 +2288,31 @@ class EmailExperienceService:
                     uow, principal, previous, normalized, source_session_id, run
                 )
             )
+            # An uncertain Not spam that a fresh read now confirms is the owner's verdict.
+            restored_from_spam = (
+                archive_operation is not None
+                and archive_operation.status == "completed"
+                and archive_operation.target_spam
+                and not archive_operation.target_archived
+            )
             if previous is not None and (
                 previous.source_fingerprint == fingerprint
                 or (
                     previous.complete == complete
-                    and [message.model_dump(exclude={"labels"}) for message in previous.messages]
-                    == [message.model_dump(exclude={"labels"}) for message in messages]
+                    and [
+                        message.model_dump(exclude={"labels", "sender_check"})
+                        for message in previous.messages
+                    ]
+                    == [
+                        message.model_dump(exclude={"labels", "sender_check"})
+                        for message in messages
+                    ]
                 )
             ):
                 if (
                     previous.messages == messages
                     and previous.in_inbox == in_inbox
+                    and previous.in_spam == in_spam
                     and previous.archive_operation == archive_operation
                 ):
                     await self._learn_history(
@@ -2211,7 +2325,15 @@ class EmailExperienceService:
                     update={
                         "messages": messages,
                         "in_inbox": in_inbox,
+                        "in_spam": in_spam,
                         "archive_operation": archive_operation,
+                        "spam_cleared": previous.spam_cleared or restored_from_spam,
+                        "assessment_version": ""
+                        if any(
+                            before.sender_check != after.sender_check
+                            for before, after in zip(previous.messages, messages, strict=True)
+                        )
+                        else previous.assessment_version,
                     }
                 )
                 await save_value(uow.email, principal, "thread", str(updated.id), updated, now)
@@ -2235,6 +2357,8 @@ class EmailExperienceService:
                 source_fingerprint=fingerprint,
                 last_accessed_at=now,
                 in_inbox=in_inbox,
+                in_spam=in_spam,
+                spam_cleared=previous is not None and (previous.spam_cleared or restored_from_spam),
                 archive_operation=archive_operation,
                 source_session_ids=list(
                     dict.fromkeys(
@@ -2479,6 +2603,19 @@ class EmailExperienceService:
             )
             if assessment.get("bulk"):
                 priority *= 0.4
+            # ADR-0165: protection keyed to an address needs a verified address.
+            received = [m for m in thread.messages if m.direction == "received"]
+            protected = (replies > 0 or supported) and (
+                not received or received[-1].sender_check != "fail"
+            )
+            suspected_spam = (
+                self.subscriptions.enabled
+                and assessment.get("spam") is True
+                and assessment.get("grounded") is True
+                and not thread.spam_cleared
+                and not protected
+            )
+            assessment = {**assessment, "suspected_spam": suspected_spam}
             topics = assessment.get("topics", [])
             if (
                 not isinstance(topics, list)
@@ -2500,6 +2637,7 @@ class EmailExperienceService:
                     "profile_revision": state.profile_revision,
                     "assessment_version": EMAIL_POLICY_VERSION,
                     "attention_expires_at": expires_at,
+                    "suspected_spam": suspected_spam,
                 }
             )
             await save_value(

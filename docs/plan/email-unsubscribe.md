@@ -16,6 +16,8 @@ introduced, the approval floor, and the egress proxy all stay exactly as they
 are. [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) records the
 architectural decisions, the owner's four shaping choices of 2026-09-19, and
 the one security-posture change this milestone makes.
+[ADR-0165](../adr/0165-suspected-spam-flag-and-thread-report-spam.md) extends
+the milestone with the suspected-spam flag and thread-level Report spam.
 
 The owner spends a lot of time unsubscribing from junk mail. Doing it by hand
 means opening each message, finding a small link, following it to a web page,
@@ -47,11 +49,12 @@ implementation may trade away.
 | Egress | The platform sends the request server-side through the egress proxy. This is the platform's first direct dial to a host that mail content selected, and the owner approved it explicitly. |
 | Fallbacks | Report spam, `mailto:` unsubscribe, and archiving the sender's existing Inbox mail. |
 | Deferred | Web-form unsubscribes through browser automation, and every standing or automatic unsubscribe rule. |
+| Spam (2026-10-08) | While processing mail, Veetbot flags suspected spam and the owner confirms. A flag never moves mail; Report spam is an owner tap on one thread, with Not spam to undo it. |
 
 ## Scope
 
 Milestone 31 delivers the census, the three actions, the consent that
-authorizes them, and the surfaces that operate them.
+authorizes them, the suspected-spam flag, and the surfaces that operate them.
 
 - **The census.** One record per bulk sender per account, derived from header
   metadata the refresh task already pages through, within the ninety-day
@@ -65,9 +68,14 @@ authorizes them, and the surfaces that operate them.
   authentication, or keep mailing after they were asked to stop.
 - **Sender cleanup.** Optionally archive the sender's existing Inbox mail as
   part of the same consented gesture.
-- **Surfaces.** Four routes under `/v1/email/subscriptions`, an additive
-  `subscription` block on the thread projection, two builtin Chat tools, and
-  the native Subscriptions view and thread action on iPhone, iPad, and Mac.
+- **Suspected spam.** A spam verdict in the importance assessment, informed
+  by Gmail's own sender check, flags a thread without touching Gmail; the
+  owner reports one thread as spam, or clears the flag, with one tap.
+- **Surfaces.** Four routes under `/v1/email/subscriptions` and two under
+  `/v1/email/threads`, an additive `subscription` block and spam fields on
+  the thread projection, two builtin Chat tools, and the native
+  Subscriptions view, thread actions, and suspected-spam tag on iPhone, iPad,
+  and Mac.
 
 Eight things are out of scope, and each is named because a reader who does
 not find it here should find the reason here.
@@ -85,7 +93,8 @@ not find it here should find the reason here.
 3. **Standing rules and automatic unsubscribes.** RFC 8058 forbids the
    request without user consent, roadmap B8 still owns standing grants, and
    Milestone 26 excludes automatic mailbox actions. Nothing here unsubscribes,
-   reports, or archives without an owner act for those exact senders.
+   reports, or archives without an owner act for those exact senders or that
+   exact thread; a suspected-spam flag is not such an act.
 4. **Background or scheduled cleanup.** The census advances only inside
    foreground refresh slices (email-experience.md:157-162). There is no
    monitor, digest, or notification about subscriptions.
@@ -111,7 +120,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:773-789).
+  (email-experience.md:776-779).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -561,6 +570,75 @@ which also covers the confirmation message many senders send.
 Nothing in the follow-up dispatches anything. It is a state change the owner
 sees the next time the list is open.
 
+## Suspected spam
+
+On 2026-10-08 the owner asked Veetbot to flag spam while it processes mail,
+and chose the rule that governs it: Veetbot flags, the owner confirms
+([ADR-0165](../adr/0165-suspected-spam-flag-and-thread-report-spam.md)).
+Gmail's own filter already holds back most spam, and Spam is excluded from
+refresh, so the target is junk that reached the Inbox anyway.
+
+**The verdict.** The importance assessment
+(email-experience.md:376-399) gains one boolean, `spam`, beside `bulk`. Spam
+is unsolicited mail that is deceptive or unwanted and comes from a party with
+no relationship to the owner: phishing, scams, fake invoices and account
+notices, and mass cold marketing. Mail the owner signed up for is `bulk`, not
+spam, and a real person's first contact about a real matter — a founder's
+pitch, an introduction, a recruiter — is never spam. When the evidence is
+unclear the verdict is false. The prompt and both assessment revisions
+change, so retained mail is re-assessed in the existing bounded foreground
+slices.
+
+**The sender check.** The read server adds one closed field to every message
+it returns, `sender_check`: `pass` or `fail` when the first
+`Authentication-Results` header carrying Gmail's identifier states that DMARC
+result, and `none` otherwise. It is parsed exactly as the census parses DKIM
+— Gmail's topmost verdict only, with comments and quoted text discarded — so
+a sender's forged header cannot set it. It reaches the assessment as
+evidence, not as a verdict of its own: a misconfigured legitimate sender, such
+as a founder writing through an outreach tool or a list that rewrites mail,
+fails it too. Like labels it is mailbox metadata, so it changes neither the
+content revision nor the source fingerprint, and mail cached before it
+existed reads `none`. A changed sender check invalidates the cached assessment
+for the next bounded refresh slice; label-only changes keep it current.
+
+**The flag.** A thread is *suspected spam* when the feature is enabled, its
+newest grounded assessment says `spam`, the owner has not cleared it, and its
+sender is not protected. A sender is protected when the owner wrote to one of
+the thread's senders inside the window, or the assessment cited a
+relationship memory the server admitted — unless the newest received message
+failed the sender check, because protection keyed to an address needs a
+verified address. A rejected or ungrounded assessment never flags. The flag
+is stored on the thread and the importance score beneath it is kept.
+
+**What the flag does.** A suspected thread projects with priority zero and no
+reply needed, so it leaves the priority view, receives no automatic draft,
+and is absent from Chat's priority context. It forms no memory: source
+validation treats it as bulk mail (ADR-0116), and refresh records the skip
+reason `spam_assessment`. It stays in Other and All mail with a *Suspected
+spam* tag. Explicit owner feedback applies after the flag, so marking the
+thread Important still brings it back. A flag never changes Gmail and never
+creates a consent; nothing a model, a refresh, or mail content produces can.
+
+**Clearing a flag.** Not spam on a flagged thread clears the flag for that
+thread. Its importance returns at once, later assessments never flag it
+again, and nothing changes in Gmail. The same command with `cleared` false
+restores the flag's eligibility.
+
+**Report spam on a thread.** Any conversation in the Inbox can be reported,
+flagged or not. The command is Archive's owner gesture with a different fixed
+delta (email-experience.md:774-794): the owner names one thread and the
+desired state, and the server derives the account, the provider thread, and
+the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
+only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.
+Archive's consent, its 120-second expiry, the exact-argument approval, the
+effect-boundary recheck, idempotent replay, and the uncertainty rule apply
+unchanged, and a pending Inbox operation of the other kind conflicts. A
+reported thread stays in Other and All mail as *Reported as spam*, offering
+Not spam, until it leaves the window. A thread report changes no
+subscription record; reporting a whole list remains the sender-level action,
+and gate 11 governs those label actions while gate 22 governs this one.
+
 ## The Chat tools
 
 | Tool | Classification | Purpose |
@@ -579,9 +657,9 @@ downstream of it accordingly.
 
 ## The routes
 
-All four are absent unless `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` is set, carry
+All six are absent unless `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` is set, carry
 `Cache-Control: private, no-store`, and answer a foreign or unknown
-subscription with an indistinguishable 404.
+subscription or thread with an indistinguishable 404.
 
 | Route | Scope | Operation |
 | --- | --- | --- |
@@ -589,8 +667,10 @@ subscription with an indistinguishable 404.
 | `POST /v1/email/subscriptions/unsubscribe` | `email.write` | One to twenty-five `{subscription_id, evidence_digest, expected_revision}` targets, `archive_existing`, and an idempotency key. Admits one typed task. |
 | `POST /v1/email/subscriptions/{id}/spam` | `email.write` | `expected_revision`, a strict `spam` boolean (`false` is Not spam), and an idempotency key. |
 | `POST /v1/email/subscriptions/{id}/keep` | `email.write` | `expected_revision` and a strict `kept` boolean. Changes no mailbox. |
+| `POST /v1/email/threads/{id}/spam` | `email.write` | `expected_revision`, a strict `spam` boolean (`false` is Not spam, for a thread in Spam), and an idempotency key. Admits one Inbox gesture. |
+| `POST /v1/email/threads/{id}/spam-flag` | `email.write` | A strict `cleared` boolean. Clears or restores the suspected-spam flag and returns the thread. Changes no mailbox. |
 
-The two commands that admit a task also require `email.read`, `run.write`,
+The three commands that admit a task also require `email.read`, `run.write`,
 `session.write`, `approval.resolve`, and each target account's exact MCP
 scopes for what its mechanism calls — read always, send for a `mailto`
 target, write for cleanup or a spam report — checked at admission and again
@@ -599,10 +679,13 @@ at dispatch. A request cannot mint account authority. Status is the existing
 their durable result; a stale revision conflicts without changing state.
 
 Two projections grow additively. The account projection advertises
-`unsubscribe_supported`. The thread projection carries a nullable
-`subscription` block — id, state, mechanism, destination, evidence digest,
-and revision — on thread detail when the conversation belongs to one, which
-is what places the action on a thread.
+`unsubscribe_supported`, and `spam_supported` where Archive's authority holds
+under the flag. The thread projection carries a nullable `subscription`
+block — id, state, mechanism, destination, evidence digest, and revision — on
+thread detail when the conversation belongs to one, which is what places the
+action on a thread. Rows and detail also carry `suspected_spam`,
+`spam_cleared`, and `in_spam`, and the existing `archive_operation` gains
+`target_spam`, so a pending report is told apart from an archive.
 
 ## The native experience
 
@@ -631,6 +714,15 @@ server or account that does not advertise `unsubscribe_supported` shows no
 Subscriptions entry and no thread action, and the client never substitutes
 another command for the missing one.
 
+A suspected thread carries a *Suspected spam* tag in its row and its detail.
+The detail says why and offers Report spam and Not spam, and every Inbox
+thread offers Report spam among its thread actions. Report spam removes the
+row at once and settles from the durable operation as Archive does,
+restoring the row with an actionable error when the outcome failed, is
+uncertain, or cannot be read. A reported thread reads *Reported as spam* and
+offers Not spam. Where `spam_supported` is absent none of this appears, and
+the client never falls back to Archive.
+
 ## Privacy, retention, and telemetry
 
 An unsubscribe address carries a token that identifies the owner to the
@@ -648,6 +740,10 @@ content under email-experience.md's privacy rules.
 - Telemetry is content-free: subscriptions by state and mechanism, outcome
   codes, consent expiries and mismatches, time from gesture to outcome, and
   the `still_sending` rate.
+- The spam verdict, the flag, and the sender check are mailbox state under
+  the same rules: they appear only in the owner's projections, carry no
+  sender identity into logs or metrics, and leave with their thread under
+  source exclusion and principal erasure.
 
 Evidence blocks are erased when a subscription becomes `kept`,
 `unsubscribed`, or `reported_spam`, and when the evidence message leaves the
@@ -666,10 +762,10 @@ existing `email_records` table.
 
 `AGENT_EMAIL_UNSUBSCRIBE_ENABLED` defaults to off and requires both
 `AGENT_EMAIL_ENABLED` and `AGENT_EMAIL_MODE_ENABLED`; set without them it is
-a configuration error at composition. Unset, the four routes are unmounted,
+a configuration error at composition. Unset, the six routes are unmounted,
 neither builtin tool is registered, the unsubscribe transport is never
-constructed, refresh builds no census, and `get_unsubscribe` is never
-called. `runtime/limits.yaml` gains `email.unsubscribe_grace_days`, default
+constructed, refresh builds no census, `get_unsubscribe` is never called, and
+no thread is flagged as suspected spam. `runtime/limits.yaml` gains `email.unsubscribe_grace_days`, default
 10, bounded from 2 through 60. The request's shape, its deadlines, the batch
 bound, and the consent expiry are constants, because a knob on any of them
 would be a way to weaken a gate. That limit is the one versioned knob this
@@ -679,8 +775,8 @@ deadline, because one gesture may send mail and page a sender's Inbox after
 its one-click request; the consent's 120-second expiry still bounds every
 approval it resolves.
 
-Typed unsubscribe, spam, and cleanup tasks perform no model work and reserve
-no automatic-email dollars, so an exhausted learning allowance never blocks
+Typed unsubscribe, spam, and cleanup tasks, and thread spam reports, perform
+no model work and reserve no automatic-email dollars, so an exhausted learning allowance never blocks
 an explicit owner action. They remain bounded by ordinary tool, time,
 concurrency, and authority limits.
 
@@ -700,6 +796,9 @@ concurrency, and authority limits.
 | A redirect to another host | Never followed; recorded as a failure. |
 | DNS rebinding | One resolution, one dial, at the proxy. |
 | A crafted identity widening a label action | Identity grammar, server-composed query, post-filter on every result, subset check in the consumer. |
+| Mail that tells the agent it is spam, or that it is not | The verdict only flags or protects; it never moves mail, and the owner's tap is the only path to `SPAM`. |
+| A forged sender-check result | Only Gmail's own, topmost `Authentication-Results` verdict is read, comments and quoted text discarded. |
+| A spoofed known contact | Protection needs a passing or absent sender check; a failed check removes it. |
 
 ## Hard gates
 
@@ -795,12 +894,12 @@ concurrency, and authority limits.
     `still_sending` and mail inside it changes nothing; and the follow-up
     dispatches nothing. Registered as `gate.email.unsubscribe_outcome_honesty`,
     case. **M31.**
-15. **Routes are flagged, scoped, and bounded.** The four routes are absent
+15. **Routes are flagged, scoped, and bounded.** The six routes are absent
     without the flag; each requires its exact email scope and current
     account authority for what its mechanism calls; every command has
     validation, authorization, conflict, failure, and retry coverage; and
     responses are private, never include the address, and hide foreign
-    subscriptions as 404. Registered as
+    subscriptions and threads as 404. Registered as
     `gate.email.unsubscribe_routes_scope_and_flag`, structural. **M31.**
 16. **The Chat tools are confined.** `email.subscriptions` is read-only with
     `EXTERNAL_UNTRUSTED` output and never returns the address;
@@ -822,20 +921,46 @@ concurrency, and authority limits.
     **M31.**
 19. **The native experience is complete and honest.** iPhone, compact and
     regular iPad, and Mac present the Subscriptions view, the thread action,
-    and the confirmation naming each mechanism; rows settle from the durable
-    operation and restore with an actionable error; selection stops at
-    twenty-five and skips protected rows; and a server or account without
-    support shows nothing in its place. Registered as
+    the confirmation naming each mechanism, the suspected-spam tag, and
+    thread Report spam and Not spam; rows settle from the durable operation
+    and restore with an actionable error; selection stops at twenty-five and
+    skips protected rows; and a server or account without support shows
+    nothing in its place. Registered as
     `gate.email.unsubscribe_native_experience`, case. **M31.**
-20. **Integrated release evidence.** Every gate above, the local,
+20. **Suspected spam is a flag, never a mailbox action.** A grounded `spam`
+    verdict flags a thread only with the flag set, never for a protected
+    sender, and never after the owner cleared it, while a failed sender
+    check removes protection; a rejected or ungrounded assessment never
+    flags; a flagged thread projects with priority zero and no reply
+    needed, leaves the priority view, receives no automatic draft, and forms
+    no memory, while explicit owner feedback still applies; clearing changes
+    no mailbox; and no verdict, refresh, or mail content creates a consent
+    or a Gmail write. Registered as `gate.email.spam_flag`, case. **M31.**
+21. **The sender check is Gmail's own verdict.** Over generated header sets,
+    the read server reports `pass` or `fail` only from the DMARC result in
+    the first `Authentication-Results` header carrying Gmail's identifier,
+    and `none` otherwise; comments, quoted text, and forged lower headers
+    never change it; and it changes neither a thread's content revision nor
+    its source fingerprint. Registered as `gate.email.spam_sender_check`,
+    property. **M31.**
+22. **Thread Report spam is an exact owner gesture.** The route requires
+    Archive's scopes and current account authority; Report spam adds `SPAM`
+    and removes `INBOX` from exactly the named conversation, and Not spam,
+    only for a thread in Spam, adds `INBOX` and removes `SPAM`; the consent
+    is immutable, expires after 120 seconds, and resolves only an exact
+    tool and argument match, rechecked at the effect boundary; a pending
+    Inbox operation of the other kind conflicts; an identical retry replays
+    its durable result; and an uncertain outcome is never retried.
+    Registered as `gate.email.spam_thread_gesture`, case. **M31.**
+23. **Integrated release evidence.** Every gate above, the local,
     PostgreSQL, and native lanes, and an owner-authorized real-mailbox smoke
     on both accounts — one accepted one-click request, one `mailto`
-    unsubscribe, one spam report reversed by Not spam, and one cleanup —
-    pass, with final-head hosted review and merged-revision production
-    evidence. Registered as `gate.email.unsubscribe_release_evidence`, case.
+    unsubscribe, one sender and one thread spam report each reversed by Not
+    spam, and one cleanup — pass, with final-head hosted review and
+    merged-revision production evidence. Registered as `gate.email.unsubscribe_release_evidence`, case.
     **M31.**
 
-These twenty registry-backed gates are the milestone's blocking delivery
+These twenty-three registry-backed gates are the milestone's blocking delivery
 contract. They do not advance the verified gate ceiling, which still moves
 only in milestone order. Pending check references remain pending until
 matching implementation and verification exist, and no fake provider stands
@@ -854,6 +979,9 @@ in for the real-mailbox smoke.
 - **Gesture to outcome** — time from consent to a settled operation.
 - **Consent refusals** — expiries and mismatches; any non-zero mismatch
   count is a defect to investigate.
+- **False-flag rate** — flagged threads the owner cleared, against flagged
+  threads the owner reported. A rising rate is the case for tightening the
+  verdict, not for hiding the flag.
 
 ## Build sequence
 
@@ -871,7 +999,9 @@ in for the real-mailbox smoke.
    privacy suite. Gates 15 and 17.
 7. The native Subscriptions view and thread action on the existing Swift
    lanes. Gate 19.
-8. Integrated evidence and the owner's real-mailbox smoke. Gate 20.
+8. The suspected-spam flag, the sender check, thread Report spam, and their
+   native surfaces. Gates 20, 21, and 22, and gate 19's spam cases.
+9. Integrated evidence and the owner's real-mailbox smoke. Gate 23.
 
 ## Decisions
 
@@ -900,6 +1030,15 @@ in for the real-mailbox smoke.
    all.
 8. **Not spam is a command.** A one-tap action that starts a thirty-day
    deletion clock needs its inverse in the same place.
+9. **Flag, never move.** The owner chose confirmation over automatic Spam
+   moves on 2026-10-08. A false positive on a founder's cold introduction
+   would be gone in thirty days, and the owner reads a flag in seconds.
+10. **The sender check informs; it does not decide.** A DMARC failure is
+    common among legitimate senders with careless configuration, which
+    includes exactly the cold introductions the owner most wants to see.
+11. **Report spam on a thread reuses Archive.** The same gesture, consent,
+    and recovery with a different fixed delta, rather than a second copy of
+    the machinery; the operation's `target_spam` tells the two apart.
 
 ## Open questions
 
@@ -908,5 +1047,6 @@ in for the real-mailbox smoke.
    the owner's real mailboxes.
 2. Whether `redirect_refused` is common enough among otherwise compliant
    senders to deserve a distinct *request delivered, outcome unknown* state.
-3. Whether Report spam should also be offered on a bulk thread that belongs
-   to no subscription, which today it is not.
+3. Whether Not spam on a flagged thread should also protect the sender's
+   later threads; ADR-0165 keeps it to the one thread until the false-flag
+   rate says otherwise.

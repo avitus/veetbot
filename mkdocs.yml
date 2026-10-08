@@ -137,6 +137,8 @@ nav:
       - ADR-0162 Bounded Readable Browser Snapshots: adr/0162-bounded-readable-browser-snapshots.md
       - ADR-0163 Focused Browser Observations and Recovery: adr/0163-focused-browser-observations-and-recovery.md
       - ADR-0164 Browser Autonomy and Verified Resumption: adr/0164-browser-autonomy-and-verified-resumption.md
+      - ADR-0165 Suspected-spam Flag and Thread Report Spam: adr/0165-suspected-spam-flag-and-thread-report-spam.md
+      - ADR-0166 Resume Adopts History Committed After Its Checkpoint: adr/0166-resume-adopts-history-committed-after-its-checkpoint.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
       - ADR-0002 Provider-neutral model protocol: adr/0002-provider-neutral-model-protocol.md
       - ADR-0003 Event log, projections, and checkpoints: adr/0003-event-log-and-projections.md

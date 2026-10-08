@@ -55,12 +55,25 @@ SUITES = (
     "EmailSubscriptionsViewModelTests",
     "EmailSubscriptionViewStructureTests",
 )
+# ADR-0165: the suspected-spam flag and thread Report spam live beside Archive's cases.
+SPAM_CASES = (
+    "testOlderServerOmitsSpamState",
+    "testSpamActionsNeedTheThreadsOwnAccountSupport",
+    "testNotSpamClearsTheFlagWithoutAMailboxWrite",
+    "testReportedThreadRestoresThroughNotSpam",
+)
+SPAM_PARAMETERIZED_CASES = (
+    "testSpamStateSurvivesRoundTrip(inSpam:)",
+    "testReportSpamRestoresOnlyUnconfirmedOutcomes(outcome:)",
+)
 JOURNEYS = (
     "testSubscriptionsCensusUnsubscribesOneSenderAfterConfirmation",
     "testSubscriptionsSelectAllSkipsProtectedAndUncheckedSenders",
     "testSubscriptionsFailedUnsubscribeRestoresTheRowWithWhatRemains",
     "testSubscriptionsThreadActionUnsubscribesTheConversationsSender",
     "testSubscriptionsStayHiddenWhereNoAccountAdvertisesThem",
+    "testSuspectedSpamNotSpamClearsTheFlag",
+    "testSuspectedSpamReportSpamRemovesTheConversation",
 )
 
 
@@ -94,13 +107,21 @@ def native_command(arguments: list[str], environment: dict[str, str], *, timeout
 def test_unsubscribe_native_experience(apple_environment: dict[str, str]) -> None:
     """The census, its confirmation, the thread action, and honest degradation."""
 
+    spam = [name.split("(")[0] for name in (*SPAM_CASES, *SPAM_PARAMETERIZED_CASES)]
     output = native_command(
-        ["swift", "test", "--package-path", "clients/apple", "--filter", "|".join(SUITES)],
+        [
+            "swift",
+            "test",
+            "--package-path",
+            "clients/apple",
+            "--filter",
+            "|".join((*SUITES, *spam)),
+        ],
         apple_environment,
     )
-    for name in PACKAGE_CASES:
+    for name in (*PACKAGE_CASES, *SPAM_CASES):
         assert f"Test {name}() passed" in output, f"Native test did not report passing: {name}"
-    for name in PARAMETERIZED_CASES:
+    for name in (*PARAMETERIZED_CASES, *SPAM_PARAMETERIZED_CASES):
         passed = re.search(rf"Test {re.escape(name)} with \d+ test cases? passed", output)
         assert passed is not None, f"Native test did not report passing: {name}"
     for suite in SUITES:

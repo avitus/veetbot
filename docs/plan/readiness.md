@@ -488,7 +488,7 @@ detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
 at `policy-and-approvals.md:1222-1223` and the resolve at
 `policy-and-approvals.md:1250`, and one reference in
-`runtime-loop.md:1240` to `POST /runs/{id}/input` that routed to an
+`runtime-loop.md:1271` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -569,7 +569,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4569-4646`
+Section 28 of the plan is not empty — `engineering-plan.md:4577-4654`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -588,7 +588,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1538`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4644` requires a container-escape attempt as
+    `engineering-plan.md:4652` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -995,7 +995,7 @@ That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1816`, and the sibling join
-at `runtime-loop.md:1197` reads it. Restricted context is
+at `runtime-loop.md:1228` reads it. Restricted context is
 `context-engine.md:504`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
@@ -1004,7 +1004,7 @@ gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:1053`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
-`runtime-loop.md:1205`: *"the parent's `deadline_at` is copied onto
+`runtime-loop.md:1236`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:1049`. Two are partial: the explicit objective has a
@@ -1017,7 +1017,7 @@ separate trace and the artifact references, stated at
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
-`event-log-and-persistence.md:782` declares a unique index on
+`event-log-and-persistence.md:818` declares a unique index on
 `session_id` where status is not one of `COMPLETED`, `FAILED`, or
 `CANCELLED`, to enforce Section 27.5's one active run per session. A
 parent suspended on a child waits in `WAITING_FOR_APPROVAL` carrying
@@ -1557,7 +1557,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4648-4805` for links to other documents returned
+`engineering-plan.md:4656-4813` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1778,7 +1778,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1520` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2655` against
-    `model-gateway.md:1970` and `milestone-map.md:1856`. The map
+    `model-gateway.md:1970` and `milestone-map.md:1861`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1787,7 +1787,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4644` requires a test the harness's case set
+    `engineering-plan.md:4652` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1978,6 +1978,8 @@ native experience, and integrated release evidence. The design touches no
 roadmap item: every action keeps its approval, nothing runs unattended, and
 no new Google permission is requested. Its one posture change, a dedicated
 public-HTTPS egress transport for a single tool, is owned by ADR-0112
-decision 5. Nineteen gates bind executable checks as of 2026-09-20; integrated
-release evidence remains pending, and the milestone does not move the verified
-ceiling.
+decision 5. Nineteen gates bind executable checks as of 2026-09-20. ADR-0165
+adds three `gate.email.spam_*` gates on 2026-10-08 for the suspected-spam flag,
+Gmail's sender check, and thread-level Report spam, designed in the same
+document. Integrated release evidence remains pending, and the milestone does
+not move the verified ceiling.

@@ -384,7 +384,7 @@
   milestone: 31
   kind: structural
   spec: docs/plan/email-unsubscribe.md#hard-gates
-  statement: "**Routes are flagged, scoped, and bounded** — The four routes are absent without the flag; each requires its exact email scope and current account authority for what its mechanism calls; every command has validation, authorization, conflict, failure, and retry coverage; and responses are private, never include the address, and hide foreign subscriptions as 404."
+  statement: "**Routes are flagged, scoped, and bounded** — The six routes are absent without the flag; each requires its exact email scope and current account authority for what its mechanism calls; every command has validation, authorization, conflict, failure, and retry coverage; and responses are private, never include the address, and hide foreign subscriptions and threads as 404."
   check: tests/gates/test_email_unsubscribe_m31.py::test_unsubscribe_routes_are_flagged_scoped_and_bounded
 - id: gate.email.unsubscribe_chat_tools
   milestone: 31
@@ -408,11 +408,29 @@
   milestone: 31
   kind: case
   spec: docs/plan/email-unsubscribe.md#hard-gates
-  statement: "**The native experience is complete and honest** — iPhone, compact and regular iPad, and Mac present the Subscriptions view, the thread action, and the confirmation naming each mechanism; rows settle from the durable operation and restore with an actionable error; selection stops at twenty-five and skips protected rows; and a server or account without support shows nothing in its place."
+  statement: "**The native experience is complete and honest** — iPhone, compact and regular iPad, and Mac present the Subscriptions view, the thread action, the confirmation naming each mechanism, the suspected-spam tag, and thread Report spam and Not spam; rows settle from the durable operation and restore with an actionable error; selection stops at twenty-five and skips protected rows; and a server or account without support shows nothing in its place."
   check: tests/native/test_email_unsubscribe_native_m31.py::test_unsubscribe_native_experience
+- id: gate.email.spam_flag
+  milestone: 31
+  kind: case
+  spec: docs/plan/email-unsubscribe.md#hard-gates
+  statement: "**Suspected spam is a flag, never a mailbox action** — A grounded `spam` verdict flags a thread only with the flag set, never for a protected sender, and never after the owner cleared it, while a failed sender check removes protection; a rejected or ungrounded assessment never flags; a flagged thread projects with priority zero and no reply needed, leaves the priority view, receives no automatic draft, and forms no memory, while explicit owner feedback still applies; clearing changes no mailbox; and no verdict, refresh, or mail content creates a consent or a Gmail write."
+  check: tests/gates/test_email_spam_m31.py::test_suspected_spam_is_a_flag_never_a_mailbox_action
+- id: gate.email.spam_sender_check
+  milestone: 31
+  kind: property
+  spec: docs/plan/email-unsubscribe.md#hard-gates
+  statement: "**The sender check is Gmail's own verdict** — Over generated header sets, the read server reports `pass` or `fail` only from the DMARC result in the first `Authentication-Results` header carrying Gmail's identifier, and `none` otherwise; comments, quoted text, and forged lower headers never change it; and it changes neither a thread's content revision nor its source fingerprint."
+  check: tests/gates/test_email_spam_m31.py::test_sender_check_is_gmails_own_verdict
+- id: gate.email.spam_thread_gesture
+  milestone: 31
+  kind: case
+  spec: docs/plan/email-unsubscribe.md#hard-gates
+  statement: "**Thread Report spam is an exact owner gesture** — The route requires Archive's scopes and current account authority; Report spam adds `SPAM` and removes `INBOX` from exactly the named conversation, and Not spam, only for a thread in Spam, adds `INBOX` and removes `SPAM`; the consent is immutable, expires after 120 seconds, and resolves only an exact tool and argument match, rechecked at the effect boundary; a pending Inbox operation of the other kind conflicts; an identical retry replays its durable result; and an uncertain outcome is never retried."
+  check: tests/gates/test_email_spam_m31.py::test_thread_report_spam_is_an_exact_owner_gesture
 - id: gate.email.unsubscribe_release_evidence
   milestone: 31
   kind: case
   spec: docs/plan/email-unsubscribe.md#hard-gates
-  statement: "**Integrated release evidence** — Every gate above, the local, PostgreSQL, and native lanes, and an owner-authorized real-mailbox smoke on both accounts — one accepted one-click request, one `mailto` unsubscribe, one spam report reversed by Not spam, and one cleanup — pass, with final-head hosted review and merged-revision production evidence."
+  statement: "**Integrated release evidence** — Every gate above, the local, PostgreSQL, and native lanes, and an owner-authorized real-mailbox smoke on both accounts — one accepted one-click request, one `mailto` unsubscribe, one sender and one thread spam report each reversed by Not spam, and one cleanup — pass, with final-head hosted review and merged-revision production evidence."
   check: tests/gates/pending.py::pending_gate

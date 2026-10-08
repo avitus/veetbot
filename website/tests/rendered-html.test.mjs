@@ -23,14 +23,16 @@ function exportedFile(pathname) {
   return /\.[a-z0-9]+$/i.test(file) ? file : `${file}.html`;
 }
 
-test("homepage identifies Veetbot and links its public policies", async () => {
+test("homepage introduces Veetbot as a personal assistant and links its public policies", async () => {
   const [html, css] = await Promise.all([
     htmlFor("/"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
+  const headline = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
-  assert.match(html, /<title>Veetbot \| Governed AI agent<\/title>/i);
-  assert.match(html, /An agent that can act\. A system you can inspect\./i);
+  assert.match(html, /<title>Veetbot \| Your personal AI assistant<\/title>/i);
+  assert.equal(headline, "An assistant that actually helps. And remembers what you told it.");
+  assert.doesNotMatch(html, /governed|inspectable|self-hostable/i, "the homepage speaks to consumers, not operators");
   assert.match(html, /Gmail/i);
   assert.match(html, /href="\/privacy"/i);
   assert.match(html, /href="\/tos"/i);
@@ -187,5 +189,6 @@ test("each legal page is dated and reachable from every page's footer", async ()
     const footer = (await htmlFor(pathname)).match(/<footer[\s\S]*?<\/footer>/)?.[0] ?? "";
     assert.match(footer, /href="\/privacy"/, `${pathname} footer omits the privacy policy`);
     assert.match(footer, /href="\/tos"/, `${pathname} footer omits the terms`);
+    assert.match(footer, /href="https:\/\/github\.com\/avitus\/veetbot"/, `${pathname} footer omits the source repository`);
   }
 });

@@ -614,10 +614,27 @@ projection carries a `subscription` block shows the same Unsubscribe action
 beside its sender and opens the same confirmation with one row; each surface
 presents only the confirmation it opened.
 
+A conversation the server flags as suspected spam (ADR-0165) carries a
+*Suspected spam* tag in its row and in its detail. The detail explains that
+nothing has changed in Gmail and offers Report spam and Not spam; Not spam
+posts `POST /v1/email/threads/{id}/spam-flag` and writes nothing to Gmail.
+Every Inbox conversation also offers Report spam in its thread actions. Report
+spam posts `POST /v1/email/threads/{id}/spam` with Archive's optimistic
+handling: the row leaves at once, the reading pane advances, and a failed,
+uncertain or unreadable outcome restores the row with an actionable error. A
+reported conversation reads *Reported as spam*, offers Not spam, and cannot be
+moved back with the Archive checkbox. Without the account's `spam_supported`
+none of these actions appear, and a missing route never falls back to Archive.
+The `--ui-testing-email-suspected-spam` fixture serves a flagged conversation
+for the `testSuspectedSpamNotSpamClearsTheFlag` and
+`testSuspectedSpamReportSpamRemovesTheConversation` journeys, which the native
+bridge runs beside the Subscriptions journeys.
+
 Run `uv run pytest tests/native/test_email_unsubscribe_native_m31.py -q` for the
 executable native unsubscribe gate check. This integration-marked bridge runs
 the real `EmailSubscriptionModelTests`, `EmailSubscriptionsViewModelTests` and
-`EmailSubscriptionViewStructureTests` Swift suites and verifies each case
+`EmailSubscriptionViewStructureTests` Swift suites, plus the named spam cases
+in `EmailArchiveModelTests` and `EmailViewModelTests`, and verifies each case
 reported passing. It needs full Xcode but no simulator, database or live
 mailbox, and an unavailable Apple lane is skipped by pytest and remains an
 unpassed active gate in the gate report.

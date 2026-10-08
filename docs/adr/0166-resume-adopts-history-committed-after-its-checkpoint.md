@@ -1,0 +1,158 @@
+# ADR-0166: A resumed run adopts the history committed after its checkpoint
+
+- Status: Accepted by the owner on 2026-10-08 (runtime repair)
+- Date: 2026-10-08
+- Related: ADR-0003 decision 12 (made mechanical), ADR-0004 (recovery),
+  ADR-0006 (continuation loss), Section 14.2
+- Detailed design: `docs/plan/event-log-and-persistence.md`,
+  `docs/plan/runtime-loop.md`
+
+## Evidence
+
+On 2026-10-07 production run b642e4d7 failed with `INTERNAL_ERROR`. Its
+second attempt wrote checkpoint 12 (`tool_pending`, one `web.fetch` call), the
+call failed, checkpoint 13 (`tool_call`) followed, and the next model turn
+committed an assistant message with a `conversation.ask_user` call. A
+maintenance prune race then deleted checkpoint 13. The third attempt resumed
+from checkpoint 12 and re-dispatched the read-only fetch, which ran again under
+a new invocation row and appended a second result for the same call. The
+fourth attempt read session history holding two results for that call and an
+unanswered question call, and context assembly raised
+`assembled context contains duplicate tool pair identifiers`.
+
+The prune race is fixed separately. Two defects made any lost checkpoint
+dangerous, whether lost to a prune, a crash between two transactions, or a
+lease expiry:
+
+1. A checkpoint stores its conversation as session history through its
+   `last_event_sequence`, so the next checkpoint's reference covers everything
+   an earlier attempt committed after it. The resumed attempt's in-memory
+   conversation stopped at the restored checkpoint, so it redid that work, and
+   the stored history held both copies.
+2. Every invocation's idempotency key includes the step that proposed it.
+   The resumed batch was dispatched at the run's current step counter, which
+   the earlier attempt had already advanced, so the pipeline did not find the
+   original invocation and executed the call again.
+
+## Decision
+
+1. **The log, not the checkpoint, says where the run is.** At resume the
+   executor appends to the restored conversation every session-history item
+   committed after the checkpoint's `last_event_sequence`, keeping the
+   in-memory conversation equal to the history its next checkpoint will
+   reference.
+2. **The checkpoint's own batch keeps its step.** When the adopted items
+   contain no model output, the batch the checkpoint recorded (pending calls,
+   or a `model_response` checkpoint's unanswered calls) re-enters the pipeline
+   at the step its `budget_state` recorded. Recorded outcomes are returned by
+   idempotency key and their context updates are reapplied. A result the log
+   already holds is not appended again, and the checkpoint's tool-usage
+   watermark decides whether the batch was counted, as before.
+3. **A turn the checkpoint never saw supersedes its batch.** When the adopted
+   items contain an assistant message or a tool call, the restored batch had
+   returned before that turn. The provider continuation is dropped, because it
+   belongs to an older turn and the newer turn's was never checkpointed. Only
+   the newest turn's unanswered calls are dispatched, at the current step,
+   because the loop starts a step only after the previous batch returns. That
+   batch was never counted, so its full size is recorded.
+4. **A committed final reply completes the run.** If the adopted history ends
+   with the final assistant message and no call is unanswered, the run has
+   answered and only its finalization was lost. The executor finalizes with
+   that message instead of asking the model again.
+
+The four-step recovery procedure of Section 14.2 is unchanged: this decision
+defines its first step, "load the latest checkpoint", as the checkpoint plus
+the log after it.
+
+## Alternatives rejected
+
+- **Excluding the abandoned suffix from history.** A marker event could hide
+  what a superseded lease epoch committed after the restored checkpoint. The
+  model would then propose that work again under new call identifiers that no
+  idempotency key matches, so a non-idempotent effect the abandoned attempt
+  completed would happen twice. It also needs a new event type, a projection
+  rule, and a way to keep owner answers and child-run results that arrive in
+  the same window.
+- **Deduplicating in context assembly.** Choosing one of two results, or
+  dropping an orphaned call, hides corruption instead of preventing it, and it
+  has to guess which result the model acted on.
+- **Writing checkpoints in the same transaction as every conversation event.**
+  It would close the crash windows but not deletion, and it puts checkpoint
+  serialization on every tool and model commit.
+
+## Consequences
+
+- Deleting any suffix of a run's non-terminal checkpoints and resuming now
+  reaches the uninterrupted run's terminal state, with every tool executed
+  once. `gate.event.checkpoint_dispensable` checks every restore point of a
+  two-tool run.
+- A turn adopted from the log loses its provider continuation, so the next
+  request omits that turn's opaque reasoning. ADR-0006 already accepts this.
+- Checkpoint-only state that steps after the checkpoint changed is not rebuilt
+  for adopted steps: loop counters, tool evidence, and context updates such as
+  loaded skills. The run repeats that work if it needs it. This is time, not
+  information.
+- Historical model-response events without a pre-batch accounting watermark
+  can undercount a fully answered adopted batch whose usage was never recorded.
+  The review amendment below closes that window for newly recorded turns.
+- Resume reads the session history once more. A long session pays for one
+  extra projection read per resumed execution.
+
+## Verification
+
+- `tests/integration/test_event_runtime_m2.py::test_lost_checkpoints_cost_time_not_information`:
+  a two-tool run interrupted after its second model turn, resumed with the last
+  one to five checkpoints deleted, plus a run interrupted while its second
+  model call was in flight. Before the fix, four restore points failed: either
+  the second call never ran or the first ran twice, and the stored history
+  failed `validate_tool_pairs`. Deleting every checkpoint already passed,
+  because reseeding reads the whole history.
+- `test_a_question_adopted_after_lost_checkpoints_survives_the_next_resume`:
+  run b642e4d7's shape through the owner's answer and the resume after it.
+  Before the fix, the resumed run re-ran the lookup and never asked the question.
+- `test_a_committed_final_reply_completes_the_resumed_run`: before the fix,
+  the resumed run asked the model again and failed when the script was
+  exhausted.
+
+## Amendment: a rebuilt batch is fitted to the tool-call budget (2026-10-08)
+
+Decisions 2 and 3 dispatched a batch rebuilt from the conversation whole. The
+loop fits each batch to `max_tool_calls` before dispatch and refuses the rest
+(ADR-0115), so a rebuilt batch can hold calls the loop refused. Resuming a
+two-call turn under a one-call budget behind a lost `tool_pending` checkpoint
+ran the refused call and failed the run with `BUDGET_EXCEEDED`.
+
+A rebuilt batch is now the model's whole turn, fitted against the count it was
+proposed under: the restored checkpoint's tool-usage watermark for the
+checkpoint's own batch, and the run's count for an adopted turn, whose batch
+was never recorded. A refusal the log does not already hold is recorded as the
+loop records it. Only the fitted calls are dispatched, and decision 3 records
+the fitted size, not the full one. A pending batch was fitted before its
+checkpoint and is unchanged.
+
+`tests/integration/test_tool_budget_refusal_history_postgres.py::test_a_resume_behind_lost_checkpoints_never_runs_a_refused_call`
+interrupts that run after its `tool_pending` checkpoint and before its
+refusals are logged, and resumes from every surviving checkpoint. Before the
+fix, five of the six restore points failed with `BUDGET_EXCEEDED`.
+
+## Review amendment: recovered guards and answered-batch accounting (2026-10-08)
+
+A recovered model turn without a saved pending batch or recorded results now
+passes the same synthesis-reserve and repeated-call guards as the normal
+loop. Pending batches and turns with recorded results have already passed
+those checks, and their identical-call counters are not incremented again.
+
+`model.response.completed` records the additive `tool_call_count_before_turn`
+watermark before dispatch. Recovery fits an adopted batch against it and
+repairs a missing count up to the watermark plus the fitted size. It never
+adds the count twice or redispatches an answered adopted call. Recovery from
+no checkpoints uses the same receipt. Historical events without the watermark
+retain their prior fallback; the missing old accounting cannot be guessed.
+
+The PostgreSQL tests in `test_tool_budget_refusal_history_postgres.py` reproduce
+the reserve and repeated-call bypasses at both a model-response checkpoint and
+a lost checkpoint, and the fully answered batch before and after its usage
+commit with zero through three lost checkpoints. Before the repair, eight
+cases failed: six dispatched forbidden calls, and two left completed work
+uncounted. These changes satisfy the existing budget and loop-guard contracts;
+no milestone, gate, scope, or effect authorization changes.

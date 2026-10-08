@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from typing import Annotated, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +41,11 @@ class SpamRequest(RevisionRequest):
 
 class KeepRequest(RevisionRequest):
     kept: bool = Field(strict=True)
+
+
+class SpamFlagRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cleared: bool = Field(strict=True)
 
 
 def _same_key(header: str | None, body: str) -> None:
@@ -123,6 +129,40 @@ def email_subscriptions_router(
         """A durable local decision; it changes no mailbox."""
         return await boundary(
             service.keep(authenticated, subscription_id, body.expected_revision, kept=body.kept)
+        )
+
+    @router.post(
+        "/v1/email/threads/{thread_id}/spam", openapi_extra={"required_scope": "email.write"}
+    )
+    async def thread_spam(
+        thread_id: UUID,
+        body: SpamRequest,
+        authenticated: Annotated[Principal, secured("email.write")],
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> EmailOperation:
+        """Archive's gesture with the Spam delta; the server derives every label (ADR-0165)."""
+        _same_key(idempotency_key, body.idempotency_key)
+        return await boundary(
+            service.report_thread_spam(
+                authenticated,
+                thread_id,
+                body.expected_revision,
+                spam=body.spam,
+                idempotency_key=body.idempotency_key,
+            )
+        )
+
+    @router.post(
+        "/v1/email/threads/{thread_id}/spam-flag", openapi_extra={"required_scope": "email.write"}
+    )
+    async def spam_flag(
+        thread_id: UUID,
+        body: SpamFlagRequest,
+        authenticated: Annotated[Principal, secured("email.write")],
+    ) -> dict[str, object]:
+        """The owner's Not spam on a flagged thread; it changes no mailbox."""
+        return await boundary(
+            service.clear_spam_flag(authenticated, thread_id, cleared=body.cleared)
         )
 
     return router

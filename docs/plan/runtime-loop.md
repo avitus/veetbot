@@ -728,9 +728,30 @@ would fail it before the model's turn is wrong for the model loop. The loop
 enforces the limit by construction instead: before dispatch it fits the batch
 to the remaining budget, runs only the calls that fit, and answers each
 refused call with a platform-trusted `tool.budget_exhausted` result. A refused
-call never reaches the tool executor, so nothing runs unaccounted for, and the
-refusals join the conversation before the `tool_pending` checkpoint so a
-resumed step re-dispatches only the fitted calls. `BudgetScope.TOOL_CALL`
+call never reaches the tool executor, so nothing runs unaccounted for, and it
+is not tool usage. Each refusal is a pipeline failure, not a policy denial, so
+the loop appends it as `tool.call.failed` carrying its result item, as the tool
+pipeline records its own refusals, and only then adds it to the conversation.
+Checkpoints store the conversation as session history built from events, so a
+refusal held only in memory would leave its call unanswered for a resumed step
+and for the session's next run. The refusals are in the log before the
+`tool_pending` checkpoint, so a resumed step re-dispatches only the fitted
+calls. A resumed run that has lost that checkpoint rebuilds the batch from the
+model's turn in its conversation, and fits the whole turn again against the
+count the batch was proposed under: the restored checkpoint's tool-usage
+watermark, or, for a turn adopted from the log, the
+`tool_call_count_before_turn` watermark on `model.response.completed`
+(ADR-0166). For a fully answered batch, recovery raises usage to that watermark
+plus the fitted batch size only if the counter is lower, without redispatching
+an adopted batch's answered calls. This also works after every checkpoint is
+lost and does not count a recorded batch twice. Legacy events without the
+watermark retain the prior accounting fallback and its undercount limitation.
+Recovery records a refusal only for a refused call the log does not already
+answer, dispatches only the fitted calls, and counts only those as usage.
+A recovered model turn with no result and no saved pending batch passes the
+same synthesis-reserve and repeated-call guards as a fresh turn. A pending
+batch or a turn with recorded results already passed them, so recovery does
+not increment its identical-call counters again. `BudgetScope.TOOL_CALL`
 carries the pre-call rule for flows that dispatch one call at a time outside
 the model loop — the email tasks — and cannot fit a batch.
 
@@ -1115,6 +1136,16 @@ if ctx.checkpoint_state.pending_tool_calls:
         )
     await ctx.checkpoint(trigger="tool_batch")
 ```
+
+**The pending calls are the ones the log leaves unanswered.** The latest
+checkpoint may be older than what the run committed: its successor can be lost
+to a crash between two transactions, an expired lease, or a deletion. Before
+dispatching anything, the executor appends the session history committed after
+the checkpoint's `last_event_sequence`. The checkpoint's batch is then
+dispatched at the step its checkpoint recorded, because that step is part of
+each invocation's idempotency key. If an adopted turn has superseded the batch,
+only that turn's unanswered calls are dispatched. An adopted final reply
+finalizes the run (ADR-0166, `event-log-and-persistence.md`).
 
 **`run.resumed` has one emitter and one condition.** No document says which
 of the four resume paths emits it. All of them do, because the condition is

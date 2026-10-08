@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-08 — Veetbot flags suspected spam
+
+- While assessing new mail, Veetbot now judges whether a conversation is spam:
+  phishing, scams, fake invoices and mass cold marketing from someone you have
+  no relationship with. Newsletters you signed up for and a real person's
+  first contact, such as a founder's pitch, are not spam. Gmail's own sender
+  authentication result is part of the evidence.
+- A suspected conversation leaves your priority list, gets no automatic draft
+  and forms no memories. It stays in Other mail with a *Suspected spam* tag.
+  Nothing moves in Gmail on its own.
+- Report spam is now available on any Inbox conversation, and Not spam undoes
+  it. Not spam on a flagged conversation clears the flag. Mail from people you
+  have written to is never flagged on its content alone (ADR-0165).
+
 ## 2026-10-07 — Browser and mailbox recovery stay responsive
 
 - New email is discovered even while earlier changed conversations are still

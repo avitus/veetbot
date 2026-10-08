@@ -1083,10 +1083,13 @@ async def test_unsubscribe_routes_are_flagged_scoped_and_bounded() -> None:
             ("POST", "/v1/email/subscriptions/unsubscribe"),
             ("POST", f"/v1/email/subscriptions/{'a' * 64}/spam"),
             ("POST", f"/v1/email/subscriptions/{'a' * 64}/keep"),
+            ("POST", f"/v1/email/threads/{UUID(int=1)}/spam"),
+            ("POST", f"/v1/email/threads/{UUID(int=1)}/spam-flag"),
         ):
             assert (await client.request(method, path, json={})).status_code == 404
         accounts = (await client.get("/v1/email/accounts")).json()["items"]
         assert all(item["unsubscribe_supported"] is False for item in accounts)
+        assert all(item["spam_supported"] is False for item in accounts)
     async with _app(mailbox, transport) as app, _client(app) as client:
         schema = create_app(
             app.services, app.settings, app.principal, app.new_request_id, app.readiness_probe
@@ -1101,6 +1104,15 @@ async def test_unsubscribe_routes_are_flagged_scoped_and_bounded() -> None:
             ("POST", "/v1/email/subscriptions/unsubscribe", "email.write"),
             ("POST", "/v1/email/subscriptions/{subscription_id}/spam", "email.write"),
             ("POST", "/v1/email/subscriptions/{subscription_id}/keep", "email.write"),
+        }
+        assert {
+            (method.upper(), path, route["required_scope"])
+            for path, methods in schema["paths"].items()
+            if path.startswith("/v1/email/threads/") and "spam" in path
+            for method, route in methods.items()
+        } == {
+            ("POST", "/v1/email/threads/{thread_id}/spam", "email.write"),
+            ("POST", "/v1/email/threads/{thread_id}/spam-flag", "email.write"),
         }
         await _refresh(app)
         listed = await client.get("/v1/email/subscriptions", params={"limit": 1})

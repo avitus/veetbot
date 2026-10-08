@@ -4219,7 +4219,15 @@ threads; owner-gesture consent for one bounded batch of at most twenty-five
 senders, and one by-value approval per batch in Chat; four routes under
 `/v1/email/subscriptions` behind a default-off flag; two builtin Chat tools;
 and the native Subscriptions view and thread action. The design declares
-twenty gates.
+twenty-three gates.
+
+On 2026-10-08 the owner extended the milestone under ADR-0165: a spam verdict
+in the importance assessment, informed by Gmail's own DMARC result, flags
+suspected spam without touching Gmail, keeping it out of the priority view,
+automatic drafts and memory; the owner clears a flag, or reports one thread as
+spam with Archive's gesture and a fixed `SPAM` delta, through two routes under
+`/v1/email/threads` behind the same flag. Nothing moves to Spam without the
+owner's tap.
 
 This amends no roadmap item. Every action keeps `REQUIRE_APPROVAL` and no
 standing authorization satisfies one, so roadmap B8 is untouched; the census
@@ -4228,7 +4236,7 @@ monitoring holds; and no new Google permission is requested. The server-side
 request is the platform's first direct dial to a host selected by mail
 content, which the owner approved explicitly in ADR-0112 decision 5.
 
-Acceptance requires all twenty gates, both repository adapters, the Apple
+Acceptance requires all twenty-three gates, both repository adapters, the Apple
 package and simulator lanes, an owner-authorized real-mailbox smoke on both
 accounts, and final-head hosted CI/review plus separately authorized
 production delivery. It does not move the verified sequential ceiling.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 from decimal import Decimal
 from email.utils import getaddresses
@@ -92,6 +93,8 @@ class EmailMessage(EmailValue):
     references: list[str] = Field(default_factory=list)
     labels: list[str] = Field(default_factory=list)
     direction: Literal["sent", "received"] = "received"
+    # Gmail's own DMARC verdict (ADR-0165): mailbox metadata, outside content identity.
+    sender_check: Literal["pass", "fail", "none"] = "none"
 
 
 class EmailArchiveOperation(EmailValue):
@@ -102,6 +105,8 @@ class EmailArchiveOperation(EmailValue):
     operation_id: UUID
     run_id: UUID
     target_archived: bool
+    # A spam report or its reversal (ADR-0165), told apart from a plain archive.
+    target_spam: bool = False
     status: Literal["pending", "completed", "failed", "uncertain"] = "pending"
     error: str | None = None
 
@@ -120,6 +125,8 @@ class EmailArchiveConsent(EmailValue):
     expected_revision: int
     archived: bool
     expires_at: datetime
+    # Through Spam (ADR-0165): archived reports spam, restored is Not spam.
+    spam: bool = False
 
     @property
     def tool_name(self) -> str:
@@ -128,20 +135,34 @@ class EmailArchiveConsent(EmailValue):
 
     @property
     def arguments(self) -> dict[str, object]:
-        """Return the sole INBOX transition; callers cannot supply arbitrary labels."""
+        """Return the sole Inbox transition; callers cannot supply arbitrary labels."""
+        if self.spam:
+            moved, kept = (["SPAM"], ["INBOX"]) if self.archived else (["INBOX"], ["SPAM"])
+            return {
+                "thread_ids": [self.provider_thread_id],
+                "add_label_ids": moved,
+                "remove_label_ids": kept,
+            }
         return {
             "thread_ids": [self.provider_thread_id],
             "add_label_ids": None if self.archived else ["INBOX"],
             "remove_label_ids": ["INBOX"] if self.archived else None,
         }
 
+    @property
+    def digest(self) -> str:
+        """Bind the gesture; a plain archive keeps the digest it had before spam existed."""
+        value = self.model_dump_json(exclude=None if self.spam else {"spam"})
+        return hashlib.sha256(value.encode()).hexdigest()
+
 
 def archive_result_matches(consent: EmailArchiveConsent, result: dict[str, Any] | None) -> bool:
     """Require the first-party write receipt to name exactly the requested delta."""
+    arguments = consent.arguments
     return isinstance(result, dict) and (
         result.get("thread_ids") == [consent.provider_thread_id]
-        and result.get("add_label_ids") == ([] if consent.archived else ["INBOX"])
-        and result.get("remove_label_ids") == (["INBOX"] if consent.archived else [])
+        and result.get("add_label_ids") == (arguments["add_label_ids"] or [])
+        and result.get("remove_label_ids") == (arguments["remove_label_ids"] or [])
     )
 
 
@@ -172,6 +193,10 @@ class EmailThread(EmailValue):
     source_session_ids: list[UUID] = Field(default_factory=list)
     reply_blocked_reason: str | None = None
     archive_operation: EmailArchiveOperation | None = None
+    # ADR-0165: a flag never moves mail; the owner clears it or reports the thread.
+    suspected_spam: bool = False
+    spam_cleared: bool = False
+    in_spam: bool = False
 
 
 class EmailDraftStatus(StrEnum):
@@ -302,6 +327,15 @@ class EmailAssessment(EmailValue):
     urgency: float = Field(ge=0, le=1)
     needs_reply: bool
     bulk: bool
+    spam: bool = Field(
+        default=False,
+        description=(
+            "True only for unsolicited mail that is deceptive or unwanted from a party with "
+            "no relationship to the owner (phishing, scams, fake invoices or account notices, "
+            "mass cold marketing). Mail the owner signed up for is bulk, not spam, and a real "
+            "person's first contact about a real matter is never spam. False when unsure."
+        ),
+    )
     attention_expires_at: AwareDatetime | None = Field(
         default=None,
         description=(
@@ -419,6 +453,9 @@ def apply_feedback(
                 "reason": "The dated event no longer needs attention.",
             }
         )
+    if selected.suspected_spam:
+        # ADR-0165: suspected spam needs no attention, but the owner's own word still wins.
+        selected = selected.model_copy(update={"priority": 0.0, "needs_reply": False})
     # Listing applies feedback to every cached thread; most match nothing, so match first.
     matching = [item for item in feedback if feedback_matches(item, thread)]
     for item in sorted(matching, key=lambda value: (value.created_at, str(value.id))):

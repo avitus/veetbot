@@ -72,10 +72,13 @@ from agent_core.runtime.loop import (
     ModelEventCallback,
     RunContext,
     ToolDispatch,
+    _fit_tool_batch,
     _record_open_question,
+    _record_refusals,
     apply_tool_evidence,
     bind_browser_auth_question,
     checkpoint,
+    guard_tool_turn,
     recover_browser_failure,
     run_loop,
 )
@@ -843,7 +846,7 @@ class RunExecutor:
                 if self._task_runner is not None:
                     task_outcome = await self._task_runner(context)
                 if task_outcome is None:
-                    await self._resume_pending_tools(context)
+                    task_outcome = await self._resume_pending_tools(context)
             except ApprovalRequiredError as exc:
                 if exc.approval_id not in context.checkpoint.pending_approval_ids:
                     context.checkpoint.pending_approval_ids.append(exc.approval_id)
@@ -1005,50 +1008,191 @@ class RunExecutor:
                     )
 
     @staticmethod
-    def _unanswered_trailing_calls(conversation: Sequence[ConversationItem]) -> list[ToolCallItem]:
-        """Trailing tool calls a checkpoint holds without their results.
+    def _latest_turn(
+        conversation: Sequence[ConversationItem],
+    ) -> tuple[list[ToolCallItem], set[str]]:
+        """The newest turn's calls, when only results follow them, and the calls answered.
 
         A checkpoint written for the model response carries the turn's calls in
-        the conversation before the loop records them in `pending_tool_calls`.
-        A run reclaimed inside that window would otherwise resume with calls no
-        result can ever answer, which no provider request can represent.
+        the conversation before the loop records them in `pending_tool_calls`,
+        and a resumed run can adopt a turn, or part of its results, that a lost
+        checkpoint never recorded. Either way the run would otherwise resume with
+        calls no result can ever answer, which no provider request can represent.
         """
 
-        trailing: list[ToolCallItem] = []
-        for item in reversed(conversation):
-            if isinstance(item, ToolCallItem):
-                trailing.append(item)
-                continue
-            break
-        answered = {item.call_id for item in conversation if isinstance(item, ToolResultItem)}
-        return [call for call in reversed(trailing) if call.call_id not in answered]
+        end = len(conversation)
+        while end and isinstance(conversation[end - 1], ToolResultItem):
+            end -= 1
+        start = end
+        while start and isinstance(conversation[start - 1], ToolCallItem):
+            start -= 1
+        calls = [item for item in conversation[start:end] if isinstance(item, ToolCallItem)]
+        answered = {item.call_id for item in conversation[end:] if isinstance(item, ToolResultItem)}
+        return calls, answered
 
-    async def _resume_pending_tools(self, context: RunContext) -> None:
-        pending = context.checkpoint.pending_tool_calls
-        if not pending:
-            # Reconcile the two representations before the loop assembles a
-            # request: the calls are durable in the conversation either way, so
-            # the pipeline re-enters at step 6 and the effect still happens once.
-            recovered = self._unanswered_trailing_calls(context.checkpoint.conversation)
-            if not recovered:
-                return
-            context.checkpoint.pending_tool_calls = [
-                call.model_dump(mode="json") for call in recovered
-            ]
-        calls = [
-            ToolCallItem.model_validate(call) for call in context.checkpoint.pending_tool_calls
+    async def _adopt_committed_history(self, context: RunContext) -> list[ConversationItem]:
+        """Append what earlier attempts committed after the restored checkpoint.
+
+        A checkpoint stores its conversation as session history through its
+        `last_event_sequence`, so the next checkpoint's reference covers every
+        conversation event an earlier attempt committed after it. Adopting them
+        keeps the resumed conversation equal to the history it is stored as, and
+        never redoes the work they record (event-log-and-persistence.md).
+        """
+
+        async with context.uow_factory() as uow:
+            committed = await uow.history.catch_up(context.run.session_id)
+            restored = await uow.history.read(
+                context.run.session_id, context.checkpoint.last_event_sequence
+            )
+        adopted = committed.items[len(restored.items) :]
+        context.checkpoint.conversation.extend(adopted)
+        context.checkpoint.last_event_sequence = max(
+            context.checkpoint.last_event_sequence, committed.through_sequence
+        )
+        return adopted
+
+    async def _fit_resumed_batch(
+        self,
+        context: RunContext,
+        turn: list[ToolCallItem],
+        used: int,
+        answered: set[str],
+    ) -> list[ToolCallItem]:
+        """Fit a batch rebuilt from history to the budget it was proposed under.
+
+        A batch recorded as pending was fitted before it was checkpointed; one
+        rebuilt from the conversation is the model's whole turn (ADR-0115). A
+        refusal the log already holds is not recorded again.
+        """
+
+        fitted, refusals = _fit_tool_batch(context.run, turn, used=used)
+        await _record_refusals(
+            context, [(call, result) for call, result in refusals if call.call_id not in answered]
+        )
+        return fitted
+
+    async def _turn_usage_baseline(
+        self, context: RunContext, calls: list[ToolCallItem]
+    ) -> int | None:
+        """Read the pre-batch usage watermark even when its checkpoint was lost."""
+
+        if not calls:
+            return None
+        async with context.uow_factory() as uow:
+            event = await uow.events.latest_before(
+                context.run.session_id,
+                context.checkpoint.last_event_sequence + 1,
+                "model.response.completed",
+                context.principal,
+                run_id=context.run.id,
+            )
+        if event is None:
+            return None
+        recorded_calls = [
+            item.get("call_id")
+            for item in event.payload.get("conversation_items", [])
+            if isinstance(item, dict) and item.get("kind") == "tool_call"
         ]
+        if recorded_calls != [call.call_id for call in calls]:
+            return None
+        baseline = event.payload.get("tool_call_count_before_turn")
+        return baseline if type(baseline) is int and baseline >= 0 else None
+
+    async def _resume_pending_tools(self, context: RunContext) -> RunOutcome | None:
+        restored = context.checkpoint
+        # The checkpoint's own batch: recorded as pending or, for a checkpoint
+        # written for the model response, still only in its conversation.
+        calls = [ToolCallItem.model_validate(call) for call in restored.pending_tool_calls]
+        turn: list[ToolCallItem] = []
+        if not calls:
+            turn, answered = self._latest_turn(restored.conversation)
+            if all(call.call_id in answered for call in turn):
+                turn = []
+        adopted = await self._adopt_committed_history(context)
+        latest, answered = self._latest_turn(restored.conversation)
+        durable_baseline = await self._turn_usage_baseline(context, latest)
         step = Step(
             run_id=context.run.id,
             step_number=max(1, context.run.step_count),
             started_at=self._clock.now(),
         )
+        # A fully answered turn can be present even in a freshly seeded
+        # checkpoint. Its pre-batch watermark makes repair idempotent.
+        if (
+            latest
+            and durable_baseline is not None
+            and all(call.call_id in answered for call in latest)
+        ):
+            fitted, _ = _fit_tool_batch(context.run, latest, used=durable_baseline)
+            missing = durable_baseline + len(fitted) - context.run.tool_call_count
+            if missing > 0:
+                await context.budgets.record_tool_usage(context.run, missing, step=step)
+        unrecorded_batch: int | None = None
+        if any(isinstance(item, (AssistantMessage, ToolCallItem)) for item in adopted):
+            # The log holds a turn the checkpoint never saw. Its own batch
+            # returned before that turn, whose continuation was never
+            # checkpointed (ADR-0006), and the loop starts a step only once the
+            # previous batch returns, so a turn with an unanswered call is the
+            # run's current step.
+            restored.provider_continuation = None
+            # The loop records a batch only once every call returns, so the
+            # run's count is still the one a batch with an unanswered call was
+            # fitted to.
+            if latest and not answered:
+                guarded = guard_tool_turn(context, latest, step)
+                if guarded is not None:
+                    return guarded
+            adopted_baseline = (
+                context.run.tool_call_count if durable_baseline is None else durable_baseline
+            )
+            fitted = await self._fit_resumed_batch(context, latest, adopted_baseline, answered)
+            calls = [call for call in fitted if call.call_id not in answered]
+            if not calls:
+                restored.pending_tool_calls = []
+                if isinstance(adopted[-1], AssistantMessage):
+                    # Only the final reply is recorded apart from its turn, so
+                    # the run has answered and lost only its finalization.
+                    return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=adopted[-1])
+                return None
+            # This batch was never recorded, though its answered calls ran.
+            unrecorded_batch = max(0, adopted_baseline + len(fitted) - context.run.tool_call_count)
+            step_number = context.run.step_count
+        else:
+            baseline = restored.budget_state.get("tool_call_count", 0)
+            if not isinstance(baseline, int):
+                raise ConflictError("checkpoint tool-usage watermark is malformed")
+            if turn:
+                if not answered:
+                    guarded = guard_tool_turn(context, turn, step)
+                    if guarded is not None:
+                        return guarded
+                # The checkpoint's tool-usage watermark is the count the turn
+                # was fitted to. A fitted call that already ran is dispatched
+                # again so the batch is counted whole.
+                calls = await self._fit_resumed_batch(context, turn, baseline, answered)
+            # Reconcile the two representations before the loop assembles a
+            # request: the calls are durable in the conversation either way, so
+            # the pipeline re-enters at step 6 and the effect still happens once.
+            if not calls:
+                return None
+            # Every invocation's idempotency key carries the step that proposed
+            # it, and an attempt the checkpoint never saw may have started a
+            # later one, so the batch keeps the step its checkpoint recorded.
+            proposed_at = restored.budget_state.get("step_count")
+            step_number = proposed_at if isinstance(proposed_at, int) else context.run.step_count
+        restored.pending_tool_calls = [call.model_dump(mode="json") for call in calls]
+        step = Step(
+            run_id=context.run.id,
+            step_number=max(1, step_number),
+            started_at=self._clock.now(),
+        )
         # The queued generation is revalidating the persisted calls. Any approval
         # raised below becomes the sole pending suspension for the next generation.
-        context.checkpoint.pending_approval_ids = []
+        restored.pending_approval_ids = []
         results = await context.dispatch_tools(
             run=context.run,
-            checkpoint=context.checkpoint,
+            checkpoint=restored,
             tool_calls=calls,
             principal=context.principal,
             step=step,
@@ -1057,20 +1201,22 @@ class RunExecutor:
             lease=context.lease,
         )
         step.tool_call_count = len(results)
-        baseline = context.checkpoint.budget_state.get("tool_call_count", 0)
-        if not isinstance(baseline, int):
-            raise ConflictError("checkpoint tool-usage watermark is malformed")
-        recorded = context.run.tool_call_count - baseline
-        if recorded == 0:
-            await context.budgets.record_tool_usage(context.run, len(results), step=step)
-        elif recorded != len(results):
-            raise ConflictError("persisted tool usage does not match the pending batch")
-        context.checkpoint.conversation.extend(results)
+        if unrecorded_batch is not None:
+            await context.budgets.record_tool_usage(context.run, unrecorded_batch, step=step)
+        else:
+            recorded = context.run.tool_call_count - baseline
+            if recorded == 0:
+                await context.budgets.record_tool_usage(context.run, len(results), step=step)
+            elif recorded != len(results):
+                raise ConflictError("persisted tool usage does not match the pending batch")
+        # A result the log already holds was adopted with the history.
+        restored.conversation.extend(result for result in results if result.call_id not in answered)
         # ADR-0130: a batch completed after an approval restarts counts too.
-        apply_tool_evidence(context.checkpoint.working_state, calls)
-        context.checkpoint.pending_tool_calls = []
+        apply_tool_evidence(restored.working_state, calls)
+        restored.pending_tool_calls = []
         await recover_browser_failure(context, step, calls, results)
         await checkpoint(context, "tool_recovered")
+        return None
 
     def _internal_failure(self, run: Run, exc: Exception) -> RunOutcome:
         return RunOutcome(

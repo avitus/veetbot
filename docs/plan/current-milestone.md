@@ -96,7 +96,7 @@ title: Current Milestone
   the shipped profile, and threshold calibration keeps the milestone in progress.
 - **Milestone 31 — Email unsubscribe assistance:** requested by the owner and
   shaped on 2026-09-19 as a new independent parallel workstream under ADR-0112;
-  [email-unsubscribe.md](email-unsubscribe.md) declares twenty gates for a
+  [email-unsubscribe.md](email-unsubscribe.md) declared twenty gates for a
   header-derived census of bulk senders, the authenticated RFC 8058 one-click
   request sent through a dedicated public-HTTPS egress transport to a
   server-derived destination, `mailto:` unsubscribe, Report spam and sender
@@ -105,7 +105,9 @@ title: Current Milestone
   Subscriptions view. It is implemented with nineteen gates bound to passing
   checks and reached `main` in pull request 131; its flag was on in production
   by 2026-09-21, ahead of the owner's real-mailbox smoke, and simulator UI
-  journeys and the release evidence remain open.
+  journeys and the release evidence remain open. On 2026-10-08 ADR-0165
+  extended it to twenty-three gates with a suspected-spam flag that never
+  touches Gmail and thread-level Report spam and Not spam.
 - **Verified gate ceiling:** Milestone 13 (268 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -577,7 +579,7 @@ ceiling.
 
 The owner requested this capability on 2026-09-19 and decided its surfaces,
 consent model, egress and fallbacks under ADR-0112.
-[Email unsubscribe assistance](email-unsubscribe.md) specifies twenty gates: a
+[Email unsubscribe assistance](email-unsubscribe.md) specified twenty gates: a
 deterministic census of bulk senders read from header metadata inside the
 existing foreground refresh; the RFC 8058 one-click request, offered only for
 mail Gmail authenticated and sent by one builtin tool whose destination is
@@ -590,5 +592,10 @@ flag; and the native Subscriptions view and thread action. The owner directed
 implementation on 2026-09-19. Nineteen gates bind passing checks, and pull
 request 131 delivered it with hosted CI and a clean review; its flag was on in
 production by 2026-09-21. Simulator UI journeys, the owner's real-mailbox
-smoke and integrated release evidence remain open. This independent
-workstream is in progress and does not move the verified ceiling.
+smoke and integrated release evidence remain open. On 2026-10-08 the owner
+extended the milestone under ADR-0165 with three more gates: a spam verdict in
+the importance assessment, informed by Gmail's own DMARC result, flags
+suspected spam without touching Gmail; the owner clears a flag or reports one
+thread as spam with Archive's gesture, through two routes under
+`/v1/email/threads` behind the same flag. This independent workstream is in
+progress and does not move the verified ceiling.

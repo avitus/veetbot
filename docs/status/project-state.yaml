@@ -10,6 +10,10 @@ project:
   # ceiling's advance to Milestone 13 (268 gates) were recorded on 2026-09-28.
   current_milestone: 13
   active_milestone: 14
+  # ADR-0165 records the owner's 2026-10-08 extension of Milestone 31: a
+  # suspected-spam flag from the importance assessment, informed by Gmail's
+  # own DMARC result, that never touches Gmail, plus thread-level Report spam
+  # and Not spam through Archive's gesture. Three gates join the milestone.
   # ADR-0164 records the owner's instruction to implement the minimal-user-
   # involvement browser tranche: automatic verification, session reuse,
   # verified resumption, consolidated interruptions and guarded workflows.
@@ -238,13 +242,14 @@ milestones:
     authorized_on: '2026-09-19'
     design: docs/plan/email-unsubscribe.md
     adr: docs/adr/0112-milestone-31-email-unsubscribe.md
-    gates_registered: 20
+    gates_registered: 23
     authorized_scope:
     - Header-derived census of bulk senders per account inside the foreground refresh and the ninety-day window, with no model call
     - Authenticated RFC 8058 one-click request through a dedicated public-HTTPS egress transport to a server-derived destination
     - mailto unsubscribe through the send server; Report spam, Not spam and sender cleanup as fixed label deltas
     - Owner-gesture consent for a batch of at most twenty-five senders and one by-value approval per batch in Chat
     - Four scoped routes behind a default-off flag, two builtin Chat tools, and the native Subscriptions view and thread action
+    - Suspected-spam flag from the assessment's spam verdict and Gmail's sender check, never a mailbox action, and thread-level Report spam and Not spam through Archive's gesture (ADR-0165)
     deferred_scope:
     - Unsubscribe links in message bodies and web-form unsubscribes through browser automation
     - Standing or automatic unsubscribe rules (B8), background or scheduled cleanup
@@ -252,9 +257,28 @@ milestones:
     open_items:
     - Pass the five native Subscriptions journeys (added 2026-09-28 and passing locally on the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
     - Show the Subscriptions detail beside its list on regular-width iPad as email-unsubscribe.md requires; the iPad sheet is a 580-point compact-width form sheet, so the detail pushes as on iPhone
-    - Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, spam with Not spam, and cleanup
+    - Pass the two native suspected-spam journeys (added 2026-10-08 and passing locally on the Mac and the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
+    - Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, sender and thread spam each with Not spam, and cleanup
     - Exact-head hosted CI and explicitly authorized review and production delivery evidence
     evidence:
+    - check: Milestone 31 spam extension registry red phase (ADR-0165)
+      outcome: observed_expected_failure
+      detail: >-
+        On 2026-10-08 the registry-bound tests failed at their behavioral
+        assertions before the three spam gates were registered: the registry
+        held 568 entries rather than 571, and the census counted twenty
+        Milestone 31 gates rather than twenty-three.
+    - check: Milestone 31 suspected-spam native journeys (local, 2026-10-08)
+      outcome: passed_locally
+      detail: >-
+        testSuspectedSpamNotSpamClearsTheFlag and
+        testSuspectedSpamReportSpamRemovesTheConversation passed on the iPhone 17
+        Pro and iPad Pro 13-inch (M5) simulators through xcodebuild
+        test-without-building, beside the unchanged
+        testEmailDetailArchiveDisplaysNextConversation and
+        testSubscriptionsThreadActionUnsubscribesTheConversationsSender journeys.
+        The same four passed on the Mac lane in an attended automation-mode
+        session the owner approved the same day.
     - check: Milestone 31 registry authorization red phase
       outcome: observed_expected_failure
       detail: >-
@@ -1953,5 +1977,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-09-28T21:30:00Z
+last_updated: 2026-10-08T20:00:00Z
 last_reviewed_commit: e55551fa

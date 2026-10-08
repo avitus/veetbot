@@ -16,11 +16,10 @@ export function SiteHeader({ legal = false }: { legal?: boolean }) {
           </>
         ) : (
           <>
-            <a href="#principles">Principles</a>
-            <a href="#gmail">Gmail access</a>
+            <a href="#features">What it does</a>
+            <a href="#how">How it works</a>
           </>
         )}
-        <a href="https://docs.veetbot.com/">Documentation</a>
       </nav>
     </header>
   );
@@ -33,11 +32,12 @@ export function SiteFooter() {
         <Image src="/veetbot-icon.svg" width={34} height={34} alt="" />
         <span>VEETBOT</span>
       </Link>
-      <p>A governed, self-hostable AI agent.</p>
+      <p>Your personal AI assistant.</p>
       <nav aria-label="Legal navigation">
         <Link href="/privacy">Privacy</Link>
         <Link href="/tos">Terms</Link>
         <a href="https://docs.veetbot.com/">Docs</a>
+        <a href="https://github.com/avitus/veetbot">GitHub</a>
       </nav>
     </footer>
   );

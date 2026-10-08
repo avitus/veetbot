@@ -378,6 +378,11 @@ public struct EmailModeView: View {
                 Label("Partial thread", systemImage: "exclamationmark.circle").appFont(.caption).foregroundColor(
                     .orange)
             }
+            if thread.isSuspectedSpam {
+                Label("Suspected spam", systemImage: "exclamationmark.octagon").appFont(.caption)
+                    .foregroundColor(.orange)
+                    .accessibilityIdentifier("email.spam.tag.\(thread.id.uuidString)")
+            }
         }
         .padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
@@ -546,6 +551,10 @@ private struct EmailThreadScreen: View {
                 EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail", showsAvailability: true)
                     .buttonStyle(.plain)
                 Menu {
+                    if model.canReportSpam(thread), !thread.isSuspectedSpam {
+                        Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
+                            .accessibilityIdentifier("email.spam.menu.report")
+                    }
                     Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
                 } label: {
                     Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
@@ -570,6 +579,7 @@ private struct EmailThreadScreen: View {
                         .accessibilityIdentifier("email.unsubscribe.thread")
                 }
             }
+            EmailSpamControls(model: model, thread: thread)
         }
     }
 
@@ -982,11 +992,60 @@ private struct EmailAvatar: View {
     }
 }
 
+/// A flag explains itself and offers the owner's two answers; a report offers its undo (ADR-0165).
+private struct EmailSpamControls: View {
+    @ObservedObject var model: EmailViewModel
+    let thread: EmailThreadView
+
+    var body: some View {
+        if thread.isInSpam {
+            HStack(spacing: 8) {
+                Text("Reported as spam. Gmail empties Spam after thirty days.")
+                    .appFont(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.spamSupported(for: thread.accountID) {
+                    Button("Not spam") { Task { await model.setThreadSpam(thread, spam: false) } }
+                        .buttonStyle(.bordered).appFont(.caption)
+                        .disabled(!model.canReportSpam(thread, spam: false))
+                        .accessibilityIdentifier("email.spam.restore")
+                }
+            }
+        } else if thread.isSuspectedSpam {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Suspected spam", systemImage: "exclamationmark.octagon")
+                    .appFont(.caption, weight: .semibold).foregroundColor(.orange)
+                    .accessibilityIdentifier("email.spam.tag.detail")
+                Text("Veetbot thinks this may be spam, so it is not in your priority list. Nothing has changed in Gmail.")
+                    .appFont(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.spamSupported(for: thread.accountID) {
+                    HStack(spacing: 8) {
+                        Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
+                            .buttonStyle(.bordered).appFont(.caption)
+                            .disabled(!model.canReportSpam(thread))
+                            .accessibilityIdentifier("email.spam.report")
+                        Button("Not spam") { Task { await model.clearSpamFlag(thread) } }
+                            .buttonStyle(.bordered).appFont(.caption)
+                            .accessibilityIdentifier("email.spam.clear")
+                    }
+                }
+                if let error = model.spamFlagErrors[thread.id] {
+                    Text(error).appFont(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+}
+
 private struct EmailThreadStatus: View {
     let thread: EmailThreadView
     var draft: EmailDraftView? = nil
 
     private var title: String {
+        if thread.isInSpam { return "Reported as spam" }
         if thread.isArchived { return "Archived" }
         if thread.isHandled { return "Handled" }
         switch (draft ?? thread.draft)?.status {
@@ -1005,7 +1064,8 @@ private struct EmailThreadStatus: View {
     var body: some View {
         Label(
             title,
-            systemImage: thread.isArchived || thread.isHandled ? "checkmark" : thread.draftID != nil
+            systemImage: thread.isInSpam ? "exclamationmark.octagon"
+                : thread.isArchived || thread.isHandled ? "checkmark" : thread.draftID != nil
                 ? "square.and.pencil" : thread.needsReply ? "arrowshape.turn.up.left" : "bookmark"
         )
         .appFont(.caption, weight: .medium)

@@ -74,6 +74,10 @@ public final class EmailViewModel: ObservableObject {
     @Published private var archiveSubmitting: Set<UUID> = []
     @Published private var archiveUnsupportedAccounts: Set<String> = []
     @Published private var archiveUnavailableThreads: Set<UUID> = []
+    @Published private var spamUnsupportedAccounts: Set<String> = []
+    /// A failed Not spam on a flagged conversation, shown beside the flag.
+    @Published public private(set) var spamFlagErrors: [UUID: String] = [:]
+    @Published private var spamFlagSubmitting: Set<UUID> = []
 
     public var authenticationFailure: ((Error) -> Void)?
     /// The census is its own surface and its own state; Email mode only opens it.
@@ -104,6 +108,8 @@ public final class EmailViewModel: ObservableObject {
         let thread: EmailThreadView
         let archived: Bool
         let key: String
+        /// Through Spam: `archived` reports spam and restoring is Not spam.
+        let spam: Bool
         var operationID: UUID?
     }
     private var archiveRequests: [UUID: ArchiveRequest] = [:]
@@ -112,6 +118,7 @@ public final class EmailViewModel: ObservableObject {
         var inInbox: Bool?
         var operation: EmailArchiveOperation?
         var dismissedRevision: Int?
+        var inSpam: Bool? = nil
     }
     private var archiveVersions: [UUID: UUID] = [:]
     private var archiveStates: [UUID: ArchiveMailboxState] = [:]
@@ -139,6 +146,12 @@ public final class EmailViewModel: ObservableObject {
     /// A thread action needs its own account's support, never another account's.
     public func unsubscribeSupported(for accountID: String) -> Bool {
         accounts.first { $0.id == accountID }?.unsubscribeSupported == true
+    }
+
+    /// Report spam and Not spam need this account's advertised support; Archive is never substituted.
+    public func spamSupported(for accountID: String) -> Bool {
+        !unavailable && !spamUnsupportedAccounts.contains(accountID)
+            && accounts.first { $0.id == accountID }.map { $0.spamSupported == true && $0.writeServerID != nil } == true
     }
 
     deinit {
@@ -214,6 +227,9 @@ public final class EmailViewModel: ObservableObject {
         archiveReadErrors = []
         archiveVersions = [:]
         archiveStates = [:]
+        spamUnsupportedAccounts = []
+        spamFlagErrors = [:]
+        spamFlagSubmitting = []
         subscriptions.resetConnection()
         active = false
         accounts = []
@@ -915,8 +931,10 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Pending and uncertain writes cannot be replaced by another checkbox action.
+    /// A conversation in Spam returns through Not spam, never through Move to Inbox.
     public func canArchive(_ thread: EmailThreadView) -> Bool {
-        guard archiveUnavailableReason(for: thread) == nil, !archiveSubmitting.contains(thread.id) else { return false }
+        guard archiveUnavailableReason(for: thread) == nil, !archiveSubmitting.contains(thread.id),
+              !thread.isInSpam else { return false }
         if let operation = thread.archiveOperation {
             return operation.status == "completed" || operation.status == "failed"
         }
@@ -940,17 +958,79 @@ public final class EmailViewModel: ObservableObject {
     /// Supplies one-action consent and retains the same request after an uncertain admission response.
     /// Archiving the selected thread from its row or its detail advances the reading pane.
     public func setThreadArchived(_ thread: EmailThreadView, archived: Bool) async {
-        guard let api = makeAPIClient(), !archiveSubmitting.contains(thread.id) else { return }
-        guard archiveUnavailableReason(for: thread) == nil else {
-            archiveErrors[thread.id] = archiveUnavailableReason(for: thread)
+        await changeInbox(thread, archived: archived, spam: false)
+    }
+
+    /// Why this conversation cannot be reported or restored; `nil` when it can.
+    public func spamUnavailableReason(for thread: EmailThreadView) -> String? {
+        guard spamSupported(for: thread.accountID) else {
+            return "Reporting spam is unavailable for this account. Update or reconnect the server."
+        }
+        return thread.inInbox == nil ? "Refresh this thread to check its Gmail Inbox state." : nil
+    }
+
+    /// Report spam needs a conversation outside Spam; Not spam needs one inside it.
+    public func canReportSpam(_ thread: EmailThreadView, spam: Bool = true) -> Bool {
+        guard spamUnavailableReason(for: thread) == nil, !archiveSubmitting.contains(thread.id),
+              thread.isInSpam != spam else { return false }
+        if let operation = thread.archiveOperation {
+            return operation.status == "completed" || operation.status == "failed"
+        }
+        return true
+    }
+
+    /// Archive's gesture with the Spam delta: the row leaves at once and settles from the operation.
+    public func setThreadSpam(_ thread: EmailThreadView, spam: Bool) async {
+        await changeInbox(thread, archived: spam, spam: true)
+    }
+
+    /// The owner's Not spam on a flagged conversation; nothing changes in Gmail.
+    public func clearSpamFlag(_ thread: EmailThreadView, cleared: Bool = true) async {
+        guard let api = makeAPIClient(), !spamFlagSubmitting.contains(thread.id) else { return }
+        guard spamSupported(for: thread.accountID) else {
+            spamFlagErrors[thread.id] = spamUnavailableReason(for: thread)
             return
         }
-        if archiveRequests[thread.id]?.operationID != nil || !canArchive(thread) {
+        let connection = generation
+        spamFlagSubmitting.insert(thread.id)
+        spamFlagErrors[thread.id] = nil
+        defer { if generation == connection { spamFlagSubmitting.remove(thread.id) } }
+        do {
+            let result = try await api.clearEmailThreadSpamFlag(thread.id, cleared: cleared)
+            guard generation == connection else { return }
+            for index in inboxItems.indices where inboxItems[index].id == thread.id {
+                inboxItems[index].suspectedSpam = result.suspectedSpam
+                inboxItems[index].spamCleared = result.spamCleared
+            }
+            if self.thread?.id == thread.id {
+                self.thread?.suspectedSpam = result.suspectedSpam
+                self.thread?.spamCleared = result.spamCleared
+            }
+            await reload(preserveOrder: true)
+        } catch {
+            guard generation == connection, !(error is CancellationError) else { return }
+            if isUnavailable(error) { spamUnsupportedAccounts.insert(thread.accountID) }
+            spamFlagErrors[thread.id] = isUnavailable(error)
+                ? spamUnavailableReason(for: thread) : error.localizedDescription
+            if case HTTPTransportError.reauthenticationRequired = error { report(error) }
+        }
+    }
+
+    private func changeInbox(_ thread: EmailThreadView, archived: Bool, spam: Bool) async {
+        guard let api = makeAPIClient(), !archiveSubmitting.contains(thread.id) else { return }
+        let unavailableReason = spam ? spamUnavailableReason(for: thread) : archiveUnavailableReason(for: thread)
+        guard unavailableReason == nil else {
+            archiveErrors[thread.id] = unavailableReason
+            return
+        }
+        if archiveRequests[thread.id]?.operationID != nil
+            || !(spam ? canReportSpam(thread, spam: archived) : canArchive(thread)) {
             await checkArchiveStatus(thread.id)
             return
         }
         let connection = generation
-        let request = archiveRequests[thread.id] ?? ArchiveRequest(thread: thread, archived: archived, key: UUID().uuidString)
+        let request = archiveRequests[thread.id]
+            ?? ArchiveRequest(thread: thread, archived: archived, key: UUID().uuidString, spam: spam)
         archiveRequests[thread.id] = request
         archiveErrors[thread.id] = nil
         archiveReadErrors.remove(thread.id)
@@ -980,21 +1060,29 @@ public final class EmailViewModel: ObservableObject {
         }
         defer { if generation == connection { archiveSubmitting.remove(thread.id) } }
         do {
-            let operation = try await api.archiveEmailThread(request.thread, archived: request.archived, idempotencyKey: request.key)
+            let operation = request.spam
+                ? try await api.reportEmailThreadSpam(request.thread, spam: request.archived, idempotencyKey: request.key)
+                : try await api.archiveEmailThread(request.thread, archived: request.archived, idempotencyKey: request.key)
             guard generation == connection else { return }
             archiveRequests[thread.id]?.operationID = operation.operationID
             let pending = EmailArchiveOperation(operationID: operation.operationID, runID: operation.runID,
-                targetArchived: request.archived, status: "pending", error: nil)
+                targetArchived: request.archived, targetSpam: request.spam ? true : nil, status: "pending", error: nil)
             if let index = inboxItems.firstIndex(where: { $0.id == thread.id }) { inboxItems[index].archiveOperation = pending }
             if self.thread?.id == thread.id { self.thread?.archiveOperation = pending }
             let current = self.thread?.id == thread.id ? self.thread : detail ?? inboxItems.first { $0.id == thread.id }
             archiveStates[thread.id] = ArchiveMailboxState(inInbox: current?.inInbox ?? thread.inInbox,
-                operation: pending, dismissedRevision: current?.dismissedRevision ?? thread.dismissedRevision)
+                operation: pending, dismissedRevision: current?.dismissedRevision ?? thread.dismissedRevision,
+                inSpam: current?.inSpam ?? thread.inSpam)
             archiveVersions[thread.id] = UUID()
             await checkArchiveStatus(thread.id)
         } catch {
             guard generation == connection, !(error is CancellationError), !Task.isCancelled else { return }
-            if isUnavailable(error) {
+            if isUnavailable(error), request.spam {
+                // A missing spam route means this server or account cannot report; never archive instead.
+                spamUnsupportedAccounts.insert(thread.accountID)
+                archiveRequests[thread.id] = nil
+                archiveErrors[thread.id] = spamUnavailableReason(for: thread)
+            } else if isUnavailable(error) {
                 if case HTTPTransportError.api(let failure) = error, failure.statusCode == 405 {
                     archiveUnsupportedAccounts.insert(thread.accountID)
                 } else { archiveUnavailableThreads.insert(thread.id) }
@@ -1041,7 +1129,7 @@ public final class EmailViewModel: ObservableObject {
     private func mergeArchive(_ value: EmailThreadView) {
         archiveVersions[value.id] = UUID()
         archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox, operation: value.archiveOperation,
-            dismissedRevision: value.dismissedRevision)
+            dismissedRevision: value.dismissedRevision, inSpam: value.inSpam)
         if let index = inboxItems.firstIndex(where: { $0.id == value.id }), value.revision >= inboxItems[index].revision {
             inboxItems[index] = value
         }
@@ -1062,11 +1150,12 @@ public final class EmailViewModel: ObservableObject {
                 preserved.inInbox = state.inInbox
                 preserved.archiveOperation = state.operation
                 preserved.dismissedRevision = state.dismissedRevision
+                preserved.inSpam = state.inSpam
                 return preserved
             }
         } else {
             archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox,
-                operation: value.archiveOperation, dismissedRevision: value.dismissedRevision)
+                operation: value.archiveOperation, dismissedRevision: value.dismissedRevision, inSpam: value.inSpam)
         }
         return value
     }
@@ -1078,6 +1167,7 @@ public final class EmailViewModel: ObservableObject {
         if let id = request.operationID { return operation.operationID == id }
         return operation.operationID != request.thread.archiveOperation?.operationID
             && operation.targetArchived == request.archived
+            && operation.isSpamAction == request.spam
     }
 
     /// Resumes pending actions learned from another device and clears only confirmed action failures.

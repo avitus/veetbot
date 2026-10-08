@@ -173,6 +173,8 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsFailedUnsubscribeRestoresTheRowWithWhatRemains \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsThreadActionUnsubscribesTheConversationsSender \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsStayHiddenWhereNoAccountAdvertisesThem \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSuspectedSpamNotSpamClearsTheFlag \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSuspectedSpamReportSpamRemovesTheConversation \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 

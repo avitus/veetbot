@@ -32,6 +32,7 @@ _LINE_BREAK: Final = re.compile(r"\r\n|[\r\n]")
 _WHITESPACE: Final = re.compile(r"\s+")
 _BRACKETED: Final = re.compile(r"<([^<>]*)>")
 _DKIM_PASS: Final = re.compile(r"\s*dkim(?:/\d+)?\s*=\s*pass(?![-\w])", re.IGNORECASE)
+_DMARC: Final = re.compile(r"\s*dmarc\s*=\s*([a-z]+)(?![-\w])", re.IGNORECASE)
 _UNSAFE_RECIPIENT: Final = re.compile(r"[\s\x00-\x1f\x7f]")
 _CONTROL: Final = re.compile(r"[\x00-\x1f\x7f]")
 _CONTROL_BUT_NEWLINE: Final = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
@@ -212,6 +213,26 @@ def _passing_domains(payload: object) -> set[str]:
                     domains.add(identity.casefold())
         return domains
     return set()
+
+
+def sender_check(payload: object) -> str:
+    """Gmail's own DMARC verdict for the From domain: `pass`, `fail`, or `none` (ADR-0165).
+
+    It is read exactly as the passing DKIM domains are: only the first verdict
+    carrying Gmail's identifier counts, with comments and quoted text removed, so
+    a sender's forged lower header or a crafted comment cannot set it.
+    """
+    for value in header_values(payload, "Authentication-Results"):
+        results = _results(value)
+        if results[0].strip().casefold() != GMAIL_AUTHSERV_ID:
+            continue
+        for result in results[1:]:
+            match = _DMARC.match(result)
+            if match is not None:
+                verdict = match.group(1).casefold()
+                return verdict if verdict in {"pass", "fail"} else NO_OFFER
+        return NO_OFFER
+    return NO_OFFER
 
 
 def _signature_tags(value: str) -> dict[str, str]:

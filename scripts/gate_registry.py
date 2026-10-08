@@ -66,7 +66,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "persona-surface.md": (14, 0),
     "email-integration.md": (17, 0),
     "email-experience.md": (32, 0),
-    "email-unsubscribe.md": (20, 0),
+    "email-unsubscribe.md": (23, 0),
     "bland-calling.md": (14, 0),
     "people-and-relationships.md": (36, 0),
     "thread-folders.md": (13, 0),

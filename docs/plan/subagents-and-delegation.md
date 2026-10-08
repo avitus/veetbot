@@ -31,7 +31,7 @@ control tool that spawns a child run and suspends the parent
 `WAITING_FOR_APPROVAL` carrying a typed `CHILD_RUN` suspension rather than an
 eighth run state (runtime-loop.md:284-292); the child-run join is the one
 post-terminal hook that is genuinely part of the run lifecycle
-(runtime-loop.md:1194-1205); a child's result enters the parent labelled
+(runtime-loop.md:1225-1236); a child's result enters the parent labelled
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:1044-1050); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
@@ -231,12 +231,12 @@ No new run status. The parent's step ends when the pipeline raises a
 child_run_ids)`, the executor writes `WAITING_FOR_APPROVAL` and the
 `run.waiting_for_approval` event whose payload carries the suspension kind and
 child identifiers, and releases the lease exactly once, as
-runtime-loop.md:1048-1078 specifies for all three suspension kinds. The single
+runtime-loop.md:1069-1099 specifies for all three suspension kinds. The single
 terminal writer's finalize path, which today treats every non-user suspension
 as an approval, branches on the kind: a `CHILD_RUN` suspension appends no
 `approval.requested` and enqueues no Milestone 12 notification.
 
-The join is the post-terminal hook runtime-loop.md:1194-1205 describes. When a
+The join is the post-terminal hook runtime-loop.md:1225-1236 describes. When a
 `DELEGATED` child reaches a terminal state, the hook checks whether every
 sibling under the same `parent_run_id` is terminal. If so, it completes the
 parent's suspended invocation as `tool.call.completed` with one result item
@@ -372,7 +372,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:1020). The resolution is the one the review log recorded as
+(readiness.md:1020-1029). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation
