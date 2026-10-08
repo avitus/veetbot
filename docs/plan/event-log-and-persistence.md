@@ -142,7 +142,7 @@ is the same "zero rows updated means stop, not retry" discipline that
 An append that carries no state change has no guarded `UPDATE` to inspect and is
 not subject to the check. The diagnostic `run.fenced` is the case in point: a
 fenced worker performs no transition, no lease release, and no checkpoint write,
-and appends exactly one event, which must commit (`runtime-loop.md:875-884`).
+and appends exactly one event, which must commit (`runtime-loop.md:881-890`).
 
 ### Gaps are normal; missing writes are not
 
@@ -630,6 +630,11 @@ after its checkpoint's `last_event_sequence`** before it does anything else
 - If an adopted turn follows the checkpoint's batch, that turn supersedes it.
   Only the newest turn's unanswered calls are dispatched, and the restored
   continuation, which belongs to an older turn, is dropped.
+- A batch rebuilt from the model's turn, rather than read from the
+  checkpoint's pending calls, is fitted to the tool-call budget again, against
+  the count it was proposed under. A call past `max_tool_calls` still never
+  runs, and only the calls that fit count as usage (`runtime-loop.md`,
+  "Budget").
 - If the adopted history ends with the final reply, the run finalizes with it
   instead of asking the model again.
 

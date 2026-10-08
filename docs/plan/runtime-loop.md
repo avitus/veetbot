@@ -736,7 +736,13 @@ Checkpoints store the conversation as session history built from events, so a
 refusal held only in memory would leave its call unanswered for a resumed step
 and for the session's next run. The refusals are in the log before the
 `tool_pending` checkpoint, so a resumed step re-dispatches only the fitted
-calls. `BudgetScope.TOOL_CALL`
+calls. A resumed run that has lost that checkpoint rebuilds the batch from the
+model's turn in its conversation, and fits the whole turn again against the
+count the batch was proposed under: the restored checkpoint's tool-usage
+watermark, or, for a turn adopted from the log, the run's own count, which
+never recorded that batch (ADR-0166). It records a refusal only for a refused
+call the log does not already answer, dispatches only the fitted calls, and
+counts only those as usage. `BudgetScope.TOOL_CALL`
 carries the pre-call rule for flows that dispatch one call at a time outside
 the model loop — the email tasks — and cannot fit a batch.
 

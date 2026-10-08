@@ -113,3 +113,24 @@ the log after it.
 - `test_a_committed_final_reply_completes_the_resumed_run`: before the fix,
   the resumed run asked the model again and failed when the script was
   exhausted.
+
+## Amendment: a rebuilt batch is fitted to the tool-call budget (2026-10-08)
+
+Decisions 2 and 3 dispatched a batch rebuilt from the conversation whole. The
+loop fits each batch to `max_tool_calls` before dispatch and refuses the rest
+(ADR-0115), so a rebuilt batch can hold calls the loop refused. Resuming a
+two-call turn under a one-call budget behind a lost `tool_pending` checkpoint
+ran the refused call and failed the run with `BUDGET_EXCEEDED`.
+
+A rebuilt batch is now the model's whole turn, fitted against the count it was
+proposed under: the restored checkpoint's tool-usage watermark for the
+checkpoint's own batch, and the run's count for an adopted turn, whose batch
+was never recorded. A refusal the log does not already hold is recorded as the
+loop records it. Only the fitted calls are dispatched, and decision 3 records
+the fitted size, not the full one. A pending batch was fitted before its
+checkpoint and is unchanged.
+
+`tests/integration/test_tool_budget_refusal_history_postgres.py::test_a_resume_behind_lost_checkpoints_never_runs_a_refused_call`
+interrupts that run after its `tool_pending` checkpoint and before its
+refusals are logged, and resumes from every surviving checkpoint. Before the
+fix, five of the six restore points failed with `BUDGET_EXCEEDED`.

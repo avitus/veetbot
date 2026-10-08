@@ -72,7 +72,9 @@ from agent_core.runtime.loop import (
     ModelEventCallback,
     RunContext,
     ToolDispatch,
+    _fit_tool_batch,
     _record_open_question,
+    _record_refusals,
     apply_tool_evidence,
     bind_browser_auth_question,
     checkpoint,
@@ -1049,14 +1051,36 @@ class RunExecutor:
         )
         return adopted
 
+    async def _fit_resumed_batch(
+        self,
+        context: RunContext,
+        turn: list[ToolCallItem],
+        used: int,
+        answered: set[str],
+    ) -> list[ToolCallItem]:
+        """Fit a batch rebuilt from history to the budget it was proposed under.
+
+        A batch recorded as pending was fitted before it was checkpointed; one
+        rebuilt from the conversation is the model's whole turn (ADR-0115). A
+        refusal the log already holds is not recorded again.
+        """
+
+        fitted, refusals = _fit_tool_batch(context.run, turn, used=used)
+        await _record_refusals(
+            context, [(call, result) for call, result in refusals if call.call_id not in answered]
+        )
+        return fitted
+
     async def _resume_pending_tools(self, context: RunContext) -> RunOutcome | None:
         restored = context.checkpoint
         # The checkpoint's own batch: recorded as pending or, for a checkpoint
         # written for the model response, still only in its conversation.
         calls = [ToolCallItem.model_validate(call) for call in restored.pending_tool_calls]
+        turn: list[ToolCallItem] = []
         if not calls:
-            latest, answered = self._latest_turn(restored.conversation)
-            calls = [call for call in latest if call.call_id not in answered]
+            turn, answered = self._latest_turn(restored.conversation)
+            if all(call.call_id in answered for call in turn):
+                turn = []
         adopted = await self._adopt_committed_history(context)
         latest, answered = self._latest_turn(restored.conversation)
         unrecorded_batch: int | None = None
@@ -1067,7 +1091,13 @@ class RunExecutor:
             # previous batch returns, so a turn with an unanswered call is the
             # run's current step.
             restored.provider_continuation = None
-            calls = [call for call in latest if call.call_id not in answered]
+            # The loop records a batch only once every call returns, so the
+            # run's count is still the one a batch with an unanswered call was
+            # fitted to.
+            fitted = await self._fit_resumed_batch(
+                context, latest, context.run.tool_call_count, answered
+            )
+            calls = [call for call in fitted if call.call_id not in answered]
             if not calls:
                 restored.pending_tool_calls = []
                 if isinstance(adopted[-1], AssistantMessage):
@@ -1075,11 +1105,18 @@ class RunExecutor:
                     # the run has answered and lost only its finalization.
                     return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=adopted[-1])
                 return None
-            # The loop records a batch only once every call returns, so this
-            # one was never recorded, though its answered calls ran.
-            unrecorded_batch = len(latest)
+            # This batch was never recorded, though its answered calls ran.
+            unrecorded_batch = len(fitted)
             step_number = context.run.step_count
         else:
+            baseline = restored.budget_state.get("tool_call_count", 0)
+            if not isinstance(baseline, int):
+                raise ConflictError("checkpoint tool-usage watermark is malformed")
+            if turn:
+                # The checkpoint's tool-usage watermark is the count the turn
+                # was fitted to. A fitted call that already ran is dispatched
+                # again so the batch is counted whole.
+                calls = await self._fit_resumed_batch(context, turn, baseline, answered)
             # Reconcile the two representations before the loop assembles a
             # request: the calls are durable in the conversation either way, so
             # the pipeline re-enters at step 6 and the effect still happens once.
@@ -1113,9 +1150,6 @@ class RunExecutor:
         if unrecorded_batch is not None:
             await context.budgets.record_tool_usage(context.run, unrecorded_batch, step=step)
         else:
-            baseline = restored.budget_state.get("tool_call_count", 0)
-            if not isinstance(baseline, int):
-                raise ConflictError("checkpoint tool-usage watermark is malformed")
             recorded = context.run.tool_call_count - baseline
             if recorded == 0:
                 await context.budgets.record_tool_usage(context.run, len(results), step=step)

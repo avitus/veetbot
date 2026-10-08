@@ -495,15 +495,18 @@ def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelReque
 
 
 def _fit_tool_batch(
-    run: Run, calls: list[ToolCallItem]
+    run: Run, calls: list[ToolCallItem], *, used: int | None = None
 ) -> tuple[list[ToolCallItem], list[tuple[ToolCallItem, ToolResultItem]]]:
     """Split a batch into the calls that fit the tool-call budget and refusals.
 
     A refused call never reaches the tool executor, so nothing runs
     unaccounted for; its result tells the model to answer from what it has.
+    `used` is the tool-call count the batch was proposed under, for a resumed
+    batch whose usage the run's own count may already include.
     """
 
-    remaining = max(0, run.limits.max_tool_calls - run.tool_call_count)
+    count = run.tool_call_count if used is None else used
+    remaining = max(0, run.limits.max_tool_calls - count)
     fitted = calls[:remaining]
     refused: list[tuple[ToolCallItem, ToolResultItem]] = []
     for call in calls[remaining:]:

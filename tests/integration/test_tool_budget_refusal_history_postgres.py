@@ -15,9 +15,12 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy import delete, func, select
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.fake import FakeModelProvider
+from agent_core.adapters.persistence.database import create_engine
+from agent_core.adapters.persistence.sqlalchemy_models import CheckpointRow, ToolInvocationRow
 from agent_core.bootstrap import Composition, build
 from agent_core.context.history import validate_tool_pairs
 from agent_core.domain.messages import (
@@ -188,3 +191,112 @@ async def test_a_resume_from_the_tool_pending_checkpoint_keeps_the_refusal(
     # The materialized tool_pending checkpoint already held the refusal, so
     # the resume re-dispatched only the call that fitted.
     assert _reason_codes(pending.conversation, REFUSED) == ["tool.budget_exhausted"]
+
+
+@pytest.mark.parametrize(
+    ("interrupted_at", "lost"),
+    [
+        # The refusal is in the log; the batch is pending.
+        ("after_tool_pending", 1),  # restore the model_response checkpoint
+        ("after_tool_pending", 2),  # restore the submission seed
+        ("after_tool_pending", 3),  # no checkpoint survives
+        # The model's turn is in the log; its refusal is not.
+        ("before_refusals", 0),  # restore the model_response checkpoint
+        ("before_refusals", 1),  # restore the submission seed
+        ("before_refusals", 2),  # no checkpoint survives
+    ],
+)
+async def test_a_resume_behind_lost_checkpoints_never_runs_a_refused_call(
+    monkeypatch: pytest.MonkeyPatch,
+    interrupted_at: str,
+    lost: int,
+) -> None:
+    """A batch rebuilt from history is fitted to the budget it was proposed under.
+
+    Found on 2026-10-08: a resume that rebuilt the batch from the conversation,
+    because the checkpoint that recorded it as pending was lost, dispatched
+    every unanswered call of the turn. The refused call ran, and recording two
+    calls against a one-call budget failed the run with BUDGET_EXCEEDED.
+    """
+
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    clock = FixedClock(NOW)
+    original_checkpoint = runtime_loop.checkpoint
+    original_record_refusals = runtime_loop._record_refusals
+
+    async def crash_after_tool_pending(context: Any, trigger: str) -> None:
+        await original_checkpoint(context, trigger)
+        if trigger == "tool_pending":
+            raise _InjectedWorkerCrash
+
+    async def crash_before_refusals(context: Any, refused: Any) -> None:
+        raise _InjectedWorkerCrash
+
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            script=_script("answered after resume"),
+            clock=clock,
+            limits=LIMITS,
+        ) as composition:
+            run_id = await composition.runs.submit("look two things up")
+            if interrupted_at == "after_tool_pending":
+                monkeypatch.setattr(runtime_loop, "checkpoint", crash_after_tool_pending)
+            else:
+                monkeypatch.setattr(runtime_loop, "_record_refusals", crash_before_refusals)
+            with pytest.raises(_InjectedWorkerCrash):
+                await _run_worker(composition, clock, "budget-interrupted")
+            monkeypatch.setattr(runtime_loop, "checkpoint", original_checkpoint)
+            monkeypatch.setattr(runtime_loop, "_record_refusals", original_record_refusals)
+
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                assert newest is not None and newest >= lost
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id,
+                        CheckpointRow.version > newest - lost,
+                    )
+                )
+
+            clock.advance(timedelta(seconds=31))
+            maintenance = MaintenanceWorker(
+                uow_factory=composition.uow_factory,
+                clock=clock,
+                poll_interval_seconds=0,
+            )
+            assert await maintenance.run_once() == 1
+            clock.advance(timedelta(seconds=2))
+            await _run_worker(composition, clock, "budget-resumed")
+            recovered = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                history = await uow.history.catch_up(recovered.session_id)
+            async with engine.connect() as connection:
+                executions = dict(
+                    (
+                        await connection.execute(
+                            select(ToolInvocationRow.provider_call_id, func.count())
+                            .where(ToolInvocationRow.run_id == run_id)
+                            .group_by(ToolInvocationRow.provider_call_id)
+                        )
+                    )
+                    .tuples()
+                    .all()
+                )
+    finally:
+        await engine.dispose()
+
+    assert recovered.failure is None
+    assert recovered.status is RunStatus.COMPLETED
+    assert recovered.final_message == "answered after resume"
+    # The refused call never reached the tool executor, and only the call
+    # that fitted counts as usage.
+    assert executions == {FITTED: 1}
+    assert recovered.tool_call_count == 1
+    assert recovered.usage.tool_calls == 1
+    validate_tool_pairs(history.items)
+    assert _reason_codes(history.items, REFUSED) == ["tool.budget_exhausted"]

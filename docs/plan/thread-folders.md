@@ -122,7 +122,7 @@ source, and records an audited deterministic fallback on any failure
 a different schema.
 
 **The maintenance role.** Background work runs as sweeps in the maintenance
-worker under an advisory lock (runtime-loop.md:1479), each on its own timer
+worker under an advisory lock (runtime-loop.md:1485), each on its own timer
 when it is slow. The proposal pass is one more sweep.
 
 ## The domain model
@@ -556,8 +556,8 @@ from session metadata alone and do not depend on the folder flag.
 constraint, the partial unique index, and the state index, with a
 `downgrade()` that drops them in reverse — written because the round-trip
 gate requires it, not as an operational promise
-(event-log-and-persistence.md:990-992). It descends linearly from the current
-head (event-log-and-persistence.md:913-916) and the expected-revision pin
+(event-log-and-persistence.md:995-997). It descends linearly from the current
+head (event-log-and-persistence.md:918-921) and the expected-revision pin
 moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none

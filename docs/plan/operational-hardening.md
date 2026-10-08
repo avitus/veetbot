@@ -362,7 +362,7 @@ worth a credential and an egress path for a single-owner host.
 The policy is recorded in ADR-0065 and matches what the persistence design
 already says: rollback is code-only; migrations are forward-only; the
 migration round-trip gate proves downgrade *authoring*, not operational
-safety (event-log-and-persistence.md:986-997); a rollback across a migration
+safety (event-log-and-persistence.md:991-1002); a rollback across a migration
 boundary is "restore the pre-release dump, then roll back the code"; and the
 startup revision assertion remains the fail-closed backstop.
 
