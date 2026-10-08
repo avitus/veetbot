@@ -625,6 +625,10 @@ uncertain or unreadable outcome restores the row with an actionable error. A
 reported conversation reads *Reported as spam*, offers Not spam, and cannot be
 moved back with the Archive checkbox. Without the account's `spam_supported`
 none of these actions appear, and a missing route never falls back to Archive.
+The `--ui-testing-email-suspected-spam` fixture serves a flagged conversation
+for the `testSuspectedSpamNotSpamClearsTheFlag` and
+`testSuspectedSpamReportSpamRemovesTheConversation` journeys, which the native
+bridge runs beside the Subscriptions journeys.
 
 Run `uv run pytest tests/native/test_email_unsubscribe_native_m31.py -q` for the
 executable native unsubscribe gate check. This integration-marked bridge runs

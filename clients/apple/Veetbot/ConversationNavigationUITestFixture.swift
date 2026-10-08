@@ -54,6 +54,10 @@ enum ConversationNavigationUITestFixture {
     static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
     static let promoSubscriptionID = "00000000-0000-0000-0000-000000000B04"
     static let bulkThreadID = "00000000-0000-0000-0000-000000000897"
+    /// ADR-0165: the work account advertises spam support and serves a
+    /// conversation the server flagged as suspected spam.
+    static let suspectedSpamLaunchArgument = "--ui-testing-email-suspected-spam"
+    static let spamThreadID = "00000000-0000-0000-0000-000000000898"
 
     static func makeAppearanceIfRequested() -> AppearancePreferences? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument),
@@ -293,6 +297,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var bulkThreadEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.bulkThreadLaunchArgument)
     }
+    private static var suspectedSpamEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.suspectedSpamLaunchArgument)
+    }
+    private static let spamOperationID = "00000000-0000-0000-0000-000000000C01"
+    /// Flag clearing, a requested report or restore, its reads, and Spam membership.
+    private static var spamCleared = false
+    private static var spamTarget: Bool?
+    private static var spamReads = 0
+    private static var spamInSpam = false
     /// Starts each journey with every sender active and no operation admitted.
     static func resetSubscriptions() {
         subscriptionLock.withLock {
@@ -325,6 +338,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         emailArchiveTarget = nil
         emailArchiveReads = 0
         emailArchived = false
+        spamCleared = false
+        spamTarget = nil
+        spamReads = 0
+        spamInSpam = false
     }
     override static func canInit(with request: URLRequest) -> Bool { true }
 
@@ -427,10 +444,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = "{\"items\":[\(Self.emailDraftJSON)],\"next_cursor\":null}"
         case ("GET", "/v1/email/accounts"):
             statusCode = 200
-            body = Self.subscriptionsEnabled
-                ? Self.emailAccountsJSON.replacingOccurrences(
-                    of: "\"archive_supported\":true", with: "\"archive_supported\":true,\"unsubscribe_supported\":true")
-                : Self.emailAccountsJSON
+            let advertised = [
+                Self.subscriptionsEnabled ? ",\"unsubscribe_supported\":true" : "",
+                Self.suspectedSpamEnabled ? ",\"spam_supported\":true" : "",
+            ].joined()
+            body = Self.emailAccountsJSON.replacingOccurrences(
+                of: "\"archive_supported\":true", with: "\"archive_supported\":true\(advertised)")
         case ("GET", "/v1/email/subscriptions") where Self.subscriptionsEnabled:
             statusCode = 200
             let state = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
@@ -506,6 +525,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             if view == "priority", Self.bulkThreadEnabled {
                 items += (items.isEmpty ? "" : ",") + Self.bulkEmailThreadJSON
             }
+            // A reported conversation leaves the priority view, as the server's does.
+            if Self.suspectedSpamEnabled, view != "priority" || !Self.emailLock.withLock({ Self.spamInSpam }) {
+                items += (items.isEmpty ? "" : ",") + Self.spamThreadJSON
+            }
             body = "{\"items\":[\(items)],\"next_cursor\":null}"
         case ("GET", "/v1/email/threads/00000000-0000-0000-0000-000000000899"):
             statusCode = 200
@@ -513,6 +536,44 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/email/threads/\(ConversationNavigationUITestFixture.bulkThreadID)") where Self.bulkThreadEnabled:
             statusCode = 200
             body = Self.bulkEmailThreadJSON
+        case ("GET", "/v1/email/threads/\(ConversationNavigationUITestFixture.spamThreadID)") where Self.suspectedSpamEnabled:
+            // A report settles on the second status read after its admission.
+            Self.emailLock.withLock {
+                if let target = Self.spamTarget {
+                    Self.spamReads += 1
+                    if Self.spamReads >= 2 {
+                        Self.spamInSpam = target
+                        if !target { Self.spamCleared = true }
+                    }
+                }
+            }
+            statusCode = 200
+            body = Self.spamThreadJSON
+        case ("POST", "/v1/email/threads/\(ConversationNavigationUITestFixture.spamThreadID)/spam") where Self.suspectedSpamEnabled:
+            let values = requestJSON()
+            let key = values["idempotency_key"] as? String
+            guard let spam = values["spam"] as? Bool, values["expected_revision"] as? Int == 1,
+                key != nil, request.value(forHTTPHeaderField: "Idempotency-Key") == key
+            else {
+                statusCode = 400
+                body = #"{"error":{"code":"malformed_request","message":"Invalid spam request.","details":{},"request_id":"ui-test"}}"#
+                break
+            }
+            Self.emailLock.withLock {
+                Self.spamTarget = spam
+                Self.spamReads = 0
+            }
+            statusCode = 202
+            body = "{\"operation_id\":\"\(Self.spamOperationID)\",\"run_id\":\"\(Self.emailRunID)\",\"status\":\"RUNNING\",\"replayed\":false}"
+        case ("POST", "/v1/email/threads/\(ConversationNavigationUITestFixture.spamThreadID)/spam-flag") where Self.suspectedSpamEnabled:
+            guard let cleared = requestJSON()["cleared"] as? Bool else {
+                statusCode = 400
+                body = #"{"error":{"code":"malformed_request","message":"Invalid flag request.","details":{},"request_id":"ui-test"}}"#
+                break
+            }
+            Self.emailLock.withLock { Self.spamCleared = cleared }
+            statusCode = 200
+            body = Self.spamThreadJSON
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/dismiss"):
             let values = requestJSON()
             Self.emailLock.withLock { Self.emailHandled = values["dismissed"] as? Bool ?? true }
@@ -1097,6 +1158,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
     /// The run finishes on its first read. Under the failure argument the
     /// sender refused an unsubscribe, which the row then records honestly.
+    /// A phishing-shaped conversation from an unknown sender, flagged until the owner says otherwise.
+    private static var spamThreadJSON: String {
+        let (cleared, target, reads, inSpam) = emailLock.withLock { (spamCleared, spamTarget, spamReads, spamInSpam) }
+        let operation = target.map {
+            "{\"operation_id\":\"\(spamOperationID)\",\"run_id\":\"\(emailRunID)\",\"target_archived\":\($0),\"target_spam\":true,\"status\":\"\(reads >= 2 ? "completed" : "pending")\",\"error\":null}"
+        } ?? "null"
+        return """
+        {"id":"\(ConversationNavigationUITestFixture.spamThreadID)","account_id":"work","subject":"Your account is locked","senders":["security@account-alerts.example.test"],"updated_at":"2026-09-10T12:00:00Z","revision":1,"in_inbox":\(!inSpam),"in_spam":\(inSpam),"suspected_spam":\(!cleared && !inSpam),"spam_cleared":\(cleared),"archive_operation":\(operation),"summary":"Claims your account is locked and asks you to sign in.","reason":"An unknown sender asks you to sign in through a link.","needs_reply":false,"draft_id":null,"session_id":null,"priority":0.9,"complete":true,"messages":[{"id":"spam-message","sender":"security@account-alerts.example.test","to":["owner@work.example"],"cc":[],"subject":"Your account is locked","body":"Your account is locked. Sign in within 24 hours to keep it.","sent_at":"2026-09-10T12:00:00Z","complete":true,"attachments":[]}],"draft":null}
+        """
+    }
+
     private static func readSubscriptionOperation(_ operationID: String) -> String {
         let failing = ProcessInfo.processInfo.arguments.contains(
             ConversationNavigationUITestFixture.subscriptionsFailureLaunchArgument)

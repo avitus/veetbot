@@ -857,6 +857,7 @@ final class ConversationNavigationUITests: XCTestCase {
     private static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
     private static let promoSubscriptionID = "00000000-0000-0000-0000-000000000B04"
     private static let bulkThreadID = "00000000-0000-0000-0000-000000000897"
+    private static let spamThreadID = "00000000-0000-0000-0000-000000000898"
     /// One status poll waits two seconds before the census is read back.
     private static let subscriptionSettleTimeout: TimeInterval = 20
 
@@ -1119,6 +1120,69 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(texts("Everything in the store is on sale this week.").firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["email.unsubscribe.thread"].exists)
         XCTAssertFalse(app.buttons["email.subscriptions.open"].exists)
+    }
+
+    /// ADR-0165: opens the conversation the server flagged as suspected spam, after one launch.
+    private func openSuspectedSpam() -> XCUIElement {
+        app.activate()
+        openEmailMode()
+        let row = app.buttons["email.thread.\(Self.spamThreadID)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(row.label.contains("Suspected spam") || firstElement("email.spam.tag.\(Self.spamThreadID)").exists,
+                      "The row carries the flag: \(row.label)")
+        activate(row)
+        XCTAssertTrue(texts("Your account is locked. Sign in within 24 hours to keep it.").firstMatch
+            .waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(firstElement("email.spam.tag.detail").waitForExistence(timeout: 5), app.debugDescription)
+        return row
+    }
+
+    private func firstElement(_ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    /// Not spam clears the flag in the detail and the row, and offers nothing that touches Gmail in its place.
+    func testSuspectedSpamNotSpamClearsTheFlag() {
+        app.launchArguments.append("--ui-testing-email-suspected-spam")
+        app.launch()
+        let row = openSuspectedSpam()
+        let notSpam = app.buttons["email.spam.clear"]
+        XCTAssertTrue(notSpam.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["email.spam.report"].exists, "A flag offers both of the owner's answers")
+        activate(notSpam)
+        XCTAssertTrue(firstElement("email.spam.tag.detail").waitForNonExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["email.spam.report"].exists)
+        XCTAssertTrue(texts("Your account is locked. Sign in within 24 hours to keep it.").firstMatch.exists,
+                      "Clearing the flag keeps the conversation open")
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        }
+        #endif
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let cleared = expectation(for: NSPredicate(format: "NOT (label CONTAINS %@)", "Suspected spam"),
+                                  evaluatedWith: row)
+        wait(for: [cleared], timeout: 10)
+    }
+
+    /// Report spam removes the conversation at once, opens the next one, and keeps it out of the inbox once settled.
+    func testSuspectedSpamReportSpamRemovesTheConversation() {
+        app.launchArguments.append("--ui-testing-email-suspected-spam")
+        app.launch()
+        _ = openSuspectedSpam()
+        let report = app.buttons["email.spam.report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 5), app.debugDescription)
+        activate(report)
+        XCTAssertTrue(texts("Please review the agenda before Friday.").firstMatch.waitForExistence(timeout: 10),
+                      "The reading pane moves on to the next conversation")
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        }
+        #endif
+        XCTAssertTrue(app.buttons["email.thread.00000000-0000-0000-0000-000000000801"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["email.thread.\(Self.spamThreadID)"].waitForNonExistence(timeout: 20),
+                      "A confirmed report keeps the conversation out of the inbox")
     }
 
     private func activate(_ element: XCUIElement) {

@@ -72,6 +72,8 @@ JOURNEYS = (
     "testSubscriptionsFailedUnsubscribeRestoresTheRowWithWhatRemains",
     "testSubscriptionsThreadActionUnsubscribesTheConversationsSender",
     "testSubscriptionsStayHiddenWhereNoAccountAdvertisesThem",
+    "testSuspectedSpamNotSpamClearsTheFlag",
+    "testSuspectedSpamReportSpamRemovesTheConversation",
 )
 
 
