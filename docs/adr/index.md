@@ -177,4 +177,4 @@ implementation without one.
 - [ADR-0163 — Focused browser observations and bounded recovery (Accepted)](0163-focused-browser-observations-and-recovery.md)
 - [ADR-0164 — Browser autonomy and verified resumption (Accepted)](0164-browser-autonomy-and-verified-resumption.md)
 - [ADR-0165 — Suspected-spam flag and thread-level Report spam (Accepted; amends ADR-0112, Milestone 31)](0165-suspected-spam-flag-and-thread-report-spam.md)
-- [ADR-0166 — A resumed run adopts the history committed after its checkpoint (Proposed)](0166-resume-adopts-history-committed-after-its-checkpoint.md)
+- [ADR-0166 — A resumed run adopts the history committed after its checkpoint (Accepted)](0166-resume-adopts-history-committed-after-its-checkpoint.md)

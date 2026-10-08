@@ -1,6 +1,6 @@
 # ADR-0166: A resumed run adopts the history committed after its checkpoint
 
-- Status: Proposed (runtime repair requested by the owner on 2026-10-08)
+- Status: Accepted by the owner on 2026-10-08 (runtime repair)
 - Date: 2026-10-08
 - Related: ADR-0003 decision 12 (made mechanical), ADR-0004 (recovery),
   ADR-0006 (continuation loss), Section 14.2
