@@ -1116,6 +1116,16 @@ if ctx.checkpoint_state.pending_tool_calls:
     await ctx.checkpoint(trigger="tool_batch")
 ```
 
+**The pending calls are the ones the log leaves unanswered.** The latest
+checkpoint may be older than what the run committed: its successor can be lost
+to a crash between two transactions, an expired lease, or a deletion. Before
+dispatching anything, the executor appends the session history committed after
+the checkpoint's `last_event_sequence`. The checkpoint's batch is then
+dispatched at the step its checkpoint recorded, because that step is part of
+each invocation's idempotency key. If an adopted turn has superseded the batch,
+only that turn's unanswered calls are dispatched. An adopted final reply
+finalizes the run (ADR-0166, `event-log-and-persistence.md`).
+
 **`run.resumed` has one emitter and one condition.** No document says which
 of the four resume paths emits it. All of them do, because the condition is
 a property of the execution rather than of the path: `run_loop` emits

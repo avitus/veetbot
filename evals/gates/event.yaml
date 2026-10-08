@@ -34,7 +34,7 @@
   kind: case
   spec: docs/plan/event-log-and-persistence.md#hard-gates
   statement: "**Checkpoint dispensability.** Delete a run's non-terminal checkpoints, resume, and reach the same terminal state. Registered as `gate.event.checkpoint_dispensable`, which `runtime-loop.md` #9 restates: this document owns it."
-  check: tests/integration/test_event_runtime_m2.py::test_nonterminal_checkpoints_are_dispensible
+  check: tests/integration/test_event_runtime_m2.py::test_lost_checkpoints_cost_time_not_information
 - id: gate.event.migration_clean
   milestone: 2
   kind: case

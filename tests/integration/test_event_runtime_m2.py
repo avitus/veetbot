@@ -6,7 +6,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.database import (
@@ -20,8 +20,10 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     CheckpointRow,
     ProjectionWatermarkRow,
     RunRow,
+    ToolInvocationRow,
 )
 from agent_core.bootstrap import build
+from agent_core.context.history import validate_tool_pairs
 from agent_core.domain.errors import ConflictError, WorkerFencedError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
@@ -31,6 +33,7 @@ from agent_core.domain.messages import (
     StopReason,
 )
 from agent_core.domain.runs import Run, RunCheckpoint, RunLimits, RunStatus, Step
+from agent_core.domain.views import TextContentBlock
 from agent_core.runtime import loop as runtime_loop
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
@@ -749,6 +752,377 @@ async def test_resume_recovers_parallel_tool_results_after_a_lost_lease(
     assert recovered.failure is None
     assert recovered.status is RunStatus.COMPLETED
     assert recovered.tool_call_count == 2
+
+
+def _two_tool_script(final_text: str = "recovered") -> FakeModelScript:
+    return FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                reasoning="look up the product first",
+                provider_reasoning_payload={"id": "rs_first", "summary": []},
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17*23"},
+                        call_id="adopted-first",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                reasoning="then the time",
+                provider_reasoning_payload={"id": "rs_second", "summary": []},
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="system.current_time",
+                        arguments={"timezone": "UTC"},
+                        call_id="adopted-second",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text=final_text),
+        ]
+    )
+
+
+def _conversation_shape(items: list[Any]) -> list[tuple[str, str | None]]:
+    return [(item.kind, getattr(item, "call_id", None)) for item in items]
+
+
+async def _reclaim_and_resume(composition: Any, clock: FixedClock, worker_id: str) -> None:
+    clock.advance(timedelta(seconds=31))
+    maintenance = MaintenanceWorker(
+        uow_factory=composition.uow_factory,
+        clock=clock,
+        poll_interval_seconds=0,
+    )
+    assert await maintenance.run_once() == 1
+    clock.advance(timedelta(seconds=2))
+    recovery = DurableWorker(
+        uow_factory=composition.uow_factory,
+        executor=composition.executor,
+        clock=clock,
+        worker_id=worker_id,
+    )
+    assert await recovery.run_once()
+
+
+@pytest.mark.parametrize(
+    ("interrupted_at", "lost"),
+    [
+        # The second step's model turn is committed; its tool_pending is not.
+        ("second_tool_pending", 1),  # restore the first step's tool_call
+        ("second_tool_pending", 2),  # restore its tool_pending (run b642e4d7)
+        ("second_tool_pending", 3),  # restore its model_response
+        ("second_tool_pending", 4),  # restore the submission seed
+        ("second_tool_pending", 5),  # no checkpoint survives
+        # The first step's results are committed and the second step has begun.
+        ("second_model_call", 1),  # restore the first step's tool_pending
+    ],
+)
+async def test_lost_checkpoints_cost_time_not_information(
+    monkeypatch: pytest.MonkeyPatch,
+    interrupted_at: str,
+    lost: int,
+) -> None:
+    """Resuming behind work the log already holds reaches the same terminal state.
+
+    Production run b642e4d7 (2026-10-07) lost its newest checkpoint after the
+    run had committed a tool result and the next model turn. The resumed
+    attempt re-ran the tool under a new invocation, and the next resume read a
+    session history with two results for one call and an unanswered call.
+    """
+
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    try:
+        clock = FixedClock(NOW)
+        async with build(
+            settings=settings,
+            storage="postgres",
+            script=_two_tool_script(),
+            clock=clock,
+        ) as composition:
+            control_id = await composition.runs.submit("use two tools and then answer")
+            control = DurableWorker(
+                uow_factory=composition.uow_factory,
+                executor=composition.executor,
+                clock=clock,
+                worker_id="uninterrupted-worker",
+            )
+            assert await control.run_once()
+            control_run = await composition.runs.get(control_id)
+            async with composition.uow_factory() as uow:
+                expected = _conversation_shape(
+                    (await uow.history.catch_up(control_run.session_id)).items
+                )
+
+        clock = FixedClock(NOW)
+        async with build(
+            settings=settings,
+            storage="postgres",
+            script=_two_tool_script(),
+            clock=clock,
+        ) as composition:
+            run_id = await composition.runs.submit("use two tools and then answer")
+            original_checkpoint = runtime_loop.checkpoint
+            original_invoke = runtime_loop._invoke_model
+            seen: dict[str, int] = {"tool_pending": 0, "model": 0}
+
+            async def interrupt_checkpoint(context: Any, trigger: str) -> None:
+                if trigger == "tool_pending":
+                    seen["tool_pending"] += 1
+                    if interrupted_at == "second_tool_pending" and seen["tool_pending"] == 2:
+                        raise _InjectedWorkerCrash
+                await original_checkpoint(context, trigger)
+
+            async def interrupt_model(context: Any, *args: Any, **kwargs: Any) -> Any:
+                seen["model"] += 1
+                if interrupted_at == "second_model_call" and seen["model"] == 2:
+                    raise _InjectedWorkerCrash
+                return await original_invoke(context, *args, **kwargs)
+
+            monkeypatch.setattr(runtime_loop, "checkpoint", interrupt_checkpoint)
+            monkeypatch.setattr(runtime_loop, "_invoke_model", interrupt_model)
+            interrupted = DurableWorker(
+                uow_factory=composition.uow_factory,
+                executor=composition.executor,
+                clock=clock,
+                worker_id="interrupted-worker",
+            )
+            with pytest.raises(_InjectedWorkerCrash):
+                await interrupted.run_once()
+            monkeypatch.setattr(runtime_loop, "checkpoint", original_checkpoint)
+            monkeypatch.setattr(runtime_loop, "_invoke_model", original_invoke)
+
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                assert newest is not None and newest >= lost
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id,
+                        CheckpointRow.version > newest - lost,
+                    )
+                )
+
+            await _reclaim_and_resume(composition, clock, "resuming-worker")
+            recovered = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                history = (await uow.history.catch_up(recovered.session_id)).items
+            async with engine.connect() as connection:
+                executions = dict(
+                    (
+                        await connection.execute(
+                            select(ToolInvocationRow.provider_call_id, func.count())
+                            .where(ToolInvocationRow.run_id == run_id)
+                            .group_by(ToolInvocationRow.provider_call_id)
+                        )
+                    )
+                    .tuples()
+                    .all()
+                )
+    finally:
+        await engine.dispose()
+
+    assert recovered.failure is None
+    assert recovered.status is RunStatus.COMPLETED
+    assert recovered.final_message == "recovered"
+    # Each call ran once, under the invocation that first proposed it.
+    assert executions == {"adopted-first": 1, "adopted-second": 1}
+    assert recovered.tool_call_count == 2
+    # The history the next resume, or the session's next run, reads is valid.
+    validate_tool_pairs(history)
+    assert _conversation_shape(history) == expected
+
+
+async def test_a_question_adopted_after_lost_checkpoints_survives_the_next_resume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run b642e4d7 end to end: the resume after the owner's answer must still assemble.
+
+    A lookup returned, the model then asked the owner a question, and the
+    checkpoints recording both were lost. Production failed with a duplicate
+    tool pair on the resume after this one; here that resume answers.
+    """
+
+    clock = FixedClock(NOW)
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17*23"},
+                        call_id="lookup-before-question",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                text="One thing first.",
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="conversation.ask_user",
+                        arguments={"question": "Should I round the answer?"},
+                        call_id="question-after-lookup",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="recovered"),
+        ]
+    )
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    original_checkpoint = runtime_loop.checkpoint
+    pending_checkpoints = 0
+
+    async def crash_before_the_question_is_pending(context: Any, trigger: str) -> None:
+        nonlocal pending_checkpoints
+        if trigger == "tool_pending":
+            pending_checkpoints += 1
+            if pending_checkpoints == 2:
+                raise _InjectedWorkerCrash
+        await original_checkpoint(context, trigger)
+
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            script=script,
+            clock=clock,
+            enabled_tools=["math.calculate", "conversation.ask_user"],
+        ) as composition:
+            run_id = await composition.runs.submit("multiply, but check with me first")
+            monkeypatch.setattr(runtime_loop, "checkpoint", crash_before_the_question_is_pending)
+            interrupted = DurableWorker(
+                uow_factory=composition.uow_factory,
+                executor=composition.executor,
+                clock=clock,
+                worker_id="question-crash",
+            )
+            with pytest.raises(_InjectedWorkerCrash):
+                await interrupted.run_once()
+            monkeypatch.setattr(runtime_loop, "checkpoint", original_checkpoint)
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                assert newest is not None
+                # Restore the lookup's tool_pending checkpoint, as production did.
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id, CheckpointRow.version > newest - 2
+                    )
+                )
+
+            await _reclaim_and_resume(composition, clock, "question-recovery")
+            waiting = await composition.runs.get(run_id)
+            assert waiting.status is RunStatus.WAITING_FOR_USER, waiting.failure
+            question = next(
+                event
+                for event in reversed(await composition.runs.events(run_id))
+                if event.event_type == "run.waiting_for_user"
+            )
+            await composition.services.runs.deliver_input(
+                composition.principal,
+                run_id,
+                [TextContentBlock(text="No rounding.")],
+                UUID(str(question.payload["question_id"])),
+            )
+            answered = DurableWorker(
+                uow_factory=composition.uow_factory,
+                executor=composition.executor,
+                clock=clock,
+                worker_id="answered-worker",
+            )
+            assert await answered.run_once()
+            recovered = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                history = (await uow.history.catch_up(recovered.session_id)).items
+            async with engine.connect() as connection:
+                executions = dict(
+                    (
+                        await connection.execute(
+                            select(ToolInvocationRow.provider_call_id, func.count())
+                            .where(ToolInvocationRow.run_id == run_id)
+                            .group_by(ToolInvocationRow.provider_call_id)
+                        )
+                    )
+                    .tuples()
+                    .all()
+                )
+    finally:
+        await engine.dispose()
+
+    assert recovered.failure is None
+    assert recovered.status is RunStatus.COMPLETED
+    assert recovered.final_message == "recovered"
+    assert executions == {"lookup-before-question": 1, "question-after-lookup": 1}
+    validate_tool_pairs(history)
+
+
+async def test_a_committed_final_reply_completes_the_resumed_run() -> None:
+    """A reply committed before finalization is the run's answer, not a reason to ask again."""
+
+    clock = FixedClock(NOW)
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17*23"},
+                        call_id="before-the-reply",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="answered once"),
+        ]
+    )
+    original_complete_reply = runtime_loop._complete_reply
+
+    async def crash_after_the_reply(context: Any, message: Any) -> Any:
+        await original_complete_reply(context, message)
+        raise _InjectedWorkerCrash
+
+    async with build(
+        settings=database_settings(),
+        storage="postgres",
+        script=script,
+        clock=clock,
+    ) as composition:
+        run_id = await composition.runs.submit("answer after one tool")
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(runtime_loop, "_complete_reply", crash_after_the_reply)
+            interrupted = DurableWorker(
+                uow_factory=composition.uow_factory,
+                executor=composition.executor,
+                clock=clock,
+                worker_id="reply-then-crash",
+            )
+            with pytest.raises(_InjectedWorkerCrash):
+                await interrupted.run_once()
+        await _reclaim_and_resume(composition, clock, "reply-recovery")
+        recovered = await composition.runs.get(run_id)
+        async with composition.uow_factory() as uow:
+            replies = [
+                event
+                for event in await uow.events.list_after(
+                    recovered.session_id, 0, PRINCIPAL, run_id=run_id
+                )
+                if event.event_type == "assistant.message.completed"
+            ]
+
+    assert recovered.failure is None
+    assert recovered.status is RunStatus.COMPLETED
+    assert recovered.final_message == "answered once"
+    assert recovered.model_call_count == 2
+    assert len(replies) == 1
 
 
 async def test_resume_after_a_crash_before_the_tool_pending_checkpoint(

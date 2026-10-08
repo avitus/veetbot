@@ -612,14 +612,36 @@ reconstructed from the log:
   the log, so replaying the log would not reproduce it. It is content, and it is
   covered by the context engine's elision rules.
 
-**Losing checkpoints costs time, not information.** With the conversation stored
-as references and the log authoritative, deleting a run's checkpoints and
-resuming reconstructs the same state, modulo the two inline exceptions above:
-losing an active `ProviderContinuation` forces the current tool loop to restart
-from the last full snapshot rather than resume mid-loop. This is a test, not a
-hope — "delete the last three checkpoints, resume, assert the same terminal
-state" belongs in the resilience suite next to the kill-the-worker test that
-Section 14.2 already requires.
+**Losing checkpoints costs time, not information.** A checkpoint can be lost
+after the run has committed more: a crash between two transactions, a lease
+that expires before the next write, or a deletion. Restoring the older
+checkpoint alone does not recover that state, because the next checkpoint's
+reference covers what the earlier attempt committed while the resumed attempt
+redoes it. Production run b642e4d7 failed this way on 2026-10-07 with a
+duplicate tool pair. So a resumed run **adopts the session history committed
+after its checkpoint's `last_event_sequence`** before it does anything else
+(ADR-0166):
+
+- If nothing adopted is model output, the checkpoint's own batch re-enters the
+  pipeline at the step its `budget_state` recorded. That step is part of every
+  invocation's idempotency key, so a call that already ran returns its recorded
+  outcome rather than running again, and a result already in the log is not
+  appended twice.
+- If an adopted turn follows the checkpoint's batch, that turn supersedes it.
+  Only the newest turn's unanswered calls are dispatched, and the restored
+  continuation, which belongs to an older turn, is dropped.
+- If the adopted history ends with the final reply, the run finalizes with it
+  instead of asking the model again.
+
+What is lost is state that only checkpoints hold. A lost checkpoint takes its
+active `ProviderContinuation` with it, the inline exception above, so a turn
+adopted from the log has none. Steps after the checkpoint also leave no loop
+counters, tool evidence, or loaded skills, so the run repeats that work if it
+needs it. This is a test, not a hope:
+`test_lost_checkpoints_cost_time_not_information` deletes the last one through
+five checkpoints of an interrupted two-tool run, resumes, and asserts the
+uninterrupted run's terminal state, with each call executed once. It sits next
+to the kill-the-worker test that Section 14.2 already requires.
 
 **Retention.** After a run reaches a terminal status, prune to the final
 checkpoint plus the last full snapshot. Before that, prune deltas older than the
@@ -738,7 +760,9 @@ being invented twice.
 On reclaim, Section 14.2's procedure runs against the tool-invocation table
 (Section 8.4), which is the authority on what actually executed:
 
-1. Load the latest checkpoint and reconstruct through the delta chain.
+1. Load the latest checkpoint, reconstruct through the delta chain, and adopt
+   the session history committed after it (see "Losing checkpoints costs time,
+   not information" above).
 2. Read `tool_invocations` for the run at or after the checkpoint's
    `last_event_sequence`.
 3. For each invocation not in a terminal state, decide by `IdempotencyClass`:
