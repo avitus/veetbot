@@ -1,6 +1,6 @@
 # ADR-0112: Milestone 31 email unsubscribe assistance
 
-- Status: Accepted — the owner requested the capability, decided its surfaces, consent model, server-side egress, and fallbacks, and directed implementation on 2026-09-19
+- Status: Accepted — the owner requested the capability, decided its surfaces, consent model, server-side egress, and fallbacks, and directed implementation on 2026-09-19 (amended by ADR-0165, 2026-10-08)
 - Date: 2026-09-19
 - Related: ADR-0017, ADR-0040, ADR-0054, ADR-0071, ADR-0085, ADR-0092, ADR-0095, ADR-0096, ADR-0098, ADR-0099, ADR-0104
 - Design: [Email unsubscribe assistance](../plan/email-unsubscribe.md)
@@ -129,6 +129,9 @@ Admitted: the census; the one-click request and its transport; the `mailto`,
 Report spam, Not spam, and sender-cleanup actions; gesture and Chat consent;
 four routes and two additive projection fields; two builtin tools; and the
 native Subscriptions view and thread action on iPhone, iPad, and Mac.
+ADR-0165 later admitted the suspected-spam flag, Gmail's sender check as
+assessment evidence, and thread-level Report spam and Not spam through two
+routes under `/v1/email/threads`, raising the milestone to twenty-three gates.
 
 Deferred, each for a stated reason in the design: unsubscribe links in a
 message body; web pages that need clicks or a login; standing rules and

@@ -734,6 +734,28 @@ class EmailSubscriptions:
             ),
         )
 
+    async def report_thread_spam(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        expected_revision: int,
+        *,
+        spam: bool,
+        idempotency_key: str,
+    ) -> EmailOperation:
+        """Report one thread as spam, or restore it, with Archive's gesture (ADR-0165)."""
+        self._require_enabled()
+        return await self.service.report_thread_spam(
+            principal, thread_id, expected_revision, spam=spam, idempotency_key=idempotency_key
+        )
+
+    async def clear_spam_flag(
+        self, principal: Principal, thread_id: UUID, *, cleared: bool
+    ) -> dict[str, object]:
+        """Clear or restore one thread's suspected-spam flag; no mailbox changes."""
+        self._require_enabled()
+        return await self.service.clear_spam_flag(principal, thread_id, cleared=cleared)
+
     # -- admission (inside submit_task's owner lock) -----------------------------------------
 
     async def _eligible(

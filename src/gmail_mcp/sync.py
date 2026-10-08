@@ -353,6 +353,7 @@ class GmailSync:
                 "in_reply_to": headers.get("in-reply-to", ""),
                 "references": headers.get("references", ""),
                 "direction": "sent" if "SENT" in labels else "received",
+                "sender_check": unsubscribe.sender_check(raw.get("payload")),
                 "body_complete": available and body == full_body,
                 "body_available": available,
                 "next_body_offset": len(body.encode()) if available and body != full_body else None,

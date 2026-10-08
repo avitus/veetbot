@@ -415,6 +415,8 @@ class EmailSemanticFormationService:
     ) -> bool:
         """Whether this thread is bulk mail (ADR-0116): census-indexed, or assessed as bulk.
 
+        A thread flagged as suspected spam is treated the same way (ADR-0165).
+
         Both signals are read through the account-qualified thread key that
         source exclusion tombstones already use, so no application module is
         imported here. The persisted assessment is keyed by the thread's own
@@ -428,7 +430,10 @@ class EmailSemanticFormationService:
         if not isinstance(thread_id, str):
             return False
         assessment = await uow.email.get(self._principal, "assessment", thread_id)
-        return assessment is not None and assessment.payload.get("bulk") is True
+        return assessment is not None and (
+            assessment.payload.get("bulk") is True
+            or assessment.payload.get("suspected_spam") is True
+        )
 
     async def _source_session(self, uow: RepositoryUnitOfWork, session_id: UUID) -> Session:
         try:

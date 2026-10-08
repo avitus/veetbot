@@ -1296,7 +1296,10 @@ class _TaskIO:
             fingerprint = hashlib.sha256(
                 json.dumps(
                     {
-                        "messages": [message.model_dump(mode="json") for message in messages],
+                        "messages": [
+                            message.model_dump(mode="json", exclude={"sender_check"})
+                            for message in messages
+                        ],
                         "complete": complete,
                     },
                     sort_keys=True,
@@ -1309,8 +1312,10 @@ class _TaskIO:
                     "revision": thread.revision + 1,
                     "source_fingerprint": fingerprint,
                     "in_inbox": any("INBOX" in message.labels for message in messages),
+                    "in_spam": any("SPAM" in message.labels for message in messages),
                     "priority": 0,
                     "needs_reply": False,
+                    "suspected_spam": False,
                     "assessment_version": "",
                     "attention_expires_at": None,
                     "summary": "Assessment pending"
@@ -1461,7 +1466,8 @@ class _TaskIO:
             if c.checkpoint.provider_pin is None
             else c.checkpoint.provider_pin.registry_version
         )
-        revision = "email-assessment@4" if self.semantics.people_enabled else "email-assessment@3"
+        # ADR-0165 added the spam verdict: both revisions move past every earlier value.
+        revision = "email-assessment@6" if self.semantics.people_enabled else "email-assessment@5"
         return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:{revision}"
 
     async def assess(self, thread: EmailThread, learning: dict[str, Any]) -> None:
@@ -1579,6 +1585,7 @@ class _TaskIO:
                 content_importance=0,
                 urgency=0,
                 needs_reply=False,
+                spam=False,
                 attention_expires_at=None,
                 supported_evidence=[],
             )
@@ -1595,7 +1602,7 @@ class _TaskIO:
             source_fingerprint=thread.source_fingerprint,
             model_revision=self._model_revision(),
         )
-        await self.service.save_assessment(
+        saved = await self.service.save_assessment(
             self.context.principal,
             thread.id,
             thread.revision,
@@ -1615,19 +1622,25 @@ class _TaskIO:
                     fact.message_id == item["id"] and fact.quote in item["body"] for item in visible
                 )
             ]
-            skipped = await self._bulk_reason(thread, assessment) if facts else None
+            skipped = await self._bulk_reason(saved, assessment) if facts else None
             if skipped is None:
                 await self._form_semantics(thread, facts)
             else:
                 await self._record_skipped(thread, skipped, len(facts))
 
     async def _bulk_reason(self, thread: EmailThread, assessment: EmailAssessment) -> str | None:
-        """Why bulk mail forms nothing (ADR-0116): the census first, then the verdict."""
+        """Why bulk mail forms nothing (ADR-0116): the census first, then the verdict.
+
+        Suspected spam forms nothing either (ADR-0165); the saved thread carries the
+        flag after protection and the owner's clearing have been applied.
+        """
         async with self.context.uow_factory() as uow:
             key = thread_source_key(thread.account_id, thread.provider_thread_id)
             if await uow.email.get(self.context.principal, "subscription_thread", key) is not None:
                 return "bulk_sender"
-        return "bulk_assessment" if assessment.bulk else None
+        if assessment.bulk:
+            return "bulk_assessment"
+        return "spam_assessment" if thread.suspected_spam else None
 
     async def _record_skipped(self, thread: EmailThread, reason: str, facts: int) -> None:
         """Leave a content-free trace so memory diagnostics can explain the absence."""

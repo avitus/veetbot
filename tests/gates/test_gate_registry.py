@@ -98,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 568
+    assert len(entries) == 571
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -177,7 +177,7 @@ def test_census_is_derived() -> None:
         28: 36,
         29: 17,
         30: 5,
-        31: 20,
+        31: 23,
     }
 
 

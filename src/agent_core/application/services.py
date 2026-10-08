@@ -731,6 +731,20 @@ class EmailSubscriptionService(Protocol):
         idempotency_key: str,
     ) -> EmailOperation: ...
 
+    async def report_thread_spam(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        expected_revision: int,
+        *,
+        spam: bool,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
+    async def clear_spam_flag(
+        self, principal: Principal, thread_id: UUID, *, cleared: bool
+    ) -> dict[str, object]: ...
+
 
 class EmailService(Protocol):
     """Email projections and commands; entry points cannot reach repositories."""

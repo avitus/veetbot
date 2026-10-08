@@ -732,6 +732,7 @@ normal contract naming review:
 | `/v1/email/threads/{id}/drafts` and draft detail | Start/refine a governed generation run; read/save revisions; discard internal proposals. |
 | `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references. |
 | `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
+| `/v1/email/threads/{id}/spam` and `/spam-flag` | Milestone 31 (ADR-0165), behind its flag: admit an owner's Report spam or Not spam with Archive's gesture; clear or restore a suspected-spam flag without a mailbox change. |
 | `/v1/email/threads/{id}/discussion`, `/dismiss`, and `/exclude` | Open the thread in Chat once (`email.discussion.opened`, which also needs `session.write`); set or clear handled state at the revision the client saw; exclude the thread as a learning source. |
 | Existing approval routes | Resolve every send once; no alternate direct-send HTTP route. |
 
@@ -1274,3 +1275,15 @@ server preparation and owner-gesture consent; and its records are new kinds in
 `email_records` under this document's retention, source-erasure and privacy
 rules. Nothing in it monitors a mailbox or writes to Gmail without an owner
 act, so this milestone's exclusions and thirty-two gates are unchanged.
+
+[ADR-0165](../adr/0165-suspected-spam-flag-and-thread-report-spam.md) extends
+that milestone into this one's assessment and projection. The assessment
+gains a `spam` verdict, its prompt and both revisions change, and each message
+carries Gmail's DMARC result as `sender_check` metadata outside the content
+fingerprint. Behind the Milestone 31 flag, a grounded verdict on an
+unprotected sender marks the thread suspected spam: it projects with priority
+zero and no reply needed, so it leaves the priority view and automatic
+drafts, and memory source validation treats it as bulk. Report spam on a
+thread is the Archive gesture above with a fixed `SPAM` delta. The rules are
+specified and gated in [email-unsubscribe.md](email-unsubscribe.md); this
+milestone's thirty-two gates are unchanged.

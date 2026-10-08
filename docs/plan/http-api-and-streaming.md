@@ -2198,20 +2198,24 @@ and a foreign or unknown folder, proposal or session is an indistinguishable
 
 ## Milestone 31 email unsubscribe routes
 
-[email-unsubscribe.md](email-unsubscribe.md#the-routes) owns four routes and
+[email-unsubscribe.md](email-unsubscribe.md#the-routes) owns six routes and
 their request and response contracts: `GET /v1/email/subscriptions`,
 `POST /v1/email/subscriptions/unsubscribe`,
-`POST /v1/email/subscriptions/{id}/spam`, and
-`POST /v1/email/subscriptions/{id}/keep`. They are absent unless
-`AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1` and require the existing `email.read` or
-`email.write` scope, with the run, session, approval-resolution and exact
-account MCP scopes on the two commands that admit a task; no new scope enters
-the vocabulary. Operation status reuses
-`GET /v1/email/operations/{operation_id}`. The account projection gains an
-additive `unsubscribe_supported` and the thread projection an additive
-nullable `subscription` block. Every response carries
+`POST /v1/email/subscriptions/{id}/spam`,
+`POST /v1/email/subscriptions/{id}/keep`, and, under ADR-0165,
+`POST /v1/email/threads/{id}/spam` and `POST /v1/email/threads/{id}/spam-flag`.
+They are absent unless `AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1` and require the
+existing `email.read` or `email.write` scope, with the run, session,
+approval-resolution and exact account MCP scopes on the three commands that
+admit a task; no new scope enters the vocabulary. Operation status reuses
+`GET /v1/email/operations/{operation_id}`. The account projection gains
+additive `unsubscribe_supported` and `spam_supported` fields; the thread
+projection gains an additive nullable `subscription` block and additive
+`suspected_spam`, `spam_cleared`, and `in_spam` fields, and its
+`archive_operation` an additive `target_spam`. Every response carries
 `Cache-Control: private, no-store`, never includes an unsubscribe address, and
-answers a foreign or unknown subscription with an indistinguishable 404.
+answers a foreign or unknown subscription or thread with an indistinguishable
+404.
 
 ## ADR-0119 model settings routes
 

@@ -265,17 +265,18 @@ value and does, and the shipped profile keeps it disabled.
 
 ### Milestone 31 — Email unsubscribe assistance
 
-Twenty gates; independent workstream under ADR-0112. A header-derived census
-of bulk senders, the authenticated one-click unsubscribe request to a
-server-derived destination through a dedicated public-HTTPS transport, and
-Report spam, `mailto:` and sender-cleanup fallbacks, each behind the owner's
-tap. Nineteen gates bind passing checks. The milestone reached `main` in pull
+Twenty-three gates; independent workstream under ADR-0112, extended by
+ADR-0165. A header-derived census of bulk senders, the authenticated one-click
+unsubscribe request to a server-derived destination through a dedicated
+public-HTTPS transport, and Report spam, `mailto:` and sender-cleanup
+fallbacks, each behind the owner's tap; and a suspected-spam flag that never
+touches Gmail, with thread-level Report spam and Not spam. Nineteen gates bind passing checks. The milestone reached `main` in pull
 request 131 with a clean review, and its flag was switched on in production by
 2026-09-21, ahead of the owner's real-mailbox smoke.
 
 - [ ] Pass the five native Subscriptions journeys (added 2026-09-28 and passing locally on the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
 - [ ] Show the Subscriptions detail beside its list on regular-width iPad as email-unsubscribe.md requires; the iPad sheet is a 580-point compact-width form sheet, so the detail pushes as on iPhone
-- [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, spam with Not spam, and cleanup
+- [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, sender and thread spam each with Not spam, and cleanup
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
 ## Outside a milestone
