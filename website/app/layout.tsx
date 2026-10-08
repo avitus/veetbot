@@ -4,11 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.veetbot.com"),
   title: {
-    default: "Veetbot | Governed AI agent",
+    default: "Veetbot | Your personal AI assistant",
     template: "%s | Veetbot",
   },
   description:
-    "A self-hostable AI agent for durable work, governed actions, and inspectable memory.",
+    "A personal AI assistant that helps with your inbox, your day, and the people in your life.",
   icons: {
     icon: "/veetbot-icon.svg",
     shortcut: "/veetbot-icon.svg",
@@ -16,22 +16,22 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "Veetbot",
-    title: "Veetbot | Governed AI agent",
-    description: "An agent that can act. A system you can inspect.",
+    title: "Veetbot | Your personal AI assistant",
+    description: "An assistant that actually helps. And remembers what you told it.",
     url: "https://www.veetbot.com/",
     images: [
       {
         url: "/og.png",
         width: 1731,
         height: 909,
-        alt: "Veetbot — An agent that can act. A system you can inspect.",
+        alt: "Veetbot — An assistant that actually helps. And remembers what you told it.",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Veetbot | Governed AI agent",
-    description: "An agent that can act. A system you can inspect.",
+    title: "Veetbot | Your personal AI assistant",
+    description: "An assistant that actually helps. And remembers what you told it.",
     images: ["/og.png"],
   },
 };
