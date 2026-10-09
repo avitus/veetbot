@@ -1,6 +1,6 @@
 # ADR-0167: Automatic memory maintenance does not refresh chat recency
 
-- Status: Proposed
+- Status: Accepted (owner authorized release on 2026-10-08)
 - Date: 2026-10-08
 - Related: ADR-0050, ADR-0069; engineering plan Section 16
 - User authorization: diagnose and fix a quiet chat continually appearing in
@@ -14,7 +14,7 @@ belief's source session, so an old conversation repeatedly appears recent even
 though no run or message occurred. This is an interaction between ADR-0050's
 blanket event timestamp rule and ADR-0069's background lifecycle audit.
 
-## Proposed decision
+## Decision
 
 Refine the activity projection in both event adapters: `memory.decayed` and
 `memory.retired` with actor `memory` and no run identifier allocate a sequence
