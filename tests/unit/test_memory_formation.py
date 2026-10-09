@@ -871,8 +871,13 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor() -
     assert idle.status is MemoryStatus.PROVISIONAL
     assert weak.confidence == pytest.approx(0.2)
 
+    async with factory() as uow:
+        activity_before = (await uow.sessions.get(SESSION_ID, principal())).updated_at
+
     clock.advance(timedelta(days=31))
     result = await service.decay()
+    async with factory() as uow:
+        assert (await uow.sessions.get(SESSION_ID, principal())).updated_at == activity_before
 
     assert (result.decayed, result.retired) == (1, 1)
     beliefs = {belief.id: belief for belief in await service.list_memories(include_inactive=True)}

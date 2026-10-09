@@ -34,6 +34,7 @@ from agent_core.domain.events import (
     EventEnvelope,
     NewEvent,
     ProcessEvent,
+    advances_session_activity,
     is_schedule_instruction_event,
 )
 from agent_core.domain.folders import (
@@ -650,7 +651,7 @@ class InMemoryEventRepository:
         ):
             self._sessions._chat_sessions.add(event.session_id)
         touch = getattr(self._sessions, "touch", None)
-        if touch is not None:
+        if touch is not None and advances_session_activity(event):
             await touch(event.session_id, occurred_at)
         return envelope.model_copy(deep=True)
 

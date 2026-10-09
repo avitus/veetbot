@@ -1636,3 +1636,14 @@ ceremony identifiers and the bounded continuation content. It replaces neither
 an owner message nor authority. The matching `tool.call.completed`, working-state
 update, full checkpoint and run requeue commit atomically with it, using the
 question-derived idempotency key. Replay preserves exactly one call/result pair.
+
+## Automatic memory maintenance and conversation activity
+
+ADR-0167 refines the append path's activity projection for the owner-requested
+Recent-chat repair. A `memory.decayed` or `memory.retired` event whose actor is
+`memory` and whose run identifier is null still allocates its sequence and
+persists in the same transaction, but leaves `sessions.updated_at` unchanged.
+Both adapters apply this exception; all other events retain the monotonic
+timestamp update. The repair migration restores affected active sessions to
+the latest remaining event or creation time, preserves later independent
+writes and closed sessions, and retains every audit event.
