@@ -474,6 +474,12 @@ function rtcDelta(before, after) {
   };
 }
 
+// fast-h3 accepts 5.167–14.375 s and snaps to the nearest length it can make.
+function reactorSeconds(duration) {
+  const { min_seconds: min, max_seconds: max } = config.reactor.model;
+  return Math.min(max, Math.max(min, duration));
+}
+
 async function runReactor(run) {
   const { t0, settings, signal } = run;
   const marks = {};
@@ -534,7 +540,7 @@ async function runReactor(run) {
     marks.enqueued = now() - t0;
     setPhase("reactor", "Generating", "Generating the clip");
     session
-      .send("enqueue", { prompt: settings.prompt, seconds: settings.duration, seed: settings.seed, metadata: tag })
+      .send("enqueue", { prompt: settings.prompt, seconds: reactorSeconds(settings.duration), seed: settings.seed, metadata: tag })
       .catch((error) => session.dispatch({ type: "clip_failed", clip: { metadata: tag }, reason: error.message }));
     marks.queued = (await step(queued)).at - t0;
     const built = await step(generated);
