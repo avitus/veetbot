@@ -21,8 +21,10 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
 
 State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
 runs as release `20260928-202932-e55551f`; Milestone 14's completion was
-recorded on 2026-10-09. Twenty-two of thirty-two milestones are complete; nine
+recorded on 2026-10-09. With Milestone 32 authorized, twenty-two of thirty-three milestones are complete; ten
 are in progress and one is authorized but not started.
+Milestone 32 has implemented components and registered gates;
+comparative quality and complete runtime/release evidence remain pending.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
@@ -36,6 +38,7 @@ are in progress and one is authorized but not started.
 | 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
 | 30 Advisory approval | In progress | Threshold calibration and enforce decision; final-head review | Owner; engineering |
 | 31 Email unsubscribe | In progress | Simulator journeys, mailbox smoke; final-head review | Engineering; owner |
+| 32 Memory reconsolidation | In progress | Measured quality failures, remaining integrated gates and release evidence | Engineering |
 
 ## Complete
 
@@ -260,6 +263,43 @@ request 131 with a clean review, and its flag was switched on in production by
 - [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, sender and thread spam each with Not spam, and cleanup
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
+### Milestone 32 — Memory reconsolidation (dreaming)
+
+The [detailed design](../plan/memory-reconsolidation.md) declares twenty-four
+registered gates. Both stores implement bounded inventory, leases/spend, merge,
+summary, grounded connection and conflict operations, source invalidation/erasure,
+owner controls and gated background composition. The Synthesis browser exposes
+supporting originals, uncertainty, conflicts and previewed merge undo. Shared
+contracts, PostgreSQL RLS/migration checks, Apple package tests and iPhone/iPad
+journeys cover these components; the complete runtime/release gates remain pending.
+
+Two answer-bearing original controls and full three-arm comparisons are retained
+under `evals/observations/memory-reconsolidation/`. Both failed the unchanged quality
+gate. The second run preserved every fact and had zero false merges, but its answer
+lift was only 1/36 per split, merge answers regressed and no hypothesis matched the
+scorer's exact reference wording. The owner approved ADR-0170 on 2026-10-08;
+its offline equivalence-review contract is implemented. The third comparison bound
+that contract before measurement. The owner judged all fifteen candidates: ten
+equivalent and five not equivalent. Precision is 75% on development and 57.14% on
+holdout, below the unchanged 80% floor; recall passes both splits. Every fact is
+preserved with no false merges, but answer lift and development merge-answer
+nonregression still fail. Review artifacts and the recomputed assessment are in
+`evals/observations/memory-reconsolidation/20261008-owner-review-v2/`. Production stays off.
+
+The ADR-0171 isolated owner-data experiment completed on 2026-10-09, and the
+owner judged its accepted related-memory summary useful. This completes that
+review; legacy bank replay and the comparative quality failures remain unresolved.
+
+The October 9 diagnostic comparison records 14/18/14 development and 17/17/19
+holdout answers out of 36 for original/merge/connections. Merge-answer
+nonregression passes, but answer lift remains below ten percentage points.
+Eleven new hypotheses await their own bound owner review; earlier judgments and
+failures remain unchanged. The design records the repairs and measured limits.
+
+- [ ] Complete the new bound hypothesis review and resolve precision and answer-lift failures; the latest comparison passes merge-answer nonregression, with release-tuple proof still required
+- [ ] Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
+- [ ] Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before production activation
+
 ## Outside a milestone
 
 Open work that no active milestone owns: owner-only steps of non-milestone
@@ -291,6 +331,7 @@ Specified, gated, and authorized, with implementation not yet begun.
 - **Milestone 15 — Operational hardening** — sixteen gates; the next
   sequential milestone now that Milestone 14 is complete. Its backup tranche
   depends on none of the milestones before it.
+
 
 
 

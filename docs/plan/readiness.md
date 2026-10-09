@@ -18,7 +18,9 @@ complete, and Milestone 14 inbound surfaces and pairing is the next sequential,
 fully specified milestone. Milestones 16, 17, 19, 20, 22, 23, and 29 completed
 as separately authorized parallel workstreams; Milestones 18, 21, and 24
 through 31 are authorized parallel workstreams in progress, each with a
-complete design and registered gates.
+complete design and registered gates. Milestone 32 was authorized on 2026-10-02
+with a proposal; Phase 1 on 2026-10-03 added its detailed contracts and twenty-four
+registered gates. It is implementable, with runtime behavior still pending.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -569,7 +571,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4577-4654`
+Section 28 of the plan is not empty — `engineering-plan.md:4618-4695`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -588,7 +590,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1538`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4652` requires a container-escape attempt as
+    `engineering-plan.md:4693` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -1438,9 +1440,10 @@ The readiness verdict is **Authorized**: ADR-0077 and ADR-0090, thirty-one new
 sequence, explicit migration and erasure rules, and a comparative corpus
 contract specify the whole workstream before production-code changes begin.
 Reinforcement learning, fine-tuning, semantic retrieval, `pgvector`, external
-memory providers, temporal graphs, global consolidation, and a
-public write API remain deferred; persona editing has since entered as
-Milestone 22 (ADR-0079).
+memory providers, general temporal graphs and a public write API remain outside
+this milestone; persona editing entered as Milestone 22 (ADR-0079), and
+Milestone 32 now authorizes whole-store consolidation and grounded connections
+with a detailed design and registered gates (ADR-0169).
 
 ## Milestone 22: the persona surface, complete
 
@@ -1560,7 +1563,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4656-4813` for links to other documents returned
+`engineering-plan.md:4697-4854` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1781,7 +1784,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1520` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2655` against
-    `model-gateway.md:1970` and `milestone-map.md:1861`. The map
+    `model-gateway.md:1980` and `milestone-map.md:1898`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1790,7 +1793,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4652` requires a test the harness's case set
+    `engineering-plan.md:4693` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1986,3 +1989,21 @@ adds three `gate.email.spam_*` gates on 2026-10-08 for the suspected-spam flag,
 Gmail's sender check, and thread-level Report spam, designed in the same
 document. Integrated release evidence remains pending, and the milestone does
 not move the verified ceiling.
+
+## Milestone 32: Memory reconsolidation (dreaming), specified
+
+The owner authorized whole-store revisiting, belief merging and grounded
+connections on 2026-10-02 and instructed engineering to begin on 2026-10-03.
+[memory-reconsolidation.md](memory-reconsolidation.md) and ADR-0169 define
+bounded durable maintenance, source content revisions, atomic operations,
+reversible equivalence membership, extractive summaries, grounded hypotheses,
+dependency invalidation, owner inspection/undo and evaluation arithmetic.
+
+The verdict is **implementable**. Twenty-four gates are registered; two bind
+checks of the frozen evaluation yardstick and twenty-two runtime/release gates
+remain explicitly pending. The corpus has twelve categories in each of its
+synthetic development and holdout splits. Its manifest pins the scorer and
+unchanged M16 control references, not an unmeasured dreaming run. The runtime
+collector and original-only control on M32 seeds must precede provider tuning.
+No production capability, quality result or activation is claimed. Milestone
+21's open evidence remains open and the verified ceiling stays 14.

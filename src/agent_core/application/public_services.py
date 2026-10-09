@@ -25,6 +25,7 @@ from agent_core.application.browser_task_grants import (
     read_task_grant_context,
     task_grant_ended_event,
 )
+from agent_core.application.derived_memories import change_derived, derived_view
 from agent_core.application.errors import (
     MemoryCursorError,
     SessionMessageCursorError,
@@ -73,6 +74,7 @@ from agent_core.domain.browser_task_grants import (
 )
 from agent_core.domain.canonical import canonical_json
 from agent_core.domain.context import WorkingState
+from agent_core.domain.derived_memory import DerivedMemoryView, SummaryAction, SummaryWriteReceipt
 from agent_core.domain.errors import (
     AttachmentValidationError,
     AuthorizationError,
@@ -119,6 +121,7 @@ from agent_core.domain.persona import (
     PersonaNominationState,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.reconsolidation_summary import SummaryMemory
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
@@ -2007,7 +2010,7 @@ class PublicArtifactService:
         return _artifact_view(artifact)
 
 
-def _encode_memory_cursor(row: MemoryRecord) -> str:
+def _encode_memory_cursor(row: MemoryRecord | SummaryMemory) -> str:
     payload = json.dumps({"p": row.store_position, "i": str(row.id)}, separators=(",", ":")).encode(
         "utf-8"
     )
@@ -2082,12 +2085,20 @@ class PublicMemoryService:
         *,
         uow_factory: UnitOfWorkFactory,
         memory_for: Callable[[Principal], MemoryOwnerActions] | None = None,
+        clock: Clock | None = None,
+        derived_enabled: bool = False,
     ) -> None:
         self._uow_factory = uow_factory
         # The composition root supplies the governed formation service per
         # owner, as it does for People corrections; the application layer never
         # imports the memory package.
         self._memory_for = memory_for
+        self._clock = clock
+        self._derived_enabled = derived_enabled
+
+    def _now(self) -> datetime:
+        assert self._clock is not None, "derived controls require the composition clock"
+        return self._clock.now()
 
     async def list(
         self,
@@ -2102,7 +2113,8 @@ class PublicMemoryService:
         limit: int,
         cursor: str | None,
         flagged: bool | None = None,
-    ) -> Page[MemoryView]:
+        include_derived: bool = False,
+    ) -> Page[MemoryView | DerivedMemoryView]:
         require_scope(principal, "memory.read")
         effective_limit = min(max(limit, 1), 200)
         decoded = _decode_memory_cursor(cursor)
@@ -2119,27 +2131,58 @@ class PublicMemoryService:
             cursor=decoded,
             flagged_for_review=flagged,
         )
+        if include_derived and not self._derived_enabled:
+            raise MemoryCursorError("derived memory browsing is unavailable")
         async with self._uow_factory() as uow:
-            rows = await uow.memories.browse(query)
-        has_more = len(rows) > effective_limit
-        page_rows = rows[:effective_limit]
-        return Page[MemoryView](
-            items=[MemoryView.from_record(row) for row in page_rows],
-            next_cursor=(_encode_memory_cursor(page_rows[-1]) if has_more and page_rows else None),
-        )
+            if not include_derived:
+                rows = await uow.memories.browse(query)
+                page_rows = rows[:effective_limit]
+                return Page[MemoryView | DerivedMemoryView](
+                    items=[MemoryView.from_record(row) for row in page_rows],
+                    next_cursor=(
+                        _encode_memory_cursor(page_rows[-1])
+                        if len(rows) > effective_limit
+                        else None
+                    ),
+                )
+            try:
+                async with uow.people.lock(principal):
+                    now = self._now()
+                    originals = await uow.memories.browse(query)
+                    summaries = await uow.reconsolidation.browse_summaries(principal, query, now)
+                    combined: list[MemoryRecord | SummaryMemory] = sorted(
+                        [*originals, *summaries], key=lambda row: (-row.store_position, row.id)
+                    )
+                    selected = combined[:effective_limit]
+                    items: list[MemoryView | DerivedMemoryView] = []
+                    for row in selected:
+                        items.append(
+                            await derived_view(uow, principal, row.id, ceiling, now)
+                            if isinstance(row, SummaryMemory)
+                            else MemoryView.from_record(row)
+                        )
+                    return Page[MemoryView | DerivedMemoryView](
+                        items=items,
+                        next_cursor=_encode_memory_cursor(selected[-1])
+                        if len(combined) > effective_limit
+                        else None,
+                    )
+            except NotFoundError:
+                return Page[MemoryView | DerivedMemoryView](items=[], next_cursor=None)
 
     async def get(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
-    ) -> MemoryView:
+    ) -> MemoryView | DerivedMemoryView:
         require_scope(principal, "memory.read")
         async with self._uow_factory() as uow:
-            record = await uow.memories.get(memory_id, principal)
-        if SENSITIVITY_ORDER[record.sensitivity] > SENSITIVITY_ORDER[ceiling]:
-            # Above the caller's ceiling is indistinguishable from absent:
-            # a distinguishable 403 or 409 would make every identifier an
-            # oracle over which beliefs are merely too sensitive to show.
-            raise NotFoundError("memory not found")
-        return MemoryView.from_record(record)
+            try:
+                record = await self._visible(uow, principal, memory_id, ceiling)
+            except NotFoundError:
+                if not self._derived_enabled:
+                    raise
+                async with uow.people.lock(principal):
+                    return await derived_view(uow, principal, memory_id, ceiling, self._now())
+            return MemoryView.from_record(record)
 
     # -- writes (ADR-0117) -------------------------------------------------------
     #
@@ -2181,9 +2224,15 @@ class PublicMemoryService:
     ) -> bool:
         """Whether this key already completed; a reused key with another request conflicts."""
         receipt = await uow.events.get_by_derivation(derivation, principal)
-        if receipt is None:
+        derived_receipt = await uow.reconsolidation.summary_write_receipt(principal, derivation)
+        if receipt is None and derived_receipt is None:
             return False
-        if receipt.payload.get("request_hash") != digest:
+        if receipt is not None:
+            recorded_hash = receipt.payload.get("request_hash")
+        else:
+            assert derived_receipt is not None
+            recorded_hash = derived_receipt.request_hash
+        if recorded_hash != digest:
             raise ConflictError("memory idempotency key was reused")
         return True
 
@@ -2217,7 +2266,6 @@ class PublicMemoryService:
         derivation, digest = self._write_key(
             principal, key, {"op": "delete", "memory_id": str(memory_id)}
         )
-        governed = self._governed(principal)
         async with (
             self._uow_factory() as uow,
             uow.email.lock(principal),
@@ -2225,8 +2273,19 @@ class PublicMemoryService:
         ):
             if await self._replayed(uow, principal, derivation, digest):
                 return
+            if (
+                self._derived_enabled
+                and await uow.reconsolidation.summary_operation(principal, memory_id) is not None
+            ):
+                await change_derived(uow, principal, memory_id, "delete", ceiling, self._now())
+                await uow.reconsolidation.record_summary_write(
+                    principal,
+                    derivation,
+                    SummaryWriteReceipt(operation_id=memory_id, request_hash=digest),
+                )
+                return
             record = await self._visible(uow, principal, memory_id, ceiling)
-            await governed.delete(memory_id, existing_uow=uow)
+            await self._governed(principal).delete(memory_id, existing_uow=uow)
             await self._receipt(
                 uow,
                 principal,
@@ -2245,24 +2304,38 @@ class PublicMemoryService:
         *,
         ceiling: Sensitivity,
         key: str,
-    ) -> MemoryView:
+    ) -> MemoryView | DerivedMemoryView:
         """Apply one review outcome to a belief; a repeated key replays its live view."""
         require_scope(principal, "memory.write")
         derivation, digest = self._write_key(
             principal, key, {"op": "review", "memory_id": str(memory_id), "outcome": outcome.value}
         )
-        governed = self._governed(principal)
         async with (
             self._uow_factory() as uow,
             uow.email.lock(principal),
             uow.people.lock(principal),
         ):
-            if await self._replayed(uow, principal, derivation, digest):
+            replayed = await self._replayed(uow, principal, derivation, digest)
+            if (
+                self._derived_enabled
+                and await uow.reconsolidation.summary_operation(principal, memory_id) is not None
+            ):
+                now = self._now()
+                if not replayed:
+                    action: SummaryAction = outcome.value
+                    await change_derived(uow, principal, memory_id, action, ceiling, now)
+                    await uow.reconsolidation.record_summary_write(
+                        principal,
+                        derivation,
+                        SummaryWriteReceipt(operation_id=memory_id, request_hash=digest),
+                    )
+                return await derived_view(uow, principal, memory_id, ceiling, now)
+            if replayed:
                 return MemoryView.from_record(
                     await self._visible(uow, principal, memory_id, ceiling)
                 )
             record = await self._visible(uow, principal, memory_id, ceiling)
-            reviewed = await governed.review(memory_id, outcome, existing_uow=uow)
+            reviewed = await self._governed(principal).review(memory_id, outcome, existing_uow=uow)
             await self._receipt(
                 uow,
                 principal,

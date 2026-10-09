@@ -163,7 +163,17 @@ async def test_people_representative_first_pages(record_property: Any) -> None:
                     text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
                     {"tenant": owner.tenant_id},
                 )
-                await session.execute(insert(MemoryRow), [_memory_values(row) for row in memories])
+                await session.execute(
+                    insert(MemoryRow),
+                    [
+                        {
+                            **_memory_values(row),
+                            "creation_sequence": row.store_position,
+                            "content_revision": 1,
+                        }
+                        for row in memories
+                    ],
+                )
                 await session.execute(
                     insert(MemoryRevisionRow),
                     [
@@ -171,6 +181,8 @@ async def test_people_representative_first_pages(record_property: Any) -> None:
                             "tenant_id": owner.tenant_id,
                             "principal_id": owner.principal_id,
                             "belief_id": row.id,
+                            "creation_sequence": row.store_position,
+                            "content_revision": 1,
                             "recorded_at": NOW,
                             "payload": row.model_dump(mode="json"),
                         }
@@ -228,6 +240,25 @@ async def test_people_representative_first_pages(record_property: Any) -> None:
             )
         seed_seconds = time.perf_counter() - started
         async with engine.begin() as connection:
+            # This read-only bulk fixture bypasses admission. Reconstruct its
+            # owner counters and journal before any service reads the seeded bank.
+            await connection.execute(
+                text("""
+                INSERT INTO reconsolidation_owners
+                    (tenant_id, principal_id, creation_count, change_count)
+                SELECT tenant_id, principal_id, max(creation_sequence), max(creation_sequence)
+                FROM memories GROUP BY tenant_id, principal_id
+            """)
+            )
+            await connection.execute(
+                text("""
+                INSERT INTO reconsolidation_changes
+                    (tenant_id, principal_id, sequence, belief_id, content_revision,
+                     creation_sequence, reason)
+                SELECT tenant_id, principal_id, creation_sequence, id, content_revision,
+                    creation_sequence, 'created' FROM memories
+            """)
+            )
             # Bulk fixtures assign positions directly; leave the sequence valid
             # for concurrent formation and restore-write rehearsals.
             await connection.execute(

@@ -4,6 +4,49 @@ title: Current Milestone
 
 # Current milestone
 
+- **Milestone 32 — Memory reconsolidation (dreaming):** authorized on
+  2026-10-02 as a parallel workstream. [memory-reconsolidation.md](memory-reconsolidation.md)
+  and ADR-0169 define twenty-four registered gates. The implementation now includes
+  bounded durable inventory and provider execution, lossless equivalence merging,
+  extractive summaries, independently supported tentative connections, conflict
+  history, source invalidation and erasure, and HTTP/CLI/native owner controls.
+  Both stores share the operation contracts. Connections use the existing derived
+  memory path and retain every original; they remain inferred at confidence at most
+  0.35 and expire no later than thirty days after their latest original evidence.
+  The native Synthesis journal exposes summaries, connections, conflicts, supporting
+  originals and previewed merge undo. Background maintenance now composes one bounded
+  proposal/verification slice behind default-off processing and exact release evidence.
+  Removing the evidence stops new work and derived recall while preserving history.
+  The frozen offline control still measures retrieval only. A separate live command
+  freezes answer-bearing original-only observations before measuring merge-only and
+  connection-enabled arms, with three repeats, fixed budgets and all failures retained.
+  Publication recomputes the observations and requires matching upstream evidence.
+  Two earlier comparisons retain their failure evidence. The owner approved
+  ADR-0170 on 2026-10-08. Its versioned offline review contract exports blinded
+  packets, requires complete human decisions and recomputes scores. A third,
+  contract-bound comparison preserved all facts and had zero false merges, but
+  still failed answer lift and development merge-answer nonregression. The owner judged
+  all fifteen candidates: ten equivalent and five not equivalent. Recomputed
+  precision is 75% on development and 57.14% on holdout, below the unchanged 80%
+  floor; recall passes both splits. Equivalence review cannot excuse answer failures.
+  The October 9 repair rejects hedged original copies and duplicate-claim connections,
+  distinguishes summaries in the proposal/verifier instructions, and preserves the best
+  visible member's recall rank after merging. Its new comparison records 14/18/14
+  development and 17/17/19 holdout answers out of 36. Merge-answer nonregression passes,
+  but 0/5.56-point answer lift still fails; eleven new hypotheses await a separate
+  bound owner review. The optional PostgreSQL summary-reader repair followed that run,
+  so its diagnostic recording is not evidence for the final source tuple.
+  The owner approved ADR-0171 on 2026-10-08 for a separate, isolated evaluation
+  using newly confirmed fixture text from their own memories. The isolated runner,
+  durable experiment budget and local input/output review are implemented. The
+  confirmed four-input experiment completed and the owner judged its accepted summary
+  useful on 2026-10-09. That qualitative review is finished; it supplies no comparative
+  or activation evidence. Any new experiment still requires exact-text confirmation
+  naming the provider/model and USD 0.25 ceiling. Production attribution is unchanged.
+  The once/dry-run operator controls, complete
+  runtime gates, macOS UI lane and exact-revision release evidence remain required.
+  Authorized PR review, hosted CI and production readback also precede activation. Production
+  stays disabled; no complete runtime gate or verified sequential ceiling advances.
 - **Active milestone:** Milestone 15 — operational hardening — is the next
   sequential authorized milestone, is specified by
   [operational-hardening.md](operational-hardening.md) with sixteen gates, and
@@ -139,7 +182,8 @@ title: Current Milestone
 - **Deferred:** New model-routing behavior and everything still listed in the
   engineering plan's roadmap subsection. Milestone 21 removes only adaptive
   memory distillation from that residue and Milestone 22 removes only the
-  persona surface; learned memory policies, semantic
+  persona surface. Milestone 32 now admits bounded whole-store consolidation,
+  belief merging and grounded connections; learned memory policies, semantic
   retrieval, external memory providers, and the remaining roadmap items stay
   unauthorized.
 - **Project status:** Milestones 0 through 13 are complete. Through Milestone

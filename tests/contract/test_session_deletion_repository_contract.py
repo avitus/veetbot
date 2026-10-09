@@ -14,6 +14,8 @@ from agent_core.adapters.memory.in_memory import (
     InMemoryMemoryStore,
     InMemoryTraceStore,
 )
+from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
+from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.adapters.persistence.delegations import InMemoryDelegationRepository
 from agent_core.adapters.persistence.memory import (
     InMemoryApprovalRepository,
@@ -88,7 +90,7 @@ async def _repository() -> tuple[
         usage=InMemoryUsageRepository(runs),
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
-        memories=InMemoryMemoryStore(clock),
+        memories=InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction())),
         people=InMemoryPeopleStore(FixedClock(NOW)),
         episodes=episodes,
         traces=InMemoryTraceStore(),
@@ -365,7 +367,7 @@ async def test_session_deletion_removes_task_grants() -> None:
         usage=InMemoryUsageRepository(runs),
         trajectory_exports=InMemoryTrajectoryExportRepository(),
         artifacts=InMemoryArtifactRepository(),
-        memories=InMemoryMemoryStore(clock),
+        memories=InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction())),
         people=InMemoryPeopleStore(FixedClock(NOW)),
         episodes=InMemoryIntegratedEpisodeStore(),
         traces=InMemoryTraceStore(),

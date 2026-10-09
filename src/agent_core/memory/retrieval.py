@@ -7,7 +7,7 @@ import html
 import math
 import re
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -25,6 +25,8 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Portability,
     RecalledBelief,
+    RecalledItem,
+    RecalledSummary,
     RecallMoment,
     RecallProfile,
     RecallQuery,
@@ -36,19 +38,22 @@ from agent_core.domain.memory import (
     lexical_tokens,
     recall_query_terms,
 )
-from agent_core.domain.people import PeopleQuery, PeopleRecord, referenced_people
+from agent_core.domain.reconsolidation_merge import normalize_claim
+from agent_core.domain.reconsolidation_operations import StoredMerge
 from agent_core.domain.runs import Run
+from agent_core.memory.identity_recall import identity_scoped_records
 from agent_core.memory.profiles import (
     DEFAULT_RETRIEVAL_PROFILE,
     DEFAULT_TRACE_PROFILE,
     RetrievalProfile,
     TraceProfile,
 )
+from agent_core.memory.reconsolidation_recall import summary_candidates
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
+RECONSOLIDATION_RETRIEVAL_POLICY_VERSION = "retrieval-reconsolidation@2"
 # Episode search reads the session stream in bounded pages: never the whole
 # stream at once, and never more pages than a bounded read is worth.
 EPISODE_PAGE_MINIMUM = 256
@@ -81,6 +86,42 @@ _INJECTION = re.compile(
     r"<\s*/?\s*(?:system|memory|untrusted)|override\s+(?:policy|instructions))",
     re.I,
 )
+
+
+def _collapse_merges(
+    items: list[RecalledBelief], operations: tuple[StoredMerge, ...]
+) -> list[RecalledBelief]:
+    visible = {item.belief_id: item for item in items}
+    for operation in operations:
+        permitted = [key for key in operation.plan.member_ids if key in visible]
+        if not permitted:
+            continue
+        chosen = operation.plan.canonical_id
+        if chosen not in permitted:
+            chosen = min(
+                (
+                    dependency.source
+                    for dependency in operation.plan.dependencies
+                    if dependency.source.belief_id in permitted
+                ),
+                key=lambda source: (source.creation_sequence, str(source.belief_id)),
+            ).belief_id
+        # Membership changes citation identity, not the relevance of an
+        # equivalent fact. Preserve the strongest visible member's rank without
+        # copying its usage or evidence back into the canonical record.
+        best = max((visible[key] for key in permitted), key=lambda item: item.score)
+        for key in permitted:
+            if key != chosen:
+                del visible[key]
+        visible[chosen] = visible[chosen].model_copy(
+            update={
+                "merge_id": operation.id,
+                "merge_revision": operation.revision,
+                "score": best.score,
+                "arms": best.arms,
+            }
+        )
+    return list(visible.values())
 
 
 def _personal_belief_types(text: str) -> list[BeliefType]:
@@ -182,6 +223,7 @@ class HybridMemoryRetriever:
         ranker: HandWeightedRanker | None = None,
         profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
         trace_retention: TraceProfile = DEFAULT_TRACE_PROFILE,
+        reconsolidation_enabled: bool | Callable[[], bool] = False,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -190,6 +232,7 @@ class HybridMemoryRetriever:
         self._ranker = ranker or HandWeightedRanker()
         self._profile = profile
         self._trace_retention = trace_retention
+        self._reconsolidation_admission = reconsolidation_enabled
 
     @property
     def retrieval_profile(self) -> RetrievalProfile:
@@ -199,6 +242,11 @@ class HybridMemoryRetriever:
 
     def current_time(self) -> datetime:
         return self._clock.now()
+
+    @property
+    def _reconsolidation_enabled(self) -> bool:
+        admission = self._reconsolidation_admission
+        return admission() if callable(admission) else admission
 
     async def recall(
         self,
@@ -263,6 +311,13 @@ class HybridMemoryRetriever:
                 }
             )
         )
+        effective_query = effective_query.model_copy(
+            update={
+                "include_merge_changes": self._reconsolidation_enabled
+                and query.as_of is None
+                and query.known_at is None,
+            }
+        )
         if moment == RecallMoment.SNAPSHOT.value:
             # ADR-0019 excludes provisional beliefs from the frozen core.
             # Filter before the store's candidate cap, not after ranking:
@@ -276,7 +331,7 @@ class HybridMemoryRetriever:
         else:
             records = await uow.memories.query(effective_query)
             if effective_query.people_scope is not None:
-                records = await _identity_scoped_records(uow.people, effective_query, records)
+                records = await identity_scoped_records(uow.people, effective_query, records)
 
             # The watermark is the store's own head, read in the same unit
             # of work as the query: a belief this query did not match still
@@ -288,6 +343,10 @@ class HybridMemoryRetriever:
         # and the rendered stamp all read the query's as-of or the clock, so a
         # historical query is scored as of the moment it asks about.
         now = effective_query.as_of or self._clock.now()
+        merges: tuple[StoredMerge, ...] = ()
+        if authorized and self._reconsolidation_enabled:
+            records, merges = await self._merge_candidates(uow, effective_query, records, now)
+            head = await uow.memories.head_position(self._principal)
         recalled: list[RecalledBelief] = []
         durable_ids: set[UUID] = set()
         excluded = set(effective_query.exclude_ids)
@@ -302,6 +361,7 @@ class HybridMemoryRetriever:
             if _is_durable(record):
                 durable_ids.add(record.id)
             recalled.append(candidate)
+        recalled = _collapse_merges(recalled, merges)
         recalled = _rrf_fuse(recalled, k=self._profile.reciprocal_rank_fusion_k)
         recalled = _penalize_near_duplicates(recalled, penalty=self._profile.near_duplicate_penalty)
         ranked = self._ranker.rank(recalled, effective_query)
@@ -388,7 +448,38 @@ class HybridMemoryRetriever:
                 continue
             selected_people.append(person_item)
             rendered = proposed
-        rendered_tokens = measure_tokens(rendered) if selected or selected_people else 0
+        selected_items: list[RecalledItem] = list(selected)
+        if authorized and self._reconsolidation_enabled:
+            candidates = await summary_candidates(
+                uow,
+                self._principal,
+                effective_query,
+                tuple(r.id for r in records[:1000]),
+                {item.belief_id for item in selected},
+                now,
+                lambda record: _score(record, effective_query, now=now, profile=self._profile),
+            )
+            selected_claims = {normalize_claim(item.statement) for item in selected}
+            for summary in candidates:
+                # Rendered clauses are whole original statements. Suppress exact
+                # repeats even when a different original UUID supplied the text.
+                claims = {normalize_claim(line[2:]) for line in summary.statement.splitlines()[1:]}
+                if claims & selected_claims:
+                    continue
+                proposed = render_memory([*selected_items, summary], as_of=now) + "".join(
+                    "\n" + _person_line(item) for item in selected_people
+                )
+                if (
+                    len(selected_items) + len(selected_people) >= effective_query.max_items
+                    or measure_tokens(proposed) > effective_query.budget_tokens
+                ):
+                    dropped.append(summary.belief_id)
+                    continue
+                selected_items.append(summary)
+                selected_claims.update(claims)
+                rendered = proposed
+            head = await uow.memories.head_position(self._principal)
+        rendered_tokens = measure_tokens(rendered) if selected_items or selected_people else 0
         rendered_bytes = rendered.encode("utf-8")
         trace_id = self._ids.new_id()
         trace = RecallTrace(
@@ -399,22 +490,32 @@ class HybridMemoryRetriever:
             run_id=run_id,
             turn_id=turn_id,
             moment=RecallMoment(moment),
-            query=effective_query,
+            # Pin the effective instant used for ranking and derived admission;
+            # trace creation can occur later, including across source expiry.
+            query=(
+                effective_query.model_copy(update={"as_of": now})
+                if effective_query.known_at is not None
+                else effective_query
+            ),
             surface_id=surface_id,
             sensitivity_ceiling=effective_query.sensitivity_ceiling,
             rendered=rendered,
             rendered_sha256=hashlib.sha256(rendered_bytes).hexdigest(),
             arm_latencies_ms={"structured": 0, "lexical": 0},
             candidates=len(records),
-            returned=[item.belief_id for item in selected],
+            returned=[item.belief_id for item in selected_items],
             dropped_for_budget=dropped,
-            blocked=[item.belief_id for item in selected if item.blocked],
-            carried_in=[item.belief_id for item in selected if item.carried],
-            beliefs=[item.model_copy(deep=True) for item in selected],
+            blocked=[item.belief_id for item in selected_items if item.blocked],
+            carried_in=[item.belief_id for item in selected_items if item.carried],
+            beliefs=[item.model_copy(deep=True) for item in selected_items],
             people=selected_people,
-            retrieval_policy_version="retrieval-people@1"
-            if query.people_scope is not None
-            else RETRIEVAL_POLICY_VERSION,
+            retrieval_policy_version=(
+                RECONSOLIDATION_RETRIEVAL_POLICY_VERSION
+                if self._reconsolidation_enabled
+                else "retrieval-people@1"
+                if query.people_scope is not None
+                else RETRIEVAL_POLICY_VERSION
+            ),
             created_at=self._clock.now(),
             operator_fields_expire_at=(
                 self._clock.now() + timedelta(days=self._trace_retention.operator_retention_days)
@@ -430,19 +531,94 @@ class HybridMemoryRetriever:
                 payload={
                     "trace_id": str(trace_id),
                     "rendered_sha256": trace.rendered_sha256,
-                    "returned": [str(item.belief_id) for item in selected],
+                    "returned": [str(item.belief_id) for item in selected_items],
                 },
             )
         )
         return RecallResult(
-            items=selected,
+            items=selected_items,
             people=selected_people,
             rendered=rendered,
             tokens=rendered_tokens,
             truncated=bool(dropped),
             trace_id=trace_id,
             watermark=head,
+            validate_snapshot_dependencies=True,
         )
+
+    async def _merge_candidates(
+        self,
+        uow: RepositoryUnitOfWork,
+        query: RecallQuery,
+        records: list[MemoryRecord],
+        now: datetime,
+    ) -> tuple[list[MemoryRecord], tuple[StoredMerge, ...]]:
+        """Resolve bounded membership and fetch a permitted canonical beyond the candidate cap."""
+        keys = tuple(record.id for record in records if record.id not in query.exclude_ids)
+        found: dict[UUID, StoredMerge] = {}
+        for offset in range(0, len(keys), 1000):
+            batch = keys[offset : offset + 1000]
+            operations = (
+                await uow.reconsolidation.active_merges(self._principal, batch, now)
+                if query.as_of is None and query.known_at is None
+                else await uow.reconsolidation.merges_at(
+                    self._principal, batch, as_of=now, known_at=query.known_at
+                )
+            )
+            for operation in operations:
+                found[operation.id] = operation
+        if query.as_of is not None or query.known_at is not None:
+            # A past revision cannot bypass today's scope/ceiling on any support.
+            # Explicit persona exclusions affect rendering, not support validation.
+            supports = tuple(sorted({key for op in found.values() for key in op.plan.member_ids}))
+            permitted: set[UUID] = set()
+            for offset in range(0, len(supports), 1000):
+                batch = supports[offset : offset + 1000]
+                visible = await uow.memories.query(
+                    query.model_copy(
+                        update={
+                            "include_ids": batch,
+                            "min_store_position": 0,
+                            "max_items": len(batch),
+                        }
+                    )
+                )
+                if query.people_scope is not None:
+                    visible = await identity_scoped_records(uow.people, query, visible)
+                permitted.update(record.id for record in visible)
+            found = {
+                key: value
+                for key, value in found.items()
+                if set(value.plan.member_ids) <= permitted
+            }
+        missing = tuple(
+            sorted(
+                {
+                    value.plan.canonical_id
+                    for value in found.values()
+                    if value.plan.canonical_id not in keys
+                    and value.plan.canonical_id not in query.exclude_ids
+                    and (query.include_ids is None or value.plan.canonical_id in query.include_ids)
+                }
+            )
+        )
+        extra: list[MemoryRecord] = []
+        for offset in range(0, len(missing), 1000):
+            batch = missing[offset : offset + 1000]
+            extra.extend(
+                await uow.memories.query(
+                    query.model_copy(
+                        update={
+                            "include_ids": batch,
+                            "min_store_position": 0,
+                            "max_items": max(len(batch), 1),
+                        }
+                    )
+                )
+            )
+        if query.people_scope is not None:
+            extra = await identity_scoped_records(uow.people, query, extra)
+        return [*records, *extra], tuple(found[key] for key in sorted(found))
 
     async def corrections(
         self,
@@ -468,7 +644,9 @@ class HybridMemoryRetriever:
         with its base recall rather than failing it.
         """
 
-        async with self._uow_factory() as uow:
+        instant = as_of or self._clock.now()
+        merge_corrections: list[MemoryCorrection] = []
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
             try:
                 trace = await uow.traces.get(snapshot_id, self._principal)
             except NotFoundError:
@@ -482,7 +660,61 @@ class HybridMemoryRetriever:
                     records.append(await uow.memories.get(belief_id, self._principal))
                 except NotFoundError:
                     continue
-        instant = as_of or self._clock.now()
+            visible = {
+                record.id
+                for record in records
+                if SENSITIVITY_ORDER[record.sensitivity]
+                <= SENSITIVITY_ORDER[trace.sensitivity_ceiling]
+            }
+            for item in trace.beliefs:
+                if item.record_kind != "belief":
+                    current = await uow.reconsolidation.get_summary(
+                        self._principal,
+                        item.operation_id,
+                        self._clock.now(),
+                        ceiling=trace.sensitivity_ceiling,
+                        current_scope=trace.query.current_scope,
+                    )
+                    if current is None or not self._reconsolidation_enabled:
+                        summary_operation = await uow.reconsolidation.summary_operation(
+                            self._principal, item.operation_id
+                        )
+                        summary_ended_at = (
+                            summary_operation.invalidated_at
+                            if summary_operation is not None
+                            else None
+                        ) or self._clock.now()
+                        if summary_ended_at <= instant:
+                            merge_corrections.append(
+                                MemoryCorrection(
+                                    belief_id=item.belief_id,
+                                    ended_at=summary_ended_at,
+                                    kind="summary_invalidated",
+                                )
+                            )
+                    continue
+                if item.merge_id is None or item.belief_id not in visible:
+                    continue
+                operation = await uow.reconsolidation.get_merge(
+                    self._principal, item.merge_id, self._clock.now()
+                )
+                if (
+                    operation is None
+                    or operation.state == "committed"
+                    or operation.store_position <= watermark
+                ):
+                    continue
+                ended_at = operation.undone_at or operation.invalidated_at
+                if ended_at is not None and ended_at <= instant:
+                    merge_corrections.append(
+                        MemoryCorrection(
+                            belief_id=item.belief_id,
+                            ended_at=ended_at,
+                            kind="merge_undone"
+                            if operation.state == "undone"
+                            else "merge_invalidated",
+                        )
+                    )
         corrections = [
             MemoryCorrection(
                 belief_id=record.id,
@@ -495,7 +727,9 @@ class HybridMemoryRetriever:
             and record.store_position > watermark
             and (record.valid_to or record.updated_at) <= instant
         ]
-        return sorted(corrections, key=lambda item: str(item.belief_id))
+        return sorted(
+            [*corrections, *merge_corrections], key=lambda item: (str(item.belief_id), item.kind)
+        )
 
     async def snapshot(
         self,
@@ -797,7 +1031,7 @@ def _rrf_fuse(candidates: list[RecalledBelief], *, k: int = 60) -> list[Recalled
     return fused
 
 
-def render_memory(items: list[RecalledBelief], *, as_of: object) -> str:
+def render_memory(items: Sequence[RecalledItem], *, as_of: object) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
     lines = [f'<memory as_of="{html.escape(stamp)}" policy="{RETRIEVAL_POLICY_VERSION}">']
     for item in items:
@@ -806,8 +1040,13 @@ def render_memory(items: list[RecalledBelief], *, as_of: object) -> str:
     return "\n".join(lines)
 
 
-def _line(item: RecalledBelief) -> str:
+def _line(item: RecalledItem) -> str:
     origin = f" (learned in {html.escape(item.origin_scope)})" if item.carried else ""
+    if isinstance(item, RecalledSummary):
+        return (
+            f"[m:{str(item.belief_id)[:8]}]{origin} {html.escape(item.statement)} "
+            f"({item.record_kind}; {item.authority.value}, {item.confidence_band})"
+        )
     # A partner is named the way a citation is, so the only identifier the
     # model ever sees for a belief is the eight-digit one it can cite back.
     conflict = (
@@ -835,52 +1074,3 @@ def _person_line(item: TracedPersonContext) -> str:
         f'<person-context ref="{item.record_id}" revision="{item.revision}" trust="memory">'
         f"{html.escape(item.text)}</person-context>"
     )
-
-
-async def _identity_scoped_records(
-    store: PeopleStore, query: RecallQuery, records: list[MemoryRecord]
-) -> list[MemoryRecord]:
-    """Batch hard identity and privacy checks, including links hidden from the requested surface."""
-    all_links: dict[UUID, list[PeopleRecord]] = defaultdict(list)
-    visible: set[UUID] = set()
-    if not records:
-        return records
-    for offset in range(0, len(records), 1000):
-        belief_ids = [record.id for record in records[offset : offset + 1000]]
-        for ceiling in {Sensitivity.RESTRICTED, query.sensitivity_ceiling}:
-            link_query = PeopleQuery(
-                tenant_id=query.tenant_id,
-                principal_id=query.principal_id,
-                kinds=["memory_link", "relationship", "commitment"],
-                belief_ids=belief_ids,
-                sensitivity_ceiling=ceiling,
-                limit=100,
-                known_at=query.known_at,
-                as_of=query.as_of,
-            )
-            for _ in range(100):
-                page = await store.query(link_query)
-                for link in page[:100]:
-                    if ceiling is Sensitivity.RESTRICTED:
-                        belief_id = getattr(link, "belief_id", None)
-                        if isinstance(belief_id, UUID):
-                            all_links[belief_id].append(link)
-                    if ceiling is query.sensitivity_ceiling:
-                        visible.add(link.id)
-                if len(page) <= 100:
-                    break
-                link_query = link_query.model_copy(update={"after": page[99].id})
-            else:
-                # A bounded scan cannot certify the unscanned identity assignments.
-                return []
-    result = []
-    focal = set(query.people_scope or ())
-    for record in records:
-        links = all_links.get(record.id, [])
-        if links and (
-            any(getattr(link, "unresolved", False) or link.id not in visible for link in links)
-            or not any(referenced_people(link) & focal for link in links)
-        ):
-            continue
-        result.append(record)
-    return result

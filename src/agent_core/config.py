@@ -134,6 +134,10 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    memory_reconsolidation_api_enabled: bool = False
+    memory_reconsolidation_enabled: bool = False
+    memory_reconsolidation_evidence: Path | None = None
+    memory_reconsolidation_residency_provider: str | None = None
     people_enabled: bool = True
     persona_api_enabled: bool = False
     thread_folders_api_enabled: bool = False
@@ -1972,6 +1976,19 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        memory_reconsolidation_api_enabled=_parse_flag(
+            values, "AGENT_MEMORY_RECONSOLIDATION_API_ENABLED"
+        ),
+        memory_reconsolidation_enabled=_parse_flag(values, "AGENT_MEMORY_RECONSOLIDATION_ENABLED"),
+        memory_reconsolidation_evidence=(
+            Path(values["AGENT_MEMORY_RECONSOLIDATION_EVIDENCE"]).expanduser()
+            if values.get("AGENT_MEMORY_RECONSOLIDATION_EVIDENCE", "").strip()
+            else None
+        ),
+        memory_reconsolidation_residency_provider=values.get(
+            "AGENT_MEMORY_RECONSOLIDATION_RESIDENCY_PROVIDER", ""
+        ).strip()
+        or None,
         people_enabled=people_enabled,
         persona_api_enabled=persona_api_enabled,
         thread_folders_api_enabled=thread_folders_api_enabled,

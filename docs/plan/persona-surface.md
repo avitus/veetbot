@@ -102,7 +102,7 @@ the prose: an affirmed entry knows its belief, an owner-typed entry knows it
 was typed, and no flat-string representation could carry either.
 
 Every entry carries `USER` authority in the sense the lifecycle design ranks
-it (memory-evaluation-and-lifecycle.md:908): owner-typed text by authorship,
+it (memory-evaluation-and-lifecycle.md:911): owner-typed text by authorship,
 affirmed text because affirmation is a direct owner statement about the
 belief. Writes are guarded by `expected_version`: a write naming any version
 but the current head is a `conflict` and changes nothing.
@@ -298,7 +298,7 @@ the memory browser's is.
 ## Safety
 
 - **Secrets are refused at write time, everywhere.** The system prompt must
-  not contain secrets (engineering-plan.md:4325), and the persona is system
+  not contain secrets (engineering-plan.md:4366), and the persona is system
   prompt. CLI, HTTP, and affirmation all run the secret-material scan before
   persistence; a credential-shaped value is a refusal, not a warning.
 - **Injection is scanned at load.** Persona text passes the same

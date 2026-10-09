@@ -9,7 +9,7 @@ import math
 import os
 import signal
 import socket
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import aclosing
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -39,6 +39,7 @@ from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.email import EmailBulkExclusionReport
 from agent_core.domain.errors import (
+    AgentCoreError,
     ConflictError,
     EvalExpectationError,
     ExportConsentError,
@@ -51,9 +52,11 @@ from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import MemoryEdit, MemoryReviewOutcome, Portability, Sensitivity
 from agent_core.domain.messages import AssistantMessage, ReasoningEffort, TextPart
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
+from agent_core.domain.reconsolidation_views import OperationKind, OperationState, OperationView
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import (
     ApprovalFilters,
+    Page,
     PersistedStreamFrame,
     RunView,
     StreamFrame,
@@ -106,6 +109,8 @@ session_app = typer.Typer(name="session", no_args_is_help=True)
 eval_app = typer.Typer(name="eval", no_args_is_help=True)
 approval_app = typer.Typer(name="approval", no_args_is_help=True)
 memory_app = typer.Typer(name="memory", no_args_is_help=True)
+reconsolidations_app = typer.Typer(name="reconsolidations", no_args_is_help=True)
+memory_app.add_typer(reconsolidations_app)
 email_app = typer.Typer(name="email", no_args_is_help=True)
 persona_app = typer.Typer(name="persona", no_args_is_help=True)
 surface_app = typer.Typer(name="surface", no_args_is_help=True)
@@ -926,6 +931,92 @@ async def _memory_list(include_inactive: bool, session_id: UUID | None, limit: i
 async def _memory_get(belief_id: UUID) -> Any:
     async with build(storage="postgres") as composition:
         return await composition.memory.get_memory(belief_id)
+
+
+async def _reconsolidations(
+    operation_id: UUID | None,
+    ceiling: Sensitivity,
+    *,
+    kind: str | None = None,
+    state: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+    expected_revision: int | None = None,
+    key: str | None = None,
+) -> Page[OperationView] | OperationView:
+    async with build(storage="postgres") as composition:
+        service = composition.services.reconsolidation
+        if service is None:
+            raise NotFoundError("reconsolidation controls are unavailable")
+        if operation_id is None:
+            return await service.list(
+                composition.principal,
+                ceiling=ceiling,
+                kind=cast(OperationKind | None, kind),
+                state=cast(OperationState | None, state),
+                limit=limit,
+                cursor=cursor,
+            )
+        if expected_revision is None:
+            return await service.get(composition.principal, operation_id, ceiling=ceiling)
+        assert key is not None
+        return await service.undo(
+            composition.principal,
+            operation_id,
+            ceiling=ceiling,
+            expected_revision=expected_revision,
+            key=key,
+        )
+
+
+def _emit_reconsolidation(
+    action: Coroutine[Any, Any, Page[OperationView] | OperationView],
+) -> None:
+    try:
+        result = asyncio.run(action)
+    except (ConfigurationError, AgentCoreError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
+
+
+@reconsolidations_app.command("list")
+def reconsolidations_list(
+    ceiling: Annotated[Sensitivity, typer.Option("--ceiling")],
+    kind: Annotated[str | None, typer.Option()] = None,
+    state: Annotated[str | None, typer.Option()] = None,
+    limit: Annotated[int, typer.Option(min=1)] = 50,
+    cursor: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """List owner operations with visible content and a bound continuation cursor."""
+    _emit_reconsolidation(
+        _reconsolidations(None, ceiling, kind=kind, state=state, limit=limit, cursor=cursor)
+    )
+
+
+@reconsolidations_app.command("get")
+def reconsolidations_get(
+    operation_id: UUID, ceiling: Annotated[Sensitivity, typer.Option("--ceiling")]
+) -> None:
+    """Inspect an operation and its currently permitted complete source set."""
+    _emit_reconsolidation(_reconsolidations(operation_id, ceiling))
+
+
+@reconsolidations_app.command("undo")
+def reconsolidations_undo(
+    operation_id: UUID,
+    ceiling: Annotated[Sensitivity, typer.Option("--ceiling")],
+    expected_revision: Annotated[int, typer.Option("--expected-revision", min=1)],
+    idempotency_key: Annotated[
+        str, typer.Option("--idempotency-key", help="Reuse this key and revision on retry.")
+    ],
+) -> None:
+    """Undo a committed merge without restoring deleted or corrected sources."""
+    _emit_reconsolidation(
+        _reconsolidations(
+            operation_id, ceiling, expected_revision=expected_revision, key=idempotency_key
+        )
+    )
 
 
 async def _email_exclude_bulk(confirm: bool) -> EmailBulkExclusionReport:
@@ -1763,6 +1854,122 @@ def eval_memory_distillation(
         raise typer.Exit(1)
     if result.development_only:
         typer.echo("development-only run passed its gates; nothing was published", err=True)
+
+
+@eval_app.command("memory-reconsolidation-comparison")
+def eval_memory_reconsolidation_comparison(
+    control: Annotated[Path, typer.Option("--control", help="New answer-control recording path.")],
+    output: Annotated[Path, typer.Option("--output", help="New comparison report path.")],
+    maximum_usd: Annotated[str, typer.Option("--maximum-usd")] = "50",
+    review_contract: Annotated[Path | None, typer.Option("--review-contract")] = None,
+) -> None:
+    """Measure three arms, freezing original answers first; never activates processing."""
+    from decimal import Decimal
+
+    reporting = importlib.import_module("agent_core.evals.memory_reconsolidation_report")
+    try:
+        result = asyncio.run(
+            reporting.run_configured_comparison(
+                Path.cwd(),
+                control,
+                output,
+                maximum_usd=Decimal(maximum_usd),
+                review_contract=review_contract,
+            )
+        )
+    except (ConfigurationError, OSError, RuntimeError, ValueError):
+        typer.echo("comparison recording failed; processing remains disabled", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(
+        json.dumps(
+            {
+                "report": str(output),
+                "failures": result.failures,
+                "provider_calls": result.provider_calls,
+                "cost_usd": str(result.cost_usd),
+            }
+        )
+    )
+    if result.failures:
+        raise typer.Exit(1)
+
+
+reconsolidation_review_app = typer.Typer(help="Offline blinded human equivalence review.")
+eval_app.add_typer(reconsolidation_review_app, name="memory-reconsolidation-review")
+
+
+@reconsolidation_review_app.command("prepare")
+def prepare_reconsolidation_review(
+    report: Annotated[Path, typer.Option("--report")],
+    directory: Annotated[Path, typer.Option("--directory", help="New private output directory.")],
+) -> None:
+    """Export a blinded packet and blank decisions; keep private-key.json separate."""
+    review = importlib.import_module("agent_core.evals.memory_reconsolidation_review")
+    composition = importlib.import_module("agent_core.bootstrap")
+    try:
+        packet = review.prepare_review(Path.cwd(), report, directory, composition.random_ids())
+    except (OSError, ValueError) as exc:
+        message = "review preparation failed; inputs invalid or output already exists"
+        if str(exc) == "comparison has no pre-run review contract":
+            message = str(exc)
+        typer.echo(message, err=True)
+        raise typer.Exit(1) from None
+    typer.echo(
+        json.dumps(
+            {
+                "directory": str(directory),
+                "candidates": len(packet.entries),
+                "human_review_required": True,
+            }
+        )
+    )
+
+
+@reconsolidation_review_app.command("score")
+def score_reconsolidation_review(
+    report: Annotated[Path, typer.Option("--report")],
+    directory: Annotated[Path, typer.Option("--directory")],
+    output: Annotated[Path, typer.Option("--output", help="New assessment path.")],
+) -> None:
+    """Recompute a complete human review; this cannot activate processing."""
+    review = importlib.import_module("agent_core.evals.memory_reconsolidation_review")
+    try:
+        result = review.score_review(Path.cwd(), report, directory, output)
+    except (OSError, ValueError):
+        typer.echo("review scoring failed; incomplete or inconsistent inputs", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(
+        json.dumps(
+            {"assessment": str(output), "failures": result.failures, "activation_evidence": False}
+        )
+    )
+    if result.failures:
+        raise typer.Exit(1)
+
+
+@eval_app.command("memory-reconsolidation-control")
+def eval_memory_reconsolidation_control(
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Record the offline retrieval control to a new file."),
+    ],
+) -> None:
+    """Record three offline original-only repeats; no answers or activation evidence."""
+    reporting = importlib.import_module("agent_core.evals.memory_reconsolidation_control_report")
+    try:
+        if output.exists():
+            raise FileExistsError("control output already exists")
+        root = Path.cwd()
+        rows = asyncio.run(reporting.run_control(root))
+        failed = sum(row.failure is not None for row in rows)
+        if failed:
+            typer.echo(json.dumps({"cases": len(rows), "failed_cases": failed}))
+            raise ValueError("control includes failed cases")
+        result = reporting.write_control(root, rows, output)
+    except (OSError, RuntimeError, ValueError):
+        typer.echo("control recording failed; no complete new control was recorded", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(result.model_dump_json())
 
 
 @eval_app.command("memory-benchmark")

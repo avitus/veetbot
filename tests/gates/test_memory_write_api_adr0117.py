@@ -18,6 +18,7 @@ import pytest
 from agent_core.bootstrap import build
 from agent_core.domain.memory import MemoryReviewOutcome, MemoryStatus, Portability, Sensitivity
 from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.views import MemoryView
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.contract.support import AGENT_ID, NOW
 from tests.gates.test_memory_read_api_m17 import (
@@ -289,6 +290,7 @@ async def test_concurrent_requests_with_one_key_apply_the_write_once() -> None:
             )
         )
         assert results[0] == results[1]
+        assert isinstance(results[0], MemoryView)
         assert results[0].confidence == pytest.approx(belief.confidence - 0.2)
         async with composition.uow_factory() as uow:
             events = await uow.events.list_after(belief.source_session_id, 0, WRITER)

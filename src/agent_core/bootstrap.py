@@ -84,6 +84,10 @@ from agent_core.adapters.memory.in_memory import (
     InMemoryMemoryStore,
     InMemoryTraceStore,
 )
+from agent_core.adapters.memory.reconsolidation import InMemoryReconsolidationStore
+from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
+from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
+from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
@@ -155,6 +159,7 @@ from agent_core.adapters.persistence.projections import (
     PostgresTrajectoryProjectionRepository,
 )
 from agent_core.adapters.persistence.queue import PostgresRunQueue
+from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
 from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
@@ -296,6 +301,7 @@ from agent_core.application.public_services import (
     PublicRunService,
     PublicSessionService,
 )
+from agent_core.application.reconsolidation import PublicReconsolidationService
 from agent_core.application.run_service import RunService
 from agent_core.application.schedule_service import ScheduleService
 from agent_core.application.services import (
@@ -338,6 +344,9 @@ from agent_core.application.services import (
     PersonaService as PublicPersonaServiceContract,
 )
 from agent_core.application.services import (
+    ReconsolidationService,
+)
+from agent_core.application.services import (
     RunService as PublicRunServiceContract,
 )
 from agent_core.application.services import (
@@ -371,6 +380,7 @@ from agent_core.config import (
     MEMORY_FORMATION_CORPUS_PATH,
     PACKAGE_ROOT,
     PRODUCTION_MODEL_POLICY,
+    REPOSITORY_ROOT,
     AuthMode,
     BrowserProviderKind,
     ConfigurationError,
@@ -524,6 +534,9 @@ from agent_core.memory.provider_extraction import (
     ProviderAssistedCandidateExtractor,
     provider_extraction_evidence_matches,
 )
+from agent_core.memory.reconsolidation_evidence import bind_evidence
+from agent_core.memory.reconsolidation_policy import local_egress_policy
+from agent_core.memory.reconsolidation_worker import ReconsolidationPass
 from agent_core.memory.retrieval import (
     DeterministicQueryFormer,
     EventEpisodeSearch,
@@ -730,6 +743,7 @@ class ApplicationServices:
     persona: PublicPersonaServiceContract
     folders: PublicFolderServiceContract
     email: EmailExperienceService
+    reconsolidation: ReconsolidationService | None = None
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
     model_settings: PublicModelSettingsServiceContract | None = None
@@ -1047,6 +1061,11 @@ def system_clock() -> Clock:
     return SystemClock()
 
 
+def random_ids() -> IdFactory:
+    """Supply opaque identities to offline commands without a full composition."""
+    return RandomIdFactory()
+
+
 def default_fake_script() -> FakeModelScript:
     return FakeModelScript(
         turns=[
@@ -1089,10 +1108,18 @@ def _memory_uow_repositories(
         RandomIdFactory(),
     )
     mcp_servers = mcp_servers or InMemoryMCPServerRepository()
-    memories = memories or InMemoryMemoryStore(clock)
+    memories = memories or InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction()))
     episodes = episodes or InMemoryIntegratedEpisodeStore()
-    people = InMemoryPeopleStore(clock, memories)
-    traces = traces or InMemoryTraceStore(people)
+    people = InMemoryPeopleStore(
+        clock,
+        memories,
+        memory_guard=memories._transaction.owner,
+        memory_index=memories._reconsolidation_index,
+    )
+    reconsolidation = InMemoryReconsolidationStore(
+        memories, RandomIdFactory(), ReconsolidationEvidence(events, people, memories)
+    )
+    traces = traces or InMemoryTraceStore(people, reconsolidation=reconsolidation, clock=clock)
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
     devices = InMemoryDeviceRegistry()
@@ -1164,6 +1191,8 @@ def _memory_uow_repositories(
         episodes=episodes,
         traces=traces,
         personas=InMemoryPersonaStore(),
+        reconsolidation=reconsolidation,
+        memory_transaction=memories._transaction.transaction,
         model_settings=InMemoryModelSettingsStore(),
         folders=InMemoryFolderStore(),
         email=InMemoryEmailStore(),
@@ -1214,7 +1243,10 @@ def _postgres_repository_factory(
         memories = PostgresMemoryStore(session, clock)
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
-        traces = PostgresTraceStore(session, people)
+        reconsolidation = PostgresReconsolidationStore(
+            session, ids, ReconsolidationEvidence(events, people, memories)
+        )
+        traces = PostgresTraceStore(session, people, reconsolidation=reconsolidation, clock=clock)
         knowledge = PostgresKnowledgeStore(session, clock)
         schedules = PostgresScheduleRepository(session)
         devices = PostgresDeviceRegistry(session)
@@ -1254,6 +1286,7 @@ def _postgres_repository_factory(
             episodes=episodes,
             traces=traces,
             personas=PostgresPersonaStore(session),
+            reconsolidation=reconsolidation,
             model_settings=PostgresModelSettingsStore(session),
             folders=PostgresFolderStore(session),
             email=PostgresEmailStore(session),
@@ -2561,14 +2594,6 @@ async def _compose(
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
-    memory_retriever = HybridMemoryRetriever(
-        uow_factory,
-        clock,
-        ids,
-        principal,
-        profile=memory_profiles.retrieval,
-        trace_retention=memory_profiles.traces,
-    )
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
     schedule_service = ScheduleService(
@@ -3186,6 +3211,57 @@ async def _compose(
     registry.register(MemoryRememberTool(memory_service))
     if settings.people_enabled:
         registry.register(PeopleMemoryRememberTool(memory_service))
+
+    def recon_admitted() -> bool:
+        return False
+
+    recon_pass = None
+    if settings.memory_reconsolidation_enabled:
+        if (
+            settings.memory_reconsolidation_evidence is None
+            or extraction_model is None
+            or settings.release_id is None
+            or evidence_build_ref is None
+            or evidence_corpus_sha256 is None
+        ):
+            raise ConfigurationError(
+                "reconsolidation needs release-bound comparative and upstream evidence"
+            )
+        try:
+            recon_admitted = bind_evidence(
+                REPOSITORY_ROOT,
+                settings.memory_reconsolidation_evidence,
+                extraction_model,
+                release_sha=settings.release_id.rsplit("-", 1)[-1],
+                formation_policy=memory_policy_version,
+                upstream_build_ref=evidence_build_ref,
+                upstream_corpus_sha256=evidence_corpus_sha256,
+                residency_provider=settings.memory_reconsolidation_residency_provider,
+            )
+        except (OSError, ValueError):
+            raise ConfigurationError(
+                "reconsolidation activation evidence is missing or mismatched"
+            ) from None
+        recon_pass = ReconsolidationPass(
+            uow_factory,
+            clock,
+            principal,
+            worker_id="maintenance",
+            admitted=recon_admitted,
+            ids=ids,
+            model=extraction_model,
+            provider=effective_providers[extraction_model.provider],
+            egress_policy=local_egress_policy(settings.memory_reconsolidation_residency_provider),
+        )
+    memory_retriever = HybridMemoryRetriever(
+        uow_factory,
+        clock,
+        ids,
+        principal,
+        profile=memory_profiles.retrieval,
+        trace_retention=memory_profiles.traces,
+        reconsolidation_enabled=recon_admitted,
+    )
     registry.register(MemorySearchTool(memory_retriever))
     people_erasure = PeopleErasureService(uow_factory, clock)
     people_identity = PeopleIdentityService(uow_factory, clock, ids)
@@ -4314,7 +4390,10 @@ async def _compose(
             device_ingest=device_ingest_service,
             notifications=notification_inbox,
             surfaces=surface_management,
+            reconsolidation=PublicReconsolidationService(uow_factory, clock),
             memory=PublicMemoryService(
+                clock=clock,
+                derived_enabled=settings.memory_reconsolidation_api_enabled,
                 uow_factory=uow_factory,
                 memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
             ),
@@ -4477,6 +4556,9 @@ async def _compose(
                     sweep_memory=sweep_memory,
                     sweep_traces=sweep_traces,
                     sweep_memory_consolidation=sweep_memory_consolidation,
+                    sweep_memory_reconsolidation=recon_pass.run_once
+                    if recon_pass is not None
+                    else None,
                     sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
                     sweep_people_erasures=lambda: people_erasure.resume_pending(principal),

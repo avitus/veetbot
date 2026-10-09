@@ -176,6 +176,14 @@ rate_limited                429  reserved; see "Limits" below
 shape now is free; discovering after release that clients cannot
 distinguish it from `conflict` is not.
 
+Milestone 32 adds `validation_error` with HTTP `400` and empty `details` for
+invalid requests to `/v1/memory-reconsolidations` and its detail/undo routes
+(ADR-0169). It covers route/body validation and the application-level
+`ReconsolidationValidationError`, including bad cursor bindings. Existing
+resources retain their current validation codes. The operation schemas and
+default-off activation flags are owned by
+[memory-reconsolidation.md](memory-reconsolidation.md).
+
 ### Three codes carry `details`, and the rest carry nothing
 
 ```json

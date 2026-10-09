@@ -200,7 +200,10 @@ class OpenAIResponsesProvider:
         if resolved.model in self._summaries_refused:
             payload = _without_summary(payload)
 
-        attempt_limit = self._max_internal_attempts
+        attempt_limit = min(
+            self._max_internal_attempts,
+            request.maximum_provider_attempts or self._max_internal_attempts,
+        )
         internal_attempt = 0
         while internal_attempt < attempt_limit:
             internal_attempt += 1
@@ -251,13 +254,19 @@ class OpenAIResponsesProvider:
                 if (
                     failure.provider_parameter == "reasoning.summary"
                     and "summary" in payload.get("reasoning", {})
+                    and (
+                        request.maximum_provider_attempts is None
+                        or internal_attempt < request.maximum_provider_attempts
+                    )
                     and emitted_count == 0
                 ):
                     # OpenAI summarizes only for verified organizations. The
                     # summary is a display nicety, so ask again without it. The
                     # refusal is not a failure of the answer: it gets its own
                     # attempt, once, since the next payload has no summary.
-                    attempt_limit += 1
+                    attempt_limit = min(
+                        attempt_limit + 1, request.maximum_provider_attempts or attempt_limit + 1
+                    )
                     self._summaries_refused.add(resolved.model)
                     logger.warning(
                         "openai_reasoning_summary_refused model=%s code=%s",

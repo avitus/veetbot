@@ -22,6 +22,7 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskScopePolicy,
     TaskGrantEcho,
 )
+from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
@@ -59,6 +60,7 @@ from agent_core.domain.people_views import (
     UpdatePerson,
 )
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
+from agent_core.domain.reconsolidation_views import OperationKind, OperationState, OperationView
 from agent_core.domain.schedules import (
     ScheduleDefinition,
     ScheduleDefinitionPatch,
@@ -444,6 +446,31 @@ class SurfaceService(Protocol):
     async def delete_pairing(self, principal: Principal, pairing_id: UUID) -> None: ...
 
 
+class ReconsolidationService(Protocol):
+    async def get(
+        self, principal: Principal, operation_id: UUID, *, ceiling: Sensitivity
+    ) -> OperationView: ...
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        kind: OperationKind | None = None,
+        state: OperationState | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[OperationView]: ...
+    async def undo(
+        self,
+        principal: Principal,
+        operation_id: UUID,
+        *,
+        ceiling: Sensitivity,
+        expected_revision: int,
+        key: str,
+    ) -> OperationView: ...
+
+
 class MemoryReadService(Protocol):
     async def list(
         self,
@@ -458,11 +485,12 @@ class MemoryReadService(Protocol):
         limit: int,
         cursor: str | None,
         flagged: bool | None = None,
-    ) -> Page[MemoryView]: ...
+        include_derived: bool = False,
+    ) -> Page[MemoryView | DerivedMemoryView]: ...
 
     async def get(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
-    ) -> MemoryView: ...
+    ) -> MemoryView | DerivedMemoryView: ...
 
     # The two write routes of ADR-0117; every other memory change stays on the CLI.
     async def delete(
@@ -477,7 +505,7 @@ class MemoryReadService(Protocol):
         *,
         ceiling: Sensitivity,
         key: str,
-    ) -> MemoryView: ...
+    ) -> MemoryView | DerivedMemoryView: ...
 
 
 class PeopleErasureOperations(Protocol):

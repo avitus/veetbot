@@ -32,6 +32,7 @@ from agent_core.api.middleware import (
 )
 from agent_core.api.model_settings import model_settings_router
 from agent_core.api.people import people_router
+from agent_core.api.reconsolidation import reconsolidation_router
 from agent_core.api.sse import encode_sse, heartbeat
 from agent_core.application.errors import (
     BrowserLoginURLValidationError,
@@ -55,6 +56,7 @@ from agent_core.application.services import (
     NotificationService,
     PeopleService,
     PersonaService,
+    ReconsolidationService,
     RunService,
     ScheduleService,
     SessionService,
@@ -72,6 +74,7 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
 )
 from agent_core.domain.browser_task_grants import TaskGrantEcho
+from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import (
     DeviceCapability,
     DeviceInvocationStatus,
@@ -197,6 +200,9 @@ class ApplicationServices(Protocol):
 
     @property
     def memory(self) -> MemoryReadService: ...
+
+    @property
+    def reconsolidation(self) -> ReconsolidationService | None: ...
 
     @property
     def persona(self) -> PersonaService: ...
@@ -591,12 +597,12 @@ def create_app(
                 locations.append(location)
         base = "The request body or parameters are malformed"
         message = f"{base}: {', '.join(locations)}." if locations else f"{base}."
-        return _error_response(
-            request,
-            code="malformed_request",
-            status=API_ERROR_STATUS["malformed_request"],
-            message=message,
+        code = (
+            "validation_error"
+            if request.url.path.startswith("/v1/memory-reconsolidations")
+            else "malformed_request"
         )
+        return _error_response(request, code=code, status=400, message=message)
 
     @app.exception_handler(MalformedRequestError)
     async def malformed_request_error(request: Request, exc: MalformedRequestError) -> JSONResponse:
@@ -1639,7 +1645,8 @@ def create_app(
         session_id: UUID | None = None,
         text: str | None = None,
         flagged: bool | None = None,
-    ) -> Page[MemoryView]:
+        include_derived: bool = False,
+    ) -> Page[MemoryView | DerivedMemoryView]:
         # A belief body is principal-scoped and sensitivity-bearing, so no
         # shared or on-disk cache may keep it; the artifact content route
         # carries the same header for the same reason.
@@ -1660,6 +1667,7 @@ def create_app(
                 limit=min(limit, 200),
                 cursor=cursor,
                 flagged=flagged,
+                include_derived=include_derived,
             )
         except MemoryCursorError as exc:
             raise MalformedRequestError("memory cursor is malformed") from exc
@@ -1673,7 +1681,7 @@ def create_app(
         response: Response,
         authenticated: Annotated[Principal, secured("memory.read")],
         ceiling: Sensitivity,
-    ) -> MemoryView:
+    ) -> MemoryView | DerivedMemoryView:
         """Read one memory through the principal's allowed retrieval ceiling."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.get(authenticated, memory_id, ceiling=ceiling)
@@ -1711,7 +1719,7 @@ def create_app(
         idempotency_key: Annotated[
             str, Header(alias="Idempotency-Key", min_length=1, max_length=200)
         ],
-    ) -> MemoryView:
+    ) -> MemoryView | DerivedMemoryView:
         """Apply one review outcome to a flagged belief and return its new view."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.review(
@@ -1723,6 +1731,8 @@ def create_app(
 
     if settings.memory_api_enabled:
         app.include_router(memory_router)
+        if settings.memory_reconsolidation_api_enabled and services.reconsolidation is not None:
+            app.include_router(reconsolidation_router(services.reconsolidation, secured))
 
     persona_router = APIRouter()
 

@@ -1492,6 +1492,16 @@ Every internal adapter retry is recorded on the attempt as
 `internal_retry_count` so that a provider having a bad day is visible in
 telemetry rather than hidden behind eventual success.
 
+A caller may set the optional neutral `ModelRequest.maximum_provider_attempts`
+to a strict integer from one through three. This caps actual adapter sends,
+including transport errors, pre-output stream failures and OpenAI's optional
+reasoning-summary downgrade. It can lower the adapter's ordinary attempt limit;
+it cannot increase that limit except for the existing summary downgrade, which
+still cannot exceed an explicit request cap. `None` preserves existing behavior.
+M32 sets one because every new send requires its own durable spend reservation;
+SDK retries remain disabled. This local control is not sent as a provider wire
+parameter, and neither adapters nor callers retry a reserved M32 request implicitly.
+
 ### Timeouts
 
 No document defines a model-call timeout. `ToolSpec.timeout_seconds` exists at

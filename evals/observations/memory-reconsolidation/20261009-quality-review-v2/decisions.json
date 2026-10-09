@@ -1,0 +1,63 @@
+{
+  "version": "reconsolidation-review@2",
+  "packet_sha256": "aef114a9c2ce2e59d237de66814aad055d50fa58ae5a030eaa32396f0d2e3d08",
+  "reviewer": "",
+  "human_reviewed": false,
+  "decisions": [
+    {
+      "candidate_id": "21c9dde5fe3ee383aad11acb281daa77dc7a9f45f7681be5fbbba6159e6e47c3",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "421c032fbb2232acab1a37c3bb39a77caebb4dc6dc60ce2b11fcf8fa3c3f9ee1",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "4dbfa6a5bf6bfd0006153f1990201fe11445f0b82cea263766cad6114970cc47",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "5743e49483bde92491262cabb4aa308bca72cac00fd07d4f8063151fca201cb7",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "9a14b9ad8fc1aa6afd11bb6a42405cff052797058880bdd92e3ca4affed10d07",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "a3d65a06e17807f0a306cb8b0c7c100e823792f29718e88f11a49d64229c88ef",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "a77c37e6fd929f90591ff17d0c72e3dbe6b024426c28efd54d125c70d3ed5b9e",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "b6abe96516131027dd6efbd0c2540c6ffe7cf278f164a91ae3e15c79efbe819b",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "bc7de3d518706ab0675ac5cd8e0eb6edcdd709777e6c1dc259f77c1ad16ab6d5",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "c53fe59215487d3b5eca5d5bdf62f31214df1cf573db7650c90c4e5fe0d5826e",
+      "verdict": null,
+      "reference_id": null
+    },
+    {
+      "candidate_id": "d37f731b596ae3d3c9fea0caf3e87e2d94fc9f4dc98fa80838900cb22a6af56c",
+      "verdict": null,
+      "reference_id": null
+    }
+  ]
+}

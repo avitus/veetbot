@@ -273,6 +273,7 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         "device_ingest_error",
         "device_channel_unavailable",
         "malformed_request",
+        "validation_error",  # M32 operation routes; ADR-0169's additive vocabulary.
         "unsupported_media_type",
         "payload_too_large",
         "rate_limited",

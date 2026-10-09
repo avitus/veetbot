@@ -685,6 +685,8 @@ async def test_memory_revisions_enforce_tenant_rls_and_cross_owner_foreign_keys(
                             tenant_id=owner.tenant_id,
                             principal_id=owner.principal_id,
                             belief_id=foreign_belief.id,
+                            creation_sequence=1,
+                            content_revision=1,
                             recorded_at=NOW,
                             payload=memory().model_dump(mode="json"),
                         )

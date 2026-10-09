@@ -1792,3 +1792,56 @@ async def test_openai_missing_terminal_has_safe_diagnostic_code() -> None:
     assert events[-1].error.provider_code == "missing_terminal_event"
     assert len(source.requests) == 1
     await provider.close()
+
+
+@pytest.mark.parametrize("provider_name", ["openai", "anthropic", "chat_completions"])
+async def test_reserved_request_can_forbid_all_internal_retries(provider_name: str) -> None:
+    failure = {"type": "server_error", "code": "server_error"}
+    raw = (
+        {"type": "response.failed", "response": {"error": failure}}
+        if provider_name == "openai"
+        else {"type": "error", "error": failure}
+        if provider_name == "anthropic"
+        else {"error": failure}
+    )
+    source = ScriptedRawSource([[raw], [raw], [raw]])
+    provider = _raw_provider(provider_name, source)
+    bounded = request().model_copy(update={"maximum_provider_attempts": 1})
+    try:
+        events = [
+            event async for event in provider.stream(bounded, resolved(provider_name), ATTEMPT)
+        ]
+    finally:
+        await provider.close()
+    assert len(source.requests) == 1, "each new provider send needs its own reservation"
+    assert len(events) == 1 and isinstance(events[0], ModelFailedEvent)
+
+
+@pytest.mark.parametrize("value", [0, 4, -1, True, "1", 1.5])
+def test_provider_attempt_cap_is_a_bounded_strict_integer(value: Any) -> None:
+    with pytest.raises(ValidationError):
+        ModelRequest.model_validate({**request().model_dump(), "maximum_provider_attempts": value})
+
+
+async def test_reserved_request_forbids_summary_downgrade_retry() -> None:
+    calls = 0
+
+    async def source(payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        raise OpenAIAPIStatusError(
+            "summary refused",
+            response=httpx.Response(400, request=httpx.Request("POST", "https://provider.test")),
+            body={"error": {"code": "unsupported_value", "param": "reasoning.summary"}},
+        )
+        yield {}
+
+    provider = OpenAIResponsesProvider(event_source=source)
+    bounded = request().model_copy(
+        update={"maximum_provider_attempts": 1, "reasoning_summary": True}
+    )
+    try:
+        events = [event async for event in provider.stream(bounded, resolved("openai"), ATTEMPT)]
+    finally:
+        await provider.close()
+    assert calls == 1 and isinstance(events[-1], ModelFailedEvent)

@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_core.adapters.memory.copy_erasure_journal import pop_copy, put_copy, replace_events
 from agent_core.adapters.persistence.people_reference_index import (
     INVOCATION_REFERENCE_TEXT,
     reference_overlap,
@@ -567,6 +568,7 @@ def erase_memory_copies_locked(
     *,
     run_ids: Sequence[UUID] = (),
 ) -> PeopleCopyCleanup:
+    journal = repository._memories._transaction
     identifiers = {str(key) for key in record_ids}
     sessions = {
         key
@@ -630,14 +632,12 @@ def erase_memory_copies_locked(
         if not discovered - identifiers:
             break
         identifiers.update(discovered)
-    repository._traces._traces = {
-        key: trace
-        for key, trace in repository._traces._traces.items()
-        if not (
-            (trace.tenant_id, trace.principal_id) == (principal.tenant_id, principal.principal_id)
-            and (trace.run_id in runs or references(trace.model_dump(mode="json"), identifiers))
-        )
-    }
+    for key, trace in list(repository._traces._traces.items()):
+        if (trace.tenant_id, trace.principal_id) == (
+            principal.tenant_id,
+            principal.principal_id,
+        ) and (trace.run_id in runs or references(trace.model_dump(mode="json"), identifiers)):
+            pop_copy(journal, repository._traces._traces, key)
     active = [
         row.id
         for row in repository._runs._runs.values()
@@ -645,8 +645,13 @@ def erase_memory_copies_locked(
     ]
     if active:
         for run_id in active:
-            repository._runs._runs[run_id] = repository._runs._runs[run_id].model_copy(
-                update={"cancel_requested_at": erased_at},
+            put_copy(
+                journal,
+                repository._runs._runs,
+                run_id,
+                repository._runs._runs[run_id].model_copy(
+                    update={"cancel_requested_at": erased_at},
+                ),
             )
     for repo in (
         repository._events,
@@ -659,7 +664,8 @@ def erase_memory_copies_locked(
         repository._traces,
     ):
         for key in runs:
-            repo._people_erased_runs.setdefault(key, erased_at)
+            if key not in repo._people_erased_runs:
+                put_copy(journal, repo._people_erased_runs, key, erased_at)
     count = 0
     for sid in sessions:
         updated = []
@@ -671,36 +677,58 @@ def erase_memory_copies_locked(
                 count += 1
             updated.append(event)
             if event.derivation_key:
-                repository._events._derived[event.derivation_key] = event
-        repository._events._events[sid] = updated
+                put_copy(journal, repository._events._derived, event.derivation_key, event)
+        replace_events(journal, repository._events, sid, updated)
     for key, row in list(repository._invocations._invocations.items()):
         if row.id in changed_invocations or row.run_id in runs:
-            repository._invocations._invocations[key] = type(row).model_validate(
-                redact(row.model_dump(mode="json"))
+            put_copy(
+                journal,
+                repository._invocations._invocations,
+                key,
+                type(row).model_validate(redact(row.model_dump(mode="json"))),
             )
-    checkpoints = sum(len(repository._checkpoints._checkpoints.pop(run_id, [])) for run_id in runs)
+    checkpoints = sum(
+        len(pop_copy(journal, repository._checkpoints._checkpoints, run_id, [])) for run_id in runs
+    )
     for run_id in runs:
         if run_id in repository._runs._runs:
-            repository._runs._runs[run_id] = repository._runs._runs[run_id].model_copy(
-                update={"final_message": None, "failure": None}
+            put_copy(
+                journal,
+                repository._runs._runs,
+                run_id,
+                repository._runs._runs[run_id].model_copy(
+                    update={"final_message": None, "failure": None}
+                ),
             )
     artifact_ids: set[UUID] = set()
     for key, artifact in list(repository._artifacts._rows.items()):
         if artifact.run_id in runs and artifact.origin != "upload":
-            repository._artifacts._rows[key] = artifact.model_copy(
-                update={"expires_at": min(artifact.expires_at or erased_at, erased_at)}
+            put_copy(
+                journal,
+                repository._artifacts._rows,
+                key,
+                artifact.model_copy(
+                    update={"expires_at": min(artifact.expires_at or erased_at, erased_at)}
+                ),
             )
             artifact_ids.add(artifact.id)
     for key, export in list(repository._trajectory_exports._rows.items()):
         if export.run_id in runs:
-            repository._trajectory_exports._rows[key] = export.model_copy(
-                update={
-                    "artifact": export.artifact.model_copy(
-                        update={
-                            "expires_at": min(export.artifact.expires_at or erased_at, erased_at)
-                        }
-                    )
-                }
+            put_copy(
+                journal,
+                repository._trajectory_exports._rows,
+                key,
+                export.model_copy(
+                    update={
+                        "artifact": export.artifact.model_copy(
+                            update={
+                                "expires_at": min(
+                                    export.artifact.expires_at or erased_at, erased_at
+                                )
+                            }
+                        )
+                    }
+                ),
             )
             artifact_ids.add(export.artifact.id)
     documents = {
@@ -708,16 +736,11 @@ def erase_memory_copies_locked(
         for key, document in repository._knowledge._documents.items()
         if document.source_ref.id in artifact_ids
     }
-    repository._knowledge._documents = {
-        key: value
-        for key, value in repository._knowledge._documents.items()
-        if key not in documents
-    }
-    repository._knowledge._chunks = {
-        key: value
-        for key, value in repository._knowledge._chunks.items()
-        if value.document_row_id not in documents
-    }
+    for key in documents:
+        pop_copy(journal, repository._knowledge._documents, key)
+    for key, value in list(repository._knowledge._chunks.items()):
+        if value.document_row_id in documents:
+            pop_copy(journal, repository._knowledge._chunks, key)
     return PeopleCopyCleanup(
         active_run_ids=active,
         pending_run_ids=sorted(runs) if active or len(artifact_ids) > 256 else [],

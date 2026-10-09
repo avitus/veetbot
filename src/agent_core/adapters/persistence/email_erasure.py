@@ -199,18 +199,23 @@ def source_belief_ids(
 
 def erase_trace(value: dict[str, Any], belief_ids: set[str]) -> dict[str, Any] | None:
     beliefs = value.get("beliefs", [])
-    if not any(
-        str(item.get("belief_id")) in belief_ids for item in beliefs if isinstance(item, dict)
-    ):
+    doomed = belief_ids | {
+        str(item.get("belief_id"))
+        for item in beliefs
+        if isinstance(item, dict)
+        and item.get("record_kind") in {"summary", "hypothesis"}
+        and belief_ids.intersection(item.get("support_ids", []))
+    }
+    if not any(str(item.get("belief_id")) in doomed for item in beliefs if isinstance(item, dict)):
         return None
     result = {
         **value,
-        "beliefs": [item for item in beliefs if str(item.get("belief_id")) not in belief_ids],
+        "beliefs": [item for item in beliefs if str(item.get("belief_id")) not in doomed],
         "rendered": "",
         "rendered_sha256": hashlib.sha256(b"").hexdigest(),
     }
     for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
-        result[field] = [item for item in result.get(field, []) if str(item) not in belief_ids]
+        result[field] = [item for item in result.get(field, []) if str(item) not in doomed]
     return result
 
 
@@ -712,7 +717,7 @@ def erase_memory_source_locked(
         "pending_artifacts": 0,
     }
     for belief_id, revisions in list(repository._memories._history.items()):
-        repository._memories._history[belief_id] = [
+        retained = [
             (at, record)
             for at, record in revisions
             if not (
@@ -721,6 +726,10 @@ def erase_memory_source_locked(
                 and set(record.source_event_ids) & sequences.get(record.source_session_id, set())
             )
         ]
+        # Do not journal an unchanged history belonging to another owner:
+        # their later committed revision must survive this owner's rollback.
+        if retained != revisions:
+            repository._memories._history[belief_id] = retained
     repository._traces._traces.update(trace_changes)
     for sid in affected_sessions:
         updated = []
