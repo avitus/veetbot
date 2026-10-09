@@ -1153,7 +1153,7 @@ scored above it. Pull request 72 passed hosted CI and a clean final review on
 2026-08-27; recorded on 2026-09-28, that advanced the verified ceiling to
 Milestone 13 and 268 gates.
 
-## Milestone 14: inbound surfaces and pairing, authorized and specified
+## Milestone 14: inbound surfaces and pairing, complete
 
 [inbound-surfaces.md](inbound-surfaces.md) gives pairing its home and
 endpoint, builds the session-key resolver the seam audit called the one
@@ -1169,10 +1169,13 @@ audit left open and bounds it to the owner's own pairing, leaving a
 third-party label to the roadmap. Twenty-one hard gates in the `surface`
 area; ADR-0064 records the decisions.
 
-The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. What remains outside the
-corpus is the owner's bot and its private token file; every milestone before
-it has now completed.
+The readiness verdict is therefore **Complete**: there was no unnamed design
+choice between the corpus and the first red tests. The one gap the corpus left,
+a per-run surface budget for admission, became the owner's ADR-0064 amendment
+on 2026-09-28. The owner's production smoke passed on 2026-10-06, and pull
+request 153 passed hosted CI and a clean final review on 2026-10-07; recorded
+on 2026-10-09, that advanced the verified ceiling to Milestone 14 and 289
+gates.
 
 ## Milestone 15: operational hardening, authorized and specified
 
