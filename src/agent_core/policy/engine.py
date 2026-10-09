@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pydantic import ValidationError
+
 from agent_core.domain.agents import Principal
+from agent_core.domain.browser import BrowserAction, BrowserActionKind, BrowserCondition
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.policies import (
     POLICY_DECISION_RANK,
@@ -14,6 +17,7 @@ from agent_core.domain.policies import (
     PolicyDecisionRank,
     PolicyDecisionType,
     ProposedAction,
+    RiskLevel,
     SideEffectClass,
     TrustLevel,
 )
@@ -89,7 +93,40 @@ def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) 
         )
     if condition is PolicyCondition.TARGET_ISOLATED:
         return action.target.isolated
+    if condition is PolicyCondition.BOUNDED_BROWSER_SCROLL:
+        return _bounded_browser_scroll(action)
     return False
+
+
+def _bounded_browser_scroll(action: ProposedAction) -> bool:
+    """Recognize only the explicitly permitted gesture, never page claims of safety."""
+
+    if not (
+        action.kind is ActionKind.TOOL_CALL
+        and action.name == "browser.act"
+        and action.target.kind == "browser_provider"
+        and action.target.isolated
+        and action.target.network_enabled
+        and action.side_effect is SideEffectClass.EXTERNAL_WRITE
+        and action.risk is RiskLevel.HIGH
+        and action.idempotency is IdempotencyClass.NON_IDEMPOTENT
+    ):
+        return False
+    arguments = action.arguments
+    if set(arguments) - {"kind", "expected_revision", "ref", "delta_y", "postcondition"}:
+        return False
+    # Do not let Pydantic coerce booleans, strings or fractions into a gesture.
+    if type(arguments.get("delta_y")) is not int:
+        return False
+    try:
+        if "postcondition" in arguments:
+            BrowserCondition.model_validate(arguments["postcondition"])
+        scroll = BrowserAction.model_validate(
+            {key: value for key, value in arguments.items() if key != "postcondition"}
+        )
+    except (ValidationError, ValueError):
+        return False
+    return scroll.kind is BrowserActionKind.SCROLL
 
 
 def evaluate_deterministic(
@@ -131,11 +168,12 @@ def evaluate_deterministic(
     rule = tool_rules[0] if tool_rules else matching[0]
     allowed = _condition_holds(rule.condition, action)
     decision = rule.decision if allowed else (rule.otherwise or ruleset.default_effect)
-    # The argument half of the overlay is suppressed only for a rule that
+    # The argument half of the overlay is normally suppressed only for a rule that
     # explicitly declares its human confirmation: that tool shows the arguments
     # to the person who completes the action, so re-escalating on model-authored
     # arguments would refuse what that person is already looking at.
     #
+    # The bounded-scroll exception below carries its own explicit gesture permission.
     # The origin half then follows the trust table's "May authorize" column
     # rather than one label's identity, so MEMORY and KNOWLEDGE escalate exactly
     # as EXTERNAL_UNTRUSTED does. This is defense in depth, not containment:
@@ -143,13 +181,25 @@ def evaluate_deterministic(
     # message, so a prior-turn injection followed by an owner message is not
     # caught here. The tool's own human confirmation is the control that holds.
     confirmed_by_human = bool(tool_rules) and tool_rules[0].human_confirms_arguments
+    # ADR-0168 permits the bounded gesture itself. Its page-derived reference
+    # cannot turn it into another action; untrusted origins still cannot authorize.
+    permitted_scroll = rule.condition is PolicyCondition.BOUNDED_BROWSER_SCROLL and allowed
     origin_untrusted = (
         action.origin_trust not in AUTHORIZING_ORIGINS
         if tool_rules
         else action.origin_trust is TrustLevel.EXTERNAL_UNTRUSTED
     )
+    if permitted_scroll:
+        # Reading the feed taints origin_trust. The pipeline separately records
+        # who opened this turn; page content cannot supply or replace that fact.
+        origin_untrusted = (
+            action.newest_user_trust
+            if action.newest_user_trust is not None
+            else action.origin_trust
+        ) not in AUTHORIZING_ORIGINS
     untrusted_input = origin_untrusted or (
-        not confirmed_by_human and TrustLevel.EXTERNAL_UNTRUSTED in action.argument_trust.values()
+        not (confirmed_by_human or permitted_scroll)
+        and TrustLevel.EXTERNAL_UNTRUSTED in action.argument_trust.values()
     )
     if (
         (

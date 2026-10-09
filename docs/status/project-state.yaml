@@ -12,6 +12,10 @@ project:
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   current_milestone: 14
   active_milestone: 15
+  # ADR-0168 records the owner's 2026-10-09 browser approval repair: the
+  # default policy permits a bounded scroll in an owner-originated task,
+  # including schedules, while other actions retain their approval rules.
+  # No milestone or gate moves; production acceptance follows delivery.
   # ADR-0165 records the owner's 2026-10-08 extension of Milestone 31: a
   # suspected-spam flag from the importance assessment, informed by Gmail's
   # own DMARC result, that never touches Gmail, plus thread-level Report spam

@@ -486,8 +486,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1222-1223` and the resolve at
-`policy-and-approvals.md:1250`, and one reference in
+at `policy-and-approvals.md:1241-1242` and the resolve at
+`policy-and-approvals.md:1269`, and one reference in
 `runtime-loop.md:1271` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 

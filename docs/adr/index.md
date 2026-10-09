@@ -179,3 +179,4 @@ implementation without one.
 - [ADR-0165 — Suspected-spam flag and thread-level Report spam (Accepted; amends ADR-0112, Milestone 31)](0165-suspected-spam-flag-and-thread-report-spam.md)
 - [ADR-0166 — A resumed run adopts the history committed after its checkpoint (Accepted)](0166-resume-adopts-history-committed-after-its-checkpoint.md)
 - [ADR-0167 — Automatic memory maintenance does not refresh chat recency (Accepted)](0167-memory-maintenance-chat-recency.md)
+- [ADR-0168 — Bounded browser scrolling without approval (Accepted)](0168-bounded-browser-scrolling-without-approval.md)

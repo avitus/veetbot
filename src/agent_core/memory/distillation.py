@@ -193,7 +193,13 @@ class _Prediction(BaseModel):
 
     episode_index: int = Field(ge=0, le=63)
     statement: str = Field(min_length=1, max_length=8192)
-    attributed_memory_ids: list[UUID] = Field(max_length=32)
+    attributed_memory_ids: list[UUID] = Field(
+        max_length=1,
+        description=(
+            "The one prior memory asserting this prediction, or empty for an ordinary "
+            "expectation. Put separately remembered claims in separate predictions."
+        ),
+    )
 
 
 class _AnticipationResponse(BaseModel):
@@ -1692,7 +1698,9 @@ class NemoriAssistedCandidateExtractor:
                 "before the earliest episode in this batch; no episode's own evidence is "
                 "supplied. For each episode_index, predict only claims already represented by "
                 "the supplied prior_memories that the prefix makes predictable. Attribute a "
-                "prediction only to the specific memory IDs that make it predictable. An "
+                "prediction to exactly one supporting memory and copy that memory's statement "
+                "verbatim. Emit separate predictions for separate memories; never combine "
+                "their claims into one prediction. An "
                 "ordinary model expectation without a supporting memory must have an empty "
                 "attributed_memory_ids list."
             )
