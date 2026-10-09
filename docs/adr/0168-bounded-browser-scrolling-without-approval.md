@@ -73,5 +73,9 @@ response schema, and is instructed to copy that memory's statement. Independent
 facts use independent predictions. The verifier, causal blinding, call budget,
 scorer, frozen corpora and publication thresholds are unchanged. The regression
 first failed because a compound prediction with two memory identifiers was
-accepted; the repair passes the focused memory suite. Fresh release evidence
-must still pass before the policy change is submitted to dev.
+accepted; the repair passes 264 focused memory checks. The fresh three-repeat
+comparison at `09df36eff0c721ead0a4ff2adee488d4f257666e` passed every publication
+gate: development direct recall 1.000 and holdout direct recall 0.967, with
+verified seeded representation in all three repeats and zero boundary failures.
+It made 1,134 provider calls at USD 6.49. The companion formation@10 evidence
+also passed, refreshing the existing bundle without switching the active policy.
