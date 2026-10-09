@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reactor vs TensorScale</title>
+<link rel="icon" href="data:,">
+<!-- Reactor's browser SDK and the modules it imports, at exact versions.
+     The SDK loads its WebAssembly core relative to its own URL. -->
+<script type="importmap">
+{
+  "imports": {
+    "@reactor-team/js-sdk": "https://cdn.jsdelivr.net/npm/@reactor-team/js-sdk@3.0.2/dist/index.js",
+    "awaitqueue": "https://cdn.jsdelivr.net/npm/awaitqueue@3.3.1/+esm",
+    "react": "https://cdn.jsdelivr.net/npm/react@18.3.1/+esm",
+    "react/jsx-runtime": "https://cdn.jsdelivr.net/npm/react@18.3.1/jsx-runtime/+esm",
+    "hls.js": "https://cdn.jsdelivr.net/npm/hls.js@1.7.3/+esm",
+    "mp4box": "https://cdn.jsdelivr.net/npm/mp4box@2.4.1/+esm"
+  }
+}
+</script>
+<link rel="stylesheet" href="/static/benchmark.css">
+<script type="module" src="/static/benchmark.js"></script>
+</head>
+<body>
+<main class="page">
+  <header class="top">
+    <div>
+      <h1>Reactor vs TensorScale</h1>
+      <p class="lede">One prompt goes to both providers at the same instant. Both videos play side by side, and every phase is timed from your click.</p>
+    </div>
+    <ul class="keys" id="keys" aria-label="API keys"></ul>
+  </header>
+
+  <section class="card controls" aria-labelledby="controls-title">
+    <h2 id="controls-title" class="visually-hidden">Benchmark settings</h2>
+    <label class="field wide" for="prompt">
+      <span>Prompt</span>
+      <textarea id="prompt" rows="3" maxlength="2000"></textarea>
+    </label>
+    <div class="grid">
+      <label class="field" for="ts-model"><span>TensorScale model</span><select id="ts-model"></select></label>
+      <label class="field" for="duration"><span>Length</span><select id="duration"></select></label>
+      <label class="field" for="aspect"><span>Aspect</span><select id="aspect"></select></label>
+      <label class="field" for="resolution"><span>TensorScale resolution</span><select id="resolution"></select></label>
+      <label class="field" for="seed"><span>Seed</span><input id="seed" type="number" min="0" max="2147483647" step="1"></label>
+      <label class="field" for="runs"><span>Runs</span><input id="runs" type="number" min="1" max="10" step="1"></label>
+    </div>
+    <div class="options">
+      <label class="check"><input id="warm" type="checkbox"> Keep the Reactor session open between runs</label>
+      <label class="field inline" for="reactor-rate"><span>Reactor rate, $ per video minute</span><input id="reactor-rate" type="number" min="0" step="0.01" placeholder="optional"></label>
+    </div>
+    <p class="note" id="pair-note"></p>
+    <div class="actions">
+      <button id="run" class="primary" type="button">Run benchmark</button>
+      <button id="stop" type="button" disabled>Stop</button>
+      <p id="run-status" class="status" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <section class="stage" aria-label="Videos">
+    <article class="panel" id="panel-reactor" data-provider="reactor">
+      <header>
+        <span class="swatch" aria-hidden="true"></span>
+        <div>
+          <h2>Reactor</h2>
+          <p class="model" id="reactor-model">MiniMax H3 Fast · real-time stream</p>
+        </div>
+        <span class="phase" id="reactor-phase">Idle</span>
+      </header>
+      <div class="screen">
+        <video id="reactor-video" playsinline muted autoplay></video>
+        <div class="overlay" id="reactor-overlay"><span>Waiting to run</span></div>
+        <span class="clock" id="reactor-clock">0.0 s</span>
+      </div>
+      <footer>
+        <dl class="quick">
+          <div><dt>First frame</dt><dd id="reactor-ttff">—</dd></div>
+          <div><dt>Generation</dt><dd id="reactor-gen">—</dd></div>
+          <div><dt>Finished</dt><dd id="reactor-done">—</dd></div>
+        </dl>
+        <button class="mute" type="button" data-video="reactor-video" aria-pressed="false">Unmute</button>
+      </footer>
+    </article>
+    <article class="panel" id="panel-tensorscale" data-provider="tensorscale">
+      <header>
+        <span class="swatch" aria-hidden="true"></span>
+        <div>
+          <h2>TensorScale</h2>
+          <p class="model" id="tensorscale-model">MiniMax H3 Fast · file download</p>
+        </div>
+        <span class="phase" id="tensorscale-phase">Idle</span>
+      </header>
+      <div class="screen">
+        <video id="tensorscale-video" playsinline muted></video>
+        <div class="overlay" id="tensorscale-overlay"><span>Waiting to run</span></div>
+        <span class="clock" id="tensorscale-clock">0.0 s</span>
+      </div>
+      <footer>
+        <dl class="quick">
+          <div><dt>First frame</dt><dd id="tensorscale-ttff">—</dd></div>
+          <div><dt>Generation</dt><dd id="tensorscale-gen">—</dd></div>
+          <div><dt>Finished</dt><dd id="tensorscale-done">—</dd></div>
+        </dl>
+        <button class="mute" type="button" data-video="tensorscale-video" aria-pressed="false">Unmute</button>
+      </footer>
+    </article>
+  </section>
+
+  <section class="card" aria-labelledby="latest-title">
+    <div class="card-head">
+      <h2 id="latest-title">Latest run</h2>
+      <p class="sub" id="latest-sub">No runs yet.</p>
+    </div>
+    <div class="tiles" id="tiles"></div>
+    <figure class="chart" id="timeline-figure" hidden>
+      <figcaption>
+        <span>Where the time went, in seconds from your click</span>
+        <span class="legend" id="timeline-legend"></span>
+      </figcaption>
+      <div class="chart-body" id="timeline"></div>
+    </figure>
+    <div class="table-scroll">
+      <table class="metrics" id="detail" hidden>
+        <thead><tr><th scope="col">Measure</th><th scope="col"><span class="key reactor"></span>Reactor</th><th scope="col"><span class="key tensorscale"></span>TensorScale</th><th scope="col">Comparison</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="summary-title">
+    <div class="card-head">
+      <h2 id="summary-title">Across runs</h2>
+      <p class="sub" id="summary-sub">Medians appear after the first run. Runs with other settings are counted separately.</p>
+    </div>
+    <figure class="chart" id="summary-figure" hidden>
+      <figcaption>
+        <span>Median seconds, lower is faster</span>
+        <span class="legend" id="summary-legend"></span>
+      </figcaption>
+      <div class="chart-body" id="summary-chart"></div>
+    </figure>
+    <div class="table-scroll">
+      <table class="metrics" id="summary" hidden>
+        <thead><tr><th scope="col">Measure</th><th scope="col">Reactor median</th><th scope="col">Reactor p90</th><th scope="col">TensorScale median</th><th scope="col">TensorScale p90</th><th scope="col">Comparison</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="history-title">
+    <div class="card-head">
+      <h2 id="history-title">Run history</h2>
+      <div class="buttons">
+        <button type="button" id="export-csv">Export CSV</button>
+        <button type="button" id="export-json">Export JSON</button>
+        <button type="button" id="clear-history">Clear</button>
+      </div>
+    </div>
+    <p class="sub" id="history-empty">Runs are kept in this browser until you clear them.</p>
+    <div class="table-scroll">
+      <table class="metrics history" id="history" hidden>
+        <thead><tr><th scope="col">#</th><th scope="col">When</th><th scope="col">Settings</th><th scope="col">Reactor first frame</th><th scope="col">Reactor finished</th><th scope="col">TensorScale first frame</th><th scope="col">TensorScale finished</th><th scope="col">Prompt</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="card method">
+    <summary>How each number is measured</summary>
+    <dl>
+      <dt>Clock</dt>
+      <dd>Every time is in seconds from the click that started the run, taken from the browser's monotonic clock. Both requests leave in the same tick.</dd>
+      <dt>First frame</dt>
+      <dd>The first frame the page actually displays that is not blank. The same detector watches both videos, so a black hold or an empty stream does not count.</dd>
+      <dt>Generation</dt>
+      <dd>Reactor: from the enqueue command to the model's <code>clip_generated</code> message. TensorScale: from the request to the response headers, because the buffered endpoint answers only once the video exists. For the streaming LTX endpoint it runs to the last byte.</dd>
+      <dt>Setup</dt>
+      <dd>Reactor only: minting the session token, connecting the WebRTC session, and choosing the canvas. A warm run reuses an open session, so this is near zero.</dd>
+      <dt>Delivery</dt>
+      <dd>From generation done to the first frame on screen. For Reactor this is playout start plus the network. For TensorScale it is the download plus the decode.</dd>
+      <dt>Finished</dt>
+      <dd>When the last frame has been shown. Reactor streams in real time, so this includes the clip's own length. TensorScale's file starts as soon as it has downloaded.</dd>
+      <dt>Generation speed</dt>
+      <dd>Seconds of video per second of generation. Above 1× is faster than real time.</dd>
+      <dt>Network and frames</dt>
+      <dd>Reactor's round-trip time, jitter, packet loss, freezes and received bytes come from its WebRTC statistics during the clip. Dropped frames come from the video element for both providers.</dd>
+      <dt>Cost</dt>
+      <dd>TensorScale uses its published per-second price for the chosen model and resolution, checked 2026-10-09. Reactor uses the rate you enter.</dd>
+    </dl>
+  </details>
+</main>
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+</body>
+</html>

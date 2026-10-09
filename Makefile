@@ -17,7 +17,7 @@ endif
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-ios \
 	test-deploy sandbox-image browser-image test-browser-image \
 	production-check \
-	docs docs-serve docs-check citations-fix website-install test-website
+	docs docs-serve docs-check citations-fix website-install test-website media-benchmark
 
 install:
 	uv sync --all-groups
@@ -281,6 +281,9 @@ test-website: website-install
 	node --test website/tests/install-dependencies.test.mjs
 	npm --prefix website test
 	npm --prefix website run lint
+
+media-benchmark:
+	uv run $(PYTHON) -m scripts.media_benchmark.server
 
 production-check:
 	uv run python scripts/check_production_deployment.py
