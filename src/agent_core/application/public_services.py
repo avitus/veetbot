@@ -20,6 +20,7 @@ from agent_core.application.attachments import (
     claim_attachments,
 )
 from agent_core.application.authorization import require_scope
+from agent_core.application.browser_connection import bind_chat_website, prepare_follow_request
 from agent_core.application.browser_task_grants import (
     TaskGrantResolution,
     read_task_grant_context,
@@ -742,16 +743,22 @@ class PublicRunService:
         content: list[ContentBlock],
         idempotency_key: str | None,
         trace_id: str | None,
+        *,
+        browser_profile_id: UUID | None = None,
     ) -> SubmitResult:
         require_scope(principal, "run.write")
         if idempotency_key is not None and len(idempotency_key) > 255:
             raise ValueError("idempotency key exceeds 255 characters")
-        wire_body = {"content": _wire_content(content)}
+        wire_body: dict[str, object] = {"content": _wire_content(content)}
+        if browser_profile_id is not None:
+            wire_body["browser_profile_id"] = str(browser_profile_id)
         request_hash = hashlib.sha256(canonical_json(wire_body).encode("utf-8")).hexdigest()
         now = self._clock.now()
         try:
-            async with self._uow_factory() as uow:
-                session = await uow.sessions.get(session_id, principal)
+            async with (
+                self._uow_factory() as uow,
+                uow.sessions.admission(session_id, principal) as session,
+            ):
                 if session.status is SessionStatus.CLOSED:
                     raise InvalidStateTransition("closed sessions cannot accept messages")
                 if idempotency_key is not None:
@@ -774,13 +781,34 @@ class PublicRunService:
                                 reason="idempotency_key_reused",
                             )
                         raise _ExistingRunError(original)
+                if browser_profile_id is not None:
+                    session = await bind_chat_website(uow, principal, session, browser_profile_id)
+                follow_handle = None
+                if await uow.runs.active_for_session(session.id, principal) is None:
+                    session, follow_handle = await prepare_follow_request(
+                        uow,
+                        principal,
+                        session,
+                        "\n".join(
+                            block.text for block in content if isinstance(block, TextContentBlock)
+                        ),
+                    )
                 prepared = await self._submit_in(
                     uow,
                     principal,
                     session,
                     content,
                     trace_id=trace_id,
+                    payload_extra=(
+                        {"browser_follow_target": follow_handle} if follow_handle else None
+                    ),
                 )
+                if follow_handle and not session.metadata.get("browser_profile_id"):
+                    pending = await uow.checkpoints.latest(prepared.run.id)
+                    assert pending is not None
+                    pending.version += 1
+                    pending.working_state["browser_access_wait"] = "https://x.com"
+                    await uow.checkpoints.write(prepared.run.id, pending, full=True)
                 if idempotency_key is not None:
                     record = await uow.idempotency.create(
                         IdempotencyRecord(
@@ -804,6 +832,78 @@ class PublicRunService:
             )
         await self._dispatch_prepared(prepared)
         return SubmitResult(run_id=prepared.run.id, status=prepared.run.status)
+
+    async def connect_browser(
+        self, principal: Principal, session_id: UUID, profile_id: UUID
+    ) -> SubmitResult | None:
+        require_scope(principal, "session.write")
+        require_scope(principal, "browser.profile.read")
+        resumed = None
+        async with (
+            self._uow_factory() as uow,
+            uow.sessions.admission(session_id, principal) as session,
+        ):
+            if session.status is SessionStatus.CLOSED:
+                raise InvalidStateTransition("closed conversations cannot connect websites")
+            active = await uow.runs.active_for_session(session_id, principal)
+            pending = None if active is None else await uow.checkpoints.latest(active.id)
+            origin = None if pending is None else pending.working_state.get("browser_access_wait")
+            if active is None or origin is None:
+                await bind_chat_website(uow, principal, session, profile_id)
+                return None
+            require_scope(principal, "run.write")
+            if (
+                active.status is not RunStatus.WAITING_FOR_USER
+                or active.cancel_requested_at is not None
+                or (active.deadline_at is not None and active.deadline_at <= self._clock.now())
+                or "run.write" not in active.principal_scopes
+            ):
+                raise ConflictError(
+                    "This connection request is no longer waiting.",
+                    reason="browser_connection_not_waiting",
+                )
+            profile = await uow.browser_profiles.get(profile_id, principal)
+            if (
+                profile.status is not BrowserProfileStatus.READY
+                or origin not in profile.allowed_origins
+            ):
+                raise InvalidStateTransition(
+                    "Choose a signed-in account for this website.",
+                    reason="browser_profile_not_ready",
+                )
+            await uow.sessions.bind_browser_profile(session_id, principal, profile_id)
+            resumed = await self._deliver_input_in(
+                uow,
+                principal,
+                active,
+                [
+                    TextContentBlock(
+                        text="The owner connected the requested website. "
+                        "Continue the original request using fresh browser evidence."
+                    )
+                ],
+                None,
+                trust=TrustLevel.PLATFORM,
+                actor_type="application",
+                derivation_namespace="browser.connection.resume",
+                verified_browser_connection=True,
+                payload_extra={"profile_id": str(profile_id)},
+            )
+            refreshed = await uow.checkpoints.latest(active.id)
+            assert refreshed is not None
+            # This preflight wait performed no model work or browser actions.
+            # The owner's connection starts a new capability epoch, not a replay.
+            refreshed.version += 1
+            refreshed.working_state.pop("browser_access_wait", None)
+            refreshed.tool_pins_initialized = False
+            refreshed.pinned_tool_names = []
+            refreshed.pinned_tool_versions = {}
+            refreshed.pinned_tool_specs = {}
+            refreshed.provider_continuation = None
+            await uow.checkpoints.write(active.id, refreshed, full=True)
+        if resumed is not None:
+            await self._dispatcher.resume(resumed.run_id)
+        return resumed
 
     async def _submit_in(
         self,
@@ -1144,6 +1244,7 @@ class PublicRunService:
         derivation_namespace: str = "run.input",
         derivation_suffix: str | None = None,
         verified_browser_authentication: UUID | None = None,
+        verified_browser_connection: bool = False,
     ) -> SubmitResult:
         """Complete one suspended question and atomically queue its run to resume."""
 
@@ -1190,7 +1291,9 @@ class PublicRunService:
                 session_id=run.session_id,
                 run_id=run.id,
                 event_type=(
-                    "user.message.created"
+                    "browser.connection.resumed"
+                    if verified_browser_connection
+                    else "user.message.created"
                     if verified_browser_authentication is None
                     else "browser.authentication.resumed"
                 ),
@@ -1209,7 +1312,9 @@ class PublicRunService:
             action=invocation.tool_name,
             reason_code="tool.succeeded",
             message=(
-                "The user answered the outstanding question."
+                "The owner connected the requested website."
+                if verified_browser_connection
+                else "The user answered the outstanding question."
                 if verified_browser_authentication is None
                 else "The isolated browser service verified sign-in."
             ),
@@ -1231,7 +1336,9 @@ class PublicRunService:
                     "question_id": str(effective_question),
                     "answered": True,
                     **(
-                        {"resolved_by": "browser_authentication"}
+                        {"resolved_by": "browser_connection"}
+                        if verified_browser_connection
+                        else {"resolved_by": "browser_authentication"}
                         if verified_browser_authentication is not None
                         else {}
                     ),
@@ -1289,6 +1396,10 @@ class PublicRunService:
         checkpoint.working_state.pop("outstanding_question_id", None)
         checkpoint.working_state.pop("outstanding_question_text", None)
         browser_wait = checkpoint.working_state.pop("browser_auth_wait", None)
+        if not verified_browser_connection:
+            # A real answer (including "cancel") must reach the model. It also
+            # supersedes any specific consent on the original owner message.
+            checkpoint.working_state.pop("browser_access_wait", None)
         state_event = await uow.events.append(
             NewEvent(
                 session_id=run.session_id,
@@ -1299,7 +1410,9 @@ class PublicRunService:
                 payload={
                     "working_state": state.model_dump(mode="json"),
                     "source": (
-                        "user_answer"
+                        "browser_connection"
+                        if verified_browser_connection
+                        else "user_answer"
                         if verified_browser_authentication is None
                         else "browser_authentication"
                     ),
@@ -1661,6 +1774,7 @@ class PublicApprovalService:
                     session_tenant_id=session.tenant_id,
                     session_principal_id=session.principal_id,
                     session_metadata=session.metadata,
+                    owner_run_id=context.owner_run_id,
                     tenant_id=principal.tenant_id,
                     principal_id=principal.principal_id,
                 )

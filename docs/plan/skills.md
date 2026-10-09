@@ -920,7 +920,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-Section 30.2 at `engineering-plan.md:4798` calls it *"a skill_manage
+Section 30.2 at `engineering-plan.md:4806` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at
@@ -1283,7 +1283,7 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 `docs/status/questions-for-review.md:391` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:751-753` cites `engineering-plan.md:2901`, the
+`readiness.md:751-753` cites `engineering-plan.md:2909`, the
 version-pinning acceptance criterion; its earlier target was an MCP
 trust-labelling bullet. The ADR and the questions file are
 historical records and are not edited. The two live statements are.

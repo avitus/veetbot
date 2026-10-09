@@ -298,7 +298,7 @@ the memory browser's is.
 ## Safety
 
 - **Secrets are refused at write time, everywhere.** The system prompt must
-  not contain secrets (engineering-plan.md:4366), and the persona is system
+  not contain secrets (engineering-plan.md:4374), and the persona is system
   prompt. CLI, HTTP, and affirmation all run the secret-material scan before
   persistence; a credential-shaped value is a refusal, not a warning.
 - **Injection is scanned at load.** Persona text passes the same

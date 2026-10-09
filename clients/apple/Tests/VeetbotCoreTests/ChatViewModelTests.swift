@@ -1311,6 +1311,44 @@ import UserNotifications
     }
 
     @Test
+    func testWebsiteSelectionConnectsExistingChatAndWatchesResumedRequest() async throws {
+        let profileID = UUID(), sessionID = UUID(), runID = UUID()
+        let lock = NSLock()
+        var connectionRequest: URLRequest?
+        let sessionBody = """
+        {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Friday recommendation","metadata":{"schedule_id":"weekly"},"created_at":"2026-10-09T12:00:00Z","updated_at":"2026-10-09T12:00:00Z","active_run_id":null,"last_run_id":null}
+        """
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}")
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("GET", "/v1/browser-profiles"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://x.com"],"status":"ready","generation":1,"created_at":"2026-10-09T12:00:00Z","updated_at":"2026-10-09T12:00:00Z","last_used_at":null}],"next_cursor":null}"#)
+            case ("PUT", "/v1/sessions/\(sessionID.uuidString)/website"):
+                lock.withLock { connectionRequest = request }
+                return try response(for: request, statusCode: 200, body: "{\"run_id\":\"\(runID.uuidString)\"}")
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(for: request, statusCode: 200, body: "", headers: ["Content-Type": "text/event-stream"])
+            default:
+                return try response(for: request, statusCode: 404, body: #"{"error":{"code":"not_found","message":"Not found"}}"#)
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        await model.selectSession(try #require(model.history.first))
+        await model.refreshBrowserProfiles()
+        await model.selectBrowserProfile(profileID)
+        let request = try #require(lock.withLock { connectionRequest })
+        #expect(try requestJSONObject(request)["browser_profile_id"] as? String == profileID.uuidString)
+        #expect(model.selectedSessionID == sessionID)
+        #expect(model.runState.activeRunID == runID)
+        model.newSession()
+    }
+
+    @Test
     func testSelectedWebsiteProfileIsBoundWhenANewConversationIsCreated() async throws {
         let profileID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")

@@ -1153,8 +1153,10 @@ A task grant is bound to the tenant, principal, session, browser profile and
 its generation, agent version, policy version, origin, path prefix, creation
 and expiry times, action cap, and the approval that created it. Only an
 interactive top-level run can use it, in a session that carries the trusted
-browser-profile binding and no schedule binding and whose newest user message
-came from the owner; scheduled, inbound-surface, and device-ingested sessions,
+browser-profile binding and whose newest user message came from the owner. An
+authenticated owner reply has a principal-authored seed message even when its
+session originated from a schedule; the occurrence has a scheduler-authored seed.
+Permission scopes alone never prove owner authorship (ADR-0172). Scheduled occurrences, inbound-surface and device-ingested input,
 delegated child runs, and other sessions cannot. A session holds at most one
 active task grant. Thirty minutes, two hundred actions, and 4,096 typed
 characters are fixed, not configurable, and enforced by database constraints.
@@ -1254,8 +1256,10 @@ accounting. Existing schedules require an explicit full-definition update.
 Hosted adapters compare tenant and principal identity and require the run's
 scopes and roles to be subsets of the configured owner's authority; restricted
 scheduled authority does not change profile ownership.
-This read integration creates no action grant, and model-callable schedule
-creation still selects no profile.
+This read integration creates no action grant. Since ADR-0172, model-callable
+`schedule.create` accepts `use_website=true` to pin the current chat's trusted
+profile and `browser.profile.read` dependency. Missing or unavailable access
+fails visibly; the model cannot choose a profile identifier.
 
 ## Bounds and stable failures
 
@@ -1763,3 +1767,30 @@ browsers within the existing service-wide cap of three, until both loads close,
 including after cancellation. Frame and input requests wait for the ceremony
 operation lock without holding the service admission lock, then revalidate the
 capability before accessing the page.
+
+
+## Owner continuation and specific Follow consent (ADR-0172)
+
+Website Access is available in an existing chat. Authenticated owner admission
+can bind an owned profile, with serialization against starting another run.
+Changing the selected account during active work is rejected. New runs refresh
+their context for changed bindings even when permission scopes are unchanged.
+
+A complete affirmative request to follow one X handle records a server-resolved
+target on its owner message. Pronouns resolve only to one unique X profile URL
+in the latest assistant answer; quotes, negations, ambiguous or compound requests
+do not grant this specific consent. One matching owned account may be reused;
+multiple matches require selection. Missing access creates a durable preflight
+question. Connecting a READY X profile resolves that question and resumes the
+same run with fresh capability pins, without inventing another user message.
+An already bound account uses the existing verified authentication continuation.
+
+The consent authorizer requires a top-level owner run, the unchanged latest owner
+message, current profile access and a request no older than thirty minutes. It
+consumes an event receipt before dispatch. Its isolated-runtime constraint permits
+only a click on the exact profile's button whose complete labels identify Follow
+for that handle. Following, Unfollow, other accounts, and unrelated controls are
+not covered. Success requires positive Following evidence on the same profile;
+missing evidence reports an uncertain, non-retryable outcome. This initial
+contract is deliberately specific to X Follow; other writes use their existing
+approval paths. An already-followed account is reported without clicking.

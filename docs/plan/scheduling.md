@@ -389,8 +389,13 @@ budget or a source chat's grants.
 
 The full-definition HTTP update can bind or unbind future occurrences with the
 ordinary expected-revision check. Content-only `schedule.update` preserves the
-binding. `schedule.create` still grants no scopes and binds no profile; the
-model cannot choose one. Browser actions retain their existing approval rules,
+binding. `schedule.create` version 1.2.0 accepts `use_website=true` to select the
+current chat's trusted website binding and request `browser.profile.read`.
+Its approval presentation identifies the profile and origins; missing binding
+fails as `schedule.browser_profile_required`, and normal creation validates
+ownership, READY state and current authority. The model cannot supply a profile
+UUID or arbitrary scopes. Version 1.1.1 remains for already pinned runs.
+Browser actions retain their existing approval rules,
 including ADR-0168's bounded-scroll permission in the default policy. Scheduled
 feed reads can scroll without an interactive grant; other actions still require
 their ordinary approval or an applicable standing grant.
@@ -999,8 +1004,9 @@ service remains the one validator and persistence path, including request-key
 replay. A past or naive instant, invalid calendar selector, or cadence with no
 future occurrence is an argument failure and leaves no schedule.
 
-The definition pins the active agent version and its policy profile and always
-sets `requested_scopes = frozenset()`. Its step, model-call, and tool-call
+The definition pins the active agent version and its policy profile and
+sets `requested_scopes = frozenset()` unless `use_website=true` supplies the
+validated website dependency described above (ADR-0172). Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
 ceilings. Cost is the minimum of the active agent's finite cost or `5` and the
 schedule cost ceiling; run timeout is the lesser of 300 seconds and its

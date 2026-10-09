@@ -263,3 +263,23 @@ async def test_email_chat_visibility_preserves_owner_messages() -> None:
 
     _, sessions, _, events = await memory_stack()
     await assert_email_chat_visibility_preserves_owner_messages(sessions, events)
+
+
+async def assert_browser_binding_is_scoped_and_preserves_metadata(
+    repository: SessionRepository,
+) -> None:
+    chat = session().model_copy(update={"id": UUID(int=172), "metadata": {"schedule_id": "weekly"}})
+    await repository.create(chat)
+    async with repository.admission(chat.id, principal()) as admitted:
+        assert admitted.metadata == {"schedule_id": "weekly"}
+        bound = await repository.bind_browser_profile(chat.id, principal(), UUID(int=173))
+        assert bound.metadata == {"schedule_id": "weekly", "browser_profile_id": str(UUID(int=173))}
+    assert await repository.get(chat.id, principal()) == bound
+    stranger = principal().model_copy(update={"principal_id": "stranger"})
+    with pytest.raises(NotFoundError):
+        await repository.bind_browser_profile(chat.id, stranger, UUID(int=174))
+    assert await repository.get(chat.id, principal()) == bound
+
+
+async def test_memory_browser_binding() -> None:
+    await assert_browser_binding_is_scoped_and_preserves_metadata(InMemorySessionRepository())

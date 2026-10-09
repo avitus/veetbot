@@ -188,6 +188,13 @@ authorization changes into the cache timing of an unrelated session.
 
 ### Prefix epochs
 
+ADR-0172 also stores `browser_profile_id` outside the prompt. At a new run's
+unpinned admission boundary, a changed selected profile rotates the epoch with
+reason `browser_profile_changed`, even with unchanged scopes. Ordinary active
+runs retain their pins. The missing-access preflight exception has performed no
+model work: a verified owner connection resolves its question, clears its tool
+pins and provider continuation, and resumes the original run once.
+
 [ADR-0094](../adr/0094-context-authority-at-run-boundaries.md) adds a narrow
 exception to session-long authorization pinning: before a new run initializes
 its tool pins, newly granted effective run scopes rebuild the plan and emit

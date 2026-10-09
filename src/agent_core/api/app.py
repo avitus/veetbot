@@ -278,6 +278,15 @@ class MessageRequest(BaseModel):
     content: list[ContentBlock] = Field(min_length=1)
 
 
+class ConnectBrowserRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    browser_profile_id: UUID
+
+
+class OwnerMessageRequest(MessageRequest):
+    browser_profile_id: UUID | None = None
+
+
 class InputRequest(MessageRequest):
     question_id: UUID | None = None
 
@@ -731,6 +740,20 @@ def create_app(
         await services.sessions.delete(authenticated, session_id)
         return Response(status_code=204)
 
+    @app.put(
+        "/v1/sessions/{session_id}/website",
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def connect_session_website(
+        session_id: UUID,
+        body: ConnectBrowserRequest,
+        authenticated: Annotated[Principal, secured("session.write")],
+    ) -> dict[str, object]:
+        resumed = await services.runs.connect_browser(
+            authenticated, session_id, body.browser_profile_id
+        )
+        return {"run_id": str(resumed.run_id) if resumed else None}
+
     @app.get(
         "/v1/sessions/{session_id}/messages",
         openapi_extra={"required_scope": "session.read"},
@@ -758,7 +781,7 @@ def create_app(
     )
     async def submit_message(
         session_id: UUID,
-        body: MessageRequest,
+        body: OwnerMessageRequest,
         authenticated: Annotated[Principal, secured("run.write")],
         idempotency_key: Annotated[
             str | None,
@@ -772,6 +795,11 @@ def create_app(
             body.content,
             idempotency_key,
             None,
+            **(
+                {"browser_profile_id": body.browser_profile_id}
+                if body.browser_profile_id is not None
+                else {}
+            ),
         )
         return JSONResponse(
             status_code=200 if result.replayed else 202,

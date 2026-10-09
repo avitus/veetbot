@@ -5,15 +5,24 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from pydantic import TypeAdapter, ValidationError
 
 from agent_core.application.services import ScheduleService
-from agent_core.domain.agents import AgentSpec
+from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approvals import ApprovalPresentation
+from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.errors import AuthorizationError, ConflictError, ScheduleValidationError
 from agent_core.domain.messages import TextPart
-from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.runs import RunLimits
+from agent_core.domain.policies import (
+    AuthorizationTurn,
+    IdempotencyClass,
+    RiskLevel,
+    SideEffectClass,
+    TrustLevel,
+)
+from agent_core.domain.runs import Run, RunLimits
 from agent_core.domain.schedules import (
     Cadence,
     OnceCadence,
@@ -27,6 +36,7 @@ from agent_core.domain.tools import (
     ToolResult,
     ToolSpec,
 )
+from agent_core.ports.persistence import UnitOfWorkFactory
 
 SCHEDULE_CREATE_TOOL_NAME = "schedule.create"
 SCHEDULE_WRITE_SCOPE = "schedule.write"
@@ -126,6 +136,7 @@ RECURRING_CADENCE_INPUT_SCHEMA: dict[str, Any] = {
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        "use_website": {"type": "boolean"},
         "title": {"type": "string", "minLength": 1, "maxLength": 1024},
         "instruction": {"type": "string", "minLength": 1, "maxLength": 65_536},
         "at": {"type": "string", "format": "date-time"},
@@ -189,10 +200,12 @@ class ScheduleCreateTool:
 
     spec = ToolSpec(
         name=SCHEDULE_CREATE_TOOL_NAME,
-        version="1.1.1",
+        version="1.2.0",
         description=(
             "Create one future one-time or recurring schedule. For recurrence, supply a "
-            "complete IANA-zone cadence; ask about ambiguous dates or times."
+            "complete IANA-zone cadence; ask about ambiguous dates or times. For tasks requiring "
+            "a signed-in website, set use_website=true to pin this chat's selected website. "
+            "Connect Website Access first if missing; never promise authenticated work without it."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
@@ -211,10 +224,12 @@ class ScheduleCreateTool:
         service: ScheduleService,
         agent: AgentSpec,
         limits: ScheduleDefinitionLimits,
+        uow_factory: UnitOfWorkFactory | None = None,
     ) -> None:
         self._service = service
         self._agent = agent
         self._limits = limits
+        self._uow_factory = uow_factory
 
     async def approval_view(
         self,
@@ -227,7 +242,8 @@ class ScheduleCreateTool:
         proposal: dict[str, Any] = {
             "title": title,
             "instruction": str(arguments["instruction"]),
-            "requested_scopes": [],
+            "requested_scopes": ["browser.profile.read"] if arguments.get("use_website") else [],
+            **({"use_website": True} if arguments.get("use_website") else {}),
         }
         try:
             cadence = parse_cadence(arguments)
@@ -245,6 +261,27 @@ class ScheduleCreateTool:
             proposal,
         )
 
+    async def approval_view_in_session(
+        self,
+        arguments: dict[str, Any],
+        *,
+        run: Run,
+        principal: Principal,
+        turn: AuthorizationTurn | None,
+        not_covered: TaskGrantNotCovered | None,
+    ) -> ApprovalPresentation:
+        del turn, not_covered
+        summary, proposal = await self.approval_view(arguments, tenant_id=principal.tenant_id)
+        if arguments.get("use_website") and self._uow_factory is not None:
+            async with self._uow_factory() as uow:
+                session = await uow.sessions.get(run.session_id, principal)
+                selected = session.metadata.get("browser_profile_id")
+                proposal["browser_profile_id"] = selected
+                if isinstance(selected, str):
+                    profile = await uow.browser_profiles.get(UUID(selected), principal)
+                    proposal["website_origins"] = list(profile.allowed_origins)
+        return ApprovalPresentation(summary=summary, arguments=proposal)
+
     async def execute(
         self,
         arguments: dict[str, Any],
@@ -260,13 +297,29 @@ class ScheduleCreateTool:
                 retryable=True,
             )
 
+        selected_profile = None
+        if arguments.get("use_website"):
+            if self._uow_factory is not None:
+                async with self._uow_factory() as uow:
+                    session = await uow.sessions.get(context.session_id, context.principal)
+                    selected_profile = session.metadata.get("browser_profile_id")
+            if not isinstance(selected_profile, str):
+                return _failure(
+                    ToolFailureKind.INVALID_ARGUMENTS,
+                    "schedule.browser_profile_required",
+                    "Connect Website Access in this conversation before creating this schedule.",
+                    retryable=False,
+                )
         definition = ScheduleDefinition(
             title=str(arguments["title"]),
             instruction=str(arguments["instruction"]),
             agent_id=self._agent.id,
             agent_version=self._agent.version,
             policy_profile=self._agent.policy_profile,
-            requested_scopes=frozenset(),
+            requested_scopes=frozenset({"browser.profile.read"})
+            if selected_profile
+            else frozenset(),
+            browser_profile_id=UUID(selected_profile) if selected_profile else None,
             limits=self._run_limits(),
             run_timeout_seconds=min(
                 DEFAULT_RUN_TIMEOUT_SECONDS,
@@ -381,3 +434,25 @@ def parse_cadence(arguments: dict[str, Any]) -> Cadence:
             "cadence must be DAILY, WEEKLY, MONTHLY, or YEARLY",
         )
     return cadence
+
+
+class LegacyScheduleCreateTool(ScheduleCreateTool):
+    """Retain the closed input shown to already pinned runs."""
+
+    spec = ScheduleCreateTool.spec.model_copy(
+        update={
+            "version": "1.1.1",
+            "description": (
+                "Create one future one-time or recurring schedule. For recurrence, supply a "
+                "complete IANA-zone cadence; ask about ambiguous dates or times."
+            ),
+            "input_schema": {
+                **INPUT_SCHEMA,
+                "properties": {
+                    key: value
+                    for key, value in INPUT_SCHEMA["properties"].items()
+                    if key != "use_website"
+                },
+            },
+        }
+    )

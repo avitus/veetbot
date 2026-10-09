@@ -804,6 +804,29 @@ def bind_browser_auth_question(checkpoint: RunCheckpoint, question_id: UUID) -> 
         ).model_dump(mode="json")
 
 
+async def prepare_browser_connection_question(context: RunContext) -> None:
+    if (
+        context.checkpoint.working_state.get("browser_access_wait") is None
+        or context.checkpoint.pending_tool_calls
+        or context.checkpoint.working_state.get("outstanding_question_id") is not None
+    ):
+        return
+    arguments = {
+        "question": "Connect your X account using Website Access in this conversation. "
+        "I will continue your follow request when it is connected."
+    }
+    call = ToolCallItem(
+        call_id=f"browser-connection:{context.ids.new_id()}",
+        item_index=0,
+        name="conversation.ask_user",
+        arguments=arguments,
+        raw_arguments=json.dumps(arguments),
+    )
+    context.checkpoint.conversation.append(call)
+    context.checkpoint.pending_tool_calls = [call.model_dump(mode="json")]
+    await checkpoint(context, "browser_recovery")
+
+
 async def suspend_for_browser_question(
     context: RunContext, error: UserInputRequiredError
 ) -> RunOutcome:

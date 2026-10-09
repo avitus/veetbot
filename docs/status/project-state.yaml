@@ -12,6 +12,9 @@ project:
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   current_milestone: 14
   active_milestone: 15
+  # ADR-0172 records the owner-approved same-chat website continuation repair,
+  # interactive authority for owner replies, and specific single-action X follow
+  # consent. No milestone or gate moves; production acceptance awaits delivery.
   # ADR-0168 records the owner's 2026-10-09 browser approval repair: the
   # default policy permits a bounded scroll in an owner-originated task,
   # including schedules, while other actions retain their approval rules.

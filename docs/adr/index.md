@@ -185,3 +185,5 @@ implementation without one.
 
 - [ADR-0170 — Reconsolidation hypothesis equivalence review (Accepted)](0170-reconsolidation-hypothesis-equivalence-review.md)
 - [ADR-0171 — Owner-confirmed real-data fixtures for offline memory evaluation (Accepted)](0171-owner-confirmed-offline-memory-fixtures.md)
+
+- [ADR-0172 — Website access and specific consent survive owner follow-up (Accepted)](0172-owner-browser-continuation.md)

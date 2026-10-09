@@ -894,6 +894,31 @@ original run. What follows is the order of operations, the conflict
 behaviour, and the disambiguation of a word the corpus uses for two
 unrelated things.
 
+### Connecting an existing conversation (ADR-0172)
+
+`POST /v1/sessions/{session_id}/messages` accepts an optional top-level
+`browser_profile_id` UUID. Selection requires `session.write` and
+`browser.profile.read` in addition to `run.write`, and participates in the
+message's idempotency hash. Raw metadata cannot forge this binding.
+
+`PUT /v1/sessions/{session_id}/website` accepts the closed body
+`{"browser_profile_id": "uuid"}` and returns `200 {"run_id": null}` for an
+idle selection, or the resumed original run UUID for a missing-access wait.
+It requires `session.write` and `browser.profile.read`; resumption also requires
+`run.write`. Both session and profile are tenant/principal scoped (404 for an
+unowned resource). Malformed input returns 400, missing scope 403, and closed
+sessions, unavailable profiles or conflicting active work 409. READY,
+AUTHENTICATION_REQUIRED and NEEDS_USER profiles may be selected for idle work;
+resuming a missing-access wait requires READY access to its requested origin.
+The session admission lock serializes selection and run creation. The same
+selection is idempotent; changing an active run's account is rejected.
+
+A verified connection resolves only the pending preflight question and emits
+`browser.connection.resumed`, never a fabricated owner message. Replaying the
+same connection cannot create another run or another action. Cancelled, expired
+or nonwaiting requests cannot resume. The native Website Access entry connects
+the originating chat and watches the resumed run after successful sign-in.
+
 ### The handler's order of operations
 
 1. Authenticate, producing the `Principal`.

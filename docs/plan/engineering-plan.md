@@ -1164,7 +1164,15 @@ thirty-minute, two-hundred-action browser task grant inside an
 owner-configured site scope (ADR-0129, accepted by the owner 2026-09-25). Do
 not implement any other session-wide or permanent approval grant.
 
-When approval is required:
+ADR-0172 recognizes an authenticated owner's explicit instruction to follow one
+identified X account as approval of that single action. The application records
+the source message and resolved target, expires consent after thirty minutes,
+and consumes it once. It accepts no model-authored, scheduled or page-authored
+consent. The browser rechecks the exact profile and Follow control at dispatch
+and requires positive Following evidence. Sign-in can continue the same request;
+uncertain effects cannot authorize another action. Policy denials still win.
+
+When approval is required and not already supplied by this specific consent:
 
 1.  Persist the proposed tool invocation.
 2.  Persist the approval request.

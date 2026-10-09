@@ -251,6 +251,7 @@ from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.attachments import StoredAttachmentResolver
 from agent_core.application.browser_continuation import BrowserContinuationService
+from agent_core.application.browser_follow_consent import BrowserFollowConsentAuthorizer
 from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
 from agent_core.application.browser_leases import (
     browser_run_state,
@@ -651,7 +652,11 @@ from agent_core.tools.people import (
 )
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
-from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
+from agent_core.tools.schedule_create import (
+    SCHEDULE_CREATE_TOOL_NAME,
+    LegacyScheduleCreateTool,
+    ScheduleCreateTool,
+)
 from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_CANCEL_TOOL_NAME,
     SCHEDULE_LIFECYCLE_TOOL_NAMES,
@@ -2678,7 +2683,14 @@ async def _compose(
         registry.register(LegacyDelegateRunTool())
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
-        registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
+        registry.register(
+            LegacyScheduleCreateTool(schedule_service, agent, schedule_definition_limits)
+        )
+        registry.register(
+            ScheduleCreateTool(
+                schedule_service, agent, schedule_definition_limits, uow_factory=uow_factory
+            )
+        )
         registry.register(LegacyScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
@@ -3604,8 +3616,16 @@ async def _compose(
                     clock=clock,
                     observer=AdvisoryMetrics(),
                 )
-        # ADR-0129 D18: the pinned standing grant first, then the task grant.
+        # ADR-0172: specific owner consent, then ADR-0129 standing/task grants.
         standing_authorizers: list[StandingAuthorizer] = []
+        if browser_provider is not None:
+            standing_authorizers.append(
+                BrowserFollowConsentAuthorizer(
+                    provider=browser_provider,
+                    uow_factory=uow_factory,
+                    now=clock.now,
+                )
+            )
         if settings.browser_grant_id is not None:
             if browser_provider is None or settings.browser_profile_id is None:
                 raise ConfigurationError("standing browser grant composition is incomplete")

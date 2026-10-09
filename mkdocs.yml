@@ -142,6 +142,7 @@ nav:
       - ADR-0166 Resume Adopts History Committed After Its Checkpoint: adr/0166-resume-adopts-history-committed-after-its-checkpoint.md
       - ADR-0167 Memory Maintenance and Chat Recency: adr/0167-memory-maintenance-chat-recency.md
       - ADR-0168 Bounded Browser Scrolling Without Approval: adr/0168-bounded-browser-scrolling-without-approval.md
+      - ADR-0172 Owner Browser Continuation: adr/0172-owner-browser-continuation.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
       - ADR-0002 Provider-neutral model protocol: adr/0002-provider-neutral-model-protocol.md
       - ADR-0003 Event log, projections, and checkpoints: adr/0003-event-log-and-projections.md

@@ -136,6 +136,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var notificationFocus: NotificationFocus?
     @Published public private(set) var notificationNavigationID: UUID?
     @Published public private(set) var browserProfiles: [BrowserProfileView] = []
+    private var websiteConnectionSessionID: UUID?
     @Published public private(set) var selectedBrowserProfileID: UUID?
     @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
     /// The one-time launch capability of the in-flight ceremony. It is held only
@@ -1214,7 +1215,8 @@ public final class ChatViewModel: ObservableObject {
         let suggestedTitle = text.isEmpty ? (sentAttachments.first?.filename ?? "") : text
         // The key covers the attachments too: the same words with other files
         // are a different message, never a replay of the first.
-        let signature = ([text] + sentAttachments.compactMap { $0.artifactID?.uuidString })
+        let signature = ([text, selectedBrowserProfileID?.uuidString ?? ""]
+            + sentAttachments.compactMap { $0.artifactID?.uuidString })
             .joined(separator: "\u{1F}")
         let idempotencyKey: String
         if let pendingSubmission, pendingSubmission.signature == signature {
@@ -1237,8 +1239,12 @@ public final class ChatViewModel: ObservableObject {
             let submit = try await api.submitMessage(
                 sessionID: session.id,
                 content: content,
-                idempotencyKey: idempotencyKey
+                idempotencyKey: idempotencyKey,
+                browserProfileID: session.metadata["browser_profile_id"] == nil
+                    ? selectedBrowserProfileID : nil
             )
+            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
+                || selectedBrowserProfileID != nil
             runState.begin(runID: submit.runID, status: submit.status)
             removeSentAttachments(sentAttachments)
             do {
@@ -1868,6 +1874,7 @@ public final class ChatViewModel: ObservableObject {
         defer { isManagingWebsiteAccess = false }
         var createdProfileID: UUID?
         do {
+            websiteConnectionSessionID = selectedSessionID
             let profile = try await api.createBrowserProfile(
                 allowedOrigins: normalizedOrigins
             )
@@ -1940,6 +1947,7 @@ public final class ChatViewModel: ObservableObject {
                 websiteAuthenticationLaunchURL = nil
             }
             try await reloadBrowserProfiles(using: api)
+            errorMessage = nil
             if updated.status == .ready,
                 browserProfiles.contains(where: {
                     $0.id == updated.profileID && $0.status == .ready
@@ -1947,8 +1955,8 @@ public final class ChatViewModel: ObservableObject {
             {
                 selectedBrowserProfileID = updated.profileID
                 await configurationStore.saveBrowserProfileID(updated.profileID)
+                await connectWebsiteToConversation(updated.profileID, sessionID: websiteConnectionSessionID)
             }
-            errorMessage = nil
         } catch {
             present(error)
         }
@@ -1961,6 +1969,7 @@ public final class ChatViewModel: ObservableObject {
     @discardableResult
     public func beginDeviceSignIn(websiteURL: String) -> DeviceSignInRequest? {
         guard api != nil else { return nil }
+        websiteConnectionSessionID = selectedSessionID
         guard let target = Self.websiteLoginTarget(websiteURL),
             let startURL = URL(string: target.loginURL)
         else {
@@ -1985,6 +1994,7 @@ public final class ChatViewModel: ObservableObject {
             let origin = profile.allowedOrigins.first,
             let startURL = URL(string: origin + "/")
         else { return nil }
+        websiteConnectionSessionID = selectedSessionID
         let request = DeviceSignInRequest(
             startURL: startURL,
             allowedOrigins: profile.allowedOrigins,
@@ -2171,11 +2181,12 @@ public final class ChatViewModel: ObservableObject {
         }
         try? await reloadBrowserProfiles(using: api)
         guard !superseded() else { return await settle(stopped) }
+        errorMessage = nil
         if browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready }) {
             selectedBrowserProfileID = profileID
             await configurationStore.saveBrowserProfileID(profileID)
+            await connectWebsiteToConversation(profileID, sessionID: websiteConnectionSessionID)
         }
-        errorMessage = nil
         return .signedIn(profileID: profileID)
     }
 
@@ -2365,6 +2376,25 @@ public final class ChatViewModel: ObservableObject {
         else { return }
         selectedBrowserProfileID = profileID
         await configurationStore.saveBrowserProfileID(profileID)
+        if let profileID {
+            await connectWebsiteToConversation(profileID, sessionID: selectedSessionID)
+        }
+    }
+
+    private func connectWebsiteToConversation(_ profileID: UUID, sessionID: UUID?) async {
+        guard let api, let sessionID else { return }
+        do {
+            let resumed = try await api.connectWebsite(sessionID: sessionID, profileID: profileID)
+            if websiteConnectionSessionID == sessionID { websiteConnectionSessionID = nil }
+            guard selectedSessionID == sessionID else { return }
+            selectedSessionUsesWebsiteProfile = true
+            if let resumed {
+                runState.begin(runID: resumed, status: .queued)
+                watch(runID: resumed)
+            }
+        } catch {
+            present(error)
+        }
     }
 
     public func removeBrowserProfile(_ profileID: UUID) async {

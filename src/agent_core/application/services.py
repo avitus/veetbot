@@ -126,6 +126,10 @@ class SessionService(Protocol):
 
 
 class RunService(Protocol):
+    async def connect_browser(
+        self, principal: Principal, session_id: UUID, profile_id: UUID
+    ) -> SubmitResult | None: ...
+
     async def submit(
         self,
         principal: Principal,
@@ -133,6 +137,8 @@ class RunService(Protocol):
         content: list[ContentBlock],
         idempotency_key: str | None,
         trace_id: str | None,
+        *,
+        browser_profile_id: UUID | None = None,
     ) -> SubmitResult: ...
 
     async def get(self, principal: Principal, run_id: UUID) -> RunView: ...
