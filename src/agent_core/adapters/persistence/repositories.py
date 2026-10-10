@@ -123,6 +123,7 @@ from agent_core.domain.events import (
     EventEnvelope,
     NewEvent,
     ProcessEvent,
+    advances_session_activity,
 )
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
@@ -848,7 +849,11 @@ class PostgresEventRepository:
             .where(SessionRow.id == event.session_id)
             .values(
                 next_event_sequence=SessionRow.next_event_sequence + 1,
-                updated_at=func.greatest(SessionRow.updated_at, occurred_at),
+                updated_at=(
+                    func.greatest(SessionRow.updated_at, occurred_at)
+                    if advances_session_activity(event)
+                    else SessionRow.updated_at
+                ),
             )
             .returning(SessionRow.next_event_sequence - 1)
         )

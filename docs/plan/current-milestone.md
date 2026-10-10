@@ -4,26 +4,24 @@ title: Current Milestone
 
 # Current milestone
 
-- **Active milestone:** Milestone 14 — inbound surfaces and pairing — is the
-  next sequential authorized milestone, is specified by
-  [inbound-surfaces.md](inbound-surfaces.md) with twenty-one gates, and is in
-  progress: the Telegram surface is implemented and every registered gate
-  passes locally. On 2026-09-28 a paired message's run gained its own USD 10
-  budget, which admits it on PostgreSQL (ADR-0064 amendment), and the sixteen
-  CodeRabbit findings pull request 104 left open were resolved; pull request
-  143 carried both to `main`. The owner's production smoke with
-  [the Telegram surface runbook](../telegram-surface-runbook.md) passed on
-  2026-10-06; only its finding, a paired sender's `/pair` reaching the model,
-  remains to ship through a dev to main pull request. Milestone 13 —
+- **Active milestone:** Milestone 15 — operational hardening — is the next
+  sequential authorized milestone, is specified by
+  [operational-hardening.md](operational-hardening.md) with sixteen gates, and
+  has not started; its backup tranche has no dependency on the milestones
+  before it. Milestone 14 — inbound surfaces and pairing, specified by
+  [inbound-surfaces.md](inbound-surfaces.md) with twenty-one gates — completed
+  on 2026-10-07. A paired message's run has its own USD 10 budget (ADR-0064
+  amendment); the sixteen findings pull request 104 left open were resolved
+  and pull request 143 carried them to `main`; the owner's production smoke
+  with [the Telegram surface runbook](../telegram-surface-runbook.md) passed
+  on 2026-10-06; and pull request 153 shipped the smoke's one finding with
+  hosted CI and a clean CodeRabbit review. The completion was recorded on
+  2026-10-09. Milestone 13 —
   general-purpose subagents and delegation, specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates — completed on 2026-08-27 when pull request 72 passed hosted CI and a
   clean CodeRabbit review on its final head; the completion was recorded on
-  2026-09-28. Milestone 15 — operational
-  hardening — is specified by
-  [operational-hardening.md](operational-hardening.md) with sixteen gates and
-  follows Milestone 14; its backup tranche has no dependency on the three
-  before it. Milestone 17 — the memory read API and the native memory
+  2026-09-28. Milestone 17 — the memory read API and the native memory
   browser — is specified by
   [memory-read-api-and-browser.md](memory-read-api-and-browser.md) with ten
   gates and completed as a second parallel workstream on 2026-08-24 without
@@ -108,7 +106,7 @@ title: Current Milestone
   journeys and the release evidence remain open. On 2026-10-08 ADR-0165
   extended it to twenty-three gates with a suspected-spam flag that never
   touches Gmail and thread-level Report spam and Not spam.
-- **Verified gate ceiling:** Milestone 13 (268 gates).
+- **Verified gate ceiling:** Milestone 14 (289 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
   (ADR-0061) — plus Milestone 16 memory evaluation and lifecycle as an
@@ -429,6 +427,13 @@ gates and the cumulative registry passed, the PostgreSQL lane passed, and hosted
 CI and a finding-free final CodeRabbit review passed on pull request 72's final
 head. It was recorded on 2026-09-28, advancing the verified ceiling to
 Milestone 13 and 268 gates.
+
+Milestone 14 completed on those terms on 2026-10-07: all twenty-one surface
+gates and the cumulative registry passed, the PostgreSQL lane passed, the
+owner's production Telegram smoke passed on 2026-10-06, and hosted CI and a
+clean final CodeRabbit review passed on pull request 153's final head, which
+carried the smoke's one repair. It was recorded on 2026-10-09, advancing the
+verified ceiling to Milestone 14 and 289 gates.
 
 Milestone 16 completes on the same terms, with its own additional condition:
 the checked-in benchmark baseline equals a fresh deterministic run exactly and

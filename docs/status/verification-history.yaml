@@ -2252,3 +2252,127 @@ verification:
           the hosted macOS and iOS simulator lanes, which passed on the final
           heads above.
     remaining: []
+  milestone_14:
+    recorded_at: 2026-10-09T17:54:00Z
+    status: complete
+    completed_on: 2026-10-07
+    evidence:
+      - check: twenty-one Milestone 14 gate.surface gates
+        outcome: passed_locally
+        detail: >-
+          Every entry in evals/gates/surface.yaml resolves to a live check.
+          The focused domain, API, ingress, Telegram, reply, deployment, and
+          persistence-schema suites pass, covering content-free default deny,
+          one-time pairing and lockout, fresh authority intersection, ordinary
+          run submission and input routing, restart-safe polling, redacted
+          chunked delivery, approval resolution, revocation, configuration,
+          and transport confinement.
+      - check: PostgreSQL surface persistence and migration lane
+        outcome: passed_locally
+        detail: >-
+          Eight focused cases pass against an isolated PostgreSQL database:
+          both adapters satisfy the shared surface contract, tenant predicates
+          and forced RLS isolate rows, active/daily/monthly admission ceilings
+          hold under the tenant advisory lock, an injected pre-commit ingress
+          crash rolls back and re-delivers once, and the full migration chain
+          passes clean and stepwise round-trip checks.
+      - check: dev to main delivery through pull request 104
+        outcome: review_findings_unresolved
+        detail: >-
+          The Telegram surface (Milestone 14) and the WhatsApp adapter
+          (Milestone 25) reached main in pull request 104, which the owner
+          merged on 2026-09-11 as 0fb6ebe7. Every hosted lane passed on its
+          final head a624ba69, but CodeRabbit's last substantive review, on
+          f26412b1, posted sixteen actionable findings on the surface code and
+          none of their sixteen threads was resolved before or after the merge.
+          They include an authorization-bypass finding in bootstrap.py,
+          sensitive-data-exposure findings in api/app.py, config.py and
+          tests/gates/test_telegram_m14.py, rejected Telegram updates blocking
+          polling, unbounded per-sender rate and notice maps, no terminal
+          attempt limit for surface replies, revoked devices still attaching a
+          surface route, surface text chunking one character over its limit,
+          repeated Idempotency-Key requests not returning the original result,
+          no rate limit on the WhatsApp webhook location, incomplete WhatsApp
+          gate coverage, and over-long migration constraint names. The merge
+          commit's static job failed, so the next merge, pull request 105
+          (7aedbdf7), was the first to deploy the code. The review loop is not
+          complete; verified from GitHub on 2026-09-28.
+      - check: surface run budget on PostgreSQL (ADR-0064 amendment)
+        outcome: passed_locally
+        detail: >-
+          The owner chose on 2026-09-28 a surface budget over a default-agent
+          cost limit: runtime/limits.yaml gives a run a paired message starts
+          USD 10 with a USD 2 synthesis reserve, admission reserves it, and the
+          run carries it. The formerly strict-xfail
+          test_the_shipped_default_agent_admits_a_paired_telegram_message passes
+          on an isolated PostgreSQL 16 database without its marker and proves an
+          Apple-client run stays uncapped; the Telegram approval journey passes
+          on the shipped limits without its USD 2 agent workaround. Its red
+          phase failed at REJECTED_ADMISSION with
+          surface.cost_reservation_missing.
+      - check: pull request 104 review findings resolved on dev
+        outcome: passed_locally
+        detail: >-
+          Fifteen of the sixteen findings were valid and each is fixed with a
+          regression test first: the authorization bypass (the API composition
+          omitted self_approval_enabled; the ingress now requires it), the bare
+          /approve crash (an empty identifier also matched a lone pending
+          approval), no-store surface responses with an allow-listed pairing
+          view, per-role credential refusal, the poller's logging path,
+          repeated pairing keys as a non-retryable conflict naming the code,
+          unreadable Telegram updates receipted instead of stalling polling, a
+          terminal reply attempt limit, bounded per-sender windows, notices for
+          every sender-facing reason code, revoked surfaces refusing pairing and
+          routes, the chunk bound at its boundary, the WhatsApp webhook rate
+          limit, Nginx-only deployment before the first release, and complete
+          WhatsApp gate bindings. The migration-name finding is inapplicable:
+          SQLAlchemy shortens the migration's and the model's names alike, and a
+          PostgreSQL check now pins the stored surface constraint names to the
+          model's.
+      - check: dev to main delivery through pull request 143
+        outcome: passed
+        detail: >-
+          Pull request 143 carried the surface run budget, the resolution of
+          pull request 104's findings, and the dedicated veetbot_surface login
+          to main. CodeRabbit completed its review of the final head 5c6696bb
+          with its one thread resolved, every hosted lane passed on that head,
+          and the owner merged it on 2026-09-29 as f52ee215, which deployed.
+          Verified from GitHub on 2026-10-06.
+      - check: owner production Telegram smoke
+        outcome: passed
+        detail: >-
+          On 2026-10-06 the owner ran docs/telegram-surface-runbook.md against
+          @alvitusbot after the release enabled veetbot-surface. The
+          content-free audit trail shows an unpaired refusal (05:14:45 UTC), a
+          code issued and paired (05:15:36, 05:15:50), a run and a clarifying
+          question answered in the chat, an approval resolved with /approve
+          (05:19:40), /status, /help, /new and /stop (05:20:39-05:21:39), and a
+          revocation (05:22:16) that refused the very next message (05:22:22).
+          A scan of two hours of surface, API, worker and notify journals and
+          the PostgreSQL log found neither the bot token nor the pairing code.
+          The smoke also found that a paired sender's /pair reached the model
+          instead of a deterministic notice; the repair is on dev.
+      - check: dev to main delivery through pull request 153
+        outcome: passed
+        detail: >-
+          Pull request 153 carried 838d4a26, the repair the owner's production
+          smoke found (a paired sender's /pair now settles as
+          surface.already_paired without reaching the model), to main. Its final
+          head 1acf3255 passed CodeRabbit's review with all eleven threads resolved
+          and every hosted lane, including the sandbox lane; the owner merged it
+          on 2026-10-07 as bce4ef13, whose deploy-app and deploy-nginx jobs
+          succeeded. This closed the milestone's last open item. Verified from
+          GitHub on 2026-10-09.
+      - check: cumulative gate registry through Milestone 14 (agent eval gates --milestone 14)
+        outcome: passed
+        detail: >-
+          On 2026-10-09 at dev 1f7fec0e, against a freshly migrated disposable
+          PostgreSQL database, agent eval gates --milestone 14 reported 289
+          active gates. All twenty-one Milestone 14 gates pass, including the
+          PostgreSQL-lane gates, and every Milestone 0 through 13 gate passes
+          except the seven Milestone 6 gate.sandbox.* gates, which fail on that
+          host only because no container runtime is installed
+          (ExecutionUnavailable: container runtime is unavailable). Those seven
+          run in the hosted sandbox lane, which passed on pull request 153's
+          final head.
+    remaining: []

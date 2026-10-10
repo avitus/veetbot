@@ -41,6 +41,12 @@ rules:
   privileged:
     decision: deny
 tool_rules:
+  # Explicit permission for a bounded scroll gesture, including scheduled reads.
+  # Other browser interactions retain ordinary approvals (ADR-0168).
+  browser.act:
+    condition: bounded_browser_scroll
+    decision: allow
+    otherwise: require_approval
   # The iOS compose sheet shows the owner the recipient and the body, and the
   # Send tap that dispatches them is non-bypassable, so a second in-app approval
   # would duplicate rather than add control (ADR-0081, ADR-0083). The

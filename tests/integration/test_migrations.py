@@ -275,3 +275,76 @@ async def test_merge_suggestion_downgrade_waits_for_an_answer_in_flight() -> Non
     finally:
         _alembic("upgrade", "head")
         await engine.dispose()
+
+
+async def test_activity_backfill_removes_only_automatic_memory_timestamps() -> None:
+    """Repair old audit bumps while preserving later conversation and close times."""
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.domain.sessions import SessionStatus
+
+    clock = FixedClock(NOW)
+    settings = database_settings()
+    ids = [UUID(int=810 + index) for index in range(5)]
+    async with build(
+        settings=settings, storage="postgres", principal=principal(), clock=clock
+    ) as app:
+        async with app.uow_factory() as uow:
+            for index, sid in enumerate(ids):
+                await uow.sessions.create(session().model_copy(update={"id": sid}))
+                if index != 4:
+                    await uow.events.append(
+                        NewEvent(
+                            session_id=sid,
+                            run_id=None,
+                            event_type="user.message.created",
+                            actor_type="principal",
+                            payload={"content": "Original conversation"},
+                        )
+                    )
+            clock.advance(timedelta(days=30))
+            for sid in ids:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=sid,
+                        run_id=None,
+                        event_type="memory.decayed",
+                        actor_type="memory",
+                    )
+                )
+            clock.advance(timedelta(days=1))
+            await uow.events.append(
+                NewEvent(
+                    session_id=ids[1],
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    payload={"content": "Later conversation"},
+                )
+            )
+            await uow.sessions.close(ids[2], principal(), clock.now())
+        _alembic("downgrade", "e6b3d1a9c470")
+        engine = create_engine(settings.database_url)
+        try:
+            async with create_session_factory(engine)() as db:
+                # Reproduce the former adapter, including a newer non-event write.
+                for index in (0, 3, 4):
+                    await db.execute(
+                        text("UPDATE sessions SET updated_at = :at WHERE id = :id"),
+                        {"id": ids[index], "at": NOW + timedelta(days=30 if index != 3 else 32)},
+                    )
+                await db.commit()
+            _alembic("upgrade", "head")
+        finally:
+            await engine.dispose()
+            _alembic("upgrade", "head")
+        async with app.uow_factory() as uow:
+            records = [await uow.sessions.get(sid, principal()) for sid in ids]
+            assert [record.updated_at for record in records] == [
+                NOW,
+                NOW + timedelta(days=31),
+                NOW + timedelta(days=31),
+                NOW + timedelta(days=32),
+                NOW,
+            ]
+            assert records[2].status is SessionStatus.CLOSED
+            assert len(await uow.events.list_after(ids[0], 0, principal())) == 2

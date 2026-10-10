@@ -193,7 +193,13 @@ class _Prediction(BaseModel):
 
     episode_index: int = Field(ge=0, le=63)
     statement: str = Field(min_length=1, max_length=8192)
-    attributed_memory_ids: list[UUID] = Field(max_length=32)
+    attributed_memory_ids: list[UUID] = Field(
+        max_length=1,
+        description=(
+            "The one prior memory asserting this prediction, or empty for an ordinary "
+            "expectation. Put separately remembered claims in separate predictions."
+        ),
+    )
 
 
 class _AnticipationResponse(BaseModel):
@@ -1368,13 +1374,19 @@ class NemoriAssistedCandidateExtractor:
                 failures["anticipation"] = failure.failure_kind
             try:
                 anticipation = _AnticipationResponse.model_validate_json(anticipation_raw or "")
-                live_ids = {memory.id for memory in prior_memories}
+                prior_by_id = {memory.id: memory for memory in prior_memories}
                 if any(
-                    not set(prediction.attributed_memory_ids) <= live_ids
+                    not set(prediction.attributed_memory_ids) <= prior_by_id.keys()
                     or prediction.episode_index >= len(episodes)
                     for prediction in anticipation.predictions
                 ):
                     raise ValueError("anticipation referenced an unknown episode or memory")
+                if any(
+                    prediction.statement != prior_by_id[memory_id].statement
+                    for prediction in anticipation.predictions
+                    for memory_id in prediction.attributed_memory_ids
+                ):
+                    raise ValueError("attributed anticipation must copy its memory statement")
             except ValueError:
                 if failure is None:
                     stage_metrics[stage_key("anticipation")]["outcome"] = "validation_failure"
@@ -1692,7 +1704,9 @@ class NemoriAssistedCandidateExtractor:
                 "before the earliest episode in this batch; no episode's own evidence is "
                 "supplied. For each episode_index, predict only claims already represented by "
                 "the supplied prior_memories that the prefix makes predictable. Attribute a "
-                "prediction only to the specific memory IDs that make it predictable. An "
+                "prediction to exactly one supporting memory and copy that memory's statement "
+                "verbatim. Emit separate predictions for separate memories; never combine "
+                "their claims into one prediction. An "
                 "ordinary model expectation without a supporting memory must have an empty "
                 "attributed_memory_ids list."
             )
