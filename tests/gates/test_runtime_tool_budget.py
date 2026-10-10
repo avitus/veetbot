@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import yaml
@@ -15,6 +16,7 @@ from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settin
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelRequest,
+    ModelTransientError,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
@@ -209,3 +211,34 @@ def test_interactive_defaults_leave_room_for_a_final_answer(tmp_path: Path) -> N
         synthesis_reserve_tool_calls=4,
     )
     assert limits.max_cost is None and limits.synthesis_reserve_cost == Decimal("0")
+
+
+async def test_retry_gets_synthesis_before_its_charge_activates_the_reserve() -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                fail_with=ModelTransientError(
+                    provider="fake",
+                    model="scripted",
+                    attempt_id=UUID(int=1),
+                    message="the first research attempt failed",
+                )
+            ),
+            ScriptedTurn(
+                text="Research is incomplete.", context_contains="final-synthesis reserve"
+            ),
+            _tool_turn(_calc("1+1", "would-research-again")),
+        ]
+    )
+    async with build(
+        settings=_settings(),
+        script=script,
+        limits=RunLimits(max_steps=4, max_model_calls=3, synthesis_reserve_model_calls=1),
+    ) as composition:
+        run_id = await composition.runs.submit("research and summarize")
+        run = await composition.runs.wait_terminal(run_id)
+        requests = _requests(composition)
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert run.model_call_count == 2
+    assert run.tool_call_count == 0
+    assert [request.tool_choice for request in requests] == [None, "none"]

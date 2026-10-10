@@ -413,6 +413,7 @@ def _synthesis_reserve_dimension(
     run: Run,
     *,
     step_in_progress: bool = False,
+    before_model_attempt: bool = False,
 ) -> str | None:
     """Name the first run budget whose final-synthesis reserve began."""
 
@@ -432,7 +433,12 @@ def _synthesis_reserve_dimension(
     remaining_steps = limits.max_steps - run.step_count + int(step_in_progress)
     if remaining_steps <= limits.synthesis_reserve_steps:
         return "steps"
-    if limits.max_model_calls - run.model_call_count <= limits.synthesis_reserve_model_calls:
+    # Charging this attempt advances the model-call count before dispatch.
+    # Send the control now if that charge will activate the existing guard.
+    remaining_model_calls = (
+        limits.max_model_calls - run.model_call_count - int(before_model_attempt)
+    )
+    if remaining_model_calls <= limits.synthesis_reserve_model_calls:
         return "model_calls"
     if remaining_tool_calls <= limits.synthesis_reserve_tool_calls:
         return "tool_calls"
@@ -873,6 +879,7 @@ async def _invoke_model(
         synthesis_reserve = initial_synthesis_reserve or _synthesis_reserve_dimension(
             context.run,
             step_in_progress=True,
+            before_model_attempt=True,
         )
         attempt_request = (
             _synthesis_only_request(request, synthesis_reserve)

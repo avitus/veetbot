@@ -796,6 +796,12 @@ becoming `RUNNING` again.
 kind when positive (ADR-0078, ADR-0115). At the first reached dimension, the
 loop adds a volatile platform instruction to the next request requiring final
 synthesis from evidence already in context. The instruction is not checkpointed.
+Before each model attempt, including a retry or the next attempt after resume,
+the request-side model-call check includes the call about to be charged. With
+24 calls and a reserve of 2, call 22 receives the synthesis instruction and
+`tool_choice="none"`: its recorded usage will activate the dispatch guard.
+The guard still checks recorded usage after the response, including the cost
+boundary (ADR-0130), and still refuses tools returned inside the reserve.
 A tool call returned while that control is active fails closed with
 `SynthesisReserveViolation` naming the dimension; all-zero reserve fields
 preserve the ordinary loop with two exceptions: an *exhausted* tool-call budget

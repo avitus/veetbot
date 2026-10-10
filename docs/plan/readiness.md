@@ -490,7 +490,7 @@ detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
 at `policy-and-approvals.md:1241-1242` and the resolve at
 `policy-and-approvals.md:1269`, and one reference in
-`runtime-loop.md:1271` to `POST /runs/{id}/input` that routed to an
+`runtime-loop.md:1277` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -997,7 +997,7 @@ That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1824`, and the sibling join
-at `runtime-loop.md:1228` reads it. Restricted context is
+at `runtime-loop.md:1234` reads it. Restricted context is
 `context-engine.md:511`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
@@ -1006,7 +1006,7 @@ gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:1053`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
-`runtime-loop.md:1236`: *"the parent's `deadline_at` is copied onto
+`runtime-loop.md:1242`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:1049`. Two are partial: the explicit objective has a
