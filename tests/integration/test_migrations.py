@@ -673,3 +673,55 @@ async def test_reconsolidation_downgrade_preserves_a_job_admitted_in_flight(
             await downgrade.communicate()
         _alembic("upgrade", "head")
         await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "ea3210a1b001_add_reconsolidation_maintenance",
+        "ea3210a1b002_backfill_memory_creation_sequences",
+    ],
+)
+async def test_initial_reconsolidation_downgrades_refuse_rls_filtered_history(
+    revision: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from importlib import import_module
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy.exc import DBAPIError
+
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
+
+    migration = import_module("migrations.versions." + revision)
+    engine = create_engine(database_settings().database_url)
+    try:
+        async with create_session_factory(engine)() as db:
+            await db.execute(
+                text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
+                {"tenant": principal().tenant_id},
+            )
+            await PostgresReconsolidationStore(
+                db, RandomIdFactory(), dreaming=PostgresDreamingSchedule(db, RandomIdFactory())
+            ).claim_due(principal(), NOW, "hidden-history")
+            connection = await db.connection()
+            await connection.execute(text("CREATE ROLE m32_history_guard NOSUPERUSER NOBYPASSRLS"))
+            await connection.execute(text("GRANT USAGE ON SCHEMA public TO m32_history_guard"))
+            await connection.execute(
+                text(
+                    "GRANT ALL ON reconsolidation_owners, reconsolidation_jobs TO m32_history_guard"
+                )
+            )
+            await connection.execute(text("SELECT set_config('agent_core.tenant_id', '', true)"))
+            await connection.execute(text("SET LOCAL ROLE m32_history_guard"))
+
+            def apply(sync: Any) -> None:
+                monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(sync)))
+                migration.downgrade()
+
+            with pytest.raises(DBAPIError, match="row-level security"):
+                await connection.run_sync(apply)
+    finally:
+        await engine.dispose()

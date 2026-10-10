@@ -326,6 +326,8 @@ def create_review_app(
                 "reason": "confirmation_or_budget_refused",
                 "operations": [],
             }
+        except Exception:
+            result = {"outcome": "failed", "reason": "runtime_failure", "operations": []}
         if state.packet is not None:
             state.result = result
             state.status = "finished"

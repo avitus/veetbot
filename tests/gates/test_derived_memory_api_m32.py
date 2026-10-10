@@ -268,3 +268,33 @@ async def derived_operation(factory: Factory, kind: str, *, omitted: bool = Fals
         )
         assert operation is not None
         return operation
+
+
+async def test_unavailable_summary_does_not_hide_other_browse_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from agent_core.application import public_services
+    from agent_core.domain.errors import NotFoundError
+
+    settings = replace(
+        memory_settings(), memory_api_enabled=True, memory_reconsolidation_api_enabled=True
+    )
+    async with build(
+        settings=settings, storage="memory", principal=owner(), clock=FixedClock(NOW)
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+        operation = await committed_summary(cast(Factory, app.uow_factory))
+        monkeypatch.setattr(
+            public_services, "derived_view", AsyncMock(side_effect=NotFoundError("unavailable"))
+        )
+        async with _client(app) as client:
+            response = await client.get(
+                "/v1/memories", params={"ceiling": "internal", "include_derived": True}
+            )
+            assert response.status_code == 200
+            assert {row["id"] for row in response.json()["items"]} == {
+                str(key) for key in operation.plan.member_ids
+            }

@@ -222,3 +222,62 @@ async def test_reviewed_daily_failure_is_retained_and_not_retried_same_day() -> 
             runs[0].reason == "execution_failed"
             and "private failure" not in runs[0].model_dump_json()
         )
+
+
+async def test_cancelled_reviewed_slice_finishes_history_despite_repeated_cancellation() -> None:
+    import pytest
+
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.domain.dreaming import DreamingRun
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+    started, finishing, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class PausedPass(ReconsolidationPass):
+        async def _inventory(self, lease: ReconsolidationJob) -> int:
+            started.set()
+            await asyncio.Event().wait()
+            return 0
+
+        async def _finish_daily(self, run: DreamingRun, *, failed: bool = False) -> None:
+            finishing.set()
+            await release.wait()
+            await super()._finish_daily(run, failed=failed)
+
+    service = PausedPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="cancelled",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(TrackedFactory(cast(Factory, factory))),
+        egress_policy=policy,
+        owner_review=True,
+    )
+    task = asyncio.create_task(service.run_once())
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        task.cancel()
+        for _ in range(100):
+            if finishing.is_set() or task.done():
+                break
+            await asyncio.sleep(0.001)
+        assert finishing.is_set(), "cancellation must finalize the claimed daily run"
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        async with factory() as uow:
+            [run] = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+            assert run.outcome == "failed" and run.finished_at is not None
+            assert run.reason == "execution_failed"
+        assert await service.run_once() == 0
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

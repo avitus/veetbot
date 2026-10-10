@@ -1,5 +1,7 @@
 """One maintenance slice composes the existing inventory, executor and writers."""
 
+import asyncio
+import logging
 from collections.abc import Callable
 from decimal import Decimal
 
@@ -16,6 +18,8 @@ from agent_core.memory.reconsolidation_inputs import EgressPolicy
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
+
+logger = logging.getLogger(__name__)
 
 
 class ReconsolidationPass(ReconsolidationInventoryPass):
@@ -59,11 +63,27 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
         self._proposal_count = 0
         try:
             queued = await super().run_once()
-        except Exception:
-            await self._finish_daily(run, failed=True)
+            await self._finish_daily(run)
+        except BaseException:
+            finish = asyncio.create_task(self._finish_failed_daily(run))
+            while not finish.done():
+                try:
+                    await asyncio.shield(finish)
+                except asyncio.CancelledError:
+                    # Repeated shutdown cancellation cannot interrupt the bounded receipt write.
+                    continue
             raise
-        await self._finish_daily(run)
         return queued
+
+    async def _finish_failed_daily(self, run: DreamingRun) -> None:
+        try:
+            async with asyncio.timeout(5):
+                await self._finish_daily(run, failed=True)
+        except Exception as exc:
+            logger.warning(
+                "dreaming_failure_receipt_unavailable",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
 
     async def _finish_daily(self, run: DreamingRun, *, failed: bool = False) -> None:
         result = self._last_execution
@@ -81,7 +101,7 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
         charges = [call.spend.charged_usd for call in calls]
         charged = (
             sum((c for c in charges if c is not None), Decimal(0))
-            if all(c is not None for c in charges)
+            if all(c is not None for c in charges) and not (failed and result is None)
             else None
         )
         async with self._uow_factory() as uow:

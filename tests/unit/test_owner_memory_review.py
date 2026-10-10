@@ -539,3 +539,55 @@ async def test_concurrent_correction_rejects_a_stale_request(tmp_path: Path) -> 
         assert stale.status_code == 409
         data = (await client.get(f"/{TOKEN}/packet")).json()
         assert data["packet"]["sources"][0]["statement"] == "Newer correction."
+
+
+@pytest.mark.parametrize("failure", [OSError, RuntimeError, ValueError])
+def test_runtime_failure_finishes_review_without_exception_content(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+) -> None:
+    import time
+    from unittest.mock import AsyncMock
+
+    from agent_core.evals import owner_memory_review
+
+    monkeypatch.setattr(
+        owner_memory_review,
+        "run_fixture",
+        AsyncMock(side_effect=failure("PRIVATE_FAILURE_SENTINEL")),
+    )
+    value = packet()
+    for source in value.sources:
+        assert (
+            client.post(
+                f"/{TOKEN}/confirm",
+                json={
+                    "packet_digest": value.digest,
+                    "reference_id": str(source.reference_id),
+                    "human_confirmed": True,
+                },
+                headers={"Origin": ORIGIN},
+            ).status_code
+            == 200
+        )
+    assert (
+        client.post(
+            f"/{TOKEN}/run",
+            json={
+                "packet_digest": value.digest,
+                "reference_ids": [str(s.reference_id) for s in value.sources],
+                "human_confirmed": True,
+            },
+            headers={"Origin": ORIGIN},
+        ).status_code
+        == 202
+    )
+    for _ in range(100):
+        response = client.get(f"/{TOKEN}/packet")
+        data = response.json()
+        if data["status"] == "finished":
+            break
+        time.sleep(0.01)
+    assert data["status"] == "finished"
+    assert data["result"]["outcome"] == ("refused" if failure is ValueError else "failed")
+    assert data["result"]["operations"] == []
+    assert "PRIVATE_FAILURE_SENTINEL" not in response.text

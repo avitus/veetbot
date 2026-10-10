@@ -2270,11 +2270,15 @@ class PublicMemoryService:
                     selected = combined[:effective_limit]
                     items: list[MemoryView | DerivedMemoryView] = []
                     for row in selected:
-                        items.append(
-                            await derived_view(uow, principal, row.id, ceiling, now)
-                            if isinstance(row, SummaryMemory)
-                            else MemoryView.from_record(row)
-                        )
+                        if isinstance(row, SummaryMemory):
+                            try:
+                                items.append(
+                                    await derived_view(uow, principal, row.id, ceiling, now)
+                                )
+                            except NotFoundError:
+                                continue
+                        else:
+                            items.append(MemoryView.from_record(row))
                     return Page[MemoryView | DerivedMemoryView](
                         items=items,
                         next_cursor=_encode_memory_cursor(selected[-1])

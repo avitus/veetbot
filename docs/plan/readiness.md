@@ -1990,7 +1990,7 @@ Gmail's sender check, and thread-level Report spam, designed in the same
 document. Integrated release evidence remains pending, and the milestone does
 not move the verified ceiling.
 
-## Milestone 32: Memory reconsolidation (dreaming), specified
+## Milestone 32: Memory reconsolidation (dreaming), implemented; verification incomplete
 
 The owner authorized whole-store revisiting, belief merging and grounded
 connections on 2026-10-02 and instructed engineering to begin on 2026-10-03.

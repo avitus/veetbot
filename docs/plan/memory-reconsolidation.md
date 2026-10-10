@@ -629,7 +629,8 @@ it does not invent a single source session or formation run. Ordinary views
 remain byte-compatible. Opt-in browsing merges both kinds by the existing
 descending store position and ascending UUID cursor. Summary filters apply to
 its rendered text/subject, inherited belief types, review flag, and any complete
-support session. Only currently valid active summaries enter browse pages;
+support session. Unavailable derived rows are skipped without discarding other page items.
+Only currently valid active summaries enter browse pages;
 operation history supplies invalidation history. Disabled surface flags leave
 derived lookup unavailable and reject opt-in browsing as malformed requests.
 
@@ -1664,6 +1665,8 @@ owner explicitly approves their current revision. Approval revalidates sources,
 is idempotent, preserves original facts and clocks, and retains undo/rejection.
 The default-off reviewed-mode flag enables daily bounded generation and only
 owner-approved recall without claiming that autonomous quality gates passed.
-Daily claims, pause and content-free run outcomes are durable. The dashboard uses
+Daily claims, pause and content-free run outcomes are durable. Cancellation records
+a failed run through a shielded receipt write bounded to five seconds; unavailable
+spend is reported as unknown. The dashboard uses
 current owner-filtered source views and never persists private browser content.
 ADR-0174 defines the authorized boundary and required regression coverage.

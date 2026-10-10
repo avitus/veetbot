@@ -254,6 +254,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("SET LOCAL row_security = off")
     # Serialize the history check with owner admission before any destructive DDL.
     op.execute("LOCK TABLE reconsolidation_owners, reconsolidation_jobs IN ACCESS EXCLUSIVE MODE")
     if (

@@ -189,6 +189,6 @@ implementation without one.
 - [ADR-0172 — Website access and specific consent survive owner follow-up (Accepted)](0172-owner-browser-continuation.md)
 
 - [ADR-0173 — Terminal email reservations become conservative budget charges (Accepted; amends ADR-0096)](0173-terminal-email-reservation-accounting.md)
-- [ADR-0174 — Daily dreaming proposals with owner-approved application](0174-owner-reviewed-dreaming.md)
+- [ADR-0174 — Daily dreaming proposals with owner-approved application (Accepted; amends ADR-0169)](0174-owner-reviewed-dreaming.md)
 
 - [ADR-0175 — Private account-control verification (Accepted; amends ADR-0164)](0175-private-account-control-verification.md)

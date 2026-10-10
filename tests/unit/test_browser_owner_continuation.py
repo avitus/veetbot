@@ -1,6 +1,9 @@
 """Owner follow-ups keep the conversation without inheriting scheduled restrictions."""
 
 from pathlib import Path
+from uuid import UUID
+
+import pytest
 
 from agent_core.domain.browser_act_views import session_allows_task_grant
 from tests.unit.test_browser_task_grant_authorizer import PROFILE, owner, run
@@ -527,3 +530,53 @@ async def test_owner_reply_can_use_a_task_permission_in_a_schedule_chat(tmp_path
         assert ended.status == RunStatus.COMPLETED, ended.failure
         assert (await h.grant(grant_id)).actions_used == 1
         assert not await h.composition.approvals.list_pending(run_id=run_id)
+
+
+@pytest.mark.parametrize("change_profile", [False, True])
+async def test_schedule_approval_binds_the_presented_website_profile(change_profile: bool) -> None:
+    from agent_core.bootstrap import build
+    from agent_core.domain.approvals import ApprovalResolutionType
+    from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
+    from tests.gates.test_schedule_tool_m19 import ARGUMENTS, NOW, _enabled_settings
+    from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="schedule.create",
+                        arguments={**ARGUMENTS, "use_website": True},
+                        call_id="website-schedule",
+                    )
+                ]
+            ),
+            ScriptedTurn(text="Schedule request processed."),
+        ]
+    )
+    async with build(
+        settings=_enabled_settings(),
+        script=script,
+        fixed_clock_at=NOW,
+        enabled_tools=["schedule.create"],
+    ) as app:
+        await seed_browser_authority(app)
+        chat = await app.services.sessions.create(app.principal, "general", {})
+        await app.services.runs.connect_browser(app.principal, chat.id, PROFILE_ID)
+        run_id = await app.runs.submit("Create the website schedule.", session_id=chat.id)
+        [approval] = await app.approvals.list_pending(run_id=run_id)
+        assert approval.arguments["browser_profile_id"] == str(PROFILE_ID)
+        if change_profile:
+            replacement = UUID(int=987654)
+            async with app.uow_factory() as uow:
+                profile = await uow.browser_profiles.get(PROFILE_ID, app.principal)
+                await uow.browser_profiles.create(profile.model_copy(update={"id": replacement}))
+            from agent_core.domain.errors import ConflictError
+
+            with pytest.raises(ConflictError, match="Finish or cancel the current run"):
+                await app.services.runs.connect_browser(app.principal, chat.id, replacement)
+        await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        await app.runs.wait_terminal(run_id)
+        schedules = (await app.schedules.list(app.principal, 10, None)).items
+        assert len(schedules) == 1
+        assert schedules[0].revision.browser_profile_id == PROFILE_ID

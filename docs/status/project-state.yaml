@@ -2648,8 +2648,9 @@ readiness:
     On 2026-10-02 the owner authorized Milestone 32 memory reconsolidation:
     whole-store revisiting, belief merging and grounded connections. Its
     detailed design and ADR-0169 are recorded. Phase 1 registered twenty-four
-    gates and froze the evaluation yardstick on 2026-10-03; runtime behavior
-    and comparative release evidence remain pending, with no ceiling change.
+    gates and froze the evaluation yardstick on 2026-10-03. Runtime operations
+    are implemented; runtime verification and comparative release evidence remain
+    pending, with no ceiling change.
     Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
