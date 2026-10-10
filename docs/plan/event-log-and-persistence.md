@@ -79,7 +79,7 @@ Inherited constraints, all of which predate this document:
 ### One event, one short transaction
 
 Appending an event is a single transaction containing exactly three statements
-and no I/O:
+and no I/O. The timestamp assignment below excludes ADR-0167's automatic maintenance.
 
 ```sql
 BEGIN;
@@ -122,8 +122,8 @@ The state change that an event describes belongs in the same transaction as the
 event. An event that says `run.completed` while the `runs` row still says
 `RUNNING` is a lie the log tells forever.
 
-The same statement advances `sessions.updated_at` to the persisted event's
-timestamp. ADR-0050 makes that field the authoritative conversation-history
+For activity-bearing events (ADR-0167), the same statement advances
+`sessions.updated_at` to the persisted event's timestamp. ADR-0050 makes that field the authoritative conversation-history
 sort key, so activity ordering is a projection of committed events rather than
 client selection or a later best-effort write. A transaction that rolls back
 the event also rolls back the timestamp.
