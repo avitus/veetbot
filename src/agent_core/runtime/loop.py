@@ -866,15 +866,19 @@ async def _invoke_model(
     initial_synthesis_reserve: str | None,
     *,
     retain_response: bool = True,
+    allow_retries: bool = True,
 ) -> ModelTurn | RunOutcome:
     """Consume one bounded model attempt sequence and persist authoritative usage.
 
     A caller that validates the turn itself and must not store what it rejects
     passes ``retain_response=False``: the response event then keeps its tool
     names and stop reason but none of the returned text or arguments.
+    Reserved callers pass ``allow_retries=False`` when another attempt needs
+    separate admission; the request also caps provider-internal attempts.
     """
 
-    while step.attempt_count < context.max_internal_attempts:
+    maximum_attempts = context.max_internal_attempts if allow_retries else 1
+    while step.attempt_count < maximum_attempts:
         context.budgets.check(context.run, BudgetScope.ATTEMPT)
         synthesis_reserve = initial_synthesis_reserve or _synthesis_reserve_dimension(
             context.run,
@@ -1022,7 +1026,7 @@ async def _invoke_model(
             if (
                 isinstance(terminal.error, ModelTransientError)
                 and not terminal.error.stream_had_output
-                and step.attempt_count < context.max_internal_attempts
+                and step.attempt_count < maximum_attempts
             ):
                 continue
             reason = (
@@ -1084,7 +1088,7 @@ async def _invoke_model(
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
         ):
-            if step.attempt_count < context.max_internal_attempts:
+            if step.attempt_count < maximum_attempts:
                 continue
             return _failure(
                 context,

@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from typing import Any, cast
 
+import httpx
 from openai import (
     APIConnectionError,
     APIError,
@@ -226,7 +227,7 @@ class OpenAIResponsesProvider:
                 if retry_stream:
                     continue
                 return
-            except (APIConnectionError, APITimeoutError):
+            except (APIConnectionError, APITimeoutError, httpx.TransportError):
                 if emitted_count == 0 and internal_attempt < attempt_limit:
                     continue
                 yield failed_event(

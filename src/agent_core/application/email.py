@@ -911,25 +911,36 @@ class EmailExperienceService:
         return session
 
     async def _check_budget(self, store: EmailStore, principal: Principal, amount: Decimal) -> None:
-        """Count settled usage and unresolved reservations against both windows."""
+        """Count actual or conservative charges once, and retain live reservations."""
         now = self.clock.now().astimezone(UTC)
         daily_spent = Decimal("0")
         monthly_spent = Decimal("0")
         reserved = Decimal("0")
+        daily_estimated = Decimal("0")
+        monthly_estimated = Decimal("0")
         settled: list[tuple[datetime, Decimal]] = []
         spent_by_day: dict[str, Decimal] = {}
         async for record in task_records(store, principal, created_since=now - timedelta(days=30)):
             task = EmailTask.model_validate(record.payload)
-            if task.settled_cost is None:
+            charge = task.settled_cost if task.settled_cost is not None else task.budget_charge
+            if charge is None:
                 reserved += task.reservation
             else:
                 created = task.created_at.astimezone(UTC)
-                settled.append((created, task.settled_cost))
+                # Unknown actual usage stays queryable for later reconciliation,
+                # even after its conservative budget charge leaves the window.
+                if created < now - timedelta(days=30):
+                    continue
+                settled.append((created, charge))
                 day = created.date().isoformat()
-                spent_by_day[day] = spent_by_day.get(day, Decimal("0")) + task.settled_cost
-                monthly_spent += task.settled_cost
+                spent_by_day[day] = spent_by_day.get(day, Decimal("0")) + charge
+                monthly_spent += charge
+                if task.settled_cost is None:
+                    monthly_estimated += charge
                 if created.date() == now.date():
-                    daily_spent += task.settled_cost
+                    daily_spent += charge
+                    if task.settled_cost is None:
+                        daily_estimated += charge
         async for record in records(store, principal, "people_import_budget"):
             imported = EmailImportBudget.model_validate(record.payload)
             if imported.settled_cost is None:
@@ -974,17 +985,19 @@ class EmailExperienceService:
                 break
         raise BudgetExceededError(
             "email_aggregate_cost",
-            f"Automatic email work is paused. Today: ${daily_spent:.2f} spent, "
+            f"Automatic email work is paused. Today: ${daily_spent:.2f} counted, "
             f"${reserved:.2f} reserved, ${self.budget_limits.daily_cost:.2f} limit. "
-            f"Rolling 30 days: ${monthly_spent:.2f} spent, "
+            f"Rolling 30 days: ${monthly_spent:.2f} counted, "
             f"${self.budget_limits.monthly_cost:.2f} limit. "
             f"The next batch needs ${amount:.2f} available. "
             "Cached mail and editing remain available.",
             details={
                 "daily_spent": str(daily_spent),
+                "daily_estimated": str(daily_estimated),
                 "daily_reserved": str(reserved),
                 "daily_limit": str(self.budget_limits.daily_cost),
                 "monthly_spent": str(monthly_spent),
+                "monthly_estimated": str(monthly_estimated),
                 "monthly_reserved": str(reserved),
                 "monthly_limit": str(self.budget_limits.monthly_cost),
                 "next_reservation": str(amount),
@@ -1127,7 +1140,7 @@ class EmailExperienceService:
                 try:
                     run = await uow.runs.get(old.run_id, principal)
                 except NotFoundError:
-                    # Missing accounting evidence never releases a reservation.
+                    await self._account_uncertain_task_in(uow, principal, old, reason="missing_run")
                     continue
                 if run.status in TERMINAL_RUN_STATUSES:
                     await self._settle_task_in(uow, principal, old, run)
@@ -1788,12 +1801,15 @@ class EmailExperienceService:
             await save_value(uow.email, principal, "task", str(task.run_id), task, self.clock.now())
 
     async def settle(self, principal: Principal, run_id: UUID) -> None:
-        """Release terminal refresh resources and settle only provable usage."""
+        """Release ended resources; distinguish actual usage from budget estimates."""
         task = await self.get_task(principal, run_id)
         if task is not None and task.kind in {"refresh", "archive", "subscription"}:
             async with self.uow_factory() as uow:
-                run = await uow.runs.get(run_id, principal)
-            if run.status in TERMINAL_RUN_STATUSES:
+                try:
+                    run: Run | None = await uow.runs.get(run_id, principal)
+                except NotFoundError:
+                    run = None
+            if run is None or run.status in TERMINAL_RUN_STATUSES:
                 # Release even when provider usage still needs reconciliation.
                 # Durable session/events and all source receipts remain intact.
                 await self._release_session(task.session_id)
@@ -1801,9 +1817,37 @@ class EmailExperienceService:
             task = await read_value(uow.email, principal, "task", str(run_id), EmailTask)
             if task is None or task.settled_cost is not None:
                 return
-            run = await uow.runs.get(run_id, principal)
+            try:
+                run = await uow.runs.get(run_id, principal)
+            except NotFoundError:
+                await self._account_uncertain_task_in(uow, principal, task, reason="missing_run")
+                return
             if run.status in TERMINAL_RUN_STATUSES:
                 await self._settle_task_in(uow, principal, task, run)
+
+    async def _account_uncertain_task_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        task: EmailTask,
+        *,
+        reason: Literal["incomplete_usage", "missing_run"],
+        recorded_cost: Decimal = Decimal("0"),
+    ) -> None:
+        """Close an ended hold without claiming unknown usage was free (ADR-0173)."""
+        updated = task.model_copy(
+            update={
+                "budget_charge": max(
+                    task.reservation, recorded_cost, task.budget_charge or Decimal("0")
+                ),
+                "budget_charge_reason": reason,
+                "stage": "cost_reconciliation_required",
+            }
+        )
+        if updated != task:
+            await save_value(
+                uow.email, principal, "task", str(task.run_id), updated, self.clock.now()
+            )
 
     async def _settle_task_in(
         self,
@@ -1851,13 +1895,13 @@ class EmailExperienceService:
             or started - known
             or (run.usage.model_calls != len(started))
         ):
-            if task.stage == "cost_reconciliation_required":
-                return
-            updated = task.model_copy(update={"stage": "cost_reconciliation_required"})
-        else:
-            updated = task.model_copy(
-                update={"settled_cost": run.usage.cost, "stage": run.status.value.lower()}
+            await self._account_uncertain_task_in(
+                uow, principal, task, reason="incomplete_usage", recorded_cost=run.usage.cost
             )
+            return
+        updated = task.model_copy(
+            update={"settled_cost": run.usage.cost, "stage": run.status.value.lower()}
+        )
         await save_value(uow.email, principal, "task", str(run.id), updated, self.clock.now())
 
     async def _release_session(self, session_id: UUID) -> None:

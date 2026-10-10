@@ -279,3 +279,58 @@ async def test_postgres_belief_messages_name_the_sources_that_formed_a_belief() 
         await configure(session)
         await belief_messages_contract(PostgresEmailStore(session))
         await session.rollback()
+
+
+async def test_postgres_terminal_budget_recovery_serializes_admission_and_survives_restart() -> (
+    None
+):
+    from dataclasses import replace
+    from decimal import Decimal
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.bootstrap import build
+    from agent_core.domain.email import EmailBudgetLimits
+    from tests.unit.test_email_budget_recovery import NOW, seed_uncertain
+
+    owner = principal().model_copy(
+        update={
+            "scopes": {
+                "email.read",
+                "email.write",
+                "run.read",
+                "run.write",
+                "session.read",
+                "session.write",
+                "mcp.gmail_read.use",
+                "mcp.gmail_send.use",
+            }
+        }
+    )
+    settings = replace(database_settings(), email_mode_enabled=True)
+    async with build(
+        settings=settings, storage="postgres", principal=owner, clock=FixedClock(NOW)
+    ) as app:
+        task = await seed_uncertain(app)
+        service = app.services.email
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("1"), monthly_cost=Decimal("2")
+        )
+        first, second = await asyncio.gather(
+            service.submit_task(owner, kind="refresh"),
+            service.submit_task(owner, kind="refresh"),
+        )
+        assert first.run_id == second.run_id
+        assert first.replayed != second.replayed
+    async with build(
+        settings=settings, storage="postgres", principal=owner, clock=FixedClock(NOW)
+    ) as restarted:
+        recovered = await restarted.services.email.get_task(owner, task.run_id)
+        assert recovered is not None
+        assert recovered.settled_cost is None
+        assert recovered.budget_charge == 1
+        assert recovered.budget_charge_reason == "incomplete_usage"
+        async with restarted.uow_factory() as uow:
+            before = await uow.email.get(owner, "task", str(task.run_id))
+        await restarted.services.email.settle(owner, task.run_id)
+        async with restarted.uow_factory() as uow:
+            assert await uow.email.get(owner, "task", str(task.run_id)) == before

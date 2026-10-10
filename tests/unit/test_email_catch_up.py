@@ -256,11 +256,10 @@ async def test_monthly_ceiling_and_unknown_usage_do_not_promise_midnight_reset(
         assert response.status_code == 402
         details = response.json()["error"]["details"]
         retry_at = datetime.fromisoformat(details["retry_at"])
-        assert retry_at == (
-            NOW + timedelta(hours=1) if unresolved else created + timedelta(days=30, microseconds=1)
-        )
+        assert retry_at == created + timedelta(days=30, microseconds=1)
         assert Decimal(details["daily_spent"]) == 0
-        assert Decimal(details["daily_reserved"]) == (200 if unresolved else 0)
+        assert Decimal(details["daily_reserved"]) == 0
+        assert Decimal(details["monthly_estimated"]) == (200 if unresolved else 0)
 
 
 async def test_mixed_age_thread_assesses_only_recent_passages_and_cannot_auto_draft() -> None:

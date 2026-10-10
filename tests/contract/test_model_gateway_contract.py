@@ -747,6 +747,42 @@ async def test_midstream_transport_failure_uses_the_next_sequence_across_api_mod
     assert events[-1].error.kind == "transient"
 
 
+@pytest.mark.parametrize("error_type", [httpx.ReadTimeout, httpx.ReadError])
+@pytest.mark.parametrize("after_output", [False, True])
+@pytest.mark.parametrize("attempt_cap", [None, 1])
+async def test_openai_raw_stream_transport_failure_is_typed_and_bounded(
+    error_type: type[httpx.TransportError], after_output: bool, attempt_cap: int | None
+) -> None:
+    """SDK stream-body errors may escape as raw HTTPX errors after headers arrive."""
+    calls = 0
+
+    async def broken_stream(_request: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        if after_output:
+            yield {"type": "response.output_text.delta", "output_index": 0, "delta": "partial"}
+        raise error_type("private transport diagnostics must not escape")
+
+    provider = OpenAIResponsesProvider(event_source=broken_stream)
+    bounded = request().model_copy(update={"maximum_provider_attempts": attempt_cap})
+    try:
+        events = [
+            event
+            async for event in validated_stream(
+                provider.stream(bounded, resolved("openai"), ATTEMPT)
+            )
+        ]
+    finally:
+        await provider.close()
+    assert calls == (1 if after_output or attempt_cap == 1 else 3)
+    assert [event.sequence for event in events] == ([0, 1] if after_output else [0])
+    assert isinstance(events[-1], ModelFailedEvent)
+    assert events[-1].error.kind == "transient"
+    assert events[-1].error.provider_code == "transport_error"
+    assert events[-1].error.stream_had_output is after_output
+    assert "private transport" not in events[-1].model_dump_json()
+
+
 async def test_openai_midstream_sdk_validation_error_is_protocol_failure() -> None:
     async def invalid_response(_request: dict[str, Any]) -> Any:
         yield {
