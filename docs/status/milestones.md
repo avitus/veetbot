@@ -296,6 +296,7 @@ nonregression passes, but answer lift remains below ten percentage points.
 Eleven new hypotheses await their own bound owner review; earlier judgments and
 failures remain unchanged. The design records the repairs and measured limits.
 
+- [ ] Deploy owner-reviewed dreaming (ADR-0174) and enable its documented shared configuration in every application role
 - [ ] Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
 - [ ] Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
 - [ ] Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before unattended production activation

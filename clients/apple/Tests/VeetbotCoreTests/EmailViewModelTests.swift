@@ -1435,6 +1435,32 @@ import SwiftUI
         #expect(!model.budgetPauseDetails.joined().contains("5703420"))
     }
 
+    @Test(arguments: ["0", "1.25"])
+    func testBudgetPauseLabelsEstimatedSpending(estimated: String) async throws {
+        let monthlyEstimated = estimated == "0" ? "0" : "2.50"
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                return (402, """
+                {"error":{"code":"budget_exceeded","message":"Budget in use",
+                "details":{"daily_spent":"4","daily_limit":"4","daily_estimated":"\(estimated)",
+                "monthly_spent":"8","monthly_limit":"8","monthly_estimated":"\(monthlyEstimated)",
+                "retry_at":"2099-01-01T00:00:00Z"},"request_id":"budget-estimate"}}
+                """)
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        try await waitForEmailTestCondition { model.budgetRetryAt != nil && !model.isRefreshing }
+        #expect(model.budgetPauseDetails.count == 2)
+        for (index, detail) in model.budgetPauseDetails.enumerated() {
+            #expect(detail.contains("estimated") == (estimated != "0"))
+            if estimated != "0" { #expect(detail.contains(index == 0 ? "1.25" : "2.50")) }
+            #expect(detail.contains(" of "))
+        }
+    }
+
     /// Keep budget pauses across mode visits while allowing an explicit refresh to recover.
     @Test func testBudgetCeilingStopsTimerAcrossVisitsAndManualRefreshRecovers() async throws {
         let requests = EmailRequestRecorder()

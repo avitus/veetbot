@@ -473,3 +473,21 @@ async def test_merge_expiry_checks_frozen_dependencies_even_without_a_new_write(
     assert squeezed.pressure.yield_steps[0] == "recall"
     assert any("equivalence grouping" in text for text in _memory_texts(squeezed.request))
     assert squeezed.request.metadata["prefix_sha256"] == assembled.request.metadata["prefix_sha256"]
+
+
+async def test_delta_failure_preserves_already_fetched_snapshot_corrections() -> None:
+    class FailingDeltaRetriever(_Retriever):
+        async def recall(self, query: RecallQuery, **kwargs: object) -> RecallResult:
+            if query.min_store_position:
+                raise RuntimeError("delta unavailable")
+            return await super().recall(query, **kwargs)  # type: ignore[arg-type]
+
+    retriever = FailingDeltaRetriever()
+    request = await _builder(retriever).build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+    texts = _memory_texts(request)
+    assert retriever.correction_calls == [(SNAPSHOT_TRACE, 7)]
+    assert len(texts) == 2
+    assert "<memory>base</memory>" in texts[0]
+    assert _correction_line() in texts[1]

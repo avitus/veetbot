@@ -312,7 +312,7 @@ call (Section 9):
 Milestone 16 builds the decay and explicit re-derivation parts of this stage.
 Whole-store merging and grounded connections are now authorized as Milestone 32;
 [memory-reconsolidation.md](memory-reconsolidation.md) defines that mechanism
-and its twenty-four gates; runtime implementation remains pending.
+and its twenty-four gates; runtime and offline comparisons are implemented; verification and supervised deployment remain pending.
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) gives
 decay a bounded sweep with per-belief-type half-lives, a confidence step, and a
 retirement floor; adds the `AFFIRMED` authority and the working-state facts

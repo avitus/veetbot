@@ -2388,9 +2388,16 @@ public final class ChatViewModel: ObservableObject {
             if websiteConnectionSessionID == sessionID { websiteConnectionSessionID = nil }
             guard selectedSessionID == sessionID else { return }
             selectedSessionUsesWebsiteProfile = true
-            if let resumed {
-                runState.begin(runID: resumed, status: .queued)
-                watch(runID: resumed)
+            var runID = resumed
+            if runID == nil {
+                // A replay can omit the run already resumed by the first PUT.
+                let refreshed = try? await api.getSession(sessionID)
+                guard selectedSessionID == sessionID else { return }
+                runID = refreshed?.activeRunID
+            }
+            if let runID {
+                runState.begin(runID: runID, status: .queued)
+                watch(runID: runID)
             }
         } catch {
             present(error)

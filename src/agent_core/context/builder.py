@@ -751,6 +751,7 @@ class BudgetedContextBuilder:
         # this: they are unbudgeted, never yield, and are the trust-critical
         # half of the pair.
         remaining = queries[0].budget_tokens - base.tokens
+        corrections: list[MemoryCorrection] = []
         try:
             # Membership can expire without a source write. Validate frozen
             # dependencies before querying the delta so invalidation is visible.
@@ -783,7 +784,8 @@ class BudgetedContextBuilder:
                 "context_memory_delta_failed",
                 extra={"run_id": str(run.id), "error_class": type(exc).__name__},
             )
-            return _RecallBundle(base=rendered_base)
+            # Corrections already fetched remain authoritative if optional delta recall fails.
+            return _RecallBundle(base=rendered_base, corrections=tuple(corrections))
         # A belief the base recall already carries is not news, however new its
         # position is: stating it twice in one turn is two voices on one fact.
         carried = {item.belief_id for item in base.items}

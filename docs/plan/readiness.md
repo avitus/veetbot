@@ -13,14 +13,14 @@ the corpus runs out?
 The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
-were written. The present answer is different: Milestones 0 through 13 are
-complete, and Milestone 14 inbound surfaces and pairing is the next sequential,
+were written. The present answer is different: Milestones 0 through 14 are
+complete, and Milestone 15 operational hardening is the next sequential,
 fully specified milestone. Milestones 16, 17, 19, 20, 22, 23, and 29 completed
 as separately authorized parallel workstreams; Milestones 18, 21, and 24
 through 31 are authorized parallel workstreams in progress, each with a
 complete design and registered gates. Milestone 32 was authorized on 2026-10-02
 with a proposal; Phase 1 on 2026-10-03 added its detailed contracts and twenty-four
-registered gates. It is implementable, with runtime behavior still pending.
+registered gates. Runtime operations and offline comparisons are implemented; verification remains incomplete.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -1999,11 +1999,11 @@ bounded durable maintenance, source content revisions, atomic operations,
 reversible equivalence membership, extractive summaries, grounded hypotheses,
 dependency invalidation, owner inspection/undo and evaluation arithmetic.
 
-The verdict is **implementable**. Twenty-four gates are registered; two bind
-checks of the frozen evaluation yardstick and twenty-two runtime/release gates
-remain explicitly pending. The corpus has twelve categories in each of its
-synthetic development and holdout splits. Its manifest pins the scorer and
-unchanged M16 control references, not an unmeasured dreaming run. The runtime
-collector and original-only control on M32 seeds must precede provider tuning.
-No production capability, quality result or activation is claimed. Milestone
-21's open evidence remains open and the verified ceiling stays 14.
+The runtime is **implemented; verification remains incomplete**. Twenty-four gates
+are registered: two bind the frozen yardstick, while twenty-two runtime/release
+gates remain pending. Recorded offline comparisons and owner judgments preserve
+failed precision and answer-lift results against frozen synthetic development
+and holdout corpora and unchanged M16 controls. Unattended activation stays off.
+ADR-0174 authorizes daily proposals and individually approved application; its
+supervised production deployment remains pending. Milestone 21's open evidence
+remains open and the verified ceiling stays 14.

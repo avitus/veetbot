@@ -77,7 +77,7 @@ as Milestone 17 (ADR-0070), and the persona surface as Milestone 22
 than silently assumed here. On 2026-10-02 the owner also authorized belief
 merge and whole-store consolidation as Milestone 32;
 [memory-reconsolidation.md](memory-reconsolidation.md) defines its contracts
-and twenty-four registered gates; runtime implementation remains pending.
+and twenty-four registered gates; runtime and offline comparisons are implemented; verification and supervised deployment remain pending.
 
 ## The boundary: the yardstick is built before the thing it measures moves
 

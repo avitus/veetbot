@@ -1486,7 +1486,7 @@ alerts; cleanup and viewed-result acknowledgement require the updated client.
 ## Owner-reviewed dreaming rollout (ADR-0174)
 
 Deploy the reviewed-dreaming build and run its normal migration to
-`ea3210a1b00c`. Then configure both API and maintenance processes with:
+`ea3210a1b00c`. Configure every application role through the shared environment:
 
 ```dotenv
 AGENT_MEMORY_API_ENABLED=1
@@ -1499,8 +1499,9 @@ AGENT_MEMORY_RECONSOLIDATION_RESIDENCY_PROVIDER=<configured-memory-provider>
 The residency provider must match the resolved memory formation provider.
 The provider must be configured and available; ordinary privacy/attribution
 checks still apply to every source. Retain `memory.read,memory.write` in the
-owner's existing token scopes. Restart the API and maintenance roles, then
-open `https://api.veetbot.com/dreaming` and connect with the owner token. Do
+owner's existing token scopes. Restart the API, interactive and asynchronous run
+workers, maintenance, and other enabled application roles so every process uses
+the same reviewed-recall mode. Then open `https://api.veetbot.com/dreaming` and connect with the owner token. Do
 not place a token in a URL. No additional proxy route or external web service
 is needed: the existing API upstream serves the page and all requests.
 
@@ -1519,6 +1520,6 @@ it does not authorize reconstructing lost source evidence or relaxing privacy.
 Unattended dreaming remains off and still needs the unchanged precision,
 answer-lift and release-evidence requirements. The review path needs no new
 blinded packet. To stop reviewed recall and proposals, disable the review
-flag in both roles; retain the operation API for inspection and undo. Do not
+flag and restart those same roles; retain the operation API for inspection and undo. Do not
 downgrade the database after review/scheduling state exists: the migration
 refuses to discard that history.

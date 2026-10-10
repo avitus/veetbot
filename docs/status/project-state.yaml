@@ -264,6 +264,7 @@ milestones:
     - Embeddings, external memory providers, learned memory policies, arbitrary multi-hop graph reasoning and external enrichment
     - New source admission, automatic persona edits, changes to People identity merge rules and automatic historical re-extraction
     open_items:
+    - Deploy owner-reviewed dreaming (ADR-0174) and enable its documented shared configuration in every application role
     - Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before unattended production activation
@@ -289,7 +290,7 @@ milestones:
         No frozen observations, owner judgments, evaluation thresholds or provider
         comparison artifacts changed. No live provider comparison was rerun for this
         owner-control change. Deployment and enabling the reviewed configuration in
-        the API and maintenance roles remain; unattended quality remains failed.
+        all application roles remain; unattended quality remains failed.
     - check: Owner-authorized integration with current dev (2026-10-09)
       outcome: integrated_pending_quality_and_activation
       detail: >-
@@ -2658,5 +2659,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
   documents_required_before_coding_reaches_them: []
 
-last_updated: '2026-10-09T20:00:00Z'
+last_updated: '2026-10-10T19:45:12Z'
 last_reviewed_commit: e55551fa

@@ -1310,11 +1310,17 @@ import UserNotifications
         #expect(model.selectedSessionID == nil)
     }
 
-    @Test
-    func testWebsiteSelectionConnectsExistingChatAndWatchesResumedRequest() async throws {
+    @Test(arguments: ["direct", "replay", "existing", "switch"])
+    func testWebsiteSelectionConnectsExistingChatAndWatchesResumedRequest(scenario: String) async throws {
+        let lostResponse = scenario != "direct"
+        let switchDuringReread = scenario == "switch"
         let profileID = UUID(), sessionID = UUID(), runID = UUID()
         let lock = NSLock()
         var connectionRequest: URLRequest?
+        var connectionAttempts = 0
+        var rereadStarted = false
+        let rereadRelease = DispatchSemaphore(value: 0)
+        defer { rereadRelease.signal() }
         let sessionBody = """
         {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Friday recommendation","metadata":{"schedule_id":"weekly"},"created_at":"2026-10-09T12:00:00Z","updated_at":"2026-10-09T12:00:00Z","active_run_id":null,"last_run_id":null}
         """
@@ -1323,14 +1329,28 @@ import UserNotifications
             case ("GET", "/v1/sessions"):
                 return try response(for: request, statusCode: 200, body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}")
             case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
-                return try response(for: request, statusCode: 200, body: sessionBody)
+                let connected = lock.withLock { connectionAttempts > 0 }
+                if connected && switchDuringReread {
+                    lock.withLock { rereadStarted = true }
+                    _ = rereadRelease.wait(timeout: .now() + 10)
+                }
+                let body = connected ? sessionBody.replacingOccurrences(
+                    of: "\"active_run_id\":null", with: "\"active_run_id\":\"\(runID.uuidString)\""
+                ) : sessionBody
+                return try response(for: request, statusCode: 200, body: body)
             case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
                 return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/browser-profiles"):
                 return try response(for: request, statusCode: 200, body: #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://x.com"],"status":"ready","generation":1,"created_at":"2026-10-09T12:00:00Z","updated_at":"2026-10-09T12:00:00Z","last_used_at":null}],"next_cursor":null}"#)
             case ("PUT", "/v1/sessions/\(sessionID.uuidString)/website"):
-                lock.withLock { connectionRequest = request }
-                return try response(for: request, statusCode: 200, body: "{\"run_id\":\"\(runID.uuidString)\"}")
+                let attempt = lock.withLock {
+                    connectionRequest = request
+                    connectionAttempts += 1
+                    return connectionAttempts
+                }
+                if lostResponse && attempt == 1 { throw URLError(.timedOut) }
+                let body = lostResponse ? "{\"run_id\":null}" : "{\"run_id\":\"\(runID.uuidString)\"}"
+                return try response(for: request, statusCode: 200, body: body)
             case ("GET", "/v1/runs/\(runID.uuidString)/events"):
                 return try response(for: request, statusCode: 200, body: "", headers: ["Content-Type": "text/event-stream"])
             default:
@@ -1340,11 +1360,24 @@ import UserNotifications
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         await model.selectSession(try #require(model.history.first))
         await model.refreshBrowserProfiles()
-        await model.selectBrowserProfile(profileID)
+        if scenario == "existing" { model.runState.begin(runID: runID, status: .waitingForUser) }
+        let connection = Task { await model.selectBrowserProfile(profileID) }
+        if switchDuringReread {
+            for _ in 0..<5_000 {
+                if lock.withLock({ rereadStarted }) { break }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            try #require(lock.withLock { rereadStarted })
+            model.newSession()
+            rereadRelease.signal()
+        }
+        await connection.value
         let request = try #require(lock.withLock { connectionRequest })
         #expect(try requestJSONObject(request)["browser_profile_id"] as? String == profileID.uuidString)
-        #expect(model.selectedSessionID == sessionID)
-        #expect(model.runState.activeRunID == runID)
+        #expect(model.selectedSessionID == (switchDuringReread ? nil : sessionID))
+        #expect(model.runState.activeRunID == (switchDuringReread ? nil : runID))
+        if !switchDuringReread { #expect(model.runState.runStatus == .queued) }
+        #expect(lock.withLock { connectionAttempts } == (lostResponse ? 2 : 1))
         model.newSession()
     }
 

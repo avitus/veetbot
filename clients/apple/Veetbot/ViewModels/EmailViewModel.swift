@@ -526,7 +526,11 @@ public final class EmailViewModel: ObservableObject {
             ("monthly", "Past 30 days", "Monthly processing budget is in use.")
         ] {
             if let spent = amount("\(window)_spent"), let limit = amount("\(window)_limit") {
-                budgetPauseDetails.append("\(label): \(money(spent)) of \(money(limit))")
+                var total = "\(label): \(money(spent)) of \(money(limit))"
+                if let estimated = amount("\(window)_estimated"), estimated > 0 {
+                    total += " (\(money(estimated)) estimated)"
+                }
+                budgetPauseDetails.append(total)
                 if let held = amount("\(window)_reserved"), let next,
                    spent + held + next > limit {
                     budgetPauseMessage = reason
