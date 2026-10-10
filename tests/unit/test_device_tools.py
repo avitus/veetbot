@@ -693,9 +693,10 @@ async def test_another_external_message_tool_still_requires_approval() -> None:
 
 
 def test_only_the_device_send_carries_an_owner_confirmed_tool_rule() -> None:
-    assert [rule.tool_name for rule in DEFAULT_RULESET.tool_rules] == [DEVICE_SMS_SEND_TOOL_NAME]
-    assert DEFAULT_RULESET.tool_rules[0].decision is PolicyDecisionType.ALLOW
-    assert DEFAULT_RULESET.tool_rules[0].human_confirms_arguments is True
+    confirmed = [rule for rule in DEFAULT_RULESET.tool_rules if rule.human_confirms_arguments]
+    assert [rule.tool_name for rule in confirmed] == [DEVICE_SMS_SEND_TOOL_NAME]
+    assert confirmed[0].decision is PolicyDecisionType.ALLOW
+    assert confirmed[0].human_confirms_arguments is True
 
 
 @pytest.mark.parametrize(

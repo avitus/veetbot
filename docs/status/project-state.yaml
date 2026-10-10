@@ -12,6 +12,10 @@ project:
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   current_milestone: 14
   active_milestone: 15
+  # ADR-0168 records the owner's 2026-10-09 browser approval repair: the
+  # default policy permits a bounded scroll in an owner-originated task,
+  # including schedules, while other actions retain their approval rules.
+  # No milestone or gate moves; production acceptance follows delivery.
   # ADR-0165 records the owner's 2026-10-08 extension of Milestone 31: a
   # suspected-spam flag from the importance assessment, informed by Gmail's
   # own DMARC result, that never touches Gmail, plus thread-level Report spam
@@ -825,6 +829,20 @@ milestones:
         audit scorer semantics and compare Sol/Astra under controlled reasoning
         settings before changing the memory tuple with new activation evidence.
     evidence:
+      - check: Policy-bound memory evidence refresh after the scrolling repair (2026-10-09)
+        outcome: passed_locally
+        detail: >-
+          ADR-0168 records the first comparison's attribution and recall failures
+          and the owner's instruction to repair formation@9 without a fallback
+          switch. Atomic attributed predictions now pass 264 focused memory checks.
+          The fresh three-repeat comparison at 09df36ef passed every publication
+          gate under the unchanged scorer, corpora and thresholds: development
+          direct recall 1.000, hypothesis 0.889, precision 0.944; holdout direct
+          recall 0.967, hypothesis 0.867, precision 0.791; verified seeded
+          representation in every repeat and zero boundary failures. The 1,134
+          calls cost USD 6.49. Both formation@9 and the existing formation@10
+          companion artifact are refreshed for default@96f9a6f2bfce+hb03f69cf;
+          formation@9 remains the selected policy. Production delivery is pending.
       - check: Astra/Fable integration with dev e8d3fb1 (2026-09-11)
         outcome: passed_locally
         detail: >-

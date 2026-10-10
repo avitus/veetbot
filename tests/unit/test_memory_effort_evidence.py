@@ -32,7 +32,7 @@ def _sol() -> ResolvedModel:
 
 
 def test_a_schema_seven_artifact_is_provider_default_evidence() -> None:
-    evidence = MemoryDistillationEvidence.model_validate(_artifact())
+    evidence = MemoryDistillationEvidence.model_validate(_artifact(schema_version=7))
     matches = [
         distillation_evidence_matches(
             evidence,
@@ -69,4 +69,6 @@ def test_a_schema_eight_artifact_matches_only_its_own_effort() -> None:
 
 def test_schema_seven_cannot_claim_an_effort() -> None:
     with pytest.raises(ValidationError, match="effort"):
-        MemoryDistillationEvidence.model_validate(_artifact(reasoning_effort="medium"))
+        MemoryDistillationEvidence.model_validate(
+            _artifact(schema_version=7, reasoning_effort="medium")
+        )

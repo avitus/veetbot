@@ -9,8 +9,9 @@ import yaml
 from agent_core.config import shipped_policy_version
 from agent_core.policy.loader import DEFAULT_RULESET, POLICY_DIRECTORY, load_ruleset_documents
 
-# The bundled release evidence is bound to this version; the advisory layer must not move it.
-SHIPPED_POLICY_VERSION = "default@19be675c1b3c+hb03f69cf"
+# ADR-0168 changes the gesture policy. Advisory defaults must not move this version;
+# the release-evidence bundle independently requires matching evaluated artifacts.
+SHIPPED_POLICY_VERSION = "default@96f9a6f2bfce+hb03f69cf"
 
 
 def _documents(**advisory: Any) -> tuple[dict[str, Any], dict[str, Any]]:

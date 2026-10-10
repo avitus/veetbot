@@ -4873,8 +4873,10 @@ credential exposure to the model, or weakening external-write approvals.
 
 - `browser.navigate` and `browser.observe` return bounded rendered-page
   observations through a provider-neutral `BrowserProvider`.
-- `browser.act` performs revision-bound interaction and is conservatively an
-  external write regardless of the apparent UI element.
+- `browser.act` performs revision-bound interaction and retains conservative
+  external-write classification. ADR-0168 authorizes bounded scroll gestures
+  without an approval in the default policy; other actions still require one
+  or an applicable grant, regardless of the apparent UI element.
 - Trusted composition, not model arguments, selects the principal, profile,
   provider, device, origin policy, and standing grant.
 - Authentication secrets and browser profile material never enter model
