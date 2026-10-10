@@ -253,7 +253,6 @@ struct MemorySynthesisDetailView: View {
                 #endif
             }
         }
-        .accessibilityIdentifier("memory.synthesis.undo.sheet")
         #if os(macOS)
         .frame(minWidth: 520, minHeight: 440)
         #endif
@@ -271,6 +270,7 @@ struct MemorySynthesisDetailView: View {
                 }.accessibilityIdentifier("memory.synthesis.undo.confirm")
             } else { Text("Refresh the operation before undoing it.") }
         }
+        .accessibilityIdentifier("memory.synthesis.undo.sheet")
         .navigationTitle("Undo merge")
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { previewUndo = false } } }
     }
