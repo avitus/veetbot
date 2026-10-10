@@ -263,7 +263,7 @@ milestones:
     - Embeddings, external memory providers, learned memory policies, arbitrary multi-hop graph reasoning and external enrichment
     - New source admission, automatic persona edits, changes to People identity merge rules and automatic historical re-extraction
     open_items:
-    - Complete the new bound hypothesis review and resolve precision and answer-lift failures; the latest comparison passes merge-answer nonregression, with release-tuple proof still required
+    - Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before production activation
     evidence:
@@ -310,8 +310,10 @@ milestones:
         and 17/17/19 on holdout, each out of 36. Merge-answer nonregression passes;
         answer lift remains 0 and 5.56 percentage points, below the unchanged 10-point
         floor. False merges and lost facts stay zero and duplicate coverage is complete.
-        Six development and five holdout hypotheses await a new bound owner review in
-        20261009-quality-review-v2; exact v1 wording matches remain zero. Prior decisions,
+        Six development and five holdout hypotheses remain unverified in
+        20261009-quality-review-v2; exact v1 wording matches remain zero. The owner
+        subsequently stopped repeated review requests. This supplies no new judgments
+        and does not reopen either completed owner review. Prior decisions,
         all ten historical artifacts, frozen controls, scoring rules and numeric floors
         are unchanged. A subsequent PostgreSQL optional-reader repair returns absence
         for a foreign tenant instead of propagating the guard's NotFoundError. That
@@ -321,6 +323,23 @@ milestones:
         outside this comparison's source digest; the recording is diagnostic and
         non-activating. The inspected holdout was not used for repair tuning.
         No gate or verified ceiling advances; production remains disabled.
+    - check: Development recall and answer-failure diagnosis (2026-10-09)
+      outcome: no_additional_recall_defect_reproduced
+      detail: >-
+        A provider-free replay seeded only the development runtime inputs and locally
+        planned the six recorded development connections from the October 9 comparison.
+        All six appeared in recall alongside their originals under the unchanged
+        query, scope and token/item budget. This isolates the recall path; it does not
+        rerun or validate proposal/verifier decisions and is not a new quality score.
+        In the recorded connections arm, 14 of 36 development answers pass the frozen
+        scorer. Of the 22 failures, 16 have supported content but extra answer wording;
+        six concern information unavailable under the frozen scope or attribution.
+        Both connection-bearing probes ask for facts already present in the originals.
+        The observed development failure does not justify widening privacy, changing
+        expected answers or tuning runtime output to inspected labels. No holdout
+        details were inspected, no provider calls were made, and no observations,
+        judgments, scoring rules or floors were changed. The latest precision remains
+        unverified and answer lift still fails; production remains disabled.
     - check: ADR-0171 completed owner-data experiment and usefulness review (2026-10-09)
       outcome: owner_reviewed_useful
       detail: >-

@@ -33,8 +33,10 @@ title: Current Milestone
   distinguishes summaries in the proposal/verifier instructions, and preserves the best
   visible member's recall rank after merging. Its new comparison records 14/18/14
   development and 17/17/19 holdout answers out of 36. Merge-answer nonregression passes,
-  but 0/5.56-point answer lift still fails; eleven new hypotheses await a separate
-  bound owner review. The optional PostgreSQL summary-reader repair followed that run,
+  but 0/5.56-point answer lift still fails; eleven new hypotheses remain unverified.
+  The owner has stopped repeated review requests; the completed October 8 review
+  and real-data usefulness review stay complete. The optional PostgreSQL summary-reader
+  repair followed that run,
   so its diagnostic recording is not evidence for the final source tuple.
   The owner approved ADR-0171 on 2026-10-08 for a separate, isolated evaluation
   using newly confirmed fixture text from their own memories. The isolated runner,

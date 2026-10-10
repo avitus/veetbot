@@ -1541,8 +1541,25 @@ are six development and five holdout outputs (previously eight and seven). None
 matches the v1 wording exactly; revised human precision/recall is **pending**, not
 inferred from fewer outputs or copied from the previous judgments. The new blinded
 packet and blank decisions are under `20261009-quality-review-v2/`; all eleven
-candidates require a new bound owner review. The October 8 review stays complete.
+candidates remain unverified. The owner subsequently stopped repeated review
+requests; do not reopen the completed October 8 or real-data usefulness reviews.
+This instruction supplies no new judgments and does not waive ADR-0170.
 Neither changing counts nor one nonregressing run establishes causal answer lift.
+
+A subsequent provider-free development diagnosis replayed all six recorded
+connections through local planning and recall with their original runtime inputs.
+All six reached recall alongside their original facts within the frozen budget.
+This checks recall only: bypassing proposal and verifier execution for replay does
+not validate hypothesis quality or recreate the historical provider requests.
+Of the recorded connections arm's 22 failed development answers, sixteen express
+supported content with wording that fails exact token matching; six concern
+information unavailable under the frozen scope or attribution. Both probes with
+connections ask for facts already directly available in their originals. This
+finding does not change their failed scores or prove that lift is impossible.
+No additional recall defect was reproduced on these paths. No paid comparison
+was repeated without a new implementation hypothesis, and no holdout details were
+used. Further evaluation-contract changes require a separately proposed and
+approved decision; none is implemented or implied by stopping repeated reviews.
 
 PostgreSQL verification also exposed an optional-read contract error:
 `get_summary` propagated the tenant guard's `NotFoundError` instead of returning
