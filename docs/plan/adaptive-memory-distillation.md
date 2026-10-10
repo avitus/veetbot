@@ -246,7 +246,8 @@ identifier per prediction, so a compound assertion cannot combine independently
 stored facts that no individual memory asserts. A prediction without an
 attributable memory is ordinary model expectation, not evidence that the
 platform already knew the fact. Clause verification still checks the prediction
-against that live memory and the source clause.
+against that live memory and the source clause. Before distillation, local validation
+rejects an attributed prediction that does not copy its named memory statement.
 
 ### Call 3: prediction-error distillation
 
