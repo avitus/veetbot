@@ -182,6 +182,7 @@ for required in \
   alembic.ini \
   docker-compose.yml \
   deploy/docker-compose.production.yml \
+  deploy/docker-compose.browser-verification.yml \
   deploy/veetbot.env.example \
   deploy/app/owner-scopes.sh \
   deploy/browser-profile-service.Dockerfile \
@@ -269,6 +270,16 @@ export BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE="$BROWSER_CONTROL_CREDENTIA
   "BROWSER_PROFILE_KEY_DIR must name an existing directory"
 [[ ! -L "$BROWSER_PROFILE_KEY_DIR" ]] || fail \
   "BROWSER_PROFILE_KEY_DIR must not be a symlink"
+PROFILE_COMPOSE_OVERLAYS=()
+if [[ -n "${BROWSER_PROFILE_VERIFICATION_FILE:-}" ]]; then
+  [[ "$BROWSER_PROFILE_VERIFICATION_FILE" = /* ]] || fail \
+    "BROWSER_PROFILE_VERIFICATION_FILE must be an absolute path"
+  [[ -f "$BROWSER_PROFILE_VERIFICATION_FILE" && ! -L "$BROWSER_PROFILE_VERIFICATION_FILE" ]] || fail \
+    "BROWSER_PROFILE_VERIFICATION_FILE must name an existing non-symlink regular file"
+  [[ "$(stat -c '%u:%a' -- "$BROWSER_PROFILE_VERIFICATION_FILE" 2>/dev/null)" == "65532:600" ]] || fail \
+    "BROWSER_PROFILE_VERIFICATION_FILE must be owned by uid 65532 with mode 0600"
+  PROFILE_COMPOSE_OVERLAYS+=(-f deploy/docker-compose.browser-verification.yml)
+fi
 [[ "${AGENT_SCHEDULE_API_ENABLED:-0}" =~ ^[01]$ ]] || fail \
   "AGENT_SCHEDULE_API_ENABLED must be 0 or 1"
 [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" =~ ^[01]$ ]] || fail \
@@ -421,6 +432,7 @@ export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
   --project-name "$COMPOSE_PROJECT_NAME" \
   -f docker-compose.yml -f deploy/docker-compose.production.yml \
+  ${PROFILE_COMPOSE_OVERLAYS[@]+"${PROFILE_COMPOSE_OVERLAYS[@]}"} \
   up -d --wait --wait-timeout "$HEALTH_TIMEOUT_SECS" postgres browser-profile-service
 
 export VEETBOT_RELEASE_ID="$RELEASE_ID"

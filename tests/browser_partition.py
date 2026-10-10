@@ -2,6 +2,7 @@
 
 BROWSER_MODULES = frozenset(
     {
+        "test_browser_account_control_real_chromium.py",
         "test_browser_playwright.py",
         "test_dreaming_real_chromium.py",
         "test_browser_observation_pages.py",

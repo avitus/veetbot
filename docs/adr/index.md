@@ -190,3 +190,5 @@ implementation without one.
 
 - [ADR-0173 — Terminal email reservations become conservative budget charges (Accepted; amends ADR-0096)](0173-terminal-email-reservation-accounting.md)
 - [ADR-0174 — Daily dreaming proposals with owner-approved application](0174-owner-reviewed-dreaming.md)
+
+- [ADR-0175 — Private account-control verification (Accepted; amends ADR-0164)](0175-private-account-control-verification.md)

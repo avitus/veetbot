@@ -650,6 +650,24 @@ reports at its source.
 
 ### Browser profile service host prerequisites
 
+Reviewed site/account definitions are optional (ADR-0175). Set
+`BROWSER_PROFILE_VERIFICATION_FILE` in the host environment to an absolute private
+JSON file, owned by uid 65532 with mode 0600 and no symlink. The release validates
+that path before replacing containers and adds
+`deploy/docker-compose.browser-verification.yml` after the production overlay.
+Only the profile service receives this read-only file. The service rejects
+oversized or invalid catalogs at startup. Empty or unset host configuration keeps
+the existing differential verification; the overlay must then be omitted.
+Catalogs contain account identities and profile bindings: keep them outside Git,
+use synthetic identities in fixtures, and qualify both the authenticated and
+empty-session page before activation. A valid saved session must pass without a
+prompt; an expired or wrong-account session must stop before a lease is issued.
+Changing a bind-mounted file or this setting requires container recreation.
+Preserve the same overlay when manually recreating a configured service. Rolling
+application units back does not replace the browser-service container; an explicit
+browser-image rollback must preserve a catalog supported by that image or disable
+the catalog deliberately before recreation.
+
 The browser service mounts `/tmp` as a 512 MiB, memory-backed filesystem with
 `noexec,nosuid,nodev`, inside the container memory limit.
 Playwright's Chromium places shared-memory files there. Device sign-in verifies
@@ -830,6 +848,9 @@ export BROWSER_PROFILE_SERVICE_IMAGE="veetbot-browser-profile-service:$VEETBOT_R
 compose=(docker compose --env-file "$environment_file"
   --project-name "${COMPOSE_PROJECT_NAME:-veetbot}"
   -f docker-compose.yml -f deploy/docker-compose.production.yml)
+if [[ -n "${BROWSER_PROFILE_VERIFICATION_FILE:-}" ]]; then
+  compose+=(-f deploy/docker-compose.browser-verification.yml)
+fi
 "${compose[@]}" up -d --no-build --wait --wait-timeout 60 browser-profile-service
 docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
   "$("${compose[@]}" ps -q browser-profile-service)" \

@@ -391,6 +391,26 @@ def test_production_compose_preserves_browser_profile_isolation() -> None:
     assert "browser-profile-material" in production_compose["volumes"]
 
 
+def test_optional_account_catalog_mount_is_isolated_and_read_only() -> None:
+    overlay = yaml.safe_load(
+        (ROOT / "deploy/docker-compose.browser-verification.yml").read_text(encoding="utf-8")
+    )
+    assert set(overlay["services"]) == {"browser-profile-service"}
+    service = overlay["services"]["browser-profile-service"]
+    assert set(service) == {"environment", "volumes"}
+    target = "/run/secrets/browser-profile-verification.json"
+    assert service["environment"] == {"BROWSER_PROFILE_VERIFICATION_FILE": target}
+    assert service["volumes"] == [
+        {
+            "type": "bind",
+            "source": "${BROWSER_PROFILE_VERIFICATION_FILE:?private catalog path required}",
+            "target": target,
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+
+
 def test_browser_profile_dockerfile_preserves_process_isolation() -> None:
     deploy = ROOT / "deploy"
     profile_dockerfile = (deploy / "browser-profile-service.Dockerfile").read_text(encoding="utf-8")

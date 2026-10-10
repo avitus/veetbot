@@ -1727,7 +1727,13 @@ The isolated service optionally loads `BROWSER_PROFILE_VERIFICATION_FILE`, a
 private absolute mode-0600 JSON file of at most 64 KiB. Its version-1 `sites`
 catalog contains at most 32 closed definitions: `id`, `version`, `profile_id`,
 `origin`, `protected_path`, positive text/region `ready` evidence and exact region
-`account` evidence. Each profile has one definition. The protected path is a
+or account-control `account` evidence (ADR-0175). A control binds exact button/link
+`role`, accessible `name` and normalized visible `text` (at most 256 characters).
+It requires a unique control in the observation and matching-revision private
+facts with complete labels and field kind `none`; editable, missing, stale,
+truncated and duplicate evidence fails closed. Account text elsewhere on the page
+does not qualify. An interrupted observation cannot confirm readiness.
+Each profile has one definition. The protected path is a
 literal path, not a selector, script, credential or permission. Both device and
 remote sign-in compare isolated signed-in and empty-session loads. A configured
 site must show the intended account and protected state only in the signed-in
