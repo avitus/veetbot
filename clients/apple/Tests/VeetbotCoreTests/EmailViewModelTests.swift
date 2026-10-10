@@ -1387,7 +1387,8 @@ import SwiftUI
         model.setActive(true)
         defer { model.setActive(false) }
         try await waitForEmailTestCondition { model.budgetRetryAt != nil && !model.isRefreshing }
-        #expect(model.budgetPauseMessage == "Budget paused.")
+        #expect(model.budgetPauseMessage == "Processing budget is in use.")
+        #expect(model.budgetPauseDetails.isEmpty)
         #expect(model.errorMessage == nil)
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
         current = try #require(model.budgetRetryAt).addingTimeInterval(1)
@@ -1397,7 +1398,41 @@ import SwiftUI
         model.setActive(false)
         model.resetConnection()
         #expect(model.budgetPauseMessage == nil)
+        #expect(model.budgetPauseDetails.isEmpty)
         #expect(model.budgetRetryAt == nil)
+    }
+
+    /// The sidebar summarizes the limiting window without repeating accounting diagnostics.
+    @Test(arguments: [false, true])
+    func testBudgetPauseUsesConciseReason(monthly: Bool) async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("refresh") {
+                let spent = monthly ? "399.50" : "16.2966295"
+                let daily = monthly ? "0" : spent
+                let held = monthly ? "0" : "23"
+                return (402, """
+                {"error":{"code":"budget_exceeded","message":"A long paragraph with accounting numbers.",
+                "details":{"daily_spent":"\(daily)","daily_reserved":"\(held)","daily_limit":"40",
+                "monthly_spent":"\(monthly ? spent : "347.5703420")","monthly_reserved":"\(held)",
+                "monthly_limit":"400","next_reservation":"1","retry_at":"2099-01-01T00:00:00Z"},
+                "request_id":"budget-test"}}
+                """)
+            }
+            return (200, self.pageJSON())
+        }
+        model.setActive(true)
+        defer { model.setActive(false) }
+        try await waitForEmailTestCondition { model.budgetRetryAt != nil && !model.isRefreshing }
+        #expect(model.budgetPauseMessage == (monthly
+            ? "Monthly processing budget is in use." : "Daily processing budget is in use."))
+        #expect(model.budgetPauseDetails.count == 4)
+        #expect(model.budgetPauseDetails[0].hasPrefix("Today: "))
+        #expect(model.budgetPauseDetails[1].hasPrefix("Past 30 days: "))
+        #expect(model.budgetPauseDetails[2].hasPrefix("Pending costs: "))
+        #expect(model.budgetPauseDetails[3].hasPrefix("Next batch: "))
+        #expect(!model.budgetPauseDetails.joined().contains("2966295"))
+        #expect(!model.budgetPauseDetails.joined().contains("5703420"))
     }
 
     /// Keep budget pauses across mode visits while allowing an explicit refresh to recover.
@@ -1429,6 +1464,8 @@ import SwiftUI
         await model.refresh()
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 2)
         #expect(model.errorMessage == nil)
+        #expect(model.budgetPauseMessage == nil)
+        #expect(model.budgetPauseDetails.isEmpty)
     }
 
     @Test func testForegroundReturnStartsOneLoopAndVisibleCadenceRepeats() async throws {

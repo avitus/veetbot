@@ -611,8 +611,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 200
             body = Self.emailThreadJSON
         case ("POST", "/v1/email/refresh"):
-            statusCode = 202
-            body = "{\"operation_id\":\"\(Self.emailThreadID)\",\"run_id\":\"\(Self.emailRunID)\",\"status\":\"COMPLETED\",\"replayed\":false}"
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-budget-pause") {
+                statusCode = 402
+                body = """
+                {"error":{"code":"budget_exceeded","message":"Automatic email work is paused. Today: $16.30 spent, $23.00 reserved, $40.00 limit. Rolling 30 days: $347.57 spent, $400.00 limit. The next batch needs $1.00 available. Cached mail and editing remain available.","details":{"daily_spent":"16.2966295","daily_reserved":"23","daily_limit":"40","monthly_spent":"347.5703420","monthly_reserved":"23","monthly_limit":"400","next_reservation":"1","retry_at":"2099-01-01T00:00:00Z"},"request_id":"ui-budget"}}
+                """
+            } else {
+                statusCode = 202
+                body = "{\"operation_id\":\"\(Self.emailThreadID)\",\"run_id\":\"\(Self.emailRunID)\",\"status\":\"COMPLETED\",\"replayed\":false}"
+            }
         case ("POST", "/v1/email/feedback"):
             statusCode = 200
             body = "{\"feedback_id\":\"\(Self.emailThreadID)\",\"thread\":\(Self.emailThreadJSON)}"

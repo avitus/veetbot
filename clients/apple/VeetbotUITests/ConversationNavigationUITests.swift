@@ -2528,6 +2528,31 @@ final class ConversationNavigationUITests: XCTestCase {
         attachEmailScreenshot("Compact priority inbox with five threads")
     }
 
+    /// A paused budget leaves the inbox usable and reveals accounting only on demand.
+    func testEmailBudgetPauseKeepsAccountingCollapsed() {
+        app.launchArguments.append("--ui-testing-email-budget-pause")
+        launchFullEmailInbox()
+        let reason = app.staticTexts["Daily processing budget is in use."]
+        XCTAssertTrue(reason.waitForExistence(timeout: 10))
+        let pending = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@ OR value BEGINSWITH %@", "Pending costs:", "Pending costs:"
+        )).firstMatch
+        XCTAssertFalse(pending.exists)
+        let first = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(first.isHittable)
+        XCTAssertLessThan(first.frame.minY - app.windows.firstMatch.frame.minY, 340,
+                          "A pause must leave useful mail space in the sidebar")
+        attachEmailScreenshot("Compact email budget pause")
+        let details = app.buttons["email.budget-details"]
+        XCTAssertTrue(details.exists)
+        details.click()
+        XCTAssertTrue(pending.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Check again"].isHittable)
+        attachEmailScreenshot("Expanded email budget accounting")
+        details.click()
+        XCTAssertFalse(pending.exists)
+    }
+
     /// Drags the actual divider and verifies both columns and the selected thread survive mode switching.
     func testEmailSidebarResizesWithItsDivider() {
         launchFullEmailInbox()
