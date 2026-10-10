@@ -224,7 +224,11 @@ class ChatCompletionsProvider:
                 detail="invalid neutral request history",
             )
             return
-        for internal_attempt in range(1, self._max_internal_attempts + 1):
+        attempt_limit = min(
+            self._max_internal_attempts,
+            request.maximum_provider_attempts or self._max_internal_attempts,
+        )
+        for internal_attempt in range(1, attempt_limit + 1):
             emitted_count = 0
             retry_stream = False
             try:
@@ -235,7 +239,7 @@ class ChatCompletionsProvider:
                         if should_retry_failure_event(
                             event,
                             internal_attempt=internal_attempt,
-                            max_internal_attempts=self._max_internal_attempts,
+                            max_internal_attempts=attempt_limit,
                         ):
                             retry_stream = True
                             break
@@ -245,7 +249,7 @@ class ChatCompletionsProvider:
                     continue
                 return
             except httpx.TransportError:
-                if emitted_count == 0 and internal_attempt < self._max_internal_attempts:
+                if emitted_count == 0 and internal_attempt < attempt_limit:
                     continue
                 yield failed_event(
                     attempt=attempt,
@@ -267,7 +271,7 @@ class ChatCompletionsProvider:
                 if (
                     failure.category == "transient"
                     and emitted_count == 0
-                    and internal_attempt < self._max_internal_attempts
+                    and internal_attempt < attempt_limit
                 ):
                     continue
                 yield failed_event(

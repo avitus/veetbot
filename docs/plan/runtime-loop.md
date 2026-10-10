@@ -53,13 +53,13 @@ Three of them are worth stating up front, because they are not disagreements
 about detail. They are places where the loop as written cannot do what
 another document requires of it.
 
-**The loop cannot resolve its own agent.** `engineering-plan.md:1566` reads
+**The loop cannot resolve its own agent.** `engineering-plan.md:1574` reads
 `agents.get_version(run.agent_id, run.agent_version)`. Neither field exists
 on `Run`. Section 6.3 puts `agent_id` and `agent_version` on `Session`. The
 first four lines of the runtime do not compile against the domain model in
 Section 6.
 
-**The loop cannot suspend.** `engineering-plan.md:1595` handles a paused
+**The loop cannot suspend.** `engineering-plan.md:1603` handles a paused
 disposition with `return`. Section 27.2 requires that entering either
 `WAITING_*` state release the worker lease, checkpoint the run, and emit an
 event. A bare `return` performs none of the three, and there is no
@@ -796,6 +796,12 @@ becoming `RUNNING` again.
 kind when positive (ADR-0078, ADR-0115). At the first reached dimension, the
 loop adds a volatile platform instruction to the next request requiring final
 synthesis from evidence already in context. The instruction is not checkpointed.
+Before each model attempt, including a retry or the next attempt after resume,
+the request-side model-call check includes the call about to be charged. With
+24 calls and a reserve of 2, call 22 receives the synthesis instruction and
+`tool_choice="none"`: its recorded usage will activate the dispatch guard.
+The guard still checks recorded usage after the response, including the cost
+boundary (ADR-0130), and still refuses tools returned inside the reserve.
 A tool call returned while that control is active fails closed with
 `SynthesisReserveViolation` naming the dimension; all-zero reserve fields
 preserve the ordinary loop with two exceptions: an *exhausted* tool-call budget

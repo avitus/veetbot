@@ -304,6 +304,8 @@ class ModelRequest(BaseModel):
     cache_hints: CacheHints | None = None
     timeout_seconds: float = 600.0
     stream_idle_seconds: float = 60.0
+    # None preserves adapter defaults; budgeted maintenance reserves each send.
+    maximum_provider_attempts: int | None = Field(default=None, ge=1, le=3, strict=True)
     # None leaves the provider's own default in force.
     reasoning_effort: ReasoningEffort | None = None
     # Ask for a displayable summary of the reasoning, streamed live and never stored.

@@ -1,0 +1,91 @@
+{
+  "version": "reconsolidation-review@2",
+  "activation_evidence": false,
+  "holdout_status": "previously_inspected",
+  "contract_sha256": "9a8a111a5f372000545da6bde8f22e30037cd7da410ae4915041da060181af74",
+  "observation_sha256": "bf8be19f65be2ac2a3a6481a81c955f284c7a1166e316885869202548a89830f",
+  "packet_sha256": "a8e565d10c2005fe7c7b5f801ab563e81775bfbc3d9a0fdea86e564c8e025fb0",
+  "decisions_sha256": "4d4d81318fe3cda835852b0f3caf49c028fad4e9ac135eefb4ab7f07d4a04aa9",
+  "reviewer": "owner",
+  "counts": {
+    "development:original_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 0,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 17,
+      "invalid_observations": 0
+    },
+    "development:merge_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 13,
+      "invalid_observations": 0
+    },
+    "development:connections": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 8,
+      "hypothesis_matches": 6,
+      "probes": 36,
+      "covered_probes": 12,
+      "invalid_observations": 0
+    },
+    "holdout:original_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 0,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 17,
+      "invalid_observations": 0
+    },
+    "holdout:merge_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 17,
+      "invalid_observations": 0
+    },
+    "holdout:connections": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 7,
+      "hypothesis_matches": 4,
+      "probes": 36,
+      "covered_probes": 14,
+      "invalid_observations": 0
+    }
+  },
+  "failures": [
+    "development:hypothesis_quality",
+    "development:answer_coverage_lift",
+    "development:merge_answer_regression",
+    "holdout:hypothesis_quality",
+    "holdout:answer_coverage_lift"
+  ]
+}

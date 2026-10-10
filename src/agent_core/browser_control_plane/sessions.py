@@ -323,7 +323,7 @@ class HostedProfileSessionService:
                     if (
                         not evidence.on_allowed_origin
                         or evidence.challenge_visible
-                        or not definition.confirms(await runtime.observe())
+                        or not await self._confirms_site(definition, runtime)
                     ):
                         raise BrowserProviderError(
                             "tool.browser.authentication_required", retryable=False
@@ -779,15 +779,22 @@ class HostedProfileSessionService:
         if (
             not with_session.on_allowed_origin
             or with_session.challenge_visible
-            or not definition.confirms(await signed_in.observe())
+            or not await self._confirms_site(definition, signed_in)
         ):
             raise DeviceSessionRejected("session_unconfirmed")
         if (
             without_session.on_allowed_origin
             and not without_session.challenge_visible
-            and definition.confirms(await signed_out.observe())
+            and await self._confirms_site(definition, signed_out)
         ):
             raise DeviceSessionRejected("session_unconfirmed")
+
+    @staticmethod
+    async def _confirms_site(
+        definition: BrowserSiteVerification, runtime: BrowserSessionRuntime
+    ) -> bool:
+        observation = await runtime.observe()
+        return definition.confirms(observation, runtime.facts(observation.revision))
 
     async def cancel_authentication(
         self,

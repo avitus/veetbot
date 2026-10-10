@@ -299,6 +299,9 @@ class EventContextPlanner:
                         current.authority_scope_hashes
                     )
                 )
+                browser_changed = refresh_authorization and (
+                    current.browser_profile_id != session.metadata.get("browser_profile_id")
+                )
                 # Typed Email work prepares only the MCP servers its task calls,
                 # so it does not reopen the session's catalog or devices.
                 if prepare_surface and _has_tool_surface(session):
@@ -324,6 +327,7 @@ class EventContextPlanner:
                     and current.persona_text == persona_text
                     and current.persona_version == persona_version
                     and not authority_changed
+                    and not browser_changed
                 )
                 if unchanged and current.prefix_sha256 == current_prefix_sha256:
                     return current
@@ -337,7 +341,9 @@ class EventContextPlanner:
                     epoch=current.epoch + 1,
                     event_type="context.epoch.rotated",
                     reason=(
-                        "run_authority_changed"
+                        "browser_profile_changed"
+                        if browser_changed
+                        else "run_authority_changed"
                         if authority_changed
                         else "model_changed"
                         if current.model_id != model_id
@@ -813,6 +819,7 @@ class EventContextPlanner:
             deferred_tool_specs=tuple(tool.model_copy(deep=True) for tool in deferred_tools),
             skipped_tool_names=tuple(tool.name for tool in skipped_tools),
             browser_origins=browser_origins,
+            browser_profile_id=session.metadata.get("browser_profile_id"),
         )
         return await self._append(plan, event_type, reason)
 

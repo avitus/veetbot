@@ -650,6 +650,24 @@ reports at its source.
 
 ### Browser profile service host prerequisites
 
+Reviewed site/account definitions are optional (ADR-0175). Set
+`BROWSER_PROFILE_VERIFICATION_FILE` in the host environment to an absolute private
+JSON file, owned by uid 65532 with mode 0600 and no symlink. The release validates
+that path before replacing containers and adds
+`deploy/docker-compose.browser-verification.yml` after the production overlay.
+Only the profile service receives this read-only file. The service rejects
+oversized or invalid catalogs at startup. Empty or unset host configuration keeps
+the existing differential verification; the overlay must then be omitted.
+Catalogs contain account identities and profile bindings: keep them outside Git,
+use synthetic identities in fixtures, and qualify both the authenticated and
+empty-session page before activation. A valid saved session must pass without a
+prompt; an expired or wrong-account session must stop before a lease is issued.
+Changing a bind-mounted file or this setting requires container recreation.
+Preserve the same overlay when manually recreating a configured service. Rolling
+application units back does not replace the browser-service container; an explicit
+browser-image rollback must preserve a catalog supported by that image or disable
+the catalog deliberately before recreation.
+
 The browser service mounts `/tmp` as a 512 MiB, memory-backed filesystem with
 `noexec,nosuid,nodev`, inside the container memory limit.
 Playwright's Chromium places shared-memory files there. Device sign-in verifies
@@ -830,6 +848,9 @@ export BROWSER_PROFILE_SERVICE_IMAGE="veetbot-browser-profile-service:$VEETBOT_R
 compose=(docker compose --env-file "$environment_file"
   --project-name "${COMPOSE_PROJECT_NAME:-veetbot}"
   -f docker-compose.yml -f deploy/docker-compose.production.yml)
+if [[ -n "${BROWSER_PROFILE_VERIFICATION_FILE:-}" ]]; then
+  compose+=(-f deploy/docker-compose.browser-verification.yml)
+fi
 "${compose[@]}" up -d --no-build --wait --wait-timeout 60 browser-profile-service
 docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
   "$("${compose[@]}" ps -q browser-profile-service)" \
@@ -1460,3 +1481,45 @@ INSERT on `notification_run_receipts`; the notify and surface dispatcher roles
 need SELECT (the surface allowlist above includes it). Check these privileges for the deployed database roles and grant any missing
 ones before restarting dispatch. Apple clients from before this change still receive
 alerts; cleanup and viewed-result acknowledgement require the updated client.
+
+
+## Owner-reviewed dreaming rollout (ADR-0174)
+
+Deploy the reviewed-dreaming build and run its normal migration to
+`ea3210a1b00c`. Configure every application role through the shared environment:
+
+```dotenv
+AGENT_MEMORY_API_ENABLED=1
+AGENT_MEMORY_RECONSOLIDATION_API_ENABLED=1
+AGENT_MEMORY_DREAMING_REVIEW_ENABLED=1
+AGENT_MEMORY_RECONSOLIDATION_ENABLED=0
+AGENT_MEMORY_RECONSOLIDATION_RESIDENCY_PROVIDER=<configured-memory-provider>
+```
+
+The residency provider must match the resolved memory formation provider.
+The provider must be configured and available; ordinary privacy/attribution
+checks still apply to every source. Retain `memory.read,memory.write` in the
+owner's existing token scopes. Restart the API, interactive and asynchronous run
+workers, maintenance, and other enabled application roles so every process uses
+the same reviewed-recall mode. Then open `https://api.veetbot.com/dreaming` and connect with the owner token. Do
+not place a token in a URL. No additional proxy route or external web service
+is needed: the existing API upstream serves the page and all requests.
+
+The next maintenance sweep claims a daily slice; after that, the schedule is
+at least 24 hours from its previous claim. Check Run history for proposed,
+empty, blocked, failed or interrupted outcomes. No provider call is made by
+opening the page or approving an operation. Inspect the exact statement and
+supporting originals, select **Approve and apply**, and confirm. Applied
+merges can be undone here. Summaries/connections retain the existing memory
+browser rejection/deletion controls. Reloading requires reconnecting and
+reads the saved server decisions. Pause previews from Review settings to
+stop new daily claims; an already running bounded slice may finish.
+
+An empty or blocked run can mean there are no eligible attributed memories;
+it does not authorize reconstructing lost source evidence or relaxing privacy.
+Unattended dreaming remains off and still needs the unchanged precision,
+answer-lift and release-evidence requirements. The review path needs no new
+blinded packet. To stop reviewed recall and proposals, disable the review
+flag and restart those same roles; retain the operation API for inspection and undo. Do not
+downgrade the database after review/scheduling state exists: the migration
+refuses to discard that history.

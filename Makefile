@@ -136,6 +136,13 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleAccessibilityAtLargeText \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleEvidencePreservesTheOpenConversation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMemoryPeopleShowsEachChosenPerson \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSynthesisExplainsSourcesAndOpensAnOriginal \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSynthesisUnavailableOriginalDoesNotReuseItsPreview \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSynthesisReviewAndDeletePreserveOriginals \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSynthesisConnectionLabelsUncertaintyAndEvidence \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSynthesisUndoShowsAffectedOriginalsBeforeCommit \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSynthesisOpaqueHistoryHasNoSourcesOrActions \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSynthesisUnavailableOnOlderServer \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFinishedAnswerOffersCopyAndSelectText \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSVGArtifactCanBeDownloadedOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleIdentityPreviewRemainsReviewableAfterEditorCloses \

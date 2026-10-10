@@ -334,8 +334,10 @@ async def test_crashed_model_attempt_keeps_automatic_budget_reserved() -> None:
 async def _terminal_email_attempts(
     composition: Composition,
     outcomes: list[tuple[str, dict[str, object], Decimal | None]],
+    *,
+    status: RunStatus = RunStatus.FAILED,
 ) -> UUID:
-    """Seed terminal outcomes with optional durable usage to model crash windows."""
+    """Seed model evidence at a chosen lifecycle state and accounting crash window."""
     service = composition.services.email
     service.account_ids = ("work",)
     service.account_servers = {"work": {"read": "gmail_read", "send": "gmail_send"}}
@@ -392,8 +394,10 @@ async def _terminal_email_attempts(
         run.usage = RunUsage(model_calls=recorded, cost=cost)
         run.model_call_count = recorded
         await uow.runs.update_counters(run)
-        await uow.runs.transition(run.id, RunStatus.QUEUED, RunStatus.RUNNING)
-        await uow.runs.transition(run.id, RunStatus.RUNNING, RunStatus.FAILED)
+        if status is not RunStatus.QUEUED:
+            await uow.runs.transition(run.id, RunStatus.QUEUED, RunStatus.RUNNING)
+            if status is not RunStatus.RUNNING:
+                await uow.runs.transition(run.id, RunStatus.RUNNING, status)
     return run.id
 
 
@@ -627,7 +631,7 @@ async def test_direct_draft_history_read_expires_old_sent_bodies() -> None:
         ("200", 2, True, 402),
         ("200", 31, True, 200),
         ("19", 0, True, 200),
-        ("20", 31, False, 402),
+        ("20", 31, False, 200),  # ADR-0173: a missing run is charged to its original period.
     ],
 )
 async def test_aggregate_email_ceilings_cover_accounts_and_unresolved_reservations(

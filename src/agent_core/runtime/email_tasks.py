@@ -1427,6 +1427,7 @@ class _TaskIO:
             tools=[],
             response_schema=response_schema,
             maximum_output_tokens=reserve,
+            maximum_provider_attempts=1,
             metadata={
                 "prefix_sha256": digest,
                 "context_total_tokens": str(estimate + reserve),
@@ -1441,7 +1442,10 @@ class _TaskIO:
         )
         c.checkpoint.context_origin_trust = TrustLevel.EXTERNAL_UNTRUSTED
         # A rejected result keeps no text, so the response event keeps none of it.
-        invoked = await _invoke_model(c, step, request, None, retain_response=False)
+        # An uncertain attempt cannot renew the slice reservation by retrying.
+        invoked = await _invoke_model(
+            c, step, request, None, retain_response=False, allow_retries=False
+        )
         if isinstance(invoked, RunOutcome):
             raise _ModelOutcomeError(invoked)
         # The completed attempt is already accounted, whatever its result holds.

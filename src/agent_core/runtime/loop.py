@@ -413,6 +413,7 @@ def _synthesis_reserve_dimension(
     run: Run,
     *,
     step_in_progress: bool = False,
+    before_model_attempt: bool = False,
 ) -> str | None:
     """Name the first run budget whose final-synthesis reserve began."""
 
@@ -432,7 +433,12 @@ def _synthesis_reserve_dimension(
     remaining_steps = limits.max_steps - run.step_count + int(step_in_progress)
     if remaining_steps <= limits.synthesis_reserve_steps:
         return "steps"
-    if limits.max_model_calls - run.model_call_count <= limits.synthesis_reserve_model_calls:
+    # Charging this attempt advances the model-call count before dispatch.
+    # Send the control now if that charge will activate the existing guard.
+    remaining_model_calls = (
+        limits.max_model_calls - run.model_call_count - int(before_model_attempt)
+    )
+    if remaining_model_calls <= limits.synthesis_reserve_model_calls:
         return "model_calls"
     if remaining_tool_calls <= limits.synthesis_reserve_tool_calls:
         return "tool_calls"
@@ -804,6 +810,29 @@ def bind_browser_auth_question(checkpoint: RunCheckpoint, question_id: UUID) -> 
         ).model_dump(mode="json")
 
 
+async def prepare_browser_connection_question(context: RunContext) -> None:
+    if (
+        context.checkpoint.working_state.get("browser_access_wait") is None
+        or context.checkpoint.pending_tool_calls
+        or context.checkpoint.working_state.get("outstanding_question_id") is not None
+    ):
+        return
+    arguments = {
+        "question": "Connect your X account using Website Access in this conversation. "
+        "I will continue your follow request when it is connected."
+    }
+    call = ToolCallItem(
+        call_id=f"browser-connection:{context.ids.new_id()}",
+        item_index=0,
+        name="conversation.ask_user",
+        arguments=arguments,
+        raw_arguments=json.dumps(arguments),
+    )
+    context.checkpoint.conversation.append(call)
+    context.checkpoint.pending_tool_calls = [call.model_dump(mode="json")]
+    await checkpoint(context, "browser_recovery")
+
+
 async def suspend_for_browser_question(
     context: RunContext, error: UserInputRequiredError
 ) -> RunOutcome:
@@ -837,19 +866,24 @@ async def _invoke_model(
     initial_synthesis_reserve: str | None,
     *,
     retain_response: bool = True,
+    allow_retries: bool = True,
 ) -> ModelTurn | RunOutcome:
     """Consume one bounded model attempt sequence and persist authoritative usage.
 
     A caller that validates the turn itself and must not store what it rejects
     passes ``retain_response=False``: the response event then keeps its tool
     names and stop reason but none of the returned text or arguments.
+    Reserved callers pass ``allow_retries=False`` when another attempt needs
+    separate admission; the request also caps provider-internal attempts.
     """
 
-    while step.attempt_count < context.max_internal_attempts:
+    maximum_attempts = context.max_internal_attempts if allow_retries else 1
+    while step.attempt_count < maximum_attempts:
         context.budgets.check(context.run, BudgetScope.ATTEMPT)
         synthesis_reserve = initial_synthesis_reserve or _synthesis_reserve_dimension(
             context.run,
             step_in_progress=True,
+            before_model_attempt=True,
         )
         attempt_request = (
             _synthesis_only_request(request, synthesis_reserve)
@@ -992,7 +1026,7 @@ async def _invoke_model(
             if (
                 isinstance(terminal.error, ModelTransientError)
                 and not terminal.error.stream_had_output
-                and step.attempt_count < context.max_internal_attempts
+                and step.attempt_count < maximum_attempts
             ):
                 continue
             reason = (
@@ -1054,7 +1088,7 @@ async def _invoke_model(
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
         ):
-            if step.attempt_count < context.max_internal_attempts:
+            if step.attempt_count < maximum_attempts:
                 continue
             return _failure(
                 context,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, MutableMapping, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -33,6 +33,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
+from agent_core.adapters.persistence.people_attribution import (
+    advance_attribution_revisions,
+    affected_attribution,
+    footprint_targets,
+)
+from agent_core.adapters.persistence.reconsolidation_sources import lock_owner
 from agent_core.adapters.persistence.sqlalchemy_models import (
     MemoryRevisionRow,
     MemoryRow,
@@ -64,6 +71,11 @@ from agent_core.domain.people import (
     summarizable_exchange,
     summary_pending,
     withheld_summary,
+)
+from agent_core.domain.reconsolidation_attribution import (
+    AttributionFootprint,
+    attribution_footprint,
+    attribution_targets,
 )
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryStore
@@ -119,20 +131,61 @@ def _copy_rebased(
 
 
 class InMemoryPeopleStore:
-    def __init__(self, clock: Clock, memories: MemoryStore | None = None) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        memories: MemoryStore | None = None,
+        *,
+        memory_guard: Callable[[tuple[str, str]], AbstractAsyncContextManager[None]] | None = None,
+        memory_index: ReconsolidationIndex | None = None,
+    ) -> None:
         self._clock = clock
         self._memories = memories
-        self._records: dict[tuple[str, str, UUID], list[PeopleRecord]] = {}
+        self._memory_guard = memory_guard
+        self._memory_index = memory_index
+        self._transaction = None if memory_index is None else memory_index.transaction
+        self._records: MutableMapping[tuple[str, str, UUID], list[PeopleRecord]] = (
+            {} if self._transaction is None else self._transaction.mapping()
+        )
+        self._attributions: MutableMapping[tuple[str, str, UUID], AttributionFootprint] = (
+            {} if self._transaction is None else self._transaction.mapping()
+        )
+        self._dependents: MutableMapping[tuple[str, str, UUID], frozenset[UUID]] = (
+            {} if self._transaction is None else self._transaction.mapping()
+        )
         self._erased: set[tuple[str, str, UUID]] = set()
-        self._positions: dict[tuple[str, str], int] = {}
+        self._positions: MutableMapping[tuple[str, str], int] = (
+            {} if self._transaction is None else self._transaction.mapping()
+        )
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._lock_tasks: dict[tuple[str, str], asyncio.Task[object]] = {}
+
+    def _guard(self, principal: Principal) -> AbstractAsyncContextManager[None]:
+        return (
+            self._memory_guard((principal.tenant_id, principal.principal_id))
+            if self._memory_guard is not None
+            else nullcontext()
+        )
 
     @asynccontextmanager
     async def lock(self, principal: Principal) -> AsyncIterator[None]:
-        async with self._locks.setdefault(
-            (principal.tenant_id, principal.principal_id), asyncio.Lock()
-        ):
-            yield
+        # Memory UOWs take this guard first. Direct People callers use the same
+        # order before taking an owner lock that may read original beliefs.
+        owner = (principal.tenant_id, principal.principal_id)
+        task = asyncio.current_task()
+        assert task is not None
+        async with self._guard(principal):
+            # Recall and membership validation share a UOW and this lock. Only
+            # the owning task may reenter; a child cannot inherit lock ownership.
+            if self._lock_tasks.get(owner) is task:
+                yield
+                return
+            async with self._locks.setdefault(owner, asyncio.Lock()):
+                self._lock_tasks[owner] = task
+                try:
+                    yield
+                finally:
+                    del self._lock_tasks[owner]
 
     async def get(
         self,
@@ -183,6 +236,26 @@ class InMemoryPeopleStore:
                 return None
             pending.extend(dependencies(target))
         return current.model_copy(deep=True)
+
+    async def memory_attribution_records(
+        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
+    ) -> tuple[PeopleRecord, ...] | None:
+        if not 1 <= len(source_ids) <= 256:
+            raise ValueError("attribution needs bounded original source identities")
+        owner = (principal.tenant_id, principal.principal_id)
+        if any(key[:2] == owner and key not in self._attributions for key in self._erased):
+            return None
+        result: list[PeopleRecord] = []
+        for key, footprint in self._attributions.items():
+            if key[:2] != owner or not (
+                footprint.belief_id == belief_id or footprint.source_id in source_ids
+            ):
+                continue
+            visible = await self.get(principal, key[2], ceiling=Sensitivity.RESTRICTED)
+            if visible is None or len(result) == 64:
+                return None
+            result.append(visible)
+        return tuple(sorted(result, key=lambda item: item.id))
 
     async def source_suppressed(self, principal: Principal, source_id: UUID) -> bool:
         return await self.is_erased(principal, source_id) or any(
@@ -495,7 +568,58 @@ class InMemoryPeopleStore:
                 ]
         return results[: query.limit + 1]
 
+    def _affected_attribution(
+        self, owner: tuple[str, str], roots: set[UUID]
+    ) -> tuple[set[UUID], set[tuple[UUID, int]]]:
+        pending, seen = list(roots), set[UUID]()
+        while pending:
+            key = pending.pop()
+            if key in seen:
+                continue
+            seen.add(key)
+            pending.extend(self._dependents.get((*owner, key), frozenset()) - seen)
+        footprints = [
+            self._attributions[(*owner, key)] for key in seen if (*owner, key) in self._attributions
+        ]
+        footprints += [
+            self._attributions[(*owner, item.source_id)]
+            for item in list(footprints)
+            if item.source_id is not None and (*owner, item.source_id) in self._attributions
+        ]
+        return attribution_targets(footprints)
+
+    def _remember_attribution(self, record: PeopleRecord) -> None:
+        owner = (record.tenant_id, record.principal_id)
+        key = (*owner, record.id)
+        prior = self._records.get(key, [])
+        old_refs = dependencies(prior[-1]) if prior else set()
+        new_refs = dependencies(record)
+        for target in old_refs - new_refs:
+            target_key = (*owner, target)
+            self._dependents[target_key] = self._dependents.get(target_key, frozenset()) - {
+                record.id
+            }
+        for target in new_refs - old_refs:
+            target_key = (*owner, target)
+            self._dependents[target_key] = self._dependents.get(target_key, frozenset()) | {
+                record.id
+            }
+        self._attributions[key] = attribution_footprint(record)
+
+    def _forget_dependencies(self, key: tuple[str, str, UUID]) -> None:
+        for target in dependencies(self._records[key][-1]):
+            target_key = (*key[:2], target)
+            remaining = self._dependents.get(target_key, frozenset()) - {key[2]}
+            if remaining:
+                self._dependents[target_key] = remaining
+            else:
+                self._dependents.pop(target_key, None)
+
     async def put(self, record: PeopleRecord, *, expected_revision: int) -> PeopleRecord:
+        async with self._guard(_principal(record)):
+            return await self._put(record, expected_revision=expected_revision)
+
+    async def _put(self, record: PeopleRecord, *, expected_revision: int) -> PeopleRecord:
         key = (record.tenant_id, record.principal_id, record.id)
         if key in self._erased:
             raise ConflictError("people record was erased")
@@ -516,15 +640,27 @@ class InMemoryPeopleStore:
         for ref in referenced_assignments(record):
             if await self.get(_principal(record), ref, ceiling=Sensitivity.RESTRICTED) is None:
                 raise ConflictError("people assignment reference is missing")
-        self._records.setdefault(key, []).append(record.model_copy(deep=True))
+        old_beliefs, old_events = self._affected_attribution(key[:2], {record.id})
+        self._remember_attribution(record)
+        self._records[key] = [*versions, record.model_copy(deep=True)]
+        new_beliefs, new_events = self._affected_attribution(key[:2], {record.id})
+        if self._memory_index is not None:
+            self._memory_index.attribution_changed(
+                key[:2], old_beliefs | new_beliefs, old_events | new_events
+            )
         owner_key = (record.tenant_id, record.principal_id)
         self._positions[owner_key] = self._positions.get(owner_key, 0) + 1
         return record.model_copy(deep=True)
 
     async def fence_for_erasure(self, principal: Principal, record_ids: Sequence[UUID]) -> int:
-        return self.erase_locked(principal, record_ids, fence_only=True)
+        async with self._guard(principal):
+            return self.erase_locked(principal, record_ids, fence_only=True)
 
     async def purge_erased(self, principal: Principal, *, limit: int = 256) -> bool:
+        async with self._guard(principal):
+            return self._purge_erased(principal, limit=limit)
+
+    def _purge_erased(self, principal: Principal, *, limit: int) -> bool:
         if not 1 <= limit <= 256:
             raise ValueError("People erasure batches contain at most 256 revisions")
         remaining = limit
@@ -534,9 +670,11 @@ class InMemoryPeopleStore:
                 continue
             versions = self._records[key]
             take = min(remaining, len(versions))
-            del versions[:take]
+            if take == len(versions):
+                self._forget_dependencies(key)
+            self._records[key] = versions[take:]
             remaining -= take
-            if not versions:
+            if not self._records[key]:
                 del self._records[key]
             if not remaining:
                 break
@@ -549,7 +687,10 @@ class InMemoryPeopleStore:
         *,
         preserve_independent: bool = False,
     ) -> int:
-        return self.erase_locked(principal, record_ids, preserve_independent=preserve_independent)
+        async with self._guard(principal):
+            return self.erase_locked(
+                principal, record_ids, preserve_independent=preserve_independent
+            )
 
     def erase_locked(
         self,
@@ -583,10 +724,13 @@ class InMemoryPeopleStore:
             for row in owned.values():
                 replacement = _copy_rebased(row, replacements, self._clock.now())
                 if replacement is not None:
-                    self._records[(principal.tenant_id, principal.principal_id, row.id)].append(
-                        replacement
-                    )
                     owner_key = (principal.tenant_id, principal.principal_id)
+                    beliefs, events = self._affected_attribution(owner_key, {row.id})
+                    self._remember_attribution(replacement)
+                    key = (principal.tenant_id, principal.principal_id, row.id)
+                    self._records[key] = [*self._records[key], replacement]
+                    if self._memory_index is not None:
+                        self._memory_index.attribution_changed(owner_key, beliefs, events)
                     self._positions[owner_key] = self._positions.get(owner_key, 0) + 1
         while True:
             dependent = {
@@ -601,14 +745,27 @@ class InMemoryPeopleStore:
             if dependent <= doomed:
                 break
             doomed.update(dependent)
+        if self._memory_index is not None:
+            owner = (principal.tenant_id, principal.principal_id)
+            fresh = {
+                key
+                for key in doomed
+                if (*owner, key) in self._records and (*owner, key) not in self._erased
+            }
+            beliefs, events = self._affected_attribution(owner, fresh)
+            self._memory_index.attribution_changed(owner, beliefs, events)
         count = 0
         for record_id in doomed:
             key = (principal.tenant_id, principal.principal_id, record_id)
             if key in self._records:
                 count += int(key not in self._erased) if fence_only else 1
                 if not fence_only:
+                    self._forget_dependencies(key)
                     del self._records[key]
-                self._erased.add(key)
+                if self._transaction is None:
+                    self._erased.add(key)
+                else:
+                    self._transaction.add(self._erased, key)
         if preserve_independent:
             for key, revisions in list(self._records.items()):
                 if key[:2] == (principal.tenant_id, principal.principal_id):
@@ -633,9 +790,16 @@ class InMemoryPeopleStore:
     async def erase_email_source(
         self, principal: Principal, account_id: str, thread_id: str, message_ids: frozenset[str]
     ) -> int:
-        return self.erase_email_source_locked(principal, account_id, thread_id, message_ids)
+        async with self._guard(principal):
+            return self.erase_email_source_locked(principal, account_id, thread_id, message_ids)
 
     async def withhold_generated_summaries(
+        self, principal: Principal, interaction_ids: Sequence[UUID]
+    ) -> int:
+        async with self._guard(principal):
+            return self._withhold_generated_summaries(principal, interaction_ids)
+
+    def _withhold_generated_summaries(
         self, principal: Principal, interaction_ids: Sequence[UUID]
     ) -> int:
         now = self._clock.now()
@@ -654,7 +818,7 @@ class InMemoryPeopleStore:
             ):
                 continue
             # Every stored gist goes, so a historical read cannot recover it.
-            versions[:] = [
+            versions = [
                 withheld_summary(row, now)
                 if isinstance(row, PeopleInteraction)
                 and row.summary_provenance
@@ -672,6 +836,7 @@ class InMemoryPeopleStore:
                     }
                 )
             )
+            self._records[key] = versions
             self._positions[owner_key] = self._positions.get(owner_key, 0) + 1
             changed += 1
         return changed
@@ -695,15 +860,36 @@ class InMemoryPeopleStore:
         return self.erase_locked(principal, ids, preserve_independent=True)
 
     async def erase_session(self, principal: Principal, session_id: UUID) -> int:
-        return self.erase_session_locked(principal, session_id)
+        async with self._guard(principal):
+            return self.erase_session_locked(principal, session_id)
 
     async def erase_principal(self, principal: Principal) -> int:
+        async with self._guard(principal):
+            return self._erase_principal(principal)
+
+    def _erase_principal(self, principal: Principal) -> int:
         owned = [k for k in self._records if k[:2] == (principal.tenant_id, principal.principal_id)]
+        owner = (principal.tenant_id, principal.principal_id)
+        if self._memory_index is not None and any(k[:2] == owner for k in self._attributions):
+            # Removing all attribution also removes legacy/erased-head fences.
+            # Fence the whole owner's bank before separate original cleanup.
+            self._memory_index.attribution_changed(
+                owner,
+                {key for key, value in self._memory_index.owners.items() if value == owner},
+                set(),
+            )
         for key in owned:
             del self._records[key]
-        self._erased = {
-            k for k in self._erased if k[:2] != (principal.tenant_id, principal.principal_id)
-        }
+        for key in list(self._erased):
+            if key[:2] == owner:
+                if self._transaction is None:
+                    self._erased.discard(key)
+                else:
+                    self._transaction.discard(self._erased, key)
+        for mapping in (self._attributions, self._dependents):
+            for key in list(mapping):
+                if key[:2] == owner:
+                    del mapping[key]
         self._positions.pop((principal.tenant_id, principal.principal_id), None)
         return len(owned)
 
@@ -722,6 +908,7 @@ class PostgresPeopleStore:
 
     @asynccontextmanager
     async def lock(self, principal: Principal) -> AsyncIterator[None]:
+        await lock_owner(self._session, principal)
         key = f"people:{len(principal.tenant_id)}:{principal.tenant_id}:{principal.principal_id}"
         number = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], signed=True)
         await self._session.execute(select(func.pg_advisory_xact_lock(number)))
@@ -839,6 +1026,51 @@ class PostgresPeopleStore:
             )
         ).scalar_one_or_none()
         return None if row is None else PEOPLE_RECORD.validate_python(row.payload)
+
+    async def memory_attribution_records(
+        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
+    ) -> tuple[PeopleRecord, ...] | None:
+        if not 1 <= len(source_ids) <= 256:
+            raise ValueError("attribution needs bounded original source identities")
+        if (
+            await self._session.scalar(
+                select(PeopleHeadRow.id)
+                .where(
+                    PeopleHeadRow.tenant_id == principal.tenant_id,
+                    PeopleHeadRow.principal_id == principal.principal_id,
+                    PeopleHeadRow.memory_attribution.is_(None),
+                )
+                .limit(1)
+            )
+            is not None
+        ):
+            return None
+        keys = (
+            await self._session.scalars(
+                select(PeopleHeadRow.id)
+                .where(
+                    PeopleHeadRow.tenant_id == principal.tenant_id,
+                    PeopleHeadRow.principal_id == principal.principal_id,
+                    or_(
+                        PeopleHeadRow.memory_attribution["belief_id"].astext == str(belief_id),
+                        PeopleHeadRow.memory_attribution["source_id"].astext.in_(
+                            [str(key) for key in source_ids]
+                        ),
+                    ),
+                )
+                .order_by(PeopleHeadRow.id)
+                .limit(65)
+            )
+        ).all()
+        if len(keys) > 64:
+            return None
+        result: list[PeopleRecord] = []
+        for key in keys:
+            visible = await self.get(principal, key, ceiling=Sensitivity.RESTRICTED)
+            if visible is None:
+                return None
+            result.append(visible)
+        return tuple(result)
 
     async def source_suppressed(self, principal: Principal, source_id: UUID) -> bool:
         if await self.is_erased(principal, source_id):
@@ -1319,7 +1551,14 @@ class PostgresPeopleStore:
             for ref in referenced_assignments(record):
                 if await self.get(owner, ref, ceiling=Sensitivity.RESTRICTED) is None:
                     raise ConflictError("people assignment reference is missing")
+            old_beliefs, old_events = (
+                await affected_attribution(self._session, owner, [record.id])
+                if current is not None
+                else (set(), set())
+            )
+            footprint = attribution_footprint(record)
             values = {
+                "memory_attribution": footprint.model_dump(mode="json", exclude_none=True),
                 "tenant_id": record.tenant_id,
                 "principal_id": record.principal_id,
                 "id": record.id,
@@ -1391,6 +1630,14 @@ class PostgresPeopleStore:
                         )
                     )
             await self._session.flush()
+            new_beliefs, new_events = await footprint_targets(self._session, owner, [footprint])
+            await advance_attribution_revisions(
+                self._session,
+                owner,
+                old_beliefs | new_beliefs,
+                old_events | new_events,
+                self._clock.now(),
+            )
             return record
 
     async def fence_for_erasure(self, principal: Principal, record_ids: Sequence[UUID]) -> int:
@@ -1507,6 +1754,10 @@ class PostgresPeopleStore:
                         .returning(PeopleHeadRow.id)
                     )
                 ).scalars()
+            )
+            beliefs, events = await affected_attribution(self._session, principal, ids)
+            await advance_attribution_revisions(
+                self._session, principal, beliefs, events, self._clock.now()
             )
             if fence_only:
                 return len(ids)
@@ -1701,4 +1952,9 @@ class PostgresPeopleStore:
                 )
                 .returning(PeopleHeadRow.id)
             )
-            return len(list(result.scalars()))
+            ids = list(result.scalars())
+            if ids:
+                await advance_attribution_revisions(
+                    self._session, principal, set(), set(), self._clock.now(), all_originals=True
+                )
+            return len(ids)

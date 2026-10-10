@@ -1546,6 +1546,152 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts[detail].exists)
     }
 
+    private func openSynthesis() {
+        #if os(macOS)
+        app.activate()
+        let memory = app.buttons["sidebar.memory"]
+        XCTAssertTrue(memory.waitForExistence(timeout: 10))
+        activate(memory)
+        let collection = app.sheets.radioButtons["Synthesis"]
+        #else
+        openSidebarDestination(identifier: "sidebar.memory")
+        let collection = app.segmentedControls.buttons["Synthesis"]
+        #endif
+        XCTAssertTrue(collection.waitForExistence(timeout: 5))
+        activate(collection)
+    }
+
+    private func openSynthesisEntry() {
+        let row = app.buttons["memory.synthesis.row.00000000-0000-0000-0000-000000003201"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        activate(row)
+        XCTAssertTrue(app.descendants(matching: .any)["memory.synthesis.detail"].waitForExistence(timeout: 5))
+    }
+
+    func testSynthesisExplainsSourcesAndOpensAnOriginal() {
+        app.launchArguments.append("--ui-testing-synthesis")
+        app.launch()
+        openSynthesis()
+        openSynthesisEntry()
+        XCTAssertTrue(app.staticTexts["Related summary · derived memory"].waitForExistence(timeout: 5))
+        let omitted = app.descendants(matching: .any)["memory.synthesis.source.00000000-0000-0000-0000-000000003203"].firstMatch
+        revealSynthesisAction(omitted)
+        XCTAssertTrue(app.staticTexts["Original · not included in summary text"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Memory synthesis evidence trail"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let original = app.descendants(matching: .any)["memory.synthesis.source.00000000-0000-0000-0000-000000000321"].firstMatch
+        revealSynthesisAction(original)
+        activate(original)
+        XCTAssertTrue(app.descendants(matching: .any)["memory.detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["The user prefers dark mode."].exists)
+    }
+
+    func testSynthesisUnavailableOriginalDoesNotReuseItsPreview() {
+        app.launchArguments.append("--ui-testing-synthesis")
+        app.launch()
+        openSynthesis()
+        openSynthesisEntry()
+        let original = app.descendants(matching: .any)["memory.synthesis.source.00000000-0000-0000-0000-000000003203"].firstMatch
+        revealSynthesisAction(original)
+        activate(original)
+        XCTAssertTrue(app.staticTexts["This memory is no longer available."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["memory.detail"].exists)
+    }
+
+    func testSynthesisConnectionLabelsUncertaintyAndEvidence() {
+        app.launchArguments += ["--ui-testing-synthesis", "--ui-testing-synthesis-connection"]
+        app.launch()
+        openSynthesis()
+        openSynthesisEntry()
+        XCTAssertTrue(app.staticTexts["User may prefer calm environments."].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Tentative connection")).firstMatch.exists)
+        let reviewed = app.buttons["memory.synthesis.review"]
+        revealSynthesisAction(reviewed)
+        XCTAssertTrue(reviewed.waitForExistence(timeout: 5))
+        activate(reviewed)
+        XCTAssertTrue(app.staticTexts["Synthesis updated."].waitForExistence(timeout: 5))
+    }
+
+    func testSynthesisReviewAndDeletePreserveOriginals() {
+        app.launchArguments.append("--ui-testing-synthesis")
+        app.launch()
+        openSynthesis()
+        openSynthesisEntry()
+        let reviewed = app.buttons["memory.synthesis.review"]
+        revealSynthesisAction(reviewed)
+        activate(reviewed)
+        XCTAssertTrue(app.staticTexts["Synthesis updated."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["memory.synthesis.review"].exists)
+        let delete = app.buttons["memory.synthesis.delete"]
+        revealSynthesisAction(delete)
+        activate(delete)
+        let confirm = app.buttons["Delete synthesis"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        activate(confirm)
+        XCTAssertTrue(app.staticTexts["Synthesis deleted. Original memories are kept."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["The user prefers dark mode."].exists)
+    }
+
+    func testSynthesisUndoShowsAffectedOriginalsBeforeCommit() {
+        app.launchArguments += ["--ui-testing-synthesis", "--ui-testing-synthesis-merge"]
+        app.launch()
+        openSynthesis()
+        openSynthesisEntry()
+        let preview = app.buttons["memory.synthesis.undo.preview"]
+        revealSynthesisAction(preview)
+        activate(preview)
+        let confirm = app.buttons["memory.synthesis.undo.confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["The user prefers quiet mornings."].exists)
+        activate(confirm)
+        XCTAssertTrue(app.staticTexts["Merge undone. Original memories remain available."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["memory.synthesis.undo.preview"].exists)
+    }
+
+    func testSynthesisOpaqueHistoryHasNoSourcesOrActions() {
+        app.launchArguments += ["--ui-testing-synthesis", "--ui-testing-synthesis-hidden"]
+        app.launch()
+        openSynthesis()
+        openSynthesisEntry()
+        XCTAssertTrue(app.staticTexts["Source details unavailable"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["The user prefers dark mode."].exists)
+        XCTAssertFalse(app.buttons["memory.synthesis.review"].exists)
+        XCTAssertFalse(app.buttons["memory.synthesis.undo.preview"].exists)
+    }
+
+    func testSynthesisUnavailableOnOlderServer() {
+        app.launch()
+        openSynthesis()
+        XCTAssertTrue(app.staticTexts["This server does not support synthesis browsing yet."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["memory.synthesis.row.00000000-0000-0000-0000-000000003201"].exists)
+    }
+
+    private func revealSynthesisAction(_ element: XCUIElement) {
+        #if os(macOS)
+        let scroll = app.scrollViews["memory.synthesis.detail"]
+        for _ in 0..<16 {
+            if element.exists && element.isHittable { break }
+            let down = element.exists && element.frame.minY < scroll.frame.minY
+            scroll.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
+        }
+        #else
+        let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        for _ in 0..<16 {
+            let top = max(detail.frame.minY + 70, app.navigationBars["Synthesis"].frame.maxY + 12)
+            let bottom = detail.frame.maxY - 90
+            if element.exists && element.isHittable && element.frame.minY >= top && element.frame.maxY < bottom { break }
+            let down = element.exists && element.frame.minY < top
+            detail.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: down ? 0.4 : 0.7))
+                .press(forDuration: 0.05, thenDragTo: detail.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: down ? 0.6 : 0.5)))
+        }
+        #endif
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        XCTAssertTrue(element.isHittable)
+    }
+
     /// Choosing one person after another in Memory's People collection replaces
     /// the open profile. The directory is longer than the window, as a real one
     /// is: on the Mac, a second click there once left the first profile open.
@@ -2380,6 +2526,31 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(fifth.isHittable, "All five initial priorities should be visible without scrolling")
         XCTAssertTrue(window.frame.contains(fifth.frame), "The fifth row must be fully visible")
         attachEmailScreenshot("Compact priority inbox with five threads")
+    }
+
+    /// A paused budget leaves the inbox usable and reveals accounting only on demand.
+    func testEmailBudgetPauseKeepsAccountingCollapsed() {
+        app.launchArguments.append("--ui-testing-email-budget-pause")
+        launchFullEmailInbox()
+        let reason = app.staticTexts["Daily processing budget is in use."]
+        XCTAssertTrue(reason.waitForExistence(timeout: 10))
+        let pending = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@ OR value BEGINSWITH %@", "Pending costs:", "Pending costs:"
+        )).firstMatch
+        XCTAssertFalse(pending.exists)
+        let first = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(first.isHittable)
+        XCTAssertLessThan(first.frame.minY - app.windows.firstMatch.frame.minY, 340,
+                          "A pause must leave useful mail space in the sidebar")
+        attachEmailScreenshot("Compact email budget pause")
+        let details = app.buttons["email.budget-details"]
+        XCTAssertTrue(details.exists)
+        details.click()
+        XCTAssertTrue(pending.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Check again"].isHittable)
+        attachEmailScreenshot("Expanded email budget accounting")
+        details.click()
+        XCTAssertFalse(pending.exists)
     }
 
     /// Drags the actual divider and verifies both columns and the selected thread survive mode switching.

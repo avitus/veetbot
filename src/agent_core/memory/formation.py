@@ -3876,8 +3876,36 @@ class GovernedMemoryService:
             )
 
     async def get_recall_trace(self, trace_id: UUID) -> RecallTrace:
-        async with self._uow_factory() as uow:
-            return await uow.traces.get(trace_id, self._principal)
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
+            trace = await uow.traces.get(trace_id, self._principal)
+            unavailable = set()
+            for item in trace.beliefs:
+                if item.record_kind == "belief":
+                    continue
+                current = await uow.reconsolidation.get_summary(
+                    self._principal,
+                    item.operation_id,
+                    self._clock.now(),
+                    ceiling=trace.sensitivity_ceiling,
+                    current_scope=trace.query.current_scope,
+                    as_of=trace.query.as_of
+                    or (trace.created_at if trace.query.known_at is not None else None),
+                    known_at=trace.query.known_at,
+                )
+                if current is None or current.revision != item.operation_revision:
+                    unavailable.add(item.belief_id)
+            if not unavailable:
+                return trace
+            # Inspection must not expose unavailable derived text from frozen
+            # bytes. Keep the internal trace intact for next-turn corrections.
+            update: dict[str, object] = {
+                "beliefs": [item for item in trace.beliefs if item.belief_id not in unavailable],
+                "rendered": "",
+                "rendered_sha256": hashlib.sha256(b"").hexdigest(),
+            }
+            for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
+                update[field] = [key for key in getattr(trace, field) if key not in unavailable]
+            return trace.model_copy(update=update)
 
     async def edit(self, belief_id: UUID, edit: MemoryEdit) -> MemoryRecord:
         async with self._uow_factory() as uow:
@@ -4334,7 +4362,7 @@ class GovernedMemoryService:
         instant = now or self._clock.now()
         short_ids = set(_CITED_BELIEF.findall(final_text))
         derivation_key = f"memory.cited:{run_id}"
-        async with self._uow_factory() as uow:
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
             if await uow.events.get_by_derivation(derivation_key, self._principal) is not None:
                 return UsageFeedback()
             traces = [
@@ -4446,7 +4474,13 @@ class GovernedMemoryService:
             try:
                 record = await uow.memories.get(belief_id, self._principal)
             except NotFoundError:
-                # The belief was deleted between the recall and the completion.
+                # Derived UUIDs credit only their still-valid projection. Deleted
+                # originals and invalid summaries receive no feedback.
+                moved += int(
+                    await uow.reconsolidation.update_summary_usage(
+                        self._principal, belief_id, delta, instant, cited=cited
+                    )
+                )
                 continue
             update: dict[str, object] = {"utility": min(1.0, max(-1.0, record.utility + delta))}
             if cited:

@@ -57,6 +57,7 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var unavailable = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var budgetPauseMessage: String?
+    @Published public private(set) var budgetPauseDetails: [String] = []
     @Published public private(set) var budgetRetryAt: Date?
     @Published private var draftActionError: String?
     @Published private var threadReadError: String?
@@ -257,6 +258,7 @@ public final class EmailViewModel: ObservableObject {
         refreshFailure = nil
         syncedBaseline = [:]
         budgetPauseMessage = nil
+        budgetPauseDetails = []
         budgetRetryAt = nil
         saveKeys = [:]
         sendKeys = [:]
@@ -424,6 +426,7 @@ public final class EmailViewModel: ObservableObject {
             guard acceptsRead(connection: connection, activation: foreground) else { return }
             refreshKey = nil
             budgetPauseMessage = nil
+            budgetPauseDetails = []
             budgetRetryAt = nil
             recordRefreshStatus(operation.status)
             await reload(preserveOrder: true, activation: foreground)
@@ -492,10 +495,52 @@ public final class EmailViewModel: ObservableObject {
         utc.timeZone = TimeZone(secondsFromGMT: 0)!
         let fallback = utc.startOfDay(for: current).addingTimeInterval(86_400)
         budgetRetryAt = max(retry ?? fallback, current.addingTimeInterval(60))
-        budgetPauseMessage = failure.message
+        setBudgetPausePresentation(failure.details)
         refreshFailure = nil
         errorMessage = nil
         return true
+    }
+
+    /// Keep accounting available on demand without putting raw server prose in the sidebar.
+    private func setBudgetPausePresentation(_ details: APIErrorDetails) {
+        func amount(_ key: String) -> Decimal? {
+            guard let raw = details.values[key]?.stringValue,
+                  let value = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")),
+                  !value.isNaN, value >= 0 else { return nil }
+            return value
+        }
+        let currency = NumberFormatter()
+        currency.numberStyle = .currency
+        currency.currencyCode = "USD"
+        currency.maximumFractionDigits = 2
+        currency.minimumFractionDigits = 2
+        func money(_ value: Decimal) -> String {
+            currency.string(from: NSDecimalNumber(decimal: value)) ?? value.description
+        }
+        let next = amount("next_reservation")
+        budgetPauseMessage = "Processing budget is in use."
+        budgetPauseDetails = []
+        // Prefer the longer-lived restriction when both windows block admission.
+        for (window, label, reason) in [
+            ("daily", "Today", "Daily processing budget is in use."),
+            ("monthly", "Past 30 days", "Monthly processing budget is in use.")
+        ] {
+            if let spent = amount("\(window)_spent"), let limit = amount("\(window)_limit") {
+                var total = "\(label): \(money(spent)) of \(money(limit))"
+                if let estimated = amount("\(window)_estimated"), estimated > 0 {
+                    total += " (\(money(estimated)) estimated)"
+                }
+                budgetPauseDetails.append(total)
+                if let held = amount("\(window)_reserved"), let next,
+                   spent + held + next > limit {
+                    budgetPauseMessage = reason
+                }
+            }
+        }
+        if let held = amount("daily_reserved") {
+            budgetPauseDetails.append("Pending costs: \(money(held))")
+        }
+        if let next { budgetPauseDetails.append("Next batch: \(money(next))") }
     }
 
     /// An account synced after a recorded failure proves a later refresh succeeded, even when

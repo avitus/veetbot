@@ -885,11 +885,25 @@ class MemoryCorrection(BaseModel):
     belief_id: UUID
     replacement_id: UUID | None = None
     ended_at: datetime
+    kind: Literal["belief_closed", "merge_undone", "merge_invalidated", "summary_invalidated"] = (
+        "belief_closed"
+    )
 
     def render(self) -> str:
         """Render the override line the context builder places in Region B."""
 
         stamp = self.ended_at.isoformat().replace("+00:00", "Z")
+        if self.kind == "summary_invalidated":
+            return (
+                f"correction: summary [m:{str(self.belief_id)[:8]}] is unavailable as of {stamp}; "
+                "use currently recalled original beliefs instead."
+            )
+        if self.kind != "belief_closed":
+            state = "undone" if self.kind == "merge_undone" else "invalidated"
+            return (
+                f"correction: equivalence grouping for [m:{str(self.belief_id)[:8]}] "
+                f"was {state} as of {stamp}; consider original beliefs independently."
+            )
         line = f"correction: [m:{str(self.belief_id)[:8]}] no longer holds as of {stamp}"
         if self.replacement_id is None:
             return f"{line}."
@@ -923,6 +937,9 @@ class RecallQuery(BaseModel):
     # snapshot at, so a belief written since is a query result rather than
     # something the caller has to filter for afterwards.
     min_store_position: int = Field(default=0, ge=0)
+    # Internal opt-in delta predicate; ordinary/historical recall leaves it off.
+    include_merge_changes: bool = False
+    owner_reviewed_merges_only: bool = False
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
     include_ids: tuple[UUID, ...] | None = Field(default=None, max_length=1000)
     expand_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)
@@ -934,6 +951,8 @@ class RecallQuery(BaseModel):
 
 class RecalledBelief(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    record_kind: Literal["belief"] = "belief"
 
     belief_id: UUID
     subject: str
@@ -956,6 +975,54 @@ class RecalledBelief(BaseModel):
     conflict_with: list[UUID] = Field(default_factory=list)
     blocked: bool = False
     source_event_ids: list[int] = Field(default_factory=list)
+    # Identity-only grouping metadata; citations still address this original atom.
+    merge_id: UUID | None = None
+    merge_revision: PositiveInt | None = None
+
+
+class RecalledSummary(BaseModel):
+    """A separate derived projection with complete opaque erasure lineage."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    record_kind: Literal["summary", "hypothesis"] = "summary"
+    belief_id: UUID
+    operation_id: UUID
+    operation_revision: PositiveInt
+    subject: Literal["Related memories", "Tentative connection"] = "Related memories"
+    statement: str
+    belief_types: tuple[BeliefType, ...]
+    status: Literal[MemoryStatus.ACTIVE] = MemoryStatus.ACTIVE
+    confidence_band: str
+    authority: MemoryAuthority
+    origin_scope: str
+    portability: Portability
+    sensitivity: Sensitivity
+    carried: bool = False
+    valid_from: datetime
+    valid_to: datetime | None = None
+    score: float
+    arms: list[str]
+    blocked: Literal[False] = False
+    support_ids: tuple[UUID, ...] = Field(min_length=2, max_length=32)
+    source_ids: tuple[UUID, ...] = Field(min_length=1, max_length=256)
+    source_session_ids: tuple[UUID, ...] = Field(min_length=1, max_length=32)
+    clause_source_ids: tuple[UUID, ...] = Field(min_length=1, max_length=32)
+    merge_id: None = None
+    merge_revision: None = None
+
+    @property
+    def belief_type(self) -> Literal["summary"]:
+        # Compatibility with frozen atomic-only readers. This deliberately is
+        # not a BeliefType: no derived item can satisfy an original belief label.
+        return "summary"
+
+    @property
+    def source_event_ids(self) -> list[int]:
+        # Event sequence numbers from different sessions cannot become one episode.
+        return []
+
+
+RecalledItem = RecalledBelief | RecalledSummary
 
 
 class TracedPassage(BaseModel):
@@ -1007,7 +1074,7 @@ class RecallTrace(BaseModel):
     dropped_for_budget_count: int = Field(default=0, ge=0)
     blocked: list[UUID] = Field(default_factory=list)
     carried_in: list[UUID] = Field(default_factory=list)
-    beliefs: list[RecalledBelief] = Field(default_factory=list)
+    beliefs: list[RecalledItem] = Field(default_factory=list)
     passages: list[TracedPassage] = Field(default_factory=list)
     people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)
     retrieval_policy_version: str
@@ -1029,6 +1096,10 @@ class RecallTrace(BaseModel):
 
 class TracedBelief(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    record_kind: Literal["belief", "summary", "hypothesis"] = "belief"
+    operation_id: UUID | None = None
+    support_ids: tuple[UUID, ...] = ()
 
     belief_id: UUID
     subject: str
@@ -1058,7 +1129,7 @@ class RecallTraceView(BaseModel):
 class RecallResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    items: list[RecalledBelief]
+    items: list[RecalledItem]
     people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)
     rendered: str
     tokens: int = Field(ge=0)
@@ -1066,6 +1137,9 @@ class RecallResult(BaseModel):
     arms_degraded: list[str] = Field(default_factory=list)
     trace_id: UUID
     watermark: int = Field(default=0, ge=0)
+    # Expiry or a disabled derived-recall seam can invalidate frozen dependencies
+    # without a source write, so the builder still needs current corrections.
+    validate_snapshot_dependencies: bool = False
 
 
 class EpisodeQuery(BaseModel):

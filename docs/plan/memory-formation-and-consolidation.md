@@ -251,7 +251,7 @@ same-source shortcut is decided over every related belief before any of them is
 acted on, and re-consolidating a conflicted session is a no-op like any other
 replay. The rule and what a
 conflict then commits are stated in
-[memory-evaluation-and-lifecycle.md:903-928](memory-evaluation-and-lifecycle.md:903-928).
+[memory-evaluation-and-lifecycle.md:906-931](memory-evaluation-and-lifecycle.md:906-931).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".
@@ -309,7 +309,10 @@ call (Section 9):
   produced which belief. This capability is the main advantage of deriving memory
   from an episodic log rather than writing it as a lossy side effect.
 
-Milestone 16 builds this stage.
+Milestone 16 builds the decay and explicit re-derivation parts of this stage.
+Whole-store merging and grounded connections are now authorized as Milestone 32;
+[memory-reconsolidation.md](memory-reconsolidation.md) defines that mechanism
+and its twenty-four gates; runtime and offline comparisons are implemented; verification and supervised deployment remain pending.
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) gives
 decay a bounded sweep with per-belief-type half-lives, a confidence step, and a
 retirement floor; adds the `AFFIRMED` authority and the working-state facts

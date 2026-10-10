@@ -1259,7 +1259,12 @@ async def test_task_grants_flag_off_composes_nothing() -> None:
         paths = _task_grant_paths(composition)
         standing = composition.tool_pipeline._standing_authorizer
 
-    assert standing is None
+    # ADR-0172 adds specific owner-action consent independently of task grants.
+    from agent_core.application.browser_follow_consent import BrowserFollowConsentAuthorizer
+
+    assert isinstance(standing, CompositeStandingAuthorizer)
+    assert len(standing._authorizers) == 1
+    assert isinstance(standing._authorizers[0], BrowserFollowConsentAuthorizer)
     assert act._presenter._enabled is False
     assert composition.services.browser_task_grants is None
     assert composition.services.approvals._task_grants is None  # type: ignore[attr-defined]

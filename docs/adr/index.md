@@ -180,3 +180,15 @@ implementation without one.
 - [ADR-0166 — A resumed run adopts the history committed after its checkpoint (Accepted)](0166-resume-adopts-history-committed-after-its-checkpoint.md)
 - [ADR-0167 — Automatic memory maintenance does not refresh chat recency (Accepted)](0167-memory-maintenance-chat-recency.md)
 - [ADR-0168 — Bounded browser scrolling without approval (Accepted)](0168-bounded-browser-scrolling-without-approval.md)
+
+- [ADR-0169 — Milestone 32 memory reconsolidation (dreaming) (Proposed; scope authorized)](0169-milestone-32-memory-reconsolidation.md)
+
+- [ADR-0170 — Reconsolidation hypothesis equivalence review (Accepted)](0170-reconsolidation-hypothesis-equivalence-review.md)
+- [ADR-0171 — Owner-confirmed real-data fixtures for offline memory evaluation (Accepted)](0171-owner-confirmed-offline-memory-fixtures.md)
+
+- [ADR-0172 — Website access and specific consent survive owner follow-up (Accepted)](0172-owner-browser-continuation.md)
+
+- [ADR-0173 — Terminal email reservations become conservative budget charges (Accepted; amends ADR-0096)](0173-terminal-email-reservation-accounting.md)
+- [ADR-0174 — Daily dreaming proposals with owner-approved application](0174-owner-reviewed-dreaming.md)
+
+- [ADR-0175 — Private account-control verification (Accepted; amends ADR-0164)](0175-private-account-control-verification.md)

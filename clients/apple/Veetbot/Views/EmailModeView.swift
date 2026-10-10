@@ -14,6 +14,7 @@ public struct EmailModeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingLearning = false
     @State private var showingSubscriptions = false
+    @State private var showingBudgetDetails = false
     @State private var navigationPath: [UUID] = []
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
@@ -152,16 +153,33 @@ public struct EmailModeView: View {
                     }.padding(.vertical, 16).emailHideSeparator()
                 }
                 if let pause = model.budgetPauseMessage {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Automatic email work is paused", systemImage: "pause.circle").appFont(.headline)
-                        Text(pause).appFont(.callout).foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Label("Processing paused", systemImage: "pause.circle").appFont(.subheadline)
+                            Spacer(minLength: 4)
+                            Button("Check again") { Task { await model.refresh() } }
+                                .buttonStyle(.borderless).appFont(.caption)
+                        }
+                        Text(pause).appFont(.caption).foregroundColor(.secondary)
                         if let retryAt = model.budgetRetryAt {
-                            Text("Next automatic check: \(retryAt.formatted(date: .abbreviated, time: .shortened))")
+                            Text("Next check: \(retryAt.formatted(date: .abbreviated, time: .shortened))")
                                 .appFont(.caption).foregroundColor(.secondary)
                         }
-                        Button("Check again") { Task { await model.refresh() } }
-                            .buttonStyle(.bordered)
-                    }.padding(.vertical, 12).emailHideSeparator()
+                        Button {
+                            showingBudgetDetails.toggle()
+                        } label: {
+                            Label("Details", systemImage: showingBudgetDetails ? "chevron.down" : "chevron.right")
+                        }.buttonStyle(.borderless).appFont(.caption)
+                            .accessibilityValue(showingBudgetDetails ? "Expanded" : "Collapsed")
+                            .accessibilityIdentifier("email.budget-details")
+                        if showingBudgetDetails {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(model.budgetPauseDetails, id: \.self) { Text($0) }
+                                Text("Cached mail and editing remain available.")
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                .appFont(.caption).foregroundColor(.secondary)
+                        }
+                    }.padding(.vertical, 6).emailHideSeparator()
                 }
                 if model.isLoading && model.items.isEmpty {
                     ProgressView("Finding your mail…").padding(.vertical, 32)

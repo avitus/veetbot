@@ -785,7 +785,12 @@ async def assert_another_or_scheduled_session_asks(tmp_path: Path) -> None:
                     update={"id": UUID(int=0x12C1), "approval_id": UUID(int=0x12C2)}
                 ).model_copy(update={"session_id": scheduled})
             )
-        scheduled_run = await harness.submit("Do today's lesson.", scheduled)
+        from tests.scheduled_run_support import submit_scheduled_seed
+
+        scheduled_run = await submit_scheduled_seed(
+            harness.composition, scheduled, "Do today's lesson."
+        )
+        await harness.drain()
         scheduled_approval = await asked(harness, scheduled_run, scheduled)
         grant = await harness.grant(grant_id)
 

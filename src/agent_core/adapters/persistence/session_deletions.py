@@ -29,6 +29,7 @@ from agent_core.adapters.persistence.people_erasure import (
     source_cleanup_receipts,
 )
 from agent_core.adapters.persistence.people_reference_index import reference_overlap
+from agent_core.adapters.persistence.reconsolidation_sources import erase_sources, lock_owner
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
@@ -273,6 +274,7 @@ class PostgresSessionDeletionRepository:
     async def _delete_with_people_lock(
         self, session_id: UUID, principal: Principal, deleted_at: datetime
     ) -> bool:
+        await lock_owner(self._session, principal)
         session_row = (
             await self._session.scalars(
                 select(SessionRow)
@@ -411,6 +413,12 @@ class PostgresSessionDeletionRepository:
                 MemoryRevisionRow.principal_id == principal.principal_id,
                 MemoryRevisionRow.payload["source_session_id"].astext == str(session_id),
             )
+        )
+        await erase_sources(
+            self._session,
+            principal,
+            list((await self._session.scalars(memory_ids)).all()),
+            deleted_at,
         )
         await self._session.execute(delete(MemoryRow).where(MemoryRow.id.in_(memory_ids)))
         await self._session.execute(
@@ -668,6 +676,12 @@ class InMemorySessionDeletionRepository:
     async def erase_call_source(
         self, principal: Principal, call_id: str, erased_at: datetime
     ) -> dict[str, int]:
+        async with self._memories._transaction.owner((principal.tenant_id, principal.principal_id)):
+            return await self._erase_call_source_locked(principal, call_id, erased_at)
+
+    async def _erase_call_source_locked(
+        self, principal: Principal, call_id: str, erased_at: datetime
+    ) -> dict[str, int]:
         locks = sorted(
             {
                 id(lock): lock
@@ -706,7 +720,10 @@ class InMemorySessionDeletionRepository:
         message_ids: frozenset[str],
         erased_at: datetime,
     ) -> dict[str, int]:
-        async with self._people.lock(principal):
+        async with (
+            self._memories._transaction.owner((principal.tenant_id, principal.principal_id)),
+            self._people.lock(principal),
+        ):
             return await self._erase_email_source_with_people_lock(
                 principal, account_id, thread_id, message_ids, erased_at
             )
@@ -792,7 +809,10 @@ class InMemorySessionDeletionRepository:
                 lock.release()
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
-        async with self._people.lock(principal):
+        async with (
+            self._memories._transaction.owner((principal.tenant_id, principal.principal_id)),
+            self._people.lock(principal),
+        ):
             return await self._delete_with_people_lock(session_id, principal, deleted_at)
 
     async def _delete_with_people_lock(
@@ -982,32 +1002,61 @@ class InMemorySessionDeletionRepository:
             for occurrence_id, occurrence in self._schedules._occurrences.items()
         }
 
-        self._memories._records = {
+        for record in self._memories._records.values():
+            if record.source_session_id == session_id or record.formation_run_id in run_ids:
+                self._memories._reconsolidation_index.record(record, erased=True)
+        retained_records = {
             key: value
             for key, value in self._memories._records.items()
             if value.source_session_id != session_id and value.formation_run_id not in run_ids
         }
-        self._memories._erasure_pending.intersection_update(self._memories._records)
-        self._memories._history = {
+        for key in list(self._memories._records):
+            if key not in retained_records:
+                del self._memories._records[key]
+            elif self._memories._records[key] != retained_records[key]:
+                self._memories._records[key] = retained_records[key]
+        for key in self._memories._erasure_pending - self._memories._records.keys():
+            self._memories._transaction.discard(self._memories._erasure_pending, key)
+        retained_history = {
             key: [(at, record) for at, record in value if record.source_session_id != session_id]
             for key, value in self._memories._history.items()
             if key in self._memories._records
         }
-        self._memories._rejections = {
+        for key in list(self._memories._history):
+            if key not in retained_history:
+                del self._memories._history[key]
+            elif self._memories._history[key] != retained_history[key]:
+                self._memories._history[key] = retained_history[key]
+        retained_rejections = {
             key: value
             for key, value in self._memories._rejections.items()
             if value.trace_id not in trace_ids
             and value.belief_id not in memory_ids
             and value.replacement_id not in memory_ids
         }
-        self._memories._consolidations = {
+        for key in list(self._memories._rejections):
+            if key not in retained_rejections:
+                del self._memories._rejections[key]
+            elif self._memories._rejections[key] != retained_rejections[key]:
+                self._memories._rejections[key] = retained_rejections[key]
+        retained_consolidations = {
             key: value
             for key, value in self._memories._consolidations.items()
             if value.session_id != session_id
         }
-        self._memories._watermarks = {
+        for key in list(self._memories._consolidations):
+            if key not in retained_consolidations:
+                del self._memories._consolidations[key]
+            elif self._memories._consolidations[key] != retained_consolidations[key]:
+                self._memories._consolidations[key] = retained_consolidations[key]
+        retained_watermarks = {
             key: value for key, value in self._memories._watermarks.items() if key[2] != session_id
         }
+        for key in list(self._memories._watermarks):
+            if key not in retained_watermarks:
+                del self._memories._watermarks[key]
+            elif self._memories._watermarks[key] != retained_watermarks[key]:
+                self._memories._watermarks[key] = retained_watermarks[key]
         removed_episode_ids = {
             key for key, value in self._episodes._records.items() if value.session_id == session_id
         }

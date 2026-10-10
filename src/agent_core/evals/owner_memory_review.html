@@ -1,0 +1,198 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try dreaming on your memories</title>
+<style>
+:root{color-scheme:light dark;--bg:light-dark(#f5f6f8,#141a21);--paper:light-dark(#fff,#202833);--ink:light-dark(#172235,#edf2f9);--muted:light-dark(#526078,#b7c5d9);--line:light-dark(#ccd4df,#4c5b70);--accent:light-dark(#1647ac,#9bbfff)}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,sans-serif}main{max-width:1060px;margin:auto;padding:32px 24px 72px}h1{font-size:32px;line-height:1.2;margin:8px 0 20px}h2{font-size:23px;line-height:1.3}h3{font-size:17px;margin:0}p{max-width:75ch}.eyebrow,.meta{font-size:14px;color:var(--muted)}.eyebrow{letter-spacing:.04em;font-weight:700}.intro{font-size:18px}.summary{display:flex;gap:28px;flex-wrap:wrap;padding:18px 0;border-block:1px solid var(--line);margin:24px 0}.summary strong{display:block}.layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:32px}.side{align-self:start;position:sticky;top:20px;background:var(--paper);padding:20px;border-radius:10px}.source{background:var(--paper);padding:22px;border:1px solid var(--line);border-radius:10px;margin:0 0 16px}.source.done{border-color:var(--accent)}blockquote{margin:12px 0 20px;font-size:19px;white-space:pre-wrap;overflow-wrap:anywhere}textarea{display:block;width:100%;font:18px/1.5 system-ui,sans-serif;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:7px;padding:12px;resize:vertical;margin:8px 0 12px}label{font-weight:600}.actions{display:flex;gap:10px;flex-wrap:wrap}button{font:inherit;min-height:44px;padding:10px 16px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);cursor:pointer}button.primary{background:var(--accent);color:light-dark(#fff,#141a21);border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}.side button{width:100%;margin-top:10px}details{font-size:14px;color:var(--muted);margin:12px 0}details pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:320px;overflow:auto;border-left:2px solid var(--line);padding-left:12px}.notice{background:var(--paper);border-left:4px solid var(--accent);padding:16px 20px}.result{padding:18px 0;border-bottom:1px solid var(--line)}[hidden]{display:none!important}#error{color:light-dark(#a21f2c,#ffa8b5)}@media(max-width:740px){main{padding:22px 18px}.layout{grid-template-columns:1fr;gap:12px}.side{position:static}.summary{gap:20px}h1{font-size:27px}.source{padding:18px}}
+</style>
+<main><div class="eyebrow">YOUR MEMORIES · PRIVATE LOCAL EXPERIMENT</div><h1>Try dreaming on information you confirm</h1><p class="intro">Choose at least two related statements from the same stored context. Check the comparison preview below before you run. Correct any wording in its text box and click <strong>Save correction</strong>, then click <strong>Use this statement</strong> for each input you want to send. You can leave the others out.</p><p>These drafts start from your stored memories and may include corrections you supplied. Saving a correction clears the current confirmations so you can review the new wording. Edits apply only to this experiment; your stored memories stay unchanged.</p><div class="summary"><div><span class="meta">Selected model</span><strong id="model">Loading…</strong></div><div><span class="meta">Maximum cost</span><strong>$0.25 · at most two calls</strong></div><div><span class="meta">Where changes happen</span><strong>Disposable test memory only</strong></div></div><p id="error" role="alert" hidden></p><section id="closed" class="notice" hidden>This experiment is closed. Its private contents have been discarded. Return to the chat to prepare another review.</section><div id="review" hidden><section id="results" hidden><h2>Your experiment result</h2><p id="outcome" class="notice" role="status"></p><p id="run-counts" class="meta"></p><div id="outputs"></div><details><summary>Execution details</summary><pre id="receipt"></pre></details></section><section class="notice" aria-label="Comparison preview"><h2>Which statements can be compared?</h2><p id="available-pairs"></p><p id="selection-preview" role="status" aria-live="polite"></p><p class="meta">This local check uses the pipeline’s matching rules. Different stored contexts stay separate, even when they mention the same topic. A compatible pair allows a test; it does not guarantee a useful change. Confirm only statements that are accurate.</p></section><div class="layout"><section><h2>Information you are choosing to supply</h2><p class="meta">Only the statement and its topic are sent as new input. Any original-message context under “Source details” stays local.</p><p id="correction-notice" class="notice" role="status" hidden>Correction saved for this experiment. Confirm the statements you now want to use.</p><div id="sources"></div></section><aside class="side"><h2>Your task</h2><p>1. Review the compatible pairs.<br>2. Correct and confirm the inputs you want.<br>3. Run when a selected pair is ready.</p><p id="progress" aria-live="polite"></p><button class="primary" id="run" disabled>Run this experiment · max $0.25</button><button id="cancel">Cancel & discard</button><p class="meta">No time limit. Saved corrections and selections survive refresh and tab closure while the local review server runs. Use Cancel &amp; discard when finished. Pressing Run confirms sending the selected text to the model shown above, up to $0.25.</p></aside></div><p class="meta">This tests the processing code on newly confirmed inputs. It does not replay your historical conversations, certify the whole memory bank or enable background dreaming. Your previous usefulness feedback remains separate.</p></div></main>
+<script>
+const $ = id => document.getElementById(id);
+let packet, preflight, confirmed = [], status = 'pending', busy = false;
+const selectionReasons = {
+  select_two: 'Select at least two statements that form one of the compatible pairs.',
+  different_contexts: 'Your selected statements are in different stored contexts. None can be compared together. Run is blocked; no model call or budget reservation will be made.',
+  not_portable: 'The selected statements cannot be combined under their sharing rules. Run is blocked.',
+  no_topic_overlap: 'The selected statements share a context, but the matcher found no related topic. Run is blocked.',
+  invalid_input: 'A selected input is unavailable or cannot be sent to this model. Remove it from your selection.'
+};
+function numbers(ids) { return ids.map(id => packet.sources.findIndex(s => s.reference_id === id) + 1).join(' and '); }
+function showCompatibility() {
+  $('available-pairs').textContent = preflight.pairs.length
+    ? 'Compatible pairs in this sample: ' + preflight.pairs.map(ids => 'statements ' + numbers(ids)).join('; ') + '.'
+    : 'This sample contains no compatible pair. Return to the chat for a different sample; selecting more statements here will not make it runnable.';
+  $('selection-preview').textContent = preflight.ready
+    ? (status === 'pending' ? 'Ready to compare: ' : 'Selected compatible pairs: ') + preflight.selected_pairs.map(ids => 'statements ' + numbers(ids)).join('; ') + '.' + (preflight.unmatched_selected.length ? ' Selected statement(s) ' + numbers(preflight.unmatched_selected) + ' have no partner and will not be compared.' : '')
+    : selectionReasons[preflight.reason];
+}
+function text(tag, value) {
+  const node = document.createElement(tag);
+  node.textContent = value;
+  return node;
+}
+function closeReview() {
+  $('review').replaceChildren();
+  $('review').hidden = true;
+  $('closed').hidden = false;
+  packet = null;
+}
+async function post(route, data) {
+  $('error').hidden = true;
+  const response = await fetch(route, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data || {})});
+  if (response.status === 410) {
+    closeReview();
+    throw Error('This review was closed. Return to the chat.');
+  }
+  if (!response.ok) {
+    const problem = await response.json();
+    if (response.status === 409) await load();
+    throw Error(selectionReasons[problem.error] || {
+      invalid_correction: 'Enter a nonempty correction of at most 2,048 bytes.',
+      changed_or_started: 'This review changed or has already started. Its current state is shown below.',
+      selection_changed: 'Your selection changed in another tab. Review the current selection, then press Run again.',
+      two_current_confirmations_required: 'Confirm at least two current, permitted statements before Run.'
+    }[problem.error] || 'This action could not be completed. Your current review is shown below.');
+  }
+  return response.json();
+}
+function update() {
+  if (!packet) return;
+  showCompatibility();
+  const pending = status === 'pending';
+  let unsaved = false;
+  document.querySelectorAll('[data-source]').forEach(button => {
+    const source = packet.sources.find(s => s.reference_id === button.dataset.source);
+    const card = button.closest('article');
+    const field = card.querySelector('textarea');
+    const dirty = field.value !== source.statement;
+    const done = confirmed.includes(source.reference_id);
+    unsaved ||= dirty;
+    field.disabled = !pending || busy;
+    card.querySelector('[data-edit]').disabled = !dirty || !pending || busy;
+    button.disabled = dirty || !pending || busy;
+    button.textContent = dirty ? 'Save correction first' : done ? '✓ Selected — remove' : 'Use this statement';
+    card.classList.toggle('done', done && !dirty);
+  });
+  $('progress').textContent = status === 'running' ? 'Running the proposal and verification…'
+    : status === 'finished' ? 'Experiment finished. Review the result above. Return to the chat if you want a new review.'
+    : unsaved ? 'Save your correction before continuing.'
+    : `${confirmed.length} of ${packet.sources.length} statements selected. ${preflight.ready ? 'A compatible pair is ready.' : 'No compatible pair selected.'}`;
+  if (unsaved) $('selection-preview').textContent = 'Save your correction to refresh the compatibility check, then confirm the updated inputs.';
+  $('run').disabled = !pending || busy || unsaved || !preflight.ready;
+  $('run').textContent = `Run with ${confirmed.length} statements · max $0.25`;
+}
+function showPacket() {
+  $('model').textContent = packet.provider + ' / ' + packet.model;
+  const host = $('sources');
+  host.replaceChildren();
+  packet.sources.forEach((source, index) => {
+    const card = text('article', '');
+    card.className = 'source';
+    card.append(text('h3', `${index + 1}. ${source.subject}`));
+    const meta = text('p', `Stored context: ${source.scope} · Original status: ${source.status}`);
+    meta.className = 'meta';
+    const label = text('label', 'Text to use — edit here to correct it');
+    label.htmlFor = `input-${source.reference_id}`;
+    const field = document.createElement('textarea');
+    field.id = label.htmlFor;
+    field.value = source.statement;
+    field.rows = source.statement.length > 160 ? 5 : 3;
+    field.maxLength = 2048;
+    field.oninput = update;
+    const partners = preflight.pairs.filter(pair => pair.includes(source.reference_id)).flatMap(pair => pair.filter(id => id !== source.reference_id));
+    const compatibility = text('p', partners.length ? 'Can compare with statement(s) ' + numbers(partners) + '.' : 'No compatible partner in this sample.');
+    compatibility.className = 'meta';
+    card.append(meta, compatibility, label, field);
+    const actions = text('div', '');
+    actions.className = 'actions';
+    const save = text('button', 'Save correction');
+    save.dataset.edit = source.reference_id;
+    save.onclick = async () => {
+      const statement = field.value;
+      busy = true;
+      update();
+      try {
+        await post('edit', {packet_digest:packet.packet_digest, reference_id:source.reference_id, statement});
+        await load();
+        if (packet) $('correction-notice').hidden = false;
+      } catch (error) { fail(error); }
+      finally { busy = false; update(); }
+    };
+    const use = text('button', 'Use this statement');
+    use.dataset.source = source.reference_id;
+    use.onclick = async () => {
+      busy = true;
+      update();
+      try {
+        if (confirmed.includes(source.reference_id)) {
+          await post('unconfirm', {packet_digest:packet.packet_digest, reference_id:source.reference_id});
+        } else {
+          await post('confirm', {packet_digest:packet.packet_digest, reference_id:source.reference_id, human_confirmed:true});
+        }
+        await load();
+      } catch (error) { fail(error); }
+      finally { busy = false; update(); }
+    };
+    actions.append(save, use);
+    card.append(actions);
+    const details = text('details', '');
+    details.append(text('summary', 'Original source details'));
+    details.append(text('p', `Stored memory reference: ${source.reference_id}. Original context below stays local; the text box above is the input you choose to send.`));
+    source.retained_source_text.forEach(value => details.append(text('pre', value)));
+    if (!source.retained_source_text.length) details.append(text('p', 'Original-message context is unavailable for this sample.'));
+    card.append(details);
+    host.append(card);
+  });
+  $('review').hidden = false;
+  update();
+}
+function fail(error) {
+  $('error').hidden = false;
+  $('error').textContent = error.message;
+}
+function results(result) {
+  if (!result) return;
+  const firstResult = $('results').hidden;
+  $('results').hidden = false;
+  $('correction-notice').hidden = true;
+  const operations = result.operations || [];
+  $('outcome').textContent = result.summary;
+  $('run-counts').textContent = `${result.groups ?? 0} related group(s) · ${result.calls ?? 0} model call(s).` + (result.reserved_usd ? ` Budget reserved: $${result.reserved_usd}; this is a spending allowance, not the provider’s bill.` : '');
+  $('outputs').replaceChildren();
+  operations.forEach(operation => {
+    const node = text('article', '');
+    node.className = 'result';
+    node.append(text('h3', {hypothesis:'Tentative connection', summary:'Related-memory summary', merge:'Equivalent statements merged', conflict:'Possible conflict'}[operation.kind] || operation.kind), text('blockquote', operation.text), text('p', `Uses statement(s): ${operation.source_ids.map(id => packet.sources.findIndex(s => s.reference_id === id) + 1).join(', ')}`));
+    $('outputs').append(node);
+  });
+  if (firstResult) $('results').scrollIntoView({block:'start'});
+  $('receipt').textContent = JSON.stringify({calls:result.calls, groups:result.groups, reason:result.reason, reserved_usd:result.reserved_usd, usage:result.usage, reviews:result.reviews, application:result.application}, null, 2);
+}
+async function load() {
+  const response = await fetch('packet', {cache:'no-store'});
+  if (response.status === 410) { closeReview(); return; }
+  if (!response.ok) throw Error('This local review is unavailable.');
+  const data = await response.json();
+  const changed = !packet || packet.packet_digest !== data.packet.packet_digest;
+  packet = data.packet;
+  confirmed = data.confirmed;
+  preflight = data.preflight;
+  status = data.status;
+  if (changed) showPacket();
+  update();
+  results(data.result);
+  if (status === 'running') setTimeout(() => load().catch(fail), 1500);
+}
+$('run').onclick = async () => {
+  busy = true;
+  update();
+  try {
+    await post('run', {packet_digest:packet.packet_digest, reference_ids:confirmed, human_confirmed:true});
+    status = 'running';
+    await load();
+  } catch (error) { fail(error); }
+  finally { busy = false; update(); }
+};
+$('cancel').onclick = async () => {
+  try { await post('cancel'); closeReview(); }
+  catch (error) { fail(error); }
+};
+load().catch(fail);
+</script></html>

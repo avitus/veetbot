@@ -31,6 +31,7 @@ from agent_core.ports.model_settings import ModelSettingsStore
 from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.personas import PersonaStore
+from agent_core.ports.reconsolidation import ReconsolidationStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -86,6 +87,7 @@ class RepositoryUnitOfWork(Protocol):
     skills: SkillRepository
     mcp_servers: MCPServerRepository
     memories: MemoryStore
+    reconsolidation: ReconsolidationStore
     episodes: IntegratedEpisodeStore
     traces: TraceStore
     personas: PersonaStore

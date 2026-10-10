@@ -1,0 +1,12 @@
+# Opt-in private account definitions; merged after docker-compose.production.yml.
+services:
+  browser-profile-service:
+    environment:
+      BROWSER_PROFILE_VERIFICATION_FILE: /run/secrets/browser-profile-verification.json
+    volumes:
+      - type: bind
+        source: ${BROWSER_PROFILE_VERIFICATION_FILE:?private catalog path required}
+        target: /run/secrets/browser-profile-verification.json
+        read_only: true
+        bind:
+          create_host_path: false

@@ -24,6 +24,18 @@ class PeopleStore(Protocol):
         at_revision: int | None = None,
     ) -> PeopleRecord | None: ...
 
+    async def memory_attribution_records(
+        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
+    ) -> tuple[PeopleRecord, ...] | None:
+        """Under the People lock, read at most 64 current source/mention/link records.
+
+        Return None if any matching head is hidden or the bound is exceeded;
+        filtering hidden attribution into an apparently unattributed belief is unsafe.
+        Opaque reverse attribution survives payload purge. A legacy purged head
+        with unknown attribution conservatively returns None for its owner.
+        """
+        ...
+
     async def source_suppressed(self, principal: Principal, source_id: UUID) -> bool: ...
 
     async def is_erased(self, principal: Principal, record_id: UUID) -> bool: ...

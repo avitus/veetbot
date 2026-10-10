@@ -1584,3 +1584,21 @@ Chat proposal parks in the ordinary queue.
 ADR-0143 adds the exact `notification.write` scope for the bounded notification
 sync route. It authorizes terminal-result receipts and reconciliation, never
 approval resolution, question input, device actions or mutation of run state.
+
+## Specific owner Follow consent (ADR-0172)
+
+An authenticated owner's complete instruction to follow one resolved X account
+is single-action consent. The application records its target on the owner
+message, validates ownership and current website access, and consumes it once
+before a matching dispatch. It applies only to a top-level interactive owner
+run, within thirty minutes and before any subsequent owner message supersedes
+it. Scheduled text, delegated work, inbound-surface content, memory and website
+text cannot supply that consent. Policy DENY decisions remain final.
+
+When policy returns REQUIRE_APPROVAL for the exact Follow action, this recorded
+consent satisfies it without a second prompt. Authorization is audited as
+`owner_action`; the isolated runtime rechecks a constrained profile and control,
+and completion requires positive Following evidence on that profile. Changed
+targets and unrelated writes retain their normal approval rules. A consumed or
+uncertain request cannot authorize another click. Verified connection/sign-in
+resumes the same bounded request; it does not create general browser authority.

@@ -245,6 +245,42 @@ _REGENERABLE_TITLE_SOURCES = tuple(source.value for source in REGENERABLE_TITLE_
 
 
 class PostgresSessionRepository:
+    @asynccontextmanager
+    async def admission(self, session_id: UUID, principal: Principal) -> AsyncIterator[Session]:
+        yield await self.lock(session_id, principal)
+
+    async def lock(self, session_id: UUID, principal: Principal) -> Session:
+        row = (
+            await self._session.scalars(
+                select(SessionRow)
+                .where(
+                    SessionRow.id == session_id,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("session not found")
+        return session_to_domain(row)
+
+    async def bind_browser_profile(
+        self, session_id: UUID, principal: Principal, profile_id: UUID
+    ) -> Session:
+        session = await self.lock(session_id, principal)
+        metadata = {**session.metadata, "browser_profile_id": str(profile_id)}
+        await self._session.execute(
+            update(SessionRow)
+            .where(
+                SessionRow.id == session_id,
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+            )
+            .values(metadata_json=metadata)
+        )
+        return session.model_copy(update={"metadata": metadata})
+
     def __init__(self, session: AsyncSession, *, created: set[UUID] | None = None) -> None:
         self._session = session
         self._created = created

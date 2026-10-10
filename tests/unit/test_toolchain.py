@@ -391,6 +391,26 @@ def test_production_compose_preserves_browser_profile_isolation() -> None:
     assert "browser-profile-material" in production_compose["volumes"]
 
 
+def test_optional_account_catalog_mount_is_isolated_and_read_only() -> None:
+    overlay = yaml.safe_load(
+        (ROOT / "deploy/docker-compose.browser-verification.yml").read_text(encoding="utf-8")
+    )
+    assert set(overlay["services"]) == {"browser-profile-service"}
+    service = overlay["services"]["browser-profile-service"]
+    assert set(service) == {"environment", "volumes"}
+    target = "/run/secrets/browser-profile-verification.json"
+    assert service["environment"] == {"BROWSER_PROFILE_VERIFICATION_FILE": target}
+    assert service["volumes"] == [
+        {
+            "type": "bind",
+            "source": "${BROWSER_PROFILE_VERIFICATION_FILE:?private catalog path required}",
+            "target": target,
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+
+
 def test_browser_profile_dockerfile_preserves_process_isolation() -> None:
     deploy = ROOT / "deploy"
     profile_dockerfile = (deploy / "browser-profile-service.Dockerfile").read_text(encoding="utf-8")
@@ -2080,13 +2100,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 31 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 32 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(32)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(33)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -2109,7 +2129,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 32):
+    for milestone in range(12, 33):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 

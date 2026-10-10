@@ -176,6 +176,14 @@ rate_limited                429  reserved; see "Limits" below
 shape now is free; discovering after release that clients cannot
 distinguish it from `conflict` is not.
 
+Milestone 32 adds `validation_error` with HTTP `400` and empty `details` for
+invalid requests to `/v1/memory-reconsolidations` and its detail/undo routes
+(ADR-0169). It covers route/body validation and the application-level
+`ReconsolidationValidationError`, including bad cursor bindings. Existing
+resources retain their current validation codes. The operation schemas and
+default-off activation flags are owned by
+[memory-reconsolidation.md](memory-reconsolidation.md).
+
 ### Three codes carry `details`, and the rest carry nothing
 
 ```json
@@ -302,8 +310,7 @@ implementer would otherwise have to make alone.
 
 **The health endpoints are unauthenticated.** A liveness probe that
 needs a credential is a liveness probe that fails when the credential
-rotates. `GET /health/live` and `GET /health/ready` are the only
-unauthenticated routes, and the shape of what they return is chosen so
+rotates. `GET /health/live` and `GET /health/ready` are unauthenticated routes, and the shape of what they return is chosen so
 that being unauthenticated is safe — see the health section below.
 
 **Token comparison is constant time and the token is never logged.**
@@ -885,6 +892,31 @@ Section 16 fixes the request body, the `202 Accepted`, the response
 original run. What follows is the order of operations, the conflict
 behaviour, and the disambiguation of a word the corpus uses for two
 unrelated things.
+
+### Connecting an existing conversation (ADR-0172)
+
+`POST /v1/sessions/{session_id}/messages` accepts an optional top-level
+`browser_profile_id` UUID. Selection requires `session.write` and
+`browser.profile.read` in addition to `run.write`, and participates in the
+message's idempotency hash. Raw metadata cannot forge this binding.
+
+`PUT /v1/sessions/{session_id}/website` accepts the closed body
+`{"browser_profile_id": "uuid"}` and returns `200 {"run_id": null}` for an
+idle selection, or the resumed original run UUID for a missing-access wait.
+It requires `session.write` and `browser.profile.read`; resumption also requires
+`run.write`. Both session and profile are tenant/principal scoped (404 for an
+unowned resource). Malformed input returns 400, missing scope 403, and closed
+sessions, unavailable profiles or conflicting active work 409. READY,
+AUTHENTICATION_REQUIRED and NEEDS_USER profiles may be selected for idle work;
+resuming a missing-access wait requires READY access to its requested origin.
+The session admission lock serializes selection and run creation. The same
+selection is idempotent; changing an active run's account is rejected.
+
+A verified connection resolves only the pending preflight question and emits
+`browser.connection.resumed`, never a fabricated owner message. Replaying the
+same connection cannot create another run or another action. Cancelled, expired
+or nonwaiting requests cannot resume. The native Website Access entry connects
+the originating chat and watches the resumed run after successful sign-in.
 
 ### The handler's order of operations
 
@@ -2290,3 +2322,30 @@ revision; an unchanged list does not advance its revision. Disabled routes
 return 404. The server stores even an empty list, and removing scopes ends
 their unended task grants in the same transaction. See
 [browser-automation.md](browser-automation.md) for the retained task limits.
+
+
+## Owner-reviewed dreaming web surface (ADR-0174)
+
+When `AGENT_MEMORY_DREAMING_REVIEW_ENABLED`, `AGENT_MEMORY_API_ENABLED` and
+`AGENT_MEMORY_RECONSOLIDATION_API_ENABLED` are enabled, `/dreaming` serves a
+content-free public HTML shell and its two same-origin CSS/JavaScript assets.
+All memory content requires the existing owner bearer token: the page retains
+it only in tab memory, never cookies or browser storage. Remote use requires
+HTTPS. The shell uses a restrictive CSP and renders untrusted prose as text.
+
+`GET /v1/dreaming` requires `memory.read` and returns the durable schedule and
+latest fifty content-free run outcomes. `POST /v1/dreaming/schedule` requires
+`memory.write` and a strict `{paused, expected_revision}` body. Repeating the
+same change at the immediately previous revision is safe. Daily runs occur
+at most once per 24 hours through maintenance, with no missed-day catch-up.
+
+`POST /v1/dreaming/{operation_id}/decision?ceiling=...` requires both memory
+scopes, a bounded `Idempotency-Key`, and a strict body containing
+`expected_revision` and `decision` (`approved` or `rejected`). It revalidates
+sources and binds the exact stored revision under the owner/People transaction.
+It accepts no replacement text. Same-decision retries replay safely; competing
+or stale decisions return 409. Foreign IDs return 404. Responses use
+`Cache-Control: private, no-store`. The existing operation list/get and merge
+undo routes provide inspection, pagination and reversal. Disabling the review
+flag removes the new routes and reviewed recall; the existing inspection and
+undo API remains independently configurable.

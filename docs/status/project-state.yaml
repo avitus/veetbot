@@ -12,6 +12,9 @@ project:
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   current_milestone: 14
   active_milestone: 15
+  # ADR-0172 records the owner-approved same-chat website continuation repair,
+  # interactive authority for owner replies, and specific single-action X follow
+  # consent. No milestone or gate moves; production acceptance awaits delivery.
   # ADR-0168 records the owner's 2026-10-09 browser approval repair: the
   # default policy permits a bounded scroll in an owner-originated task,
   # including schedules, while other actions retain their approval rules.
@@ -239,9 +242,757 @@ project:
     - 29
     - 30
     - 31
+    - 32
 
 
 milestones:
+  '32':
+    title: Memory reconsolidation (dreaming)
+    status: in_progress
+    authorized_on: '2026-10-02'
+    design: docs/plan/memory-reconsolidation.md
+    design_status: specified
+    adr: docs/adr/0169-milestone-32-memory-reconsolidation.md
+    gates_registered: 24
+    authorized_scope:
+    - Periodically revisit the entire eligible memory bank within one tenant and principal through bounded resumable maintenance
+    - Daily proposals and an authenticated web review page with individually approved production application; unattended application remains evidence-gated (owner authorized 2026-10-10, ADR-0174)
+    - Merge equivalent beliefs, summarize related memories without losing atomic facts, and synthesize grounded tentative connections across sessions
+    - Preserve provenance, evidence clocks, authority, portability, sensitivity, owner corrections and erasure; expose inspection and safe merge undo
+    - Compare against existing maintenance using Milestone 16 and applicable Milestone 21 evidence before unattended activation
+    deferred_scope:
+    - Embeddings, external memory providers, learned memory policies, arbitrary multi-hop graph reasoning and external enrichment
+    - New source admission, automatic persona edits, changes to People identity merge rules and automatic historical re-extraction
+    open_items:
+    - Deploy owner-reviewed dreaming (ADR-0174) and enable its documented shared configuration in every application role
+    - Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
+    - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
+    - Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before unattended production activation
+    evidence:
+    - check: Owner-reviewed daily dreaming implementation (2026-10-10, ADR-0174)
+      outcome: implemented_pending_deployment
+      detail: >-
+        A separate default-off review flag composes one bounded daily provider slice,
+        durable paused/due state and content-free run history. Locally validated
+        operations remain pending until an authenticated, revision-bound owner
+        approval makes them eligible for recall. Pending/rejected operations and
+        legacy unapproved automatic operations stay out of reviewed recall. The
+        private web page at /dreaming supports sources, explicit approval, rejection,
+        merge undo, history and pause/resume with no browser credential storage.
+        Original evidence, source privacy, expiry and erasure are unchanged.
+        Migration ea3210a1b00c preserves this state and refuses destructive downgrade.
+        Fabricated red assertions reproduced premature merge visibility, ineffective
+        approval, missing daily claims, missing approval delta recall and pending
+        merges replaying unchanged originals into session deltas; they pass
+        after the corresponding store changes. The focused M32 suite passes 692
+        tests in 38.67 seconds, with fourteen additional focused edge checks in
+        1.74 seconds and a passing real Chromium approval/undo/rejection/reload flow.
+        No frozen observations, owner judgments, evaluation thresholds or provider
+        comparison artifacts changed. No live provider comparison was rerun for this
+        owner-control change. Deployment and enabling the reviewed configuration in
+        all application roles remain; unattended quality remains failed.
+    - check: Owner-authorized integration with current dev (2026-10-09)
+      outcome: integrated_pending_quality_and_activation
+      detail: >-
+        The owner explicitly authorized integrating the entire unpublished M32
+        implementation and renumbering its colliding ADRs. ADRs 0148, 0149 and
+        0150 from that worktree are now 0169, 0170 and 0171; approval dates and
+        decisions are unchanged. Frozen evaluation code, manifests, observations
+        and human review artifacts retain their original bytes and identifiers.
+        Integration preserves dev's completed Milestone 14 and all existing gates;
+        the registry now has 595 entries, including M32's unchanged 24. The M32
+        migration chain follows f7c4a2d9e681 and has one head, ea3210a1b00b.
+        The combined focused M32, model-gateway and registry partition passes
+        986 tests in 59.12 seconds wall time; the Apple package passes 704 tests in
+        67.15 seconds. Full sidecar make check passes 5990 static tests (3 skipped),
+        1483 contracts and 312 real-browser tests, plus website, deployment, lint,
+        types and documentation. Its wall time is 691.65 seconds; make stages take
+        687.062 seconds elapsed with 542.161 seconds of overlap. Browser tests are
+        slowest at 596.247 seconds, followed by static tests at 438.049 seconds.
+        UTF-8 PostgreSQL verification passes all 256 M32 cases and four existing
+        title cases. Twelve migration checks pass across focused runs after direct
+        repository fixtures bind the required transaction-local tenant context.
+        The downgrade race now exercises both the original destructive-DDL guard
+        and the later grounded-operation guard, preserving the original refusal
+        and every history assertion. No production guard was relaxed. The recorded
+        live comparison predates this integration and cannot authorize its release.
+        No quality or activation gate is advanced; production dreaming stays off.
+    - check: Connection classification and merge ranking repairs (2026-10-09)
+      outcome: implemented_quality_still_failed
+      detail: >-
+        Five fabricated red assertions exposed hedged original copies admitted as
+        connections, duplicate claims treated as distinct observations and a canonical
+        merge discarding the best visible member's rank. Local connection admission
+        and source-only proposal/verifier instructions now enforce the documented
+        distinction between summaries and novel connections. Merge recall preserves
+        the strongest visible score without changing canonical identity or evidence.
+        The focused partition passes 840 tests, and eight comparison tests include
+        a fabricated no-operation case with identical answer requests across arms.
+        One preserved pre-bound comparison completed all 216 attempts with 408 calls,
+        USD 3.53385250, no unknown usage and 862.20 seconds wall time against a USD 10
+        ceiling. Original/merge/connection answer counts are 14/18/14 on development
+        and 17/17/19 on holdout, each out of 36. Merge-answer nonregression passes;
+        answer lift remains 0 and 5.56 percentage points, below the unchanged 10-point
+        floor. False merges and lost facts stay zero and duplicate coverage is complete.
+        Six development and five holdout hypotheses remain unverified in
+        20261009-quality-review-v2; exact v1 wording matches remain zero. The owner
+        subsequently stopped repeated review requests. This supplies no new judgments
+        and does not reopen either completed owner review. Prior decisions,
+        all ten historical artifacts, frozen controls, scoring rules and numeric floors
+        are unchanged. A subsequent PostgreSQL optional-reader repair returns absence
+        for a foreign tenant instead of propagating the guard's NotFoundError. That
+        repair passes the existing regression plus 32 recall/history scenarios with
+        RLS bypass disabled. Three migration/RLS checks pass with their required
+        administrator setup and restricted-role assertions. The reader repair is
+        outside this comparison's source digest; the recording is diagnostic and
+        non-activating. The inspected holdout was not used for repair tuning.
+        No gate or verified ceiling advances; production remains disabled.
+    - check: Development recall and answer-failure diagnosis (2026-10-09)
+      outcome: no_additional_recall_defect_reproduced
+      detail: >-
+        A provider-free replay seeded only the development runtime inputs and locally
+        planned the six recorded development connections from the October 9 comparison.
+        All six appeared in recall alongside their originals under the unchanged
+        query, scope and token/item budget. This isolates the recall path; it does not
+        rerun or validate proposal/verifier decisions and is not a new quality score.
+        In the recorded connections arm, 14 of 36 development answers pass the frozen
+        scorer. Of the 22 failures, 16 have supported content but extra answer wording;
+        six concern information unavailable under the frozen scope or attribution.
+        Both connection-bearing probes ask for facts already present in the originals.
+        The observed development failure does not justify widening privacy, changing
+        expected answers or tuning runtime output to inspected labels. No holdout
+        details were inspected, no provider calls were made, and no observations,
+        judgments, scoring rules or floors were changed. The latest precision remains
+        unverified and answer lift still fails; production remains disabled.
+    - check: ADR-0171 completed owner-data experiment and usefulness review (2026-10-09)
+      outcome: owner_reviewed_useful
+      detail: >-
+        Experiment 95630466-a38b-4cdb-8291-2c147090b45b completed with four
+        owner-confirmed inputs, one eligible related group, two model calls and
+        one accepted related-memory summary in the disposable store. Settled
+        provider usage was USD 0.03793375 against the USD 0.25 reservation.
+        The owner reviewed the actual output and judged it useful. This completes
+        the isolated experiment's owner review; private input/output remains
+        outside the repository. It does not resolve legacy bank attribution,
+        comparative quality failures or release gates, and production stays off.
+    - check: ADR-0171 credential selection and failure receipts (2026-10-09)
+      outcome: implemented
+      detail: >-
+        The owner instructed continuation after a failed experiment. The launcher
+        now uses the application's canonical OpenAI credential before its alias
+        and checks selected-model access without sending fixture text before opening
+        a review. Red assertions reproduced wrong credential precedence, missing
+        startup refusal and a real-adapter authentication error hidden by releasing
+        unfinished groups. The isolated runner now completes those claims and
+        preserves its finite execution reason, group count and call receipts without
+        retrying. Fabricated tests cover precedence, whitespace, compatibility
+        fallback, authentication/model/server refusal, network timeout and receipt
+        retention. No production source admission or activation gate changes.
+    - check: ADR-0171 review lifetime and submission consent (2026-10-09)
+      outcome: implemented
+      detail: >-
+        The owner authorized removing review expiry. The local review now retains
+        saved corrections, selections and results until explicit discard or process
+        shutdown, including across refresh and tab closure. Run binds the current
+        selected references and packet to a fresh submission; the runner refuses
+        stale submissions without changing per-input evidence timestamps. Ninety-one
+        fabricated-input cases pass across the fixture, review and preflight suites,
+        including two-day waits, fresh/stale submission boundaries, selection
+        mismatch, zero-spend refusal and shutdown disposal. Two red assertions first
+        reproduced automatic deletion on access and startup. Browser checks verified
+        saved correction/selection recovery, a fake-provider run after reopening,
+        and result retention on refresh. No production or activation gate changes.
+    - check: ADR-0171 compatibility preview and outcome explanations (2026-10-09)
+      outcome: implemented
+      detail: >-
+        Thirty-one added fabricated-input cases cover the three-context selection,
+        preview/inventory parity, zero-reservation refusal in both entry points,
+        eligibility and sharing floors, correction invalidation, removal of a
+        selection and distinct empty/error explanations. Red assertions reproduced
+        the missing preview, a direct no-group execution that reserved budget, the
+        absent removal route and an unexplained abstention. Browser checks confirmed
+        blocked incompatible selections, recovery to a matching pair, corrections,
+        a completed fake-provider run and layouts at 390 and 1280 pixels. This
+        changes the isolated review only; production rules and quality gates remain.
+    - check: ADR-0171 selected inputs and editable corrections (2026-10-08)
+      outcome: implemented
+      detail: >-
+        Twelve added fabricated-input cases cover selecting three of four drafts,
+        keeping unselected text out of storage/provider requests, the two-input
+        minimum, editable corrections and fresh confirmation, classification and
+        reference preservation, malformed/oversized and cross-origin requests,
+        stale concurrent writes and refusal to edit a started experiment. Red
+        tests reproduced subset refusal, the missing correction route and a
+        stale correction overwriting newer text. Corrections affect only the
+        isolated experiment; production admission and quality gates are unchanged.
+    - check: ADR-0171 isolated runner and local review boundaries (2026-10-08)
+      outcome: implemented
+      detail: >-
+        Thirty-two fabricated-input tests cover absent/changed/stale confirmation,
+        source exclusions and egress, per-gesture timestamps and fresh identities,
+        duplicate evidence, cross-owner and concurrent daily reservations, real
+        proposal/verification and accepted writers, rejection/abstention, unknown
+        usage, cancellation/timeout, loopback Host/Origin/capability controls,
+        bounded commands, expiry, cancellation and one-time execution. Initial
+        assertions reproduced absent confirmation refusals, missing reservations,
+        unbounded concurrent admission, zero execution calls, unprotected review
+        routes and a cancellation receipt that lost its attempted call count.
+        No real owner input has been sent and no activation gate advances.
+    - check: ADR-0171 owner approval (2026-10-08)
+      outcome: authorized
+      detail: >-
+        The owner confirmed approval of ADR-0171 after clarification of its number.
+        This authorizes an isolated owner-confirmed fixture evaluation path, not
+        production changes or provider export. Exact-text confirmation naming the
+        selected provider/model and USD 0.25 ceiling, implementation verification
+        and durable experiment spending limits remain required before a live run.
+        Legacy attribution refusal and all quality/release requirements remain.
+    - check: owner authorization of broader memory reconsolidation
+      outcome: authorized
+      detail: >-
+        On 2026-10-02 the owner said "Authorize that and propose a plan"
+        for revisiting the entire memory bank, merging related beliefs and
+        synthesizing new connections. This records scope authorization and
+        a documentation-only proposal, not implementation or passing gates.
+    - check: Phase 1 design and evaluation yardstick (2026-10-03)
+      outcome: specified
+      detail: >-
+        The owner instructed engineering to begin. Detailed operation, store,
+        migration, provider, lifecycle, API and native contracts now declare
+        twenty-four registered gates. The first two bind the frozen corpus
+        and transitive false-merge scorer checks; twenty-two runtime/release
+        gates remain explicitly pending. Twenty-four synthetic cases split
+        evenly between development and holdout, a pure deterministic scorer
+        and a manifest pinning unchanged M16 controls establish the yardstick;
+        no dreaming arm or production activation is claimed.
+    - check: Phase 1 registry and scoring behavioral red tests
+      outcome: observed_expected_failure
+      detail: >-
+        The focused registry grammar/count, census, maximum-bound and docs-plan
+        tests failed at assertions because 568 entries lacked the 24 M32 gates,
+        the bound was 31 and a missing M32 plan section was not rejected.
+        The new scorer's transitive false-merge and duplicate-hypothesis tests
+        failed because its initial empty score reported zero errors and zero
+        denominators. The missing-pytest setup attempt is not red evidence.
+    - check: Phase 2 durable maintenance foundation (2026-10-03)
+      outcome: implemented
+      detail: >-
+        Both adapters now expose owner-scoped leases, content revisions,
+        immutable creation sequences, bounded full/change inventory, durable
+        groups, reservations and content-free receipts. Shared maintenance
+        tests cover recovery, erasure filtering, retries, scope, pending work
+        and exact spend across UTC midnight. A 100000-record scan covers all
+        original keys despite new inserts and recent churn. PostgreSQL checks
+        cover concurrent claims/reservations, transaction rollback and bounds
+        waiting for in-flight source commits. The maintenance worker's bounded
+        background slot is not connected in production composition. Full
+        operation/dependency/undo parity, entity grouping, provider prepricing
+        and release evidence remain open; no runtime gate is marked complete.
+    - check: Phase 2 behavioral red tests
+      outcome: observed_expected_failure
+      detail: >-
+        The first owner lease test failed because claim_due returned no job.
+        Additional assertions reproduced stranded pending groups after inventory
+        completion, admission of sub-database-precision spend, PostgreSQL grouping
+        of nonportable user-scope sources, and missing background dispatch and
+        inventory queuing. A migration race also reproduced a newly committed
+        job being lost during downgrade; owner-serialized downgrade guards now
+        refuse it. These failures preceded their implementations.
+    - check: Phase 2 atomic memory boundary and inventory continuation (2026-10-03)
+      outcome: implemented
+      detail: >-
+        Original memory and maintenance state now share a write-proportional
+        in-memory rollback journal. Shared scenarios cover source/history/revision
+        rollback, aborted erasure and spend, cancellation and concurrent admission.
+        Child tasks cannot inherit write ownership; People and erasure paths take
+        an owner memory guard on first access. Existing contention and email
+        latency regressions reject locking every unit-of-work entry; other owners
+        and unrelated email reads remain independent. Rollback preserves other
+        owners' committed checkpoints and memory histories during source cleanup.
+        Changed anchors precede the reserved full lane,
+        and checkpoints must match the recomputed bounded page. Regression tests
+        first reproduced retained aborted writes and erased originals, changed-lane
+        ordering and skipped inventory checkpoints. Full operation/dependency/undo
+        parity and production activation remain open; no runtime gate is completed.
+    - check: Phase 3 local merge and undo policy (2026-10-05)
+      outcome: implemented
+      detail: >-
+        A pure planner verifies exact-equivalence fields, original source revisions,
+        resolved attribution, eligibility, erasure/rejection decisions and active
+        membership before returning a content-free merge plan. Local transitions
+        invalidate changed support and compute revision-checked, idempotent undo
+        without restoring changed, erased or expired originals. Pair signatures
+        preserve undo across subject/policy changes and copies of the same original
+        evidence. Unit tests first reproduced missing valid plans, admission of
+        distinct or ineligible claims, missing provenance/blocks, absent invalidation
+        and unsafe undo. Durable operations/dependencies/membership,
+        atomic commit/undo, recall and surface wiring remain open; these tests do
+        not complete a runtime gate or activate processing.
+    - check: Phase 3 authenticated source planning (2026-10-05)
+      outcome: implemented
+      detail: >-
+        Both repositories now plan only currently claimed groups under the owner
+        and People locks, rechecking leases, slice deadlines, original revisions,
+        retained owner events, erasure fences, current People attribution and
+        outstanding rejection text or tombstone hashes. Shared contracts verify
+        immutable originals, complete bounded leaf reads, current attribution,
+        sensitivity, hidden and purged links, owner isolation and stale leases.
+        Behavioral reds reproduced missing valid plans, sensitive attribution
+        admission, purged-link admission, source identity/support mismatch and
+        PostgreSQL People locking ahead of the original-memory owner guard.
+        The lock-order regression now passes on PostgreSQL. Planning is read-only;
+        persisted operations, membership, undo, recall and production admission
+        remain open, and no complete runtime gate is claimed.
+    - check: Phase 3 transactional attribution fences (2026-10-05)
+      outcome: implemented
+      detail: >-
+        Both repositories retain owner-bound opaque attribution keys after People
+        payload purge and advance original content revisions atomically with
+        attribution changes. Unrelated purged heads no longer disable the owner's
+        bank; legacy heads purged before the metadata migration remain unknown
+        and conservatively withhold planning. Original payloads, source clocks and
+        insertion order remain unchanged. Shared regression scenarios cover
+        identity changes, link reassignment, mention roles, source-copy rebasing,
+        repeated purge, principal erasure, rollback and concurrent writes.
+        Behavioral reds reproduced owner-wide purge blocking, missing content
+        revisions, retained aborted People writes, missed rebasing revisions,
+        direct writes bypassing the owner lock, purged dependency edges and
+        oversized PostgreSQL attribution parameter lists. Array-bound bulk lookups
+        retain exact session/event pairs.
+        Migration checks verify opaque backfill, unchanged evidence and downgrade
+        serialization with in-flight owner answers. RLS-filtered migration roles
+        now fail after regression assertions reproduced unsafe upgrade and
+        downgrade admission. Persisted operations,
+        membership, atomic commit/undo, recall and production admission remain
+        open; no runtime gate is completed by these foundations.
+    - check: Phase 3 durable deterministic merge operations (2026-10-05)
+      outcome: implemented
+      detail: >-
+        Both repositories atomically persist merge metadata, original dependencies,
+        unique active membership, audit revisions, group outcomes and memory-allocator
+        positions. Source and attribution mutations invalidate memberships in the same
+        transaction; reads also recheck evidence, fences, rejections and expiry.
+        Revision-checked undo persists hash-only pair blocks and idempotency receipts,
+        including replay after original erasure. Shared operation contracts cover
+        persistence, rollback, isolation, copied-evidence blocks, overlapping groups,
+        concurrent commits and erasure races. PostgreSQL constraints and non-bypass
+        RLS checks cover all six new tables. Behavioral reds reproduced the missing
+        merge commit and admission of a fifth group claim in a slice; retries now
+        consume the durable four-claim allowance. Migration ea3210a1b006 preserves
+        originals and refuses downgrade with leased work or retained merge history.
+        Recall projection/deltas, public operation views, generic proposal lifecycle,
+        provider synthesis and exact-tuple release evidence remain open. These
+        foundations do not complete a runtime gate or activate production.
+    - check: Phase 3 live membership recall and frozen-session deltas (2026-10-05)
+      outcome: implemented
+      detail: >-
+        Opt-in retrieval-reconsolidation@1 revalidates bounded membership reads,
+        chooses permitted canonical originals including beyond the candidate cap,
+        and falls back under exclusions without changing atomic records or citation
+        identities. Both memory adapters include operation transitions in owner head
+        positions and delta membership predicates. Frozen traces retain their bytes;
+        undo, invalidation and elapsed expiry emit grouping-specific corrections in
+        the non-yielding context body. Shared recall scenarios cover disabled behavior,
+        isolation, canonical selection, visibility, source changes, expiry and undo.
+        Behavioral reds reproduced a head watermark that omitted merge positions,
+        higher-utility duplicate selection, missing undo corrections and skipped
+        dependency validation when expiry advanced without a new write. Task-owned
+        People lock reentry prevents nested recall validation deadlock while preserving
+        child-task exclusion. Citation tests preserve evidence and refuse ambiguous
+        short IDs. Historical membership, derived projection/erasure, owner
+        surfaces, provider synthesis and release evidence remain pending; production
+        composition still leaves the opt-in recall seam disabled and no gate advances.
+    - check: Phase 3 historical membership projection (2026-10-05)
+      outcome: implemented
+      detail: >-
+        Opt-in historical recall projects the original committed merge revision using
+        effective as_of and recorded known_at cutoffs. Both adapters require exact
+        source versions, retained leaf evidence and current privacy; historical reads
+        leave current operation state and head positions unchanged. In-memory version
+        history journals attribution-only changes; PostgreSQL uses existing revision
+        and reverse-dependency indexes. Shared scenarios cover undo boundaries, source
+        correction, same-instant revisions, expiry, scope/sensitivity tightening,
+        identity correction and People fencing/purge, with bounded owner-isolated
+        lookups. Behavioral reds reproduced missing historical grouping and a grouping
+        that ignored a support's current local-scope restriction. Historical attribution
+        conservatively abstains when current heads cannot certify a past assignment.
+        Derived projection/erasure, owner surfaces, provider synthesis and release
+        evidence remain pending. The production seam remains disabled; no gate advances.
+    - check: Phase 3 extractive summary storage and invalidation (2026-10-06)
+      outcome: implemented
+      detail: >-
+        Both adapters now plan and atomically commit current extractive summaries
+        with complete original-source lineage, including omitted inputs. Four exact
+        NFC/whitespace-normalized clauses and a 1024-character rendered limit preserve
+        atomic originals, original evidence clocks and the strictest support constraints.
+        Summary text lives in a separate erasable projection; operations and history
+        contain only identities, digests and transition metadata. Reverse invalidation
+        visits every committed dependent and purges summary text synchronously on
+        source or People changes. Reads recheck exact revisions, current evidence,
+        expiry, owner, sensitivity and local scope. Shared contracts cover lineage,
+        preservation of originals, omitted support, multiple dependents, rollback,
+        stale leases/inputs, fabricated previews, expiry and isolation. PostgreSQL
+        regressions cover physical purge before reads, erasure/commit serialization,
+        concurrent commit uniqueness, forced RLS and guarded downgrade of migration
+        ea3210a1b007. Behavioral reds reproduced missing summary plans and a missing
+        projection revision; pure planner reds reproduced absent exact-clause,
+        bounded-rendering and evidence-preservation behavior. Derived recall/citations,
+        frozen generated-copy fences, owner controls, provider selection, hypotheses
+        and activation evidence remain pending. Production stays disabled and no
+        complete runtime gate advances.
+    - check: Phase 3 summary recall, usage and frozen-copy safety (2026-10-06)
+      outcome: implemented
+      detail: >-
+        Opt-in current ordinary recall admits source-validated summaries only after
+        original atoms and People allocation, within remaining item/token budgets.
+        Typed summary traces preserve operation identity and all original, leaf-event
+        and session dependencies, including omitted support. Trace views and CLI inspection
+        enforce source validity and viewing ceilings; frozen-session corrections
+        report invalidation, elapsed expiry and disabled derived recall. Citation
+        feedback changes only derived utility/usage and refuses ambiguous short IDs.
+        Shared contracts cover budgets, exact duplicate omission, delta positions,
+        visibility, corrections, expiry, trace erasure and faithful/ambiguous usage.
+        Both full compositions verify deletion of an omitted source removes frozen
+        copied influence, cancels affected runs, rotates cached plans and refuses
+        stale snapshot replay. PostgreSQL verifies these read/copy boundaries and
+        the existing memory integration suite; behavioral reds reproduced missing
+        summary admission, duplicate text, absent corrections, trace attribution,
+        omitted-support erasure and citation credit. Historical/People-scoped summary
+        recall, owner controls, provider selection, hypotheses and activation evidence
+        remain pending. Production stays disabled; no complete runtime gate advances.
+    - check: Phase 3 historical and People-scoped summary recall (2026-10-06)
+      outcome: implemented
+      detail: >-
+        Both adapters reconstruct historical extractive summaries from exact original
+        revisions and opaque clause/dependency digests, preserving effective and recorded
+        cutoffs without restoring current projections or changing operation state or
+        memory watermarks. Current privacy, local scope, rejection, original-source
+        retention and People erasure govern every input, including omitted clauses.
+        Summary recall shares the atomic hard identity filter across all support;
+        historical queries retain past identity assignments under current privacy.
+        Trace views and CLI inspection preserve the original effective instant for
+        known-at-only queries. Shared contracts cover correction after purge, privacy
+        tightening, erasure, expiry and exact boundaries, same-instant source revisions,
+        unchanged current audit/head state, People intersection and reassignment.
+        Behavioral reds reproduced missing historical/People summary admission and
+        a historical trace incorrectly reevaluated at inspection or later creation
+        time instead of its pinned effective instant. Owner controls,
+        provider selection, hypotheses and activation evidence remain pending.
+        Production stays disabled and no complete runtime gate advances.
+    - check: Phase 3 owner operation inspection and merge undo (2026-10-06)
+      outcome: implemented
+      detail: >-
+        Both adapters expose allowlisted owner operation views through one HTTP/CLI
+        service. Complete source revalidation gates content and links; missing support
+        leaves opaque metadata only at the restricted ceiling. Pages bind owner,
+        filters and ceiling, skip hidden operations and filter state after expiry
+        revalidation using a clock sampled after transaction/owner waits. Durable
+        revision-checked undo replays after erasure without
+        revealing source content and serializes simultaneous write-scoped retries.
+        Shared store scenarios and HTTP/CLI tests cover isolation, pagination, scopes,
+        validation, private responses, disabled flags, redaction and retry/conflict.
+        Behavioral reds reproduced absent operation views/undo, missing API/CLI
+        routes and expiry omitted from an invalidated-state list or ignored after
+        a transaction/owner wait. ADR-0169 records
+        the conservative history ceiling and additive M32 validation error code.
+        Both API flags default off; operator controls do not activate maintenance or
+        recall. Derived browse/review/delete, native controls, hypotheses, provider
+        synthesis and release evidence remain open. No complete runtime gate advances.
+    - check: Phase 3 derived-memory owner lifecycle (2026-10-06)
+      outcome: implemented_local_component
+      detail: >-
+        The existing memory API now accepts opt-in derived browsing and exposes
+        separate many-source summary detail, review and deletion. Ordinary defaults
+        and views remain unchanged. Both adapters preserve original atoms and
+        evidence clocks, overlay current owner restrictions on historical recall,
+        suppress equivalent copies across renamed or case-varied inputs, and commit
+        content-free receipts with owner controls. Generated-copy erasure fences
+        snapshots and affected runs; the memory adapter now rolls those touched
+        copies back when the enclosing write fails. Migration ea3210a1b008 adds
+        owner-bound forced-RLS receipts and guarded downgrade. Shared adapter,
+        full-context and HTTP boundary tests cover these behaviors, privacy,
+        expiry after lock waits, concurrent retries, failure rollback and erasure.
+        Initial behavioral reds reproduced absent derived routes and later exposed
+        empty-search parity, historical revision drift, cached-copy rollback and
+        equivalent-copy erasure gaps. PostgreSQL verification covers 204 distinct
+        M32, M9, M17 and migration cases; the final migration follow-up also proves
+        refusal of unreviewed metadata unreadable by the previous application and
+        preservation of an independently arriving original message during rollback.
+        Native controls, hypotheses, provider
+        synthesis and exact-tuple release evidence remain pending. Production
+        flags remain disabled and no complete runtime gate advances.
+    - check: Phase 3 native synthesis evidence journal (2026-10-06)
+      outcome: implemented_local_component
+      detail: >-
+        The Synthesis collection now connects operation history to derived claims,
+        complete supporting originals, fresh source reads, summary review/deletion
+        and previewed merge undo. Server filters and guarded cursor pages avoid
+        invented local relationships or memory-bank counts. Private content clears
+        on refresh, backgrounding, connection change and authorization loss; uncertain
+        writes retain only opaque retry identity. Behavioral reds cover the missing
+        journal, writes and undo, authorization loss, mismatched response identity
+        and unsupported deletion. The full Swift package passes 654 tests; the final
+        focused memory partition passes 26. Six new UI journeys and three existing
+        memory/People journeys pass on each iPhone/iPad simulator across focused runs.
+        UI failures exposed offscreen action feedback and an inherited accessibility
+        identifier; the visible feedback and separate list identity now pass.
+        macOS builds, but its UI runner timed out enabling automation mode before
+        test execution. That verification, hypotheses, provider synthesis and release
+        evidence remain pending. No complete gate advances and production stays off.
+    - check: Offline original-only retrieval control (2026-10-06)
+      outcome: implemented_local_component
+      detail: >-
+        The offline command replays all twenty-four frozen cases three times in
+        fresh in-memory compositions, using actual original rows, governed deletion,
+        expiry/decay and persisted recall traces. Runtime inputs exclude expected
+        answers, duplicate classes, hypotheses and survivor labels. The recording
+        separates surviving originals from ordinary duplicate-rendering collapse,
+        binds its fixed scope/budget/clock and actual source bytes, and refuses
+        incomplete, failed or inconsistent observations and overwritten evidence.
+        Behavioral reds reproduced missing observations, missing repeat collection,
+        absent recording and CLI, and admission of a changed probe question.
+        Regression checks cover lifecycle, shared-event identity, scope, budget
+        drops, corrupted traces, cancellation, failures, immutable outputs and
+        question/source drift. Thirty-four focused control/scorer checks pass;
+        the recorded seventy-two case runs have no failures or lost originals.
+        The control has no provider calls and marks answer
+        evaluation not run; it is not the live answer baseline or activation
+        evidence. The Phase 1 scorer/corpus and M16 controls remain unchanged.
+        Full comparative quality, macOS journeys and release evidence remain open;
+        no complete gate advances and production stays off.
+    - check: Closed provider proposal and verification response boundary (2026-10-07)
+      outcome: implemented_local_component
+      detail: >-
+        Frozen transient schemas bound to locally supplied owner, batch, group,
+        source-revision and excerpt identities now refuse malformed envelopes,
+        duplicate JSON keys, unknown fields, oversized replies and incomplete or
+        mismatched verification. Candidate-local source, revision, support,
+        output-hazard and entailment failures preserve valid siblings. A passing
+        response explicitly requires local kind-specific planning and transaction
+        revalidation; it cannot authorize a semantic merge or write a hypothesis.
+        The first behavioral red returned no candidates instead of one valid
+        sibling and one unknown-excerpt rejection. One hundred seven boundary
+        tests now pass, including all four groups, eight operations, thirty-two
+        verdicts, UTF-8 limits, cross-group references, status/reason consistency
+        and the separate local refusal of a verifier-supported paraphrase merge.
+        Two hundred thirty-three focused provider, merge, summary, control and
+        scorer regressions pass. Request construction, egress admission, live
+        orchestration, hypothesis planning and answer-bearing comparison remain
+        open. No provider was called and no complete gate or activation advances.
+    - check: Source-only provider proposal request preparation (2026-10-07)
+      outcome: implemented_local_component
+      detail: >-
+        Both maintenance repositories now return current authenticated original
+        text parts for claimed groups under owner and People locks. Complete
+        source boundaries, shared-event identity, source rejection, erasure,
+        actor attribution and exact revisions constrain the transient snapshot.
+        The pure request builder requires a current local sensitivity/residency
+        decision for every memory and leaf, preserves visibility and attribution,
+        binds provider/model/policy/pricing, and budgets the entire serialized
+        request with a conservative byte-based token estimate. Unknown policy or
+        pricing, unavailable support, inconsistent snapshots and exhausted bounds
+        defer affected groups while preserving valid siblings. Behavioral reds
+        reproduced absent source/request results, missing model/policy binding,
+        shared-snapshot conflicts, extreme-price failure and owner-rejected input
+        admission. Fifty-one builder cases and eighteen shared input contracts
+        pass; 277 focused cases pass together. All 185 M32 PostgreSQL cases pass
+        across the unprivileged run and the ten migration/RLS harness cases
+        requiring administrative setup. Complete-source contracts also exercise
+        repository-to-request preparation. No provider was called or money
+        reserved. Production egress admission, fresh pre-send checks, verification
+        request/orchestration, hypotheses and answer-bearing comparison remain
+        open. ADR-0169 documents the explicit policy seam; production stays off
+        and no complete runtime gate advances.
+    - check: Verification requests and atomic worker admission (2026-10-07)
+      outcome: implemented_local_component
+      detail: >-
+        Verification preparation now binds the original proposal digest to fresh
+        source snapshots and the same job/lease, independently checks egress for
+        proposed clauses, and excludes unsafe, stale, unapproved or oversized
+        candidates before serialization while retaining valid siblings. Its
+        response validator requires exactly the requested verdicts and preserves
+        local rejections outside provider control. Worker-facing request admission
+        reads and validates originals under owner/People guards and reserves the
+        exact digest and maximum cost in one transaction, returning after commit.
+        Behavioral reds reproduced absent verification/admission results, missing
+        selective verification, mutated request/proposal/exclusion acceptance and
+        malformed policy-version serialization. Fifty-seven verification tests,
+        ten shared admission scenarios and 346 focused checks pass. Twenty-eight
+        source/admission PostgreSQL cases pass with row security enforced,
+        including kill-switch withdrawal, duplicate requests, exhausted budgets,
+        commit rollback and source/deadline changes during lock waits. Pure
+        builders still perform no writes; admission creates only test reservations.
+        Provider transport, cancellation/settlement orchestration, production
+        egress composition, hypotheses and answer-bearing comparison remain open.
+        ADR-0169 records the exclusion and reservation mechanism. No provider was
+        called, production stays off and no complete runtime gate advances.
+    - check: Bounded provider execution and conservative settlement (2026-10-07)
+      outcome: implemented_local_component
+      detail: >-
+        A caller-owned batch executor now runs proposal then verification using
+        the exact reserved requests and one copied model resolution outside all
+        transactions. The neutral request can cap provider sends; M32 sets one,
+        including transport, pre-output stream and optional-summary retries.
+        Original slice deadlines, lease heartbeats, shutdown and the kill switch
+        fence execution. Closed response validation, token/byte bounds and fresh
+        verifier admission leave originals unchanged. Known complete terminal
+        usage releases only the verified difference; unknown usage, cancellation
+        and failed settlement retain full reservations for recovery. Receipts
+        report settlement only after commit. Behavioral reds reproduced hidden
+        adapter retries, absent execution, acceptance above token ceilings and
+        a settlement receipt published before failed commit. The focused provider,
+        preparation and repository partition passes 508 cases; thirty-three
+        PostgreSQL source/admission/execution scenarios pass with row security
+        enforced. Twelve architecture/transaction/secret gates and changed-module
+        typing pass. ADR-0169 and the model gateway specify the cap and execution
+        boundary. Only synthetic providers were exercised; no live model was
+        called. Durable stage/usage audit, operation orchestration, hypotheses,
+        production policy and answer-bearing comparison remain open. Production
+        stays off and no complete runtime gate advances.
+    - check: Reviewed merge and summary application (2026-10-07)
+      outcome: implemented_local_component
+      detail: >-
+        A thin application function now applies the executor's bound local review
+        through the existing deterministic merge and extractive-summary planners.
+        Candidate subsets retain complete dependencies and their own input digest;
+        accepted writes and completion commit atomically per group. Fresh source
+        checks, owner undo, admission withdrawal and rollback remain enforced.
+        Twenty-three shared scenarios cover multiple operations, valid siblings,
+        stale or erased groups, forged binding, expired leases, replay, rollback,
+        unsupported writers and a fake-provider execution-to-commit path using
+        exactly two calls. Summary planning refuses repeated input evidence within
+        a group and across overlapping groups through existing dependency indexes.
+        The focused partition passes 567 checks; fifty-six
+        source/admission/execution/application scenarios pass in PostgreSQL with
+        row security enforced. PostgreSQL exposed a one-operation group constraint;
+        migration ea3210a1b009 replaces it with an index and refuses downgrade of
+        running work or multi-operation history. Both refusal cases and two schema
+        round trips pass. Behavioral reds first observed absent application,
+        duplicate-group constraint failures, missing downgrade guards and repeated
+        summary outputs for the same inputs.
+        Twelve architecture/transaction/secret gates and changed-module typing
+        pass. The spec and ADR-0169 describe the application boundary. No live
+        provider was called; durable stage/usage audit, hypothesis/conflict writers,
+        production policy and comparative activation remain open. Production stays
+        off and no complete runtime gate advances.
+    - check: Durable provider-call and stage audit (2026-10-07)
+      outcome: implemented_local_component
+      detail: >-
+        Existing spend reservations now retain a closed content-free audit:
+        configured model and policy/pricing identities, admitted batch and groups,
+        completion time, elapsed duration and verified token counts. Completion
+        commits with settlement; immutable stage decisions separately record
+        prepared, reviewed, deferred or invalid-response outcomes and bounded
+        candidate counts. Existing groups and operations remain the commit journal.
+        Unknown recovery retains full charges and never fabricates tokens or
+        successful validation. Eighteen shared scenarios cover fresh reads,
+        cancellation, malformed replies, rejected candidates, unavailable providers,
+        unknown usage, source changes, replay, rollback, lease/owner isolation and
+        receipts published only after commit. Behavioral reds observed absent audit,
+        unclaimed audit-group admission and token counts changing during settlement;
+        verified usage is now copied before database waits. An architecture gate
+        also caught ambient timing; completion and elapsed duration now use the
+        injected clock, with a deterministic duration regression. The focused partition
+        passes 585 checks and seventy-four PostgreSQL scenarios pass with row
+        security enforced. Migration ea3210a1b00a adds one nullable column to the
+        existing spend table; two schema round trips, two downgrade refusals and
+        legacy-reservation preservation pass. Nine changed modules pass typing.
+        The M32 spec, current milestone and ADR-0169 describe the audit boundary.
+        No live provider was called. Hypothesis/conflict writers, production policy
+        and worker composition, comparative evidence and native release verification
+        remain open. Production stays off and no complete runtime gate advances.
+    - check: Grounded writers, processing composition and measured comparison (2026-10-08)
+      outcome: implemented_quality_failed
+      detail: >-
+        Connections reuse the erasable derived projection with two independent original
+        events, complete lineage, inferred confidence at most 0.35 and original-clock
+        expiry. Conflicts retain dependencies without changing source truth or recall.
+        Both stores share these writers and owner/lifecycle controls. The existing
+        maintenance slot composes bounded inventory, provider execution and application;
+        processing defaults off and requires revocable exact source/model/privacy,
+        corpus/scorer, release and matching formation/People/M16 recall evidence.
+        No new scheduler, graph store or major dependency was introduced.
+        Behavioral reds reproduced missing writers/processing/admission, unsafe egress,
+        rejected-claim resurrection, omitted hypothesis recall/labels, incomplete
+        publication data, missing current recall proof and rewritten verified wording.
+        The latest focused writer/provider/store partition passes 368 tests; earlier
+        full M32 coverage passes 621. PostgreSQL passes 81 provider/writer/audit cases,
+        seven migration/guard checks and 57 recall/history/erasure/owner scenarios with
+        RLS enforced. Foreign-tenant reads now return missing/empty before attempting
+        to insert an inaccessible owner lock. Apple package tests pass 655 tests;
+        seven Synthesis journeys pass on each iPhone/iPad, with affected action-label
+        cases rerun after their final edit. The macOS build passes but UI execution
+        is blocked by an existing system-authentication prompt.
+        Two complete synthetic live comparisons preserve separate original-answer
+        controls and all observations under evals/observations/memory-reconsolidation.
+        The initial run failed with zero connections and one unknown-usage call.
+        The second run completed all 216 cases with 408 calls, USD 3.44078625 known
+        cost and no unknown usage in 879.67 seconds. It had zero false merges/lost
+        facts and complete duplicate coverage, but all 15 hypotheses failed exact
+        reference matching. Development covered probes were 13/11/14 of 36 for
+        original/merge/connections; holdout was 15/14/16. Both splits fail hypothesis
+        quality, the 0.10 answer-lift floor and merge-answer nonregression.
+        These dirty-tree failure artifacts predate the final verified-wording
+        preservation repair; they are not current release or activation evidence.
+        ADR-0169 and the design describe the completed components; ADR-0170 only
+        proposes a versioned offline equivalence review and is not approved or
+        implemented. No scorer/corpus/floor was weakened, no release certificate
+        was published and no complete runtime gate advances. Production stays off.
+    - check: Owner-approved offline equivalence review contract (2026-10-08)
+      outcome: implemented_human_review_pending
+      detail: >-
+        The owner explicitly approved ADR-0170. reconsolidation-review@2 freezes
+        the existing corpus, controls and v1 scorer alongside the new offline
+        review/aggregation/recording code before measurement. New comparisons
+        bind the contract before provider calls and reject mid-run drift. Legacy
+        recordings without that binding cannot be relabelled. An exclusive packet
+        uses randomized opaque candidate/source/reference identities, hides model,
+        arm, repeat and case labels, and preserves original support and reference
+        meanings. Blank decision files require every judgment and an explicit owner
+        attestation; no model judges or reviewer labels reach runtime. Scoring
+        reconstructs the packet, verifies complete input/decision bindings and exact
+        support, recomputes one-to-one matches and preserves duplicate penalties,
+        all failed cases and every existing answer/safety/usage floor. Assessments
+        are non-activating and identify the corpus as previously inspected.
+        CLI reds reproduced missing review commands; an adversarial regression
+        reproduced an internal lookup error before unknown-case census validation.
+        The focused evaluation/release/architecture partition passes 78 tests,
+        including changed wording, missing/duplicate/unknown decisions, altered
+        support/references/sources, foreign reviewers, uncertain exact matches,
+        stale packets/keys/contracts, repeated outputs, safe retry and pre-run
+        binding. Final sidecar make check passes 5,437 static and 1,413 contract
+        tests, with 106 static skips; formatting, lint, types, deployment,
+        documentation and website checks also pass. End-to-end wall time is 533.62
+        seconds (527.327 seconds inside make), including 60.863 seconds of stage
+        overlap; static tests take 429.117 seconds and the contract stage 98.147
+        seconds. A new comparison bound the contract before its 408 calls and
+        completed all 216 cases with known usage in 823.52 seconds, costing
+        USD 3.44656125. Its control and report are preserved as 20261008-review-v2
+        artifacts. It preserved every fact, made no false merges and covered all
+        duplicate sets; development answer counts were 17/13/12 of 36 and holdout
+        17/17/14 for original/merge/connections. Thus answer lift still fails on
+        both splits and merge-answer nonregression fails on development. Fifteen
+        candidates have a blinded packet and blank owner decisions; no human score
+        is claimed. Human judgments and passing comparative/release evidence remain
+        outstanding. Original v1 artifacts and production activation are unchanged.
+    - check: Completed owner equivalence review (2026-10-08)
+      outcome: review_valid_quality_failed
+      detail: >-
+        The owner supplied all fifteen bound judgments: ten equivalent and five
+        not equivalent. Exact packet, complete candidate census, references and
+        support sets validated. Scoring in 1.30 seconds credits six of eight
+        development outputs (75% precision, 100% recall) and four of seven holdout
+        outputs (57.14% precision, 66.67% recall). Both precision scores fail the
+        unchanged 80% floor; recall passes. Answer coverage remains 17/13/12 of
+        36 on development and 17/17/14 on holdout; both answer-lift failures and
+        development merge-answer regression remain. Zero false merges, zero lost
+        facts and complete duplicate coverage are unchanged. The exact review
+        packet, reconstruction key, decisions and assessment are preserved under
+        evals/observations/memory-reconsolidation/20261008-owner-review-v2/.
+        This completes the first owner review, not a comparative or release gate.
+        The corpus remains previously inspected and activation_evidence is false.
+        Any separate real-owner-data usefulness review cannot relabel this corpus
+        or waive its failures. Production remains disabled.
   '31':
     title: Email unsubscribe assistance
     status: in_progress
@@ -1894,14 +2645,19 @@ readiness:
     WhatsApp surface, the email experience, Bland calling, People, thread
     folders with typed judgment, the advisory approval layer, and email
     unsubscribe.
+    On 2026-10-02 the owner authorized Milestone 32 memory reconsolidation:
+    whole-store revisiting, belief merging and grounded connections. Its
+    detailed design and ADR-0169 are recorded. Phase 1 registered twenty-four
+    gates and froze the evaluation yardstick on 2026-10-03; runtime behavior
+    and comparative release evidence remain pending, with no ceiling change.
     Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-10-08T20:00:00Z
+last_updated: '2026-10-10T19:45:12Z'
 last_reviewed_commit: e55551fa

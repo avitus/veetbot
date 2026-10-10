@@ -703,7 +703,9 @@ class BudgetedContextBuilder:
         head the base recall read is still the session's watermark, since
         nothing has been written since and neither could say anything. The
         delta also shares the base block's budget class rather than doubling
-        it. A failure in either read costs the turn only what that read would
+        it. Dependency-aware retrievers still validate frozen support when no
+        position moved, including after derived recall is disabled.
+        A failure in either read costs the turn only what that read would
         have added: the base recall it already has is still the turn's memory.
         """
 
@@ -735,12 +737,12 @@ class BudgetedContextBuilder:
         # One instant governs the turn's memory, the way it governs one recall:
         # a historical query stamps both blocks with the moment it asks about.
         instant = queries[0].as_of or self._clock.now()
-        if snapshot_id is None or base.watermark <= snapshot_watermark:
-            # No row can sit above the store head, and every status change a
-            # correction selects on takes a fresh position, so a head still at
-            # the session's watermark makes both further reads provably empty.
-            # Skipping them spares a quiet turn a query, a trace, an event, and
-            # a page of rows that could only have said nothing.
+        if snapshot_id is None or (
+            base.watermark <= snapshot_watermark and not base.validate_snapshot_dependencies
+        ):
+            # Ordinary atom closures take a new position. Membership-aware
+            # recall additionally validates elapsed dependency expiry even when
+            # maintenance has not yet written an invalidation position.
             return _RecallBundle(base=rendered_base)
         # The two blocks share one budget class. In-turn recall is capped once
         # in the context engine's Region B table, not once per block, so the
@@ -749,7 +751,14 @@ class BudgetedContextBuilder:
         # this: they are unbudgeted, never yield, and are the trust-critical
         # half of the pair.
         remaining = queries[0].budget_tokens - base.tokens
+        corrections: list[MemoryCorrection] = []
         try:
+            # Membership can expire without a source write. Validate frozen
+            # dependencies before querying the delta so invalidation is visible.
+            corrections = await self._memory_retriever.corrections(
+                snapshot_id=snapshot_id,
+                watermark=snapshot_watermark,
+            )
             delta = (
                 None
                 if remaining <= 0
@@ -770,16 +779,13 @@ class BudgetedContextBuilder:
                     moment="in_turn",
                 )
             )
-            corrections = await self._memory_retriever.corrections(
-                snapshot_id=snapshot_id,
-                watermark=snapshot_watermark,
-            )
         except Exception as exc:
             logger.warning(
                 "context_memory_delta_failed",
                 extra={"run_id": str(run.id), "error_class": type(exc).__name__},
             )
-            return _RecallBundle(base=rendered_base)
+            # Corrections already fetched remain authoritative if optional delta recall fails.
+            return _RecallBundle(base=rendered_base, corrections=tuple(corrections))
         # A belief the base recall already carries is not news, however new its
         # position is: stating it twice in one turn is two voices on one fact.
         carried = {item.belief_id for item in base.items}

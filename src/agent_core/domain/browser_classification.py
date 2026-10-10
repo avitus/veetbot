@@ -34,6 +34,7 @@ from agent_core.domain.browser import (
     browser_origin,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_follow import exact_follow_control
 
 C = BrowserActionConsequence
 
@@ -678,6 +679,21 @@ def dispatch_constraint_coverage(
             kind=action.kind, role=role, labels=labels, facts=facts, option_texts=option_texts
         )
         return _refused(consequence, "outside_origin")
+    if constraint.grant_kind == "follow" and constraint.follow_handle is not None:
+        covered = exact_follow_control(
+            constraint.follow_handle,
+            action=action,
+            page_url=page_url,
+            role=role,
+            labels=labels,
+            facts=facts,
+            disabled=disabled,
+        )
+        return BrowserCoverage(
+            covered=covered,
+            consequence=C.PUBLICATION,
+            reason=None if covered else "different_follow_target",
+        )
     if constraint.grant_kind == "task" and constraint.path_prefix is not None:
         return task_grant_coverage(
             action=action,

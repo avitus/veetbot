@@ -248,7 +248,9 @@ async def test_scheduled_browser_preflight_fails_before_model_call(unavailable: 
                     status=BrowserProfileStatus(unavailable),
                     updated_at=NOW,
                 )
-        run_id = await composition.runs.submit("Read my feed.", session_id)
+        from tests.scheduled_run_support import submit_scheduled_seed
+
+        run_id = await submit_scheduled_seed(composition, session_id, "Read my feed.")
         run = await composition.runs.wait_terminal(run_id)
         assert run.status is RunStatus.FAILED
         assert run.failure is not None
