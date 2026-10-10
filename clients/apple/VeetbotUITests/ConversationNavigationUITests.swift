@@ -1576,7 +1576,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Related summary · derived memory"].waitForExistence(timeout: 5))
         let omitted = app.descendants(matching: .any)["memory.synthesis.source.00000000-0000-0000-0000-000000003203"].firstMatch
         revealSynthesisAction(omitted)
-        XCTAssertTrue(app.staticTexts["Original · not included in summary text"].exists)
+        XCTAssertTrue(omitted.label.contains("Original · not included in summary text"), omitted.debugDescription)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Memory synthesis evidence trail"
         screenshot.lifetime = .keepAlways
@@ -1606,7 +1606,7 @@ final class ConversationNavigationUITests: XCTestCase {
         openSynthesis()
         openSynthesisEntry()
         XCTAssertTrue(app.staticTexts["User may prefer calm environments."].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Tentative connection")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Tentative connection · derived memory"].waitForExistence(timeout: 5))
         let reviewed = app.buttons["memory.synthesis.review"]
         revealSynthesisAction(reviewed)
         XCTAssertTrue(reviewed.waitForExistence(timeout: 5))
@@ -1627,7 +1627,11 @@ final class ConversationNavigationUITests: XCTestCase {
         let delete = app.buttons["memory.synthesis.delete"]
         revealSynthesisAction(delete)
         activate(delete)
+        #if os(macOS)
+        let confirm = app.windows.buttons["Delete synthesis"].firstMatch
+        #else
         let confirm = app.buttons["Delete synthesis"].firstMatch
+        #endif
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         activate(confirm)
         XCTAssertTrue(app.staticTexts["Synthesis deleted. Original memories are kept."].waitForExistence(timeout: 5))
@@ -1644,7 +1648,11 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(preview)
         let confirm = app.buttons["memory.synthesis.undo.confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["The user prefers quiet mornings."].exists)
+        let original = app.descendants(matching: .any)["memory.synthesis.undo.sheet"]
+            .descendants(matching: .any)["memory.synthesis.source.00000000-0000-0000-0000-000000003203"].firstMatch
+        XCTAssertTrue(original.waitForExistence(timeout: 5))
+        XCTAssertTrue(original.isHittable, original.debugDescription)
+        XCTAssertTrue(original.label.contains("The user prefers quiet mornings."), original.debugDescription)
         activate(confirm)
         XCTAssertTrue(app.staticTexts["Merge undone. Original memories remain available."].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["memory.synthesis.undo.preview"].exists)

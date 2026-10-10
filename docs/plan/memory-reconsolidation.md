@@ -705,7 +705,10 @@ source counts or cached content. Unknown kinds remain inspectable without action
 
 Undo first previews every visible affected original and explains that only duplicate
 suppression is reversed; it requires a current committed merge and complete visible
-support. Writes retain their key and revision across an uncertain retry, disable
+support. The macOS undo dialog uses a single navigation pane so the affected
+originals remain readable before confirmation. Source links expose the original
+statement and omitted-input status together to accessibility clients.
+Writes retain their key and revision across an uncertain retry, disable
 competing actions, and refresh after conflicts. Refresh, connection changes and
 backgrounding clear private content and invalidate late responses. Only opaque
 pending write identity survives backgrounding for an explicit retry on the same

@@ -238,29 +238,41 @@ struct MemorySynthesisDetailView: View {
                 Text(source.omitted ? "Original · not included in summary text" : "Original memory")
                     .appFont(.caption).foregroundColor(.secondary)
             }
-        }.accessibilityIdentifier("memory.synthesis.source.\(source.id.uuidString)")
+        }
+        .accessibilityLabel("\(source.statement) \(source.omitted ? "Original · not included in summary text" : "Original memory")")
+        .accessibilityIdentifier("memory.synthesis.source.\(source.id.uuidString)")
     }
     private var undoPreview: some View {
-        NavigationView {
-            List {
-                if let operation = model.operation, operation.canUndo {
-                    Section("What will change") {
-                        Text("These originals will be recalled independently again. Undo does not restore erased, expired or changed memories, and this merge will not be recreated automatically.")
-                    }
-                    originals(operation.sources)
-                    Button("Undo merge") {
-                        previewUndo = false
-                        Task { await model.undo() }
-                    }.accessibilityIdentifier("memory.synthesis.undo.confirm")
-                } else { Text("Refresh the operation before undoing it.") }
+        Group {
+            if #available(macOS 13, iOS 16, *) {
+                NavigationStack { undoContent }
+            } else {
+                NavigationView { undoContent }
+                #if os(iOS)
+                    .navigationViewStyle(.stack)
+                #endif
             }
-            .navigationTitle("Undo merge")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { previewUndo = false } } }
         }
         .accessibilityIdentifier("memory.synthesis.undo.sheet")
         #if os(macOS)
-        .frame(minWidth: 420, minHeight: 360)
+        .frame(minWidth: 520, minHeight: 440)
         #endif
+    }
+    private var undoContent: some View {
+        List {
+            if let operation = model.operation, operation.canUndo {
+                Section("What will change") {
+                    Text("These originals will be recalled independently again. Undo does not restore erased, expired or changed memories, and this merge will not be recreated automatically.")
+                }
+                originals(operation.sources)
+                Button("Undo merge") {
+                    previewUndo = false
+                    Task { await model.undo() }
+                }.accessibilityIdentifier("memory.synthesis.undo.confirm")
+            } else { Text("Refresh the operation before undoing it.") }
+        }
+        .navigationTitle("Undo merge")
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { previewUndo = false } } }
     }
 }
 
