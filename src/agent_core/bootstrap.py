@@ -617,6 +617,7 @@ from agent_core.tools.browser_act import (
 )
 from agent_core.tools.browser_navigate import BrowserNavigateTool, LegacyBrowserNavigateTool
 from agent_core.tools.browser_observe import (
+    ArticleBrowserObserveTool,
     BrowserObserveTool,
     LegacyBrowserObserveTool,
     PagedBrowserObserveTool,
@@ -2652,6 +2653,7 @@ async def _compose(
             PagedBrowserObserveTool(browser_provider, inline_output_bytes=inline_output_bytes)
         )
         registry.register(BrowserObserveTool(browser_provider))
+        registry.register(ArticleBrowserObserveTool(browser_provider))
         if isinstance(browser_provider, BrowserImageUploader):
             registry.register(
                 BrowserUploadTool(
@@ -3971,10 +3973,21 @@ async def _compose(
         from agent_core.domain.browser_workflows import BrowserWorkflowCatalog
         from agent_core.runtime.browser_workflows import BrowserWorkflowRunner
 
+        workflow_catalog = BrowserWorkflowCatalog.model_validate(
+            load_config_document(settings, "runtime/browser-workflows.yaml")
+        )
+        if not settings.browser_feed_workflow_enabled:
+            workflow_catalog = workflow_catalog.model_copy(
+                update={
+                    "recipes": [
+                        recipe
+                        for recipe in workflow_catalog.recipes
+                        if not any(step.kind == "collect_feed" for step in recipe.steps)
+                    ]
+                }
+            )
         browser_workflows = BrowserWorkflowRunner(
-            BrowserWorkflowCatalog.model_validate(
-                load_config_document(settings, "runtime/browser-workflows.yaml")
-            ),
+            workflow_catalog,
             policy_version=ruleset.policy_version,
         )
 

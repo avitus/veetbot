@@ -462,7 +462,9 @@ def _loop_synthesis_needed(context: RunContext) -> bool:
     )
 
 
-def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelRequest:
+def _synthesis_only_request(
+    request: ModelRequest, dimension: str, workflow: dict[str, Any] | None = None
+) -> ModelRequest:
     """Add a volatile platform control that protects final-synthesis headroom."""
 
     reason = (
@@ -479,13 +481,18 @@ def _synthesis_only_request(request: ModelRequest, dimension: str) -> ModelReque
             "already in the conversation and state any remaining gap."
         )
     )
+    extra = ""
+    if dimension == "browser_workflow" and workflow and workflow.get("report") == "x_home_briefing":
+        from agent_core.runtime.browser_feed import feed_report_control
+
+        extra = feed_report_control(workflow)
     control = UserMessage(
         content=[
             TextPart(
                 text=(
                     "Runtime control: the reviewed browser workflow has stopped. Do not call tools "
                     "or repeat its actions. Report only what the existing evidence confirms, "
-                    "and state any unverified outcome or remaining gap."
+                    "and state any unverified outcome or remaining gap." + extra
                     if dimension == "browser_workflow"
                     else reason
                 )
@@ -886,7 +893,9 @@ async def _invoke_model(
             before_model_attempt=True,
         )
         attempt_request = (
-            _synthesis_only_request(request, synthesis_reserve)
+            _synthesis_only_request(
+                request, synthesis_reserve, context.checkpoint.working_state.get("browser_workflow")
+            )
             if synthesis_reserve is not None
             else request
         )

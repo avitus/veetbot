@@ -192,3 +192,4 @@ implementation without one.
 - [ADR-0174 — Daily dreaming proposals with owner-approved application (Accepted; amends ADR-0169)](0174-owner-reviewed-dreaming.md)
 
 - [ADR-0175 — Private account-control verification (Accepted; amends ADR-0164)](0175-private-account-control-verification.md)
+- [ADR-0176 — Reviewed X feed briefing (Accepted; amends ADR-0164)](0176-reviewed-x-feed-briefing.md)

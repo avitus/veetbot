@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from pydantic import ValidationError
@@ -70,6 +71,9 @@ INPUT_SCHEMA: dict[str, Any] = {
     ],
     "additionalProperties": False,
 }
+ARTICLE_INPUT_SCHEMA = deepcopy(INPUT_SCHEMA)
+# Keep the already published observation contract available to pinned runs.
+INPUT_SCHEMA["properties"]["extract"]["properties"]["kind"]["enum"] = ["table", "list", "form"]
 
 
 class LegacyBrowserObserveTool:
@@ -209,6 +213,8 @@ class BrowserObserveTool:
                 if set(arguments) != {"extract"}:
                     raise ValueError("extraction cannot be combined with another mode")
                 extraction = BrowserExtractionRequest.model_validate(arguments["extract"])
+                if extraction.kind == "articles" and self.spec.version == "1.7.0":
+                    raise ValueError("article extraction requires browser.observe 1.8.0")
             elif "wait_for" in arguments:
                 if set(arguments) != {"wait_for"}:
                     raise ValueError("wait and expansion cannot be combined")
@@ -237,3 +243,22 @@ class BrowserObserveTool:
         except BrowserProviderError as error:
             return browser_failure(error)
         return observation_result(self._provider, observation, self.spec.maximum_output_bytes)
+
+
+class ArticleBrowserObserveTool(BrowserObserveTool):
+    """Add bounded article excerpts and timestamp links without changing pinned 1.7."""
+
+    spec = BrowserObserveTool.spec.model_copy(
+        update={
+            "version": "1.8.0",
+            "input_schema": ARTICLE_INPUT_SCHEMA,
+            "description": (
+                "Read: {}; next_observe after/cursor; region_ref+expected_revision+text_offset; "
+                "extract table/list/form/articles. Article index selects main; columns: "
+                "0 excerpt, 1 unique same-origin timestamp link. Form: label/role/disabled/"
+                "checked/required, never values. wait_for: role/name or text/region/location/row "
+                "evidence; optional failure_evidence. Checks are bounded, window-scoped, "
+                "not action authority."
+            ),
+        }
+    )

@@ -1748,7 +1748,7 @@ change a profile once a newer ceremony exists.
 
 `runtime/browser-workflows.yaml` is a closed version-1 catalog of reviewed
 definitions. A recipe binds ID/version, exact origin, explicit task-intent
-phrases, at most 16 navigate/observe/act/extract steps and a maximum 900-second
+phrases, at most 16 navigate/observe/act/extract or finite collection steps and a maximum 900-second
 duration. Selection requires one unambiguous matching owner request and a ready
 selected profile. Actions require unique fresh role/name targets and a positive
 postcondition. Every tool call uses normal validation, policy, approvals, current
@@ -1759,12 +1759,11 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
-The shipped recipe catalog and site definitions are empty. Engineering-owned
-definitions require site-specific fixtures and review before activation; this
-tranche proves the mechanism using controlled account/report fixtures and makes
-no claim of configured live-site coverage. Users do not author or maintain these
-technical definitions. Unknown sites retain protected-page differential sign-in
-verification and the ordinary agent execution path.
+The shipped catalog includes the reviewed X home-feed briefing below; private
+account definitions remain deployment-owned. Engineering-owned definitions
+require site-specific fixtures and review before activation. Users do not author
+or maintain these technical definitions. Unknown sites retain protected-page
+differential sign-in verification and the ordinary agent execution path.
 
 All hosted browsers remain headed (ADR-0145). A trusted ceremony or differential
 verification explicitly permits login-page reads; headed agent leases still
@@ -1774,6 +1773,53 @@ including after cancellation. Frame and input requests wait for the ceremony
 operation lock without holding the service admission lock, then revalidate the
 capability before accessing the page.
 
+
+### Reviewed X feed briefing (ADR-0176)
+
+The default-off `BROWSER_FEED_WORKFLOW_ENABLED` switch admits the `x-home-briefing`
+recipe. It matches complete normalized owner intent, either an
+explicit phrase or a SHA-256 digest of the reviewed long schedule instruction.
+No private prompt or identity is in the catalog. Ambiguous, changed or untrusted
+requests use ordinary execution; the newest complete owner message controls
+selection. A READY selected X profile and a pinned observation tool supporting
+article extraction are required. Account identity remains the isolated service's
+private ADR-0175 verification responsibility, not a feed-text inference.
+
+`browser.observe@1.8.0` adds `extract.kind: articles`, retaining 1.7.0 for pinned
+runs. Index selects a visible main region; columns 0 and 1 are a bounded visible
+article excerpt and its unique visible timestamp link. Only articles intersecting
+the viewport qualify, with scope `main_document_viewport_articles`. Discovery
+retains the 8,192-source-node and 4,096-row-node ceilings. Per-article text and
+link walks each inspect at most 256 nodes. Excerpts retain 256 characters and
+explicit truncation; incomplete or ambiguous link walks supply no link. Hidden,
+editable, nested-article and frame content is excluded. Links must be public
+HTTPS on the document origin, without credentials, query or fragment. They are
+source evidence, not navigation/action authority or verified dates. Existing
+revision, row, byte, output-admission, trust and atomic-cleanup contracts apply.
+
+The finite `collect_feed` step is restricted to an X home navigation followed by
+collection; it cannot mix other actions into that recipe. It seeks six distinct
+linked excerpts from at most four windows of three articles, accepting explicitly
+partial excerpts but never missing/invalid links. Exact home location and X post
+URL structure are mandatory; post IDs deduplicate evidence. Up to six empty or
+stale-read retries wait one second and recheck bounds before dispatch. The empty
+home shell cannot complete collection. Repeated content ends with an explicit
+insufficient-evidence result. At most three bounded scrolls use one unique fresh
+Account menu control as an anchor, through normal policy and effect accounting.
+A lost scroll response permits read-only collection followed by an uncertain
+stop, never another scroll. Authentication uses verified same-run resumption;
+generation changes clear captured post IDs, restart home navigation and exclude
+earlier evidence, while retaining the retry/scroll ceilings and possible-effect
+state. Calls, steps, cancellation and deadlines remain inside the ordinary run
+budget and the recipe's 180-second ceiling.
+
+Final synthesis has no tools. It uses only qualifying rows from current-generation
+extraction calls, keeps their external-untrusted status, cites observed links and
+describes an observed-feed sample. Six posts verify collection, not the existence
+of two or three trends: fewer supported topics or omitted evidence must be stated
+honestly, without public-trend substitutions. The synthetic fixture suite covers
+the recipe; production activation requires the qualified private account catalog,
+the matching browser/application release and a successful live scheduled briefing.
 
 ## Owner continuation and specific Follow consent (ADR-0172)
 

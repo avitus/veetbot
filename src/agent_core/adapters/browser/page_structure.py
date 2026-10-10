@@ -31,13 +31,16 @@ PAGE_TEXT_HELPERS = """
         }
         return null;
     };
-    const summary = (root, limit = 512, excludeCollections = false, budget = null) => {
+    const summary = (root, limit = 512, excludeCollections = false, budget = null,
+                     excludeArticles = false) => {
         let node = root, scanned = 0, text = '', clipped = false;
         const nodeLimit = budget ? Math.min(256, budget.remaining) : 256;
         while (node && scanned < nodeLimit && text.length < limit) {
             scanned++;
             const skip = blocked(node) || (excludeCollections && node !== root
-                && node.nodeType === 1 && node.matches(collectionSelector));
+                && node.nodeType === 1 && node.matches(collectionSelector))
+                || (excludeArticles && node !== root && node.nodeType === 1
+                    && node.matches('article,[role="article"]'));
             if (!skip && node.nodeType === 3) {
                 const range = document.createRange();
                 range.selectNode(node);

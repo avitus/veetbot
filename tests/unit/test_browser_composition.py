@@ -181,7 +181,8 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         act = cast(RegisteredTool, registry.get("browser.act"))
         assert isinstance(navigate.implementation, BrowserNavigateTool)
         assert isinstance(observe.implementation, BrowserObserveTool)
-        assert observe.spec.version == "1.7.0"
+        assert observe.spec.version == "1.8.0"
+        assert registry.get("browser.observe", version="1.7.0").spec.version == "1.7.0"
         paged = cast(RegisteredTool, registry.get("browser.observe", version="1.1.0"))
         assert isinstance(paged.implementation, PagedBrowserObserveTool)
         legacy = cast(RegisteredTool, registry.get("browser.observe", version="1.0.0"))

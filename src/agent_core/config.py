@@ -190,6 +190,7 @@ class Settings:
     # ADR-0129: task grants from the browser.act approval card, and the exact
     # site scopes an owner may allow; environment-layer deployment controls.
     browser_task_grants_enabled: bool = False
+    browser_feed_workflow_enabled: bool = False
     browser_task_grant_scopes: tuple[BrowserTaskGrantScope, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
@@ -2040,6 +2041,7 @@ def _load_settings(
         judgment_provider=judgment_provider,
         browser_allowed_origins=browser_allowed_origins,
         browser_task_grants_enabled=browser_task_grants_enabled,
+        browser_feed_workflow_enabled=_parse_flag(values, "BROWSER_FEED_WORKFLOW_ENABLED"),
         browser_task_grant_scopes=browser_task_grant_scopes,
         browser_profile_service_url=browser_profile_service_url,
         browser_profile_id=browser_profile_id,

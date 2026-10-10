@@ -668,6 +668,19 @@ application units back does not replace the browser-service container; an explic
 browser-image rollback must preserve a catalog supported by that image or disable
 the catalog deliberately before recreation.
 
+The reviewed morning X briefing has a separate default-off application switch,
+`BROWSER_FEED_WORKFLOW_ENABLED=1` (ADR-0176). Before enabling it in the application
+environment shared by all roles, deploy matching application and browser-service
+images and install the qualified private X account definition above. The pinned
+observation tool must support version 1.8.0 article extraction; older pinned chats
+retain ordinary execution. Confirm the existing schedule's complete instruction
+still matches the reviewed catalog digest and its selected profile is the
+qualified account. After activation, verify a real scheduled occurrence reports
+observed personalized-feed evidence without scroll approvals. A feed that stays
+empty must report insufficient evidence. Clearing the switch disables recipe
+selection; an already suspended recipe fails closed instead of changing its
+definition. No production schedule or profile is rewritten by deployment.
+
 The browser service mounts `/tmp` as a 512 MiB, memory-backed filesystem with
 `noexec,nosuid,nodev`, inside the container memory limit.
 Playwright's Chromium places shared-memory files there. Device sign-in verifies

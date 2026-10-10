@@ -1,4 +1,20 @@
 version: 1
-# Add only reviewed definitions backed by site fixtures. An empty catalog uses
-# the ordinary agent loop; users never maintain this implementation configuration.
-recipes: []
+# Engineering-owned definitions with synthetic site and runtime fixtures.
+recipes:
+  - id: x-home-briefing
+    version: 1
+    origin: https://x.com
+    intents:
+      - Summarize the recurring topics in my personalized X home feed.
+      - Give me my morning X feed briefing.
+    # Exact normalized instruction reviewed from the existing morning schedule.
+    # No private prompt, account label or profile identifier is stored here.
+    intent_sha256:
+      - 91618066456eed953e68a0593f64a08d705ed5819551047114d4b168d2758e51
+    maximum_seconds: 180
+    steps:
+      - kind: navigate
+        url: https://x.com/home
+      - kind: collect_feed
+        role: button
+        name: Account menu

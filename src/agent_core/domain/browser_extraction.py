@@ -21,7 +21,7 @@ class BrowserExtractionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
     expected_revision: str = Field(min_length=1, max_length=128)
-    kind: Literal["table", "list", "form"]
+    kind: Literal["table", "list", "form", "articles"]
     index: int = Field(default=0, ge=0, le=15)
     fields: list[BrowserExtractionField] = Field(min_length=1, max_length=8)
     row_limit: int = Field(default=20, ge=1, le=50)
@@ -57,14 +57,14 @@ class BrowserExtractionResult(BaseModel):
 
     version: Literal[1] = 1
     revision: str = Field(min_length=1, max_length=128)
-    kind: Literal["table", "list", "form"]
+    kind: Literal["table", "list", "form", "articles"]
     index: int = Field(ge=0, le=15)
     status: Literal["extracted", "not_found", "unsupported_structure"]
     source_ref: str | None = Field(default=None, max_length=128)
     source_name: str = Field(default="", max_length=256)
     fields: list[BrowserExtractionField] = Field(min_length=1, max_length=8)
     rows: tuple[BrowserExtractedRow, ...] = Field(default=(), max_length=50)
-    scope: Literal["main_document"] = "main_document"
+    scope: Literal["main_document", "main_document_viewport_articles"] = "main_document"
     source_nodes: int = Field(ge=0, le=8192)
     source_scan_limit_reached: bool
     row_nodes: int = Field(ge=0, le=4096)
