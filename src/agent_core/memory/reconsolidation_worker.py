@@ -98,10 +98,10 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
         )
         if failed:
             outcome, reason = "failed", "execution_failed"
-        charges = [call.spend.charged_usd for call in calls]
         charged = (
-            sum((c for c in charges if c is not None), Decimal(0))
-            if all(c is not None for c in charges) and not (failed and result is None)
+            sum((call.spend.charged_usd for call in calls), Decimal(0))
+            if all(call.spend.state == "settled" for call in calls)
+            and not (failed and result is None)
             else None
         )
         async with self._uow_factory() as uow:

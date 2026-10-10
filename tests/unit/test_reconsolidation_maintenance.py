@@ -1,7 +1,9 @@
 """M32 inventory and background isolation leave ordinary maintenance responsive."""
 
 import asyncio
-from typing import cast
+from typing import Literal, cast
+
+import pytest
 
 from agent_core.domain.reconsolidation import ReconsolidationJob
 from agent_core.memory.reconsolidation import ReconsolidationInventoryPass
@@ -281,3 +283,64 @@ async def test_cancelled_reviewed_slice_finishes_history_despite_repeated_cancel
         release.set()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("state", ["settled", "reserved", "unknown"])
+async def test_daily_history_only_reports_settled_provider_charges(
+    state: Literal["settled", "reserved", "unknown"],
+) -> None:
+    from decimal import Decimal
+    from uuid import UUID
+
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.domain.reconsolidation import ReconsolidationSpend
+    from agent_core.domain.reconsolidation_execution import (
+        ReconsolidationCall,
+        ReconsolidationExecution,
+    )
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+    service = ReconsolidationPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="charges",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(TrackedFactory(cast(Factory, factory))),
+        egress_policy=policy,
+        owner_review=True,
+    )
+    async with factory() as uow:
+        run = await uow.reconsolidation.claim_dreaming_run(principal(), clock.now())
+    assert run is not None
+    service._last_execution = ReconsolidationExecution(
+        reason="reviewed",
+        calls=(
+            ReconsolidationCall(
+                stage="proposal",
+                reason="reviewed",
+                spend=ReconsolidationSpend(
+                    id=UUID(int=1),
+                    tenant_id=principal().tenant_id,
+                    principal_id=principal().principal_id,
+                    job_id=UUID(int=2),
+                    lease_token=UUID(int=3),
+                    day=clock.now().date(),
+                    request_digest="a" * 64,
+                    maximum_usd=Decimal("0.1"),
+                    charged_usd=Decimal("0.1"),
+                    state=state,
+                ),
+            ),
+        ),
+    )
+    await service._finish_daily(run)
+    async with factory() as uow:
+        [finished] = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+    assert finished.charged_usd == (Decimal("0.1") if state == "settled" else None)
+    assert finished.provider_calls == 1

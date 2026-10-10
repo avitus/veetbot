@@ -2382,10 +2382,10 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func connectWebsiteToConversation(_ profileID: UUID, sessionID: UUID?) async {
+        defer { if websiteConnectionSessionID == sessionID { websiteConnectionSessionID = nil } }
         guard let api, let sessionID else { return }
         do {
             let resumed = try await api.connectWebsite(sessionID: sessionID, profileID: profileID)
-            if websiteConnectionSessionID == sessionID { websiteConnectionSessionID = nil }
             guard selectedSessionID == sessionID else { return }
             selectedSessionUsesWebsiteProfile = true
             var runID = resumed

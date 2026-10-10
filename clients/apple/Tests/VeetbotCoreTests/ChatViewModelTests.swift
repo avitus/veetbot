@@ -1382,6 +1382,49 @@ import UserNotifications
     }
 
     @Test
+    func testFailedWebsiteConnectionDoesNotRetainAnOldConversationTarget() async throws {
+        let sessionID = UUID(), profileID = UUID(), authenticationID = UUID()
+        let lock = NSLock()
+        var connections = 0
+        let sessionBody = #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Original chat","metadata":{},"created_at":"2026-10-09T12:00:00Z","updated_at":"2026-10-09T12:00:00Z","active_run_id":null,"last_run_id":null}"#
+        let profileBody = #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"ready","generation":1,"created_at":"2026-10-09T12:00:00Z","updated_at":"2026-10-09T12:00:00Z","last_used_at":null}"#
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}")
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("POST", "/v1/browser-profiles"):
+                return try response(for: request, statusCode: 201, body: profileBody)
+            case ("GET", "/v1/browser-profiles"):
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(profileBody)],\"next_cursor\":null}")
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                return try response(for: request, statusCode: 201, body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"needs_user","expires_at":"2026-10-09T13:00:00Z","launch_url":"https://browser.example.org/login"}"#)
+            case ("GET", "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"ready","expires_at":"2026-10-09T13:00:00Z","launch_url":null}"#)
+            case ("PUT", "/v1/sessions/\(sessionID.uuidString)/website"):
+                lock.withLock { connections += 1 }
+                return try response(for: request, statusCode: 409, body: #"{"error":{"code":"conflict","message":"Connection refused","details":{},"request_id":"refused"}}"#)
+            default:
+                return try response(for: request, statusCode: 404, body: #"{"error":{"code":"not_found","message":"Not found"}}"#)
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        await model.selectSession(try #require(model.history.first))
+        #expect(await model.createWebsiteAccess(websiteURL: "https://example.org/login") != nil)
+        await model.refreshBrowserAuthentication()
+        #expect(lock.withLock { connections } == 1)
+        #expect(model.errorMessage != nil)
+
+        model.newSession()
+        await model.refreshBrowserAuthentication()
+        #expect(model.selectedSessionID == nil)
+        #expect(lock.withLock { connections } == 1)
+    }
+
+    @Test
     func testSelectedWebsiteProfileIsBoundWhenANewConversationIsCreated() async throws {
         let profileID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")

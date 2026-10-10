@@ -1667,6 +1667,7 @@ The default-off reviewed-mode flag enables daily bounded generation and only
 owner-approved recall without claiming that autonomous quality gates passed.
 Daily claims, pause and content-free run outcomes are durable. Cancellation records
 a failed run through a shielded receipt write bounded to five seconds; unavailable
-spend is reported as unknown. The dashboard uses
+spend is reported as unknown. Only settled provider charges appear as exact costs.
+The dashboard uses
 current owner-filtered source views and never persists private browser content.
 ADR-0174 defines the authorized boundary and required regression coverage.
