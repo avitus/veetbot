@@ -120,6 +120,7 @@ def controlled_summary(
             "content": content,
             "flagged_for_review": not operation.reviewed,
             "revision": operation.owner_revision,
+            "store_position": operation.store_position,
         }
     )
 

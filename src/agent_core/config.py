@@ -135,6 +135,7 @@ class Settings:
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
     memory_reconsolidation_api_enabled: bool = False
+    memory_dreaming_review_enabled: bool = False
     memory_reconsolidation_enabled: bool = False
     memory_reconsolidation_evidence: Path | None = None
     memory_reconsolidation_residency_provider: str | None = None
@@ -1979,6 +1980,7 @@ def _load_settings(
         memory_reconsolidation_api_enabled=_parse_flag(
             values, "AGENT_MEMORY_RECONSOLIDATION_API_ENABLED"
         ),
+        memory_dreaming_review_enabled=_parse_flag(values, "AGENT_MEMORY_DREAMING_REVIEW_ENABLED"),
         memory_reconsolidation_enabled=_parse_flag(values, "AGENT_MEMORY_RECONSOLIDATION_ENABLED"),
         memory_reconsolidation_evidence=(
             Path(values["AGENT_MEMORY_RECONSOLIDATION_EVIDENCE"]).expanduser()

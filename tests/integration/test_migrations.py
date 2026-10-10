@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import text
 
 from agent_core.adapters.persistence.database import create_engine, create_session_factory
+from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.revision import EXPECTED_REVISION
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
@@ -528,9 +529,11 @@ async def test_attribution_migration_refuses_an_rls_filtered_role(
             await PostgresPeopleStore(database_session, FixedClock(NOW)).put(
                 person(), expected_revision=0
             )
-            await PostgresReconsolidationStore(database_session, RandomIdFactory()).claim_due(
-                principal(), NOW, "hidden-lease"
-            )
+            await PostgresReconsolidationStore(
+                database_session,
+                RandomIdFactory(),
+                dreaming=PostgresDreamingSchedule(database_session, RandomIdFactory()),
+            ).claim_due(principal(), NOW, "hidden-lease")
             connection = await database_session.connection()
             if direction == "upgrade":
                 await connection.execute(
@@ -570,6 +573,7 @@ import asyncio
 from importlib import import_module
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.database import create_engine
 from tests.integration.m2_support import database_settings
 
@@ -614,9 +618,11 @@ async def test_reconsolidation_downgrade_preserves_a_job_admitted_in_flight(
                     text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
                     {"tenant": principal().tenant_id},
                 )
-                job = await PostgresReconsolidationStore(connection, RandomIdFactory()).claim_due(
-                    principal(), NOW, "in-flight"
-                )
+                job = await PostgresReconsolidationStore(
+                    connection,
+                    RandomIdFactory(),
+                    dreaming=PostgresDreamingSchedule(connection, RandomIdFactory()),
+                ).claim_due(principal(), NOW, "in-flight")
                 assert job is not None
                 arguments = ["-m", "alembic", "downgrade", "f7c4a2d9e681"]
                 if original_guard:

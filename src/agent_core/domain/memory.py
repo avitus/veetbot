@@ -939,6 +939,7 @@ class RecallQuery(BaseModel):
     min_store_position: int = Field(default=0, ge=0)
     # Internal opt-in delta predicate; ordinary/historical recall leaves it off.
     include_merge_changes: bool = False
+    owner_reviewed_merges_only: bool = False
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
     include_ids: tuple[UUID, ...] | None = Field(default=None, max_length=1000)
     expand_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)

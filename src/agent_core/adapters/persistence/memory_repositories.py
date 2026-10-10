@@ -558,6 +558,26 @@ class PostgresMemoryStore:
                         ReconsolidationDependencyRow.belief_id == MemoryRow.id,
                         ReconsolidationOperationRow.store_position > query.min_store_position,
                         ReconsolidationOperationRow.payload["kind"].astext == "merge",
+                        or_(
+                            false()
+                            if query.owner_reviewed_merges_only
+                            else ReconsolidationOperationRow.payload["owner_review"][
+                                "decision"
+                            ].astext.is_(None),
+                            and_(
+                                ReconsolidationOperationRow.payload["owner_review"][
+                                    "decision"
+                                ].astext
+                                == "approved",
+                                sql_cast(
+                                    ReconsolidationOperationRow.payload["owner_review"][
+                                        "decided_at"
+                                    ].astext,
+                                    DateTime(timezone=True),
+                                )
+                                <= (query.as_of or self._clock.now()),
+                            ),
+                        ),
                     )
                     .exists()
                 )

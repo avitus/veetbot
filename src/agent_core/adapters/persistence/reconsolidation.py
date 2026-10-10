@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
+from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.memory_repositories import _memory
 from agent_core.adapters.persistence.reconsolidation_mappers import (
     group_to_domain,
@@ -54,6 +55,13 @@ from agent_core.domain.derived_memory import (
     summary_blocks,
     summary_matches,
 )
+from agent_core.domain.dreaming import (
+    DreamingRun,
+    DreamingSchedule,
+    OwnerDreamingReview,
+    review_visible,
+)
+from agent_core.domain.dreaming_decisions import decide_review
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import (
     SENSITIVITY_ORDER,
@@ -122,9 +130,15 @@ def _version(row: MemoryRow) -> SourceVersion:
 
 class PostgresReconsolidationStore:
     def __init__(
-        self, session: AsyncSession, ids: IdFactory, evidence: ReconsolidationEvidence | None = None
+        self,
+        session: AsyncSession,
+        ids: IdFactory,
+        evidence: ReconsolidationEvidence | None = None,
+        *,
+        dreaming: PostgresDreamingSchedule,
     ) -> None:
         self._session = session
+        self._dreaming = dreaming
         self._ids = ids
         self._evidence = evidence
 
@@ -225,6 +239,106 @@ class PostgresReconsolidationStore:
                 operation_id=receipt.operation_id,
                 payload=receipt.model_dump(mode="json"),
             )
+        )
+
+    async def dreaming_schedule(self, principal: Principal) -> DreamingSchedule:
+        return await self._dreaming.status(principal)
+
+    async def pause_dreaming(
+        self, principal: Principal, paused: bool, revision: int
+    ) -> DreamingSchedule:
+        return await self._dreaming.pause(principal, paused, revision)
+
+    async def claim_dreaming_run(self, principal: Principal, now: datetime) -> DreamingRun | None:
+        return await self._dreaming.claim(principal, now)
+
+    async def finish_dreaming_run(self, principal: Principal, run: DreamingRun) -> None:
+        await self._dreaming.finish(principal, run)
+
+    async def dreaming_runs(self, principal: Principal, now: datetime) -> tuple[DreamingRun, ...]:
+        return await self._dreaming.runs(principal, now)
+
+    async def decide_owner_review(
+        self,
+        principal: Principal,
+        operation_id: UUID,
+        expected_revision: int,
+        decision: Literal["approved", "rejected"],
+        key: str,
+        now: datetime,
+    ) -> OperationView:
+        view = await self.get_operation(
+            principal, operation_id, now, ceiling=Sensitivity.RESTRICTED
+        )
+        if view is None:
+            raise NotFoundError("operation not found")
+        row = ReconsolidationOperationRow
+        payload = await self._session.scalar(
+            select(row.payload).where(
+                row.tenant_id == principal.tenant_id,
+                row.principal_id == principal.principal_id,
+                row.id == operation_id,
+            )
+        )
+        value = STORED_OPERATION.validate_python(payload)
+        updated = decide_review(
+            value,
+            expected_revision=expected_revision,
+            decision=decision,
+            digest=undo_key(principal, key),
+            now=now,
+            source_valid=view.content is not None,
+            position=await position(self._session),
+        )
+        if updated != value:
+            if decision == "rejected":
+                signatures = (
+                    value.plan.blocked_pair_signatures
+                    if value.kind == "merge"
+                    else (value.rejection_signatures if isinstance(value, StoredSummary) else ())
+                )
+                for signature in signatures:
+                    await self._session.execute(
+                        pg_insert(ReconsolidationBlockRow)
+                        .values(
+                            tenant_id=principal.tenant_id,
+                            principal_id=principal.principal_id,
+                            signature=signature,
+                            reason="owner_review_rejection",
+                            created_at=now,
+                        )
+                        .on_conflict_do_nothing()
+                    )
+            await save_operation(self._session, updated)
+        result = await self.get_operation(
+            principal, operation_id, now, ceiling=Sensitivity.RESTRICTED
+        )
+        assert result is not None
+        return result
+
+    async def stage_owner_review(
+        self, principal: Principal, token: UUID, operation_id: UUID, now: datetime
+    ) -> None:
+        job = await self._job(principal, token, now)
+        row = ReconsolidationOperationRow
+        payload = await self._session.scalar(
+            select(row.payload).where(
+                row.tenant_id == principal.tenant_id,
+                row.principal_id == principal.principal_id,
+                row.id == operation_id,
+            )
+        )
+        value = None if payload is None else STORED_OPERATION.validate_python(payload)
+        if value is None or value.job_id != job.id or value.owner_review is not None:
+            raise ConflictError("operation cannot be staged")
+        await save_operation(
+            self._session,
+            value.model_copy(
+                update={
+                    "owner_review": OwnerDreamingReview(),
+                    "revision": value.revision + 1,
+                }
+            ),
         )
 
     async def summary_rejection_targets(
@@ -437,7 +551,12 @@ class PostgresReconsolidationStore:
             except NotFoundError:
                 scope = ""
             projection = await self.get_summary(
-                principal, operation_id, now, ceiling=Sensitivity.RESTRICTED, current_scope=scope
+                principal,
+                operation_id,
+                now,
+                ceiling=Sensitivity.RESTRICTED,
+                current_scope=scope,
+                include_pending=True,
             )
             refreshed = await self.summary_operation(principal, operation_id)
             assert refreshed is not None
@@ -851,6 +970,7 @@ class PostgresReconsolidationStore:
         current_scope: str,
         as_of: datetime | None = None,
         known_at: datetime | None = None,
+        include_pending: bool = False,
     ) -> SummaryMemory | None:
         try:
             await lock_owner(self._session, principal)
@@ -868,6 +988,10 @@ class PostgresReconsolidationStore:
         if payload is None or payload["kind"] not in {"summary", "hypothesis"}:
             return None
         value = StoredSummary.model_validate(payload)
+        if not include_pending and not review_visible(
+            value.owner_review, now, as_of=as_of, known_at=known_at
+        ):
+            return None
         if value.owner_removed is not None:
             return None
         if (as_of is not None or known_at is not None) and value.kind == "summary":
@@ -1069,7 +1193,11 @@ class PostgresReconsolidationStore:
         result = []
         for key in keys:
             value = await self.get_merge(principal, key, now)
-            if value is not None and value.state == "committed":
+            if (
+                value is not None
+                and value.state == "committed"
+                and review_visible(value.owner_review, now)
+            ):
                 result.append(value)
         return tuple(result)
 

@@ -6,7 +6,11 @@ title: Current Milestone
 
 - **Milestone 32 — Memory reconsolidation (dreaming):** authorized on
   2026-10-02 as a parallel workstream. [memory-reconsolidation.md](memory-reconsolidation.md)
-  and ADR-0169 define twenty-four registered gates. The implementation now includes
+  and ADR-0169 define twenty-four registered gates. The owner authorized ADR-0174
+  on 2026-10-10: daily pending proposals, a private web review page, and explicit
+  individual approval applying changes to real memory. This supervised path is
+  independent of the unchanged unattended quality gate; no further blinded
+  review packet is required for this path. The implementation now includes
   bounded durable inventory and provider execution, lossless equivalence merging,
   extractive summaries, independently supported tentative connections, conflict
   history, source invalidation and erasure, and HTTP/CLI/native owner controls.

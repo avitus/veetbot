@@ -256,17 +256,40 @@ milestones:
     gates_registered: 24
     authorized_scope:
     - Periodically revisit the entire eligible memory bank within one tenant and principal through bounded resumable maintenance
+    - Daily proposals and an authenticated web review page with individually approved production application; unattended application remains evidence-gated (owner authorized 2026-10-10, ADR-0174)
     - Merge equivalent beliefs, summarize related memories without losing atomic facts, and synthesize grounded tentative connections across sessions
     - Preserve provenance, evidence clocks, authority, portability, sensitivity, owner corrections and erasure; expose inspection and safe merge undo
-    - Compare against existing maintenance using Milestone 16 and applicable Milestone 21 evidence before activation
+    - Compare against existing maintenance using Milestone 16 and applicable Milestone 21 evidence before unattended activation
     deferred_scope:
     - Embeddings, external memory providers, learned memory policies, arbitrary multi-hop graph reasoning and external enrichment
     - New source admission, automatic persona edits, changes to People identity merge rules and automatic historical re-extraction
     open_items:
     - Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
-    - Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before production activation
+    - Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Owner-reviewed daily dreaming implementation (2026-10-10, ADR-0174)
+      outcome: implemented_pending_deployment
+      detail: >-
+        A separate default-off review flag composes one bounded daily provider slice,
+        durable paused/due state and content-free run history. Locally validated
+        operations remain pending until an authenticated, revision-bound owner
+        approval makes them eligible for recall. Pending/rejected operations and
+        legacy unapproved automatic operations stay out of reviewed recall. The
+        private web page at /dreaming supports sources, explicit approval, rejection,
+        merge undo, history and pause/resume with no browser credential storage.
+        Original evidence, source privacy, expiry and erasure are unchanged.
+        Migration ea3210a1b00c preserves this state and refuses destructive downgrade.
+        Fabricated red assertions reproduced premature merge visibility, ineffective
+        approval, missing daily claims, missing approval delta recall and pending
+        merges replaying unchanged originals into session deltas; they pass
+        after the corresponding store changes. The focused M32 suite passes 692
+        tests in 38.67 seconds, with fourteen additional focused edge checks in
+        1.74 seconds and a passing real Chromium approval/undo/rejection/reload flow.
+        No frozen observations, owner judgments, evaluation thresholds or provider
+        comparison artifacts changed. No live provider comparison was rerun for this
+        owner-control change. Deployment and enabling the reviewed configuration in
+        the API and maintenance roles remain; unattended quality remains failed.
     - check: Owner-authorized integration with current dev (2026-10-09)
       outcome: integrated_pending_quality_and_activation
       detail: >-

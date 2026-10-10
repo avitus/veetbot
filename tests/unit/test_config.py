@@ -1659,3 +1659,12 @@ def test_reconsolidation_processing_requires_separate_explicit_configuration() -
         "processing flag must be distinct from browsing"
     )
     assert not settings.memory_reconsolidation_api_enabled
+
+
+def test_reviewed_dreaming_flag_is_explicit_and_does_not_enable_unattended_mode() -> None:
+    assert not load_settings(base_environment()).memory_dreaming_review_enabled
+    settings = load_settings({**base_environment(), "AGENT_MEMORY_DREAMING_REVIEW_ENABLED": "1"})
+    assert settings.memory_dreaming_review_enabled
+    assert not settings.memory_reconsolidation_enabled
+    with pytest.raises(ConfigurationError):
+        load_settings({**base_environment(), "AGENT_MEMORY_DREAMING_REVIEW_ENABLED": "maybe"})

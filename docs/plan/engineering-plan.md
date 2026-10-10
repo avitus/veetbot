@@ -4268,6 +4268,11 @@ approved ADR-0170 on 2026-10-08: a separately versioned, blinded human review ma
 adjudicate equivalent hypothesis wording with exact original support. Existing
 v1 results, answer scoring, all numeric floors and release requirements remain intact.
 
+On 2026-10-10 the owner authorized the supervised production path in ADR-0174:
+daily proposals, a private review page and individual owner-approved application.
+Unattended application retains the frozen comparative quality gates. Supervised
+application preserves the same source, privacy, erasure and original-fact contracts.
+
 Requirements and acceptance direction:
 
 - Bound and resume maintenance across the whole eligible store, with fair

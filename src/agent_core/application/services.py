@@ -24,6 +24,7 @@ from agent_core.domain.browser_task_grants import (
 )
 from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
+from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
@@ -453,6 +454,21 @@ class SurfaceService(Protocol):
 
 
 class ReconsolidationService(Protocol):
+    async def dreaming_status(self, principal: Principal) -> DreamingStatus: ...
+    async def pause_dreaming(
+        self, principal: Principal, *, paused: bool, expected_revision: int
+    ) -> DreamingSchedule: ...
+    async def decide(
+        self,
+        principal: Principal,
+        operation_id: UUID,
+        *,
+        ceiling: Sensitivity,
+        expected_revision: int,
+        decision: Literal["approved", "rejected"],
+        key: str,
+    ) -> OperationView: ...
+
     async def get(
         self, principal: Principal, operation_id: UUID, *, ceiling: Sensitivity
     ) -> OperationView: ...

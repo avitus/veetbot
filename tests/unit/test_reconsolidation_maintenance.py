@@ -151,3 +151,74 @@ async def test_processing_startup_refuses_missing_activation_evidence() -> None:
             storage="memory",
         ):
             pass
+
+
+async def test_reviewed_daily_slice_records_empty_run_once_and_pause() -> None:
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+    tracked = TrackedFactory(cast(Factory, factory))
+    provider = ExecutionProvider(tracked)
+    service = ReconsolidationPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="daily",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=policy,
+        owner_review=True,
+    )
+    assert await service.run_once() == 0
+    assert await service.run_once() == 0
+    async with factory() as uow:
+        runs = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+        assert len(runs) == 1 and runs[0].outcome == "no_change"
+        assert runs[0].provider_calls == 0
+        state = await uow.reconsolidation.dreaming_schedule(principal())
+        await uow.reconsolidation.pause_dreaming(principal(), True, state.revision)
+    assert await service.run_once() == 0
+    assert not provider.requests
+
+
+async def test_reviewed_daily_failure_is_retained_and_not_retried_same_day() -> None:
+    import pytest
+
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+
+    class FailedPass(ReconsolidationPass):
+        async def _inventory(self, lease: ReconsolidationJob) -> int:
+            raise RuntimeError("private failure detail must not be persisted")
+
+    service = FailedPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="failure",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(TrackedFactory(cast(Factory, factory))),
+        egress_policy=policy,
+        owner_review=True,
+    )
+    with pytest.raises(ExceptionGroup):
+        await service.run_once()
+    assert await service.run_once() == 0
+    async with factory() as uow:
+        runs = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+        assert len(runs) == 1 and runs[0].outcome == "failed"
+        assert (
+            runs[0].reason == "execution_failed"
+            and "private failure" not in runs[0].model_dump_json()
+        )

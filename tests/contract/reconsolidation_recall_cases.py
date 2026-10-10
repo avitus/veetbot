@@ -278,3 +278,38 @@ async def merge_preserves_best_member_rank_under_pressure(factory: UnitOfWorkFac
 
 
 RECALL_SCENARIOS.append(merge_preserves_best_member_rank_under_pressure)
+
+
+async def reviewed_recall_excludes_legacy_operations(factory: UnitOfWorkFactory) -> None:
+    async with factory() as uow:
+        job, group = await seed(Stores(uow.memories, uow.reconsolidation, uow.events, uow.people))
+        plan = await uow.reconsolidation.plan_merge(principal(), job.lease_token, group.id, NOW)
+        assert plan is not None
+        operation = await uow.reconsolidation.commit_merge(
+            principal(), job.lease_token, group.id, plan, NOW
+        )
+    retriever = HybridMemoryRetriever(
+        factory,
+        FixedClock(NOW),
+        RandomIdFactory(),
+        principal(),
+        reconsolidation_enabled=True,
+        reconsolidation_owner_approved_only=True,
+    )
+    legacy = await retriever.recall(recall_query(), session_id=SESSION_ID)
+    assert legacy.items and all(item.merge_id is None for item in legacy.items)
+    async with factory() as uow:
+        await uow.reconsolidation.stage_owner_review(
+            principal(), job.lease_token, operation.id, NOW
+        )
+    pending = await retriever.recall(recall_query(), session_id=SESSION_ID)
+    assert pending.items and all(item.merge_id is None for item in pending.items)
+    async with factory() as uow:
+        await uow.reconsolidation.decide_owner_review(
+            principal(), operation.id, operation.revision + 1, "approved", "recall", NOW
+        )
+    approved = await retriever.recall(recall_query(), session_id=SESSION_ID)
+    assert approved.items and approved.items[0].merge_id == operation.id
+
+
+RECALL_SCENARIOS.append(reviewed_recall_excludes_legacy_operations)

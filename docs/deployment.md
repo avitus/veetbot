@@ -1460,3 +1460,44 @@ INSERT on `notification_run_receipts`; the notify and surface dispatcher roles
 need SELECT (the surface allowlist above includes it). Check these privileges for the deployed database roles and grant any missing
 ones before restarting dispatch. Apple clients from before this change still receive
 alerts; cleanup and viewed-result acknowledgement require the updated client.
+
+
+## Owner-reviewed dreaming rollout (ADR-0174)
+
+Deploy the reviewed-dreaming build and run its normal migration to
+`ea3210a1b00c`. Then configure both API and maintenance processes with:
+
+```dotenv
+AGENT_MEMORY_API_ENABLED=1
+AGENT_MEMORY_RECONSOLIDATION_API_ENABLED=1
+AGENT_MEMORY_DREAMING_REVIEW_ENABLED=1
+AGENT_MEMORY_RECONSOLIDATION_ENABLED=0
+AGENT_MEMORY_RECONSOLIDATION_RESIDENCY_PROVIDER=<configured-memory-provider>
+```
+
+The residency provider must match the resolved memory formation provider.
+The provider must be configured and available; ordinary privacy/attribution
+checks still apply to every source. Retain `memory.read,memory.write` in the
+owner's existing token scopes. Restart the API and maintenance roles, then
+open `https://api.veetbot.com/dreaming` and connect with the owner token. Do
+not place a token in a URL. No additional proxy route or external web service
+is needed: the existing API upstream serves the page and all requests.
+
+The next maintenance sweep claims a daily slice; after that, the schedule is
+at least 24 hours from its previous claim. Check Run history for proposed,
+empty, blocked, failed or interrupted outcomes. No provider call is made by
+opening the page or approving an operation. Inspect the exact statement and
+supporting originals, select **Approve and apply**, and confirm. Applied
+merges can be undone here. Summaries/connections retain the existing memory
+browser rejection/deletion controls. Reloading requires reconnecting and
+reads the saved server decisions. Pause previews from Review settings to
+stop new daily claims; an already running bounded slice may finish.
+
+An empty or blocked run can mean there are no eligible attributed memories;
+it does not authorize reconstructing lost source evidence or relaxing privacy.
+Unattended dreaming remains off and still needs the unchanged precision,
+answer-lift and release-evidence requirements. The review path needs no new
+blinded packet. To stop reviewed recall and proposals, disable the review
+flag in both roles; retain the operation API for inspection and undo. Do not
+downgrade the database after review/scheduling state exists: the migration
+refuses to discard that history.

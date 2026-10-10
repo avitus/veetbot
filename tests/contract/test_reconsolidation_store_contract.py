@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import pytest
 
 from agent_core.adapters.determinism import FixedClock, RandomIdFactory
+from agent_core.adapters.memory.dreaming import InMemoryDreamingSchedule
 from agent_core.adapters.memory.in_memory import InMemoryMemoryStore
 from agent_core.adapters.memory.reconsolidation import InMemoryReconsolidationStore
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
@@ -25,7 +26,11 @@ from tests.contract.support import NOW, memory_uow_factory, principal
 
 async def test_due_owner_is_claimed_once() -> None:
     memories = InMemoryMemoryStore(FixedClock(NOW), ReconsolidationIndex(MemoryTransaction()))
-    store = InMemoryReconsolidationStore(memories, RandomIdFactory())
+    store = InMemoryReconsolidationStore(
+        memories,
+        RandomIdFactory(),
+        dreaming=InMemoryDreamingSchedule(memories._transaction, RandomIdFactory()),
+    )
     first = await store.claim_due(principal(), NOW, "worker-a")
     assert first is not None, "a due owner needs a durable job lease"
     assert await store.claim_due(principal(), NOW, "worker-b") is None
@@ -51,7 +56,11 @@ async def test_full_scan_covers_100000_originals_despite_recent_churn() -> None:
     from tests.contract.memory_fixtures import memory
 
     memories = InMemoryMemoryStore(FixedClock(NOW), ReconsolidationIndex(MemoryTransaction()))
-    store = InMemoryReconsolidationStore(memories, RandomIdFactory())
+    store = InMemoryReconsolidationStore(
+        memories,
+        RandomIdFactory(),
+        dreaming=InMemoryDreamingSchedule(memories._transaction, RandomIdFactory()),
+    )
     count = 100_000
     for i in range(count):
         await memories.upsert_belief(

@@ -2324,6 +2324,9 @@ class PeopleLinkRow(Base):
 
 
 class ReconsolidationOwnerRow(Base):
+    dreaming_state: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
     __tablename__ = "reconsolidation_owners"
     tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
     principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -2689,4 +2692,21 @@ class ReconsolidationMemoryWriteRow(Base):
     principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
     key_digest: Mapped[str] = mapped_column(Text, primary_key=True)
     operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class DreamingRunRow(Base):
+    __tablename__ = "dreaming_runs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id"],
+            ["reconsolidation_owners.tenant_id", "reconsolidation_owners.principal_id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_dreaming_runs_owner_time", "tenant_id", "principal_id", "started_at", "id"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)

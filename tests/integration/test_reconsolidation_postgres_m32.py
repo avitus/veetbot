@@ -14,6 +14,7 @@ from sqlalchemy import text
 from agent_core.adapters.determinism import FixedClock, RandomIdFactory
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
 from agent_core.adapters.persistence.database import create_engine, create_session_factory
+from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.memory_repositories import (
     PostgresMemoryStore,
     PostgresTraceStore,
@@ -31,6 +32,7 @@ from agent_core.domain.reconsolidation import ReconsolidationJob
 from agent_core.ports.memory import TraceStore
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.derived_memory_cases import DERIVED_SCENARIOS
+from tests.contract.dreaming_cases import SCENARIOS as DREAMING_SCENARIOS
 from tests.contract.memory_fixtures import memory
 from tests.contract.reconsolidation_admission_cases import ADMISSION_SCENARIOS
 from tests.contract.reconsolidation_apply_cases import APPLY_SCENARIOS
@@ -126,7 +128,10 @@ async def postgres_stores(history_clock: FixedClock) -> AsyncIterator[Factory]:
             events = PostgresEventRepository(connection, clock, EventUpcasterRegistry())
             people = PostgresPeopleStore(connection, clock)
             reconsolidation = PostgresReconsolidationStore(
-                connection, RandomIdFactory(), ReconsolidationEvidence(events, people, memories)
+                connection,
+                RandomIdFactory(),
+                ReconsolidationEvidence(events, people, memories),
+                dreaming=PostgresDreamingSchedule(connection, RandomIdFactory()),
             )
             yield RecallStores(
                 memories,
@@ -231,6 +236,7 @@ async def test_scan_bound_waits_for_inflight_source_commit(postgres_stores: Fact
         *ADMISSION_SCENARIOS,
         *EXECUTION_SCENARIOS,
         *APPLY_SCENARIOS,
+        *DREAMING_SCENARIOS,
         *AUDIT_SCENARIOS,
     ],
     ids=lambda case: case.__name__,
@@ -896,3 +902,34 @@ async def test_grounded_operation_downgrade_preserves_history(
 
         with pytest.raises(RuntimeError, match="previous readers cannot decode"):
             await (await uow.reconsolidation._session.connection()).run_sync(downgrade)
+
+
+@pytest.mark.parametrize("state", ["schedule", "proposal"])
+async def test_reviewed_dreaming_downgrade_preserves_owner_work(
+    postgres_stores: Factory, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    from importlib import import_module
+    from typing import Any
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    from tests.contract.dreaming_cases import review_mode_stages_merge_without_suppressing_originals
+
+    if state == "proposal":
+        await review_mode_stages_merge_without_suppressing_originals(postgres_stores)
+    else:
+        async with postgres_stores() as uow:
+            await uow.reconsolidation.claim_dreaming_run(principal(), NOW)
+    async with postgres_stores() as uow:
+        assert isinstance(uow.reconsolidation, PostgresReconsolidationStore)
+        connection = uow.reconsolidation._session
+        migration = import_module("migrations.versions.ea3210a1b00c_owner_reviewed_dreaming")
+
+        def downgrade(sync: Any) -> None:
+            monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(sync)))
+            migration.downgrade()
+
+        with pytest.raises(RuntimeError, match="Preserve dreaming review and scheduling history"):
+            await (await connection.connection()).run_sync(downgrade)
+        assert await connection.scalar(text("SELECT to_regclass('dreaming_runs')")) is not None

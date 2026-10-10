@@ -111,6 +111,7 @@ async def apply_review(
     *,
     admitted: Callable[[], bool],
     merge_only: bool = False,
+    owner_review: bool = False,
 ) -> tuple[AppliedGroup, ...]:
     """Finish each group atomically; a stale group cannot discard its siblings.
 
@@ -161,6 +162,10 @@ async def apply_review(
                             + prepared.request.metadata["model"],
                         )
                         if operation_id is not None:
+                            if owner_review:
+                                await uow.reconsolidation.stage_owner_review(
+                                    principal, prepared.lease_token, operation_id, clock.now()
+                                )
                             operation_ids.append(operation_id)
                 if not admitted():
                     raise ConflictError("reconsolidation admission withdrawn")

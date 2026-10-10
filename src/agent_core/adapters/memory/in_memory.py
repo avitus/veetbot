@@ -11,6 +11,7 @@ from uuid import UUID
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
 from agent_core.adapters.trace_projection import trace_beliefs
 from agent_core.domain.agents import Principal
+from agent_core.domain.dreaming import review_visible
 from agent_core.domain.erasure import erased_rejection, memory_erasure_tombstone
 from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.knowledge import (
@@ -281,6 +282,11 @@ class InMemoryMemoryStore:
                         == (
                             query.tenant_id,
                             query.principal_id,
+                        )
+                        and review_visible(operation.owner_review, as_of)
+                        and (
+                            not query.owner_reviewed_merges_only
+                            or operation.owner_review is not None
                         )
                         and operation.store_position > query.min_store_position
                     ):

@@ -22,6 +22,7 @@ from agent_core.api.auth import Authenticator
 from agent_core.api.boundary import MalformedRequestError
 from agent_core.api.browser_task_grants import browser_task_grants_router
 from agent_core.api.calls import call_router
+from agent_core.api.dreaming import dreaming_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
@@ -1761,6 +1762,8 @@ def create_app(
         app.include_router(memory_router)
         if settings.memory_reconsolidation_api_enabled and services.reconsolidation is not None:
             app.include_router(reconsolidation_router(services.reconsolidation, secured))
+            if settings.memory_dreaming_review_enabled:
+                app.include_router(dreaming_router(services.reconsolidation, secured))
 
     persona_router = APIRouter()
 

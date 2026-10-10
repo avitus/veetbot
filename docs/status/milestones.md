@@ -298,7 +298,7 @@ failures remain unchanged. The design records the repairs and measured limits.
 
 - [ ] Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
 - [ ] Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
-- [ ] Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before production activation
+- [ ] Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before unattended production activation
 
 ## Outside a milestone
 

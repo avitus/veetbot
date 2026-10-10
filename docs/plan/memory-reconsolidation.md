@@ -1652,3 +1652,18 @@ This is a qualitative experiment using newly supplied information. It does not
 certify historical provenance, full-bank selection, erasure recovery, comparative
 quality or production activation. Private owner text never enters the repository
 or CI; the evaluator and webpage tests use invented statements.
+
+
+## Owner-reviewed production mode (ADR-0174)
+
+On 2026-10-10 the owner authorized daily automatic proposals and a private web
+review page with explicit production application. This supervised mode is separate
+from evidence-gated unattended reconsolidation. Pending proposals retain the
+existing source/dependency lifecycle but are excluded from all recall until the
+owner explicitly approves their current revision. Approval revalidates sources,
+is idempotent, preserves original facts and clocks, and retains undo/rejection.
+The default-off reviewed-mode flag enables daily bounded generation and only
+owner-approved recall without claiming that autonomous quality gates passed.
+Daily claims, pause and content-free run outcomes are durable. The dashboard uses
+current owner-filtered source views and never persists private browser content.
+ADR-0174 defines the authorized boundary and required regression coverage.

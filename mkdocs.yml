@@ -144,6 +144,7 @@ nav:
       - ADR-0168 Bounded Browser Scrolling Without Approval: adr/0168-bounded-browser-scrolling-without-approval.md
       - ADR-0172 Owner Browser Continuation: adr/0172-owner-browser-continuation.md
       - ADR-0173 Terminal Email Reservation Accounting: adr/0173-terminal-email-reservation-accounting.md
+      - ADR-0174 Owner-reviewed dreaming: adr/0174-owner-reviewed-dreaming.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
       - ADR-0002 Provider-neutral model protocol: adr/0002-provider-neutral-model-protocol.md
       - ADR-0003 Event log, projections, and checkpoints: adr/0003-event-log-and-projections.md

@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field, TypeAdapter, model_validator
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.dreaming import OwnerDreamingReview
 from agent_core.domain.reconsolidation import POLICY, ReconValue
 from agent_core.domain.reconsolidation_merge import (
     Digest,
@@ -26,6 +27,7 @@ class StoredMerge(MergeOperation):
     policy: Literal["reconsolidation@1"] = POLICY
     model_identity: Literal["deterministic-equivalence@1"] = "deterministic-equivalence@1"
     evidence_identity: Digest
+    owner_review: OwnerDreamingReview | None = None
     created_at: AwareDatetime
     store_position: int = Field(gt=0)
     reason: Literal["equivalent", "source_changed", "owner_undo"] = "equivalent"
@@ -43,6 +45,7 @@ class StoredSummary(ReconValue):
     policy: Literal["reconsolidation@1"] = POLICY
     model_identity: str = "deterministic-extractive@1"
     evidence_identity: Digest
+    owner_review: OwnerDreamingReview | None = None
     created_at: AwareDatetime
     committed_at: AwareDatetime
     invalidated_at: AwareDatetime | None = None
@@ -91,6 +94,7 @@ class StoredConflict(ReconValue):
     policy: Literal["reconsolidation@1"] = POLICY
     model_identity: str
     evidence_identity: Digest
+    owner_review: OwnerDreamingReview | None = None
     created_at: AwareDatetime
     committed_at: AwareDatetime
     invalidated_at: AwareDatetime | None = None

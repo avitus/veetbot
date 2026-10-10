@@ -7,6 +7,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.derived_memory import SummaryAction, SummaryWriteReceipt
+from agent_core.domain.dreaming import DreamingRun, DreamingSchedule
 from agent_core.domain.memory import MemoryBrowseQuery, Sensitivity
 from agent_core.domain.reconsolidation import (
     CallAdmission,
@@ -36,6 +37,33 @@ from agent_core.domain.reconsolidation_views import (
 
 
 class ReconsolidationStore(Protocol):
+    async def dreaming_schedule(self, principal: Principal) -> DreamingSchedule: ...
+    async def pause_dreaming(
+        self, principal: Principal, paused: bool, revision: int
+    ) -> DreamingSchedule: ...
+    async def finish_dreaming_run(self, principal: Principal, run: DreamingRun) -> None: ...
+    async def dreaming_runs(
+        self, principal: Principal, now: datetime
+    ) -> tuple[DreamingRun, ...]: ...
+
+    async def claim_dreaming_run(
+        self, principal: Principal, now: datetime
+    ) -> DreamingRun | None: ...
+
+    async def decide_owner_review(
+        self,
+        principal: Principal,
+        operation_id: UUID,
+        expected_revision: int,
+        decision: Literal["approved", "rejected"],
+        key: str,
+        now: datetime,
+    ) -> OperationView: ...
+
+    async def stage_owner_review(
+        self, principal: Principal, token: UUID, operation_id: UUID, now: datetime
+    ) -> None: ...
+
     async def get_spend(
         self, principal: Principal, reservation_id: UUID
     ) -> ReconsolidationSpend: ...

@@ -184,7 +184,7 @@ use the same four routes and scopes; no additional memory text-write route exist
 the supplied ceiling, that belongs to another principal or another tenant, or
 that does not exist at all is uniformly `not_found` with status 404. This
 extends the existing cross-tenant-404 rule
-(http-api-and-streaming.md:329-347) to the ceiling, because the alternative
+(http-api-and-streaming.md:328-346) to the ceiling, because the alternative
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
@@ -245,7 +245,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1695-1712) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1694-1711) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text

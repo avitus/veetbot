@@ -224,6 +224,7 @@ class HybridMemoryRetriever:
         profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
         trace_retention: TraceProfile = DEFAULT_TRACE_PROFILE,
         reconsolidation_enabled: bool | Callable[[], bool] = False,
+        reconsolidation_owner_approved_only: bool = False,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -233,6 +234,7 @@ class HybridMemoryRetriever:
         self._profile = profile
         self._trace_retention = trace_retention
         self._reconsolidation_admission = reconsolidation_enabled
+        self._owner_approved_only = reconsolidation_owner_approved_only
 
     @property
     def retrieval_profile(self) -> RetrievalProfile:
@@ -313,6 +315,7 @@ class HybridMemoryRetriever:
         )
         effective_query = effective_query.model_copy(
             update={
+                "owner_reviewed_merges_only": self._owner_approved_only,
                 "include_merge_changes": self._reconsolidation_enabled
                 and query.as_of is None
                 and query.known_at is None,
@@ -458,6 +461,7 @@ class HybridMemoryRetriever:
                 {item.belief_id for item in selected},
                 now,
                 lambda record: _score(record, effective_query, now=now, profile=self._profile),
+                owner_approved_only=self._owner_approved_only,
             )
             selected_claims = {normalize_claim(item.statement) for item in selected}
             for summary in candidates:
@@ -566,6 +570,10 @@ class HybridMemoryRetriever:
                 )
             )
             for operation in operations:
+                if self._owner_approved_only and (
+                    operation.owner_review is None or operation.owner_review.decision != "approved"
+                ):
+                    continue
                 found[operation.id] = operation
         if query.as_of is not None or query.known_at is not None:
             # A past revision cannot bypass today's scope/ceiling on any support.

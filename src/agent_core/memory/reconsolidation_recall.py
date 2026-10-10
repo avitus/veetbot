@@ -20,6 +20,8 @@ async def summary_candidates(
     selected_ids: set[UUID],
     now: datetime,
     score_original: Callable[[MemoryRecord], RecalledBelief | None],
+    *,
+    owner_approved_only: bool = False,
 ) -> list[RecalledSummary]:
     summaries = await uow.reconsolidation.active_summaries(
         principal,
@@ -33,6 +35,14 @@ async def summary_candidates(
     )
     result = []
     for summary in summaries:
+        if owner_approved_only:
+            operation = await uow.reconsolidation.summary_operation(principal, summary.operation_id)
+            if (
+                operation is None
+                or operation.owner_review is None
+                or operation.owner_review.decision != "approved"
+            ):
+                continue
         content = summary.content
         clause_ids = {key for clause in content.clauses for key in clause.source_ids}
         if (

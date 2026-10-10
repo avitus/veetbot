@@ -360,7 +360,16 @@ class ReconsolidationEvidence:
         view = OperationView(
             id=operation.id,
             kind=operation.kind,
-            state=operation.state,
+            state=(
+                "proposed"
+                if operation.state == "committed"
+                and operation.owner_review is not None
+                and operation.owner_review.decision == "pending"
+                else "rejected"
+                if operation.owner_review is not None
+                and operation.owner_review.decision == "rejected"
+                else operation.state
+            ),
             revision=operation.revision,
             reason=operation.reason,
             policy=operation.policy,

@@ -17,6 +17,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ReconsolidationSummaryRow,
 )
 from agent_core.domain.agents import Principal
+from agent_core.domain.dreaming import review_visible
 from agent_core.domain.reconsolidation import SourceVersion
 from agent_core.domain.reconsolidation_operations import (
     STORED_OPERATION,
@@ -41,8 +42,8 @@ async def historical_merges(
         cast(operation.payload["undone_at"].astext, DateTime(timezone=True)),
         cast(operation.payload["invalidated_at"].astext, DateTime(timezone=True)),
     )
-    payloads = await session.scalars(
-        select(history.payload)
+    payloads = await session.execute(
+        select(history.payload, operation.payload)
         .join(
             operation,
             and_(
@@ -68,7 +69,16 @@ async def historical_merges(
         )
         .order_by(history.operation_id)
     )
-    return tuple(StoredMerge.model_validate(payload) for payload in payloads)
+    result = []
+    for original, current in payloads:
+        current_merge = StoredMerge.model_validate(current)
+        if review_visible(current_merge.owner_review, cutoff):
+            result.append(
+                StoredMerge.model_validate(original).model_copy(
+                    update={"owner_review": current_merge.owner_review}
+                )
+            )
+    return tuple(result)
 
 
 async def source_versions_at(

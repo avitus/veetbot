@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
+from agent_core.adapters.memory.dreaming import InMemoryDreamingSchedule
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
 from agent_core.domain.agents import Principal
 from agent_core.domain.derived_memory import (
@@ -18,6 +19,13 @@ from agent_core.domain.derived_memory import (
     summary_blocks,
     summary_matches,
 )
+from agent_core.domain.dreaming import (
+    DreamingRun,
+    DreamingSchedule,
+    OwnerDreamingReview,
+    review_visible,
+)
+from agent_core.domain.dreaming_decisions import decide_review
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import (
     SENSITIVITY_ORDER,
@@ -85,6 +93,8 @@ class InMemoryReconsolidationStore:
         memories: InMemoryMemoryStore,
         ids: IdFactory,
         evidence: ReconsolidationEvidence | None = None,
+        *,
+        dreaming: InMemoryDreamingSchedule,
     ) -> None:
         self._memories = memories
         self._ids = ids
@@ -95,6 +105,7 @@ class InMemoryReconsolidationStore:
         )
         self._groups: MutableMapping[UUID, ReconsolidationGroup] = self._transaction.mapping()
         self._spend: MutableMapping[UUID, ReconsolidationSpend] = self._transaction.mapping()
+        self._dreaming = dreaming
         self._audits: list[ReconsolidationAudit] = []
 
     def _job(self, principal: Principal, token: UUID, now: datetime) -> ReconsolidationJob:
@@ -147,6 +158,85 @@ class InMemoryReconsolidationStore:
             self._memories._reconsolidation_index.summary_receipts[
                 principal.tenant_id, principal.principal_id, key
             ] = receipt
+
+    async def dreaming_schedule(self, principal: Principal) -> DreamingSchedule:
+        return await self._dreaming.status(principal)
+
+    async def pause_dreaming(
+        self, principal: Principal, paused: bool, revision: int
+    ) -> DreamingSchedule:
+        return await self._dreaming.pause(principal, paused, revision)
+
+    async def claim_dreaming_run(self, principal: Principal, now: datetime) -> DreamingRun | None:
+        return await self._dreaming.claim(principal, now)
+
+    async def finish_dreaming_run(self, principal: Principal, run: DreamingRun) -> None:
+        await self._dreaming.finish(principal, run)
+
+    async def dreaming_runs(self, principal: Principal, now: datetime) -> tuple[DreamingRun, ...]:
+        return await self._dreaming.runs(principal, now)
+
+    async def decide_owner_review(
+        self,
+        principal: Principal,
+        operation_id: UUID,
+        expected_revision: int,
+        decision: Literal["approved", "rejected"],
+        key: str,
+        now: datetime,
+    ) -> OperationView:
+        async with self._transaction.owner((principal.tenant_id, principal.principal_id)):
+            view = await self.get_operation(
+                principal, operation_id, now, ceiling=Sensitivity.RESTRICTED
+            )
+            if view is None:
+                raise NotFoundError("operation not found")
+            index = self._memories._reconsolidation_index
+            value = index.operations[operation_id]
+            updated = decide_review(
+                value,
+                expected_revision=expected_revision,
+                decision=decision,
+                digest=undo_key(principal, key),
+                now=now,
+                source_valid=view.content is not None,
+                position=await self._memories.next_position(),
+            )
+            if updated != value:
+                if decision == "rejected":
+                    signatures = (
+                        value.plan.blocked_pair_signatures
+                        if value.kind == "merge"
+                        else (
+                            value.rejection_signatures if isinstance(value, StoredSummary) else ()
+                        )
+                    )
+                    for signature in signatures:
+                        index.blocks[principal.tenant_id, principal.principal_id, signature] = now
+                index.save(updated)
+            result = await self.get_operation(
+                principal, operation_id, now, ceiling=Sensitivity.RESTRICTED
+            )
+            assert result is not None
+            return result
+
+    async def stage_owner_review(
+        self, principal: Principal, token: UUID, operation_id: UUID, now: datetime
+    ) -> None:
+        async with self._transaction.owner((principal.tenant_id, principal.principal_id)):
+            job = self._job(principal, token, now)
+            index = self._memories._reconsolidation_index
+            value = index.operations.get(operation_id)
+            if value is None or value.job_id != job.id or value.owner_review is not None:
+                raise ConflictError("operation cannot be staged")
+            index.save(
+                value.model_copy(
+                    update={
+                        "owner_review": OwnerDreamingReview(),
+                        "revision": value.revision + 1,
+                    }
+                )
+            )
 
     async def summary_rejection_targets(
         self, principal: Principal, operation_id: UUID
@@ -304,6 +394,7 @@ class InMemoryReconsolidationStore:
                     now,
                     ceiling=Sensitivity.RESTRICTED,
                     current_scope=scope,
+                    include_pending=True,
                 )
                 refreshed = await self.summary_operation(principal, operation_id)
                 assert refreshed is not None
@@ -667,6 +758,7 @@ class InMemoryReconsolidationStore:
         current_scope: str,
         as_of: datetime | None = None,
         known_at: datetime | None = None,
+        include_pending: bool = False,
     ) -> SummaryMemory | None:
         async with self._transaction.owner((principal.tenant_id, principal.principal_id)):
             index = self._memories._reconsolidation_index
@@ -676,6 +768,10 @@ class InMemoryReconsolidationStore:
                 or not isinstance(value, StoredSummary)
                 or (value.plan.tenant_id, value.plan.principal_id)
                 != (principal.tenant_id, principal.principal_id)
+            ):
+                return None
+            if not include_pending and not review_visible(
+                value.owner_review, now, as_of=as_of, known_at=known_at
             ):
                 return None
             if value.owner_removed is not None:
@@ -858,7 +954,11 @@ class InMemoryReconsolidationStore:
             result = []
             for key in sorted(keys):
                 value = await self.get_merge(principal, key, now)
-                if value is not None and value.state == "committed":
+                if (
+                    value is not None
+                    and value.state == "committed"
+                    and review_visible(value.owner_review, now)
+                ):
                     result.append(value)
             return tuple(result)
 
@@ -885,7 +985,7 @@ class InMemoryReconsolidationStore:
             result = []
             for key in sorted(keys):
                 value = index.operations[key]
-                if value.kind != "merge":
+                if value.kind != "merge" or not review_visible(value.owner_review, cutoff):
                     continue
                 ended = value.undone_at or value.invalidated_at
                 if value.committed_at > cutoff or (ended is not None and ended <= cutoff):
@@ -898,7 +998,7 @@ class InMemoryReconsolidationStore:
                 ):
                     continue
                 if await self._evidence.historical(principal, original.plan, as_of, known_at):
-                    result.append(original)
+                    result.append(original.model_copy(update={"owner_review": value.owner_review}))
             return tuple(result)
 
     async def merge_members(

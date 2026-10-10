@@ -4,10 +4,12 @@ import base64
 import binascii
 import hashlib
 import json
+from typing import Literal
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
+from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.reconsolidation_views import (
@@ -82,6 +84,61 @@ class PublicReconsolidationService:
     def __init__(self, uow_factory: UnitOfWorkFactory, clock: Clock) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
+
+    async def dreaming_status(self, principal: Principal) -> DreamingStatus:
+        require_scope(principal, "memory.read")
+        async with self._uow_factory() as uow:
+            return DreamingStatus(
+                schedule=await uow.reconsolidation.dreaming_schedule(principal),
+                runs=await uow.reconsolidation.dreaming_runs(principal, self._clock.now()),
+            )
+
+    async def pause_dreaming(
+        self, principal: Principal, *, paused: bool, expected_revision: int
+    ) -> DreamingSchedule:
+        require_scope(principal, "memory.write")
+        if type(paused) is not bool or type(expected_revision) is not int or expected_revision < 1:
+            raise ReconsolidationValidationError("invalid dreaming schedule revision")
+        async with self._uow_factory() as uow:
+            return await uow.reconsolidation.pause_dreaming(principal, paused, expected_revision)
+
+    async def decide(
+        self,
+        principal: Principal,
+        operation_id: UUID,
+        *,
+        ceiling: Sensitivity,
+        expected_revision: int,
+        decision: Literal["approved", "rejected"],
+        key: str,
+    ) -> OperationView:
+        require_scope(principal, "memory.write")
+        require_scope(principal, "memory.read")
+        if (
+            type(expected_revision) is not int
+            or expected_revision < 1
+            or decision not in {"approved", "rejected"}
+            or not key.strip()
+            or len(key) > 128
+        ):
+            raise ReconsolidationValidationError(
+                "decision requires a revision and bounded idempotency key"
+            )
+        async with self._uow_factory() as uow, uow.people.lock(principal):
+            now = self._clock.now()
+            view = await uow.reconsolidation.get_operation(
+                principal, operation_id, now, ceiling=ceiling
+            )
+            if view is None:
+                raise NotFoundError("reconsolidation operation not found")
+            await uow.reconsolidation.decide_owner_review(
+                principal, operation_id, expected_revision, decision, key, now
+            )
+            result = await uow.reconsolidation.get_operation(
+                principal, operation_id, now, ceiling=ceiling
+            )
+            assert result is not None
+            return result
 
     async def get(
         self, principal: Principal, operation_id: UUID, *, ceiling: Sensitivity
@@ -169,7 +226,7 @@ class PublicReconsolidationService:
             )
             if value is None:
                 raise NotFoundError("reconsolidation operation not found")
-            if value.kind != "merge":
+            if value.kind != "merge" or value.state not in {"committed", "undone"}:
                 raise ConflictError("only a committed merge can be undone")
             await uow.reconsolidation.undo_merge(
                 principal, operation_id, expected_revision, key, now

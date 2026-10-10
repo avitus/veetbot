@@ -310,8 +310,7 @@ implementer would otherwise have to make alone.
 
 **The health endpoints are unauthenticated.** A liveness probe that
 needs a credential is a liveness probe that fails when the credential
-rotates. `GET /health/live` and `GET /health/ready` are the only
-unauthenticated routes, and the shape of what they return is chosen so
+rotates. `GET /health/live` and `GET /health/ready` are unauthenticated routes, and the shape of what they return is chosen so
 that being unauthenticated is safe — see the health section below.
 
 **Token comparison is constant time and the token is never logged.**
@@ -2323,3 +2322,30 @@ revision; an unchanged list does not advance its revision. Disabled routes
 return 404. The server stores even an empty list, and removing scopes ends
 their unended task grants in the same transaction. See
 [browser-automation.md](browser-automation.md) for the retained task limits.
+
+
+## Owner-reviewed dreaming web surface (ADR-0174)
+
+When `AGENT_MEMORY_DREAMING_REVIEW_ENABLED`, `AGENT_MEMORY_API_ENABLED` and
+`AGENT_MEMORY_RECONSOLIDATION_API_ENABLED` are enabled, `/dreaming` serves a
+content-free public HTML shell and its two same-origin CSS/JavaScript assets.
+All memory content requires the existing owner bearer token: the page retains
+it only in tab memory, never cookies or browser storage. Remote use requires
+HTTPS. The shell uses a restrictive CSP and renders untrusted prose as text.
+
+`GET /v1/dreaming` requires `memory.read` and returns the durable schedule and
+latest fifty content-free run outcomes. `POST /v1/dreaming/schedule` requires
+`memory.write` and a strict `{paused, expected_revision}` body. Repeating the
+same change at the immediately previous revision is safe. Daily runs occur
+at most once per 24 hours through maintenance, with no missed-day catch-up.
+
+`POST /v1/dreaming/{operation_id}/decision?ceiling=...` requires both memory
+scopes, a bounded `Idempotency-Key`, and a strict body containing
+`expected_revision` and `decision` (`approved` or `rejected`). It revalidates
+sources and binds the exact stored revision under the owner/People transaction.
+It accepts no replacement text. Same-decision retries replay safely; competing
+or stale decisions return 409. Foreign IDs return 404. Responses use
+`Cache-Control: private, no-store`. The existing operation list/get and merge
+undo routes provide inspection, pagination and reversal. Disabling the review
+flag removes the new routes and reviewed recall; the existing inspection and
+undo API remains independently configurable.

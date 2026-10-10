@@ -78,6 +78,7 @@ from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
 from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.adapters.media.tensorscale import TensorScaleMediaProvider
+from agent_core.adapters.memory.dreaming import InMemoryDreamingSchedule
 from agent_core.adapters.memory.in_memory import (
     InMemoryIntegratedEpisodeStore,
     InMemoryKnowledgeStore,
@@ -109,6 +110,7 @@ from agent_core.adapters.persistence.device_channel import (
     PostgresDeviceIngestStore,
     PostgresDeviceInvocationStore,
 )
+from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
 from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
 from agent_core.adapters.persistence.latency_report import chat_latency_report
@@ -1122,7 +1124,10 @@ def _memory_uow_repositories(
         memory_index=memories._reconsolidation_index,
     )
     reconsolidation = InMemoryReconsolidationStore(
-        memories, RandomIdFactory(), ReconsolidationEvidence(events, people, memories)
+        memories,
+        RandomIdFactory(),
+        ReconsolidationEvidence(events, people, memories),
+        dreaming=InMemoryDreamingSchedule(memories._transaction, RandomIdFactory()),
     )
     traces = traces or InMemoryTraceStore(people, reconsolidation=reconsolidation, clock=clock)
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
@@ -1249,7 +1254,10 @@ def _postgres_repository_factory(
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
         reconsolidation = PostgresReconsolidationStore(
-            session, ids, ReconsolidationEvidence(events, people, memories)
+            session,
+            ids,
+            ReconsolidationEvidence(events, people, memories),
+            dreaming=PostgresDreamingSchedule(session, ids),
         )
         traces = PostgresTraceStore(session, people, reconsolidation=reconsolidation, clock=clock)
         knowledge = PostgresKnowledgeStore(session, clock)
@@ -3265,6 +3273,51 @@ async def _compose(
             provider=effective_providers[extraction_model.provider],
             egress_policy=local_egress_policy(settings.memory_reconsolidation_residency_provider),
         )
+    if settings.memory_dreaming_review_enabled:
+        if settings.memory_reconsolidation_enabled:
+            raise ConfigurationError(
+                "reviewed dreaming and unattended reconsolidation are separate modes"
+            )
+        if not settings.memory_api_enabled or not settings.memory_reconsolidation_api_enabled:
+            raise ConfigurationError("reviewed dreaming requires memory and reconsolidation APIs")
+        if extraction_model is None:
+            if extraction_model_policy in NON_ROUTED_MODEL_POLICIES:
+                extraction_model = ResolvedModel(
+                    provider="fake",
+                    model="scripted",
+                    credential_ref="fake",
+                    policy_name=extraction_model_policy,
+                    resolved_at=clock.now(),
+                )
+            else:
+                extraction_model = await model_router.resolve(
+                    extraction_model_policy,
+                    tenant_id=principal.tenant_id,
+                    required=frozenset({Capability.STRUCTURED_OUTPUT, Capability.STREAMING}),
+                )
+        if extraction_model.provider not in effective_providers or isinstance(
+            effective_providers[extraction_model.provider], MissingCredentialProvider
+        ):
+            raise ConfigurationError("reviewed dreaming provider is unavailable")
+        if (
+            extraction_model.provider != "fake"
+            and settings.memory_reconsolidation_residency_provider != extraction_model.provider
+        ):
+            raise ConfigurationError(
+                "reviewed dreaming requires an explicit matching residency provider"
+            )
+        recon_pass = ReconsolidationPass(
+            uow_factory,
+            clock,
+            principal,
+            worker_id="reviewed-dreaming",
+            admitted=lambda: True,
+            ids=ids,
+            model=extraction_model,
+            provider=effective_providers[extraction_model.provider],
+            egress_policy=local_egress_policy(settings.memory_reconsolidation_residency_provider),
+            owner_review=True,
+        )
     memory_retriever = HybridMemoryRetriever(
         uow_factory,
         clock,
@@ -3272,7 +3325,8 @@ async def _compose(
         principal,
         profile=memory_profiles.retrieval,
         trace_retention=memory_profiles.traces,
-        reconsolidation_enabled=recon_admitted,
+        reconsolidation_enabled=True if settings.memory_dreaming_review_enabled else recon_admitted,
+        reconsolidation_owner_approved_only=settings.memory_dreaming_review_enabled,
     )
     registry.register(MemorySearchTool(memory_retriever))
     people_erasure = PeopleErasureService(uow_factory, clock)
