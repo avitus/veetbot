@@ -613,7 +613,7 @@ class InMemoryRunRepository:
 
 
 class InMemoryEventRepository:
-    def __init__(self, sessions: SessionRepository, clock: Clock) -> None:
+    def __init__(self, sessions: InMemorySessionRepository, clock: Clock) -> None:
         self._sessions = sessions
         self._clock = clock
         self._events: dict[UUID, list[EventEnvelope]] = defaultdict(list)
@@ -633,6 +633,8 @@ class InMemoryEventRepository:
                 existing = self._derived.get(event.derivation_key)
                 if existing is not None:
                     return existing.model_copy(deep=True)
+            if event.session_id not in self._sessions._sessions:
+                raise NotFoundError("session not found")
             stream = self._events[event.session_id]
             envelope = EventEnvelope(
                 id=self._next_id,
@@ -644,15 +646,13 @@ class InMemoryEventRepository:
             stream.append(envelope)
             if event.derivation_key is not None:
                 self._derived[event.derivation_key] = envelope
-        if (
-            isinstance(self._sessions, InMemorySessionRepository)
-            and event.actor_type == "principal"
-            and event.event_type in {"email.discussion.opened", "user.message.created"}
-        ):
+        if event.actor_type == "principal" and event.event_type in {
+            "email.discussion.opened",
+            "user.message.created",
+        }:
             self._sessions._chat_sessions.add(event.session_id)
-        touch = getattr(self._sessions, "touch", None)
-        if touch is not None and advances_session_activity(event):
-            await touch(event.session_id, occurred_at)
+        if advances_session_activity(event):
+            await self._sessions.touch(event.session_id, occurred_at)
         return envelope.model_copy(deep=True)
 
     async def list_window(
