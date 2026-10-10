@@ -3127,7 +3127,8 @@ async def test_distillation_grounds_evidence_that_contains_a_period() -> None:
     assert audit.coverage_dispositions == {f"{source_id}:1": "formed"}
 
 
-async def test_represented_coverage_is_verified_against_the_cited_memory() -> None:
+@pytest.mark.parametrize("compound", [False, True])
+async def test_represented_coverage_is_verified_against_the_cited_memory(compound: bool) -> None:
     """A clause is only represented by a memory that asserts it."""
 
     clock, factory, baseline, _retriever = await formation_stack()
@@ -3153,7 +3154,12 @@ async def test_represented_coverage_is_verified_against_the_cited_memory() -> No
                             "predictions": [
                                 {
                                     "episode_index": 0,
-                                    "statement": "User prefers concise answers.",
+                                    "statement": (
+                                        "User prefers concise answers and swims "
+                                        "three mornings each week."
+                                        if compound
+                                        else "User prefers concise answers."
+                                    ),
                                     "attributed_memory_ids": [str(existing.id)],
                                 }
                             ]
@@ -3191,6 +3197,11 @@ async def test_represented_coverage_is_verified_against_the_cited_memory() -> No
     await extractor.extract(new_events, principal=principal(), scope="general")
 
     audit = extractor.last_audit
+    if compound:
+        assert json.loads(_prompt_text(provider.requests[2]))["anticipation"]["predictions"] == []
+        assert audit.provider_stage_metrics["anticipation"]["outcome"] == "validation_failure"
+        assert "anticipation" in audit.fallback_stages
+        return
     assert "prediction_error_distillation" not in audit.fallback_stages
     assert audit.represented_unverified == 1
     assert audit.coverage_dispositions == {f"{new_source}:1": "represented_unverified"}

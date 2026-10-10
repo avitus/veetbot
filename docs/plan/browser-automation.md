@@ -132,7 +132,8 @@ The stable builtin namespace is `browser`:
 The write classification is deliberately conservative. A click that appears
 local can submit a form, mark a message read, accept terms, or mutate an
 account. `browser.act` therefore follows the external-write approval path even
-when a provider predicts that one action is harmless. Separate read-only tools
+when a provider predicts that one action is harmless, except for the owner's
+explicitly permitted bounded scroll gesture (ADR-0168). Separate read-only tools
 keep observation available without granting mutation.
 
 The model never selects a tenant, principal, profile, device, provider, cookie
@@ -1021,7 +1022,21 @@ trusted `browser_provider`, their exact tool classification matches this
 document, and the provider binding enforces the origin policy. Otherwise they
 are denied.
 
-`browser.act` requires an ordinary approval by default. Two durable grants can
+`browser.act` requires an ordinary approval by default, with one narrow
+exception under ADR-0168: the default policy permits a validated scroll of
+1–2,000 pixels in either direction through the isolated browser provider.
+Only revision, reference, integer delta and an optional validated observation
+postcondition are admitted. Other action kinds, unknown fields and classification
+mismatches cannot use this permission. It works for both interactive and
+scheduled tasks. The pipeline supplies the newest user message's trust separately
+from page-result taint: reading a feed does not remove an owner's permission,
+while a turn opened by untrusted content still requires approval. Hardline rules,
+profile and origin checks, revision checks, serial dispatch, effect recording,
+non-idempotent recovery and run budgets remain in force. A scroll may invoke
+site JavaScript; this is explicit authority for the gesture, not proof of no
+website side effects. A custom policy may keep requiring approval or deny it.
+
+Two durable grants can
 stand in for it, and neither is ever created through conversation text or page
 content. Unattended operation requires a standing `BrowserGrant` created
 through an explicit approval surface. An interactive task may use a

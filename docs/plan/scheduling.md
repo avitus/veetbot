@@ -390,7 +390,10 @@ budget or a source chat's grants.
 The full-definition HTTP update can bind or unbind future occurrences with the
 ordinary expected-revision check. Content-only `schedule.update` preserves the
 binding. `schedule.create` still grants no scopes and binds no profile; the
-model cannot choose one. Browser actions retain their existing approval rules.
+model cannot choose one. Browser actions retain their existing approval rules,
+including ADR-0168's bounded-scroll permission in the default policy. Scheduled
+feed reads can scroll without an interactive grant; other actions still require
+their ordinary approval or an applicable standing grant.
 The native schedule detail offers that update as its Website access picker
 (ADR-0154).
 

@@ -1159,3 +1159,11 @@ Metrics carry no belief statement, no secret, and no local dataset path.
 6. Whether the external-dataset results should ever be published anywhere but
    the operator's own machine, given that all three licenses permit local
    evaluation and two forbid commercial use.
+
+## Background lifecycle audits and chat recency
+
+The automatic decay sweep's `memory.decayed` and `memory.retired` events
+(actor `memory`, no run) remain in the source session's audit history without
+advancing its conversation activity timestamp or postponing its idle boundary
+(ADR-0167). Confidence, provenance, retirement, event ordering and the memory
+policy stay unchanged.

@@ -1664,6 +1664,7 @@ class ToolPipeline:
             normalized_arguments_hash=arguments_hash,
             argument_trust=_argument_trust(arguments, checkpoint),
             origin_trust=invocation.origin_trust,
+            newest_user_trust=_active_turn_facts(checkpoint).newest_user_trust,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},

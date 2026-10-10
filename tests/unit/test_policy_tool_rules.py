@@ -89,7 +89,11 @@ def test_the_shipped_device_entry_declares_its_human_confirmation() -> None:
     [undeclared] = _ruleset({TOOL_NAME: {"decision": "allow"}}).tool_rules
     assert undeclared.human_confirms_arguments is False
 
-    [shipped] = load_ruleset_documents(*_documents()).tool_rules
+    [shipped] = [
+        rule
+        for rule in load_ruleset_documents(*_documents()).tool_rules
+        if rule.tool_name == TOOL_NAME
+    ]
     assert shipped.tool_name == TOOL_NAME
     assert shipped.decision is PolicyDecisionType.ALLOW
     assert shipped.human_confirms_arguments is True

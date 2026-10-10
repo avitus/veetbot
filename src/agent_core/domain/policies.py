@@ -89,6 +89,7 @@ class PolicyCondition(StrEnum):
     PATH_INSIDE_WORKSPACE = "path_inside_workspace"
     HOST_ON_ALLOWLIST = "host_on_allowlist"
     TARGET_ISOLATED = "target_isolated"
+    BOUNDED_BROWSER_SCROLL = "bounded_browser_scroll"
 
 
 class HardlineRuleKind(StrEnum):
@@ -124,6 +125,8 @@ class ProposedAction(BaseModel):
     normalized_arguments_hash: str
     argument_trust: dict[str, TrustLevel] = Field(default_factory=dict)
     origin_trust: TrustLevel
+    # Trusted pipeline fact, distinct from the taint introduced by later tool results.
+    newest_user_trust: TrustLevel | None = None
     target: ExecutionTarget
     evaluated_at: datetime
 
@@ -214,7 +217,8 @@ class ToolPolicyRule(BaseModel):
     `human_confirms_arguments` is a separate, explicit claim: this tool shows
     the arguments to the human who completes the action, so the argument half of
     the trust overlay would refuse what that human is looking at. Only a rule
-    declaring it gets that suppression. The origin half always applies and
+    declaring it gets that suppression, apart from the explicitly permitted
+    bounded-scroll gesture (ADR-0168). The origin half always applies and
     follows the trust table's "May authorize" column, which is defense in depth
     rather than a containment boundary: origin trust is scoped to the active
     turn, so it does not survive the next user message.

@@ -6,7 +6,8 @@
   ADR-0021, ADR-0044, ADR-0054
 - Amended by: ADR-0127 (decision 15, run-attempt leases renew while the run
   needs them); ADR-0128 (decision 16, a device variant of the login ceremony);
-  ADR-0129 (decision 17, task grants may cover unknown consequences)
+  ADR-0129 (decision 17, task grants may cover unknown consequences);
+  ADR-0168 (decisions 2 and 11, explicit bounded-scroll permission)
 - Detailed design: `docs/plan/browser-automation.md`
 
 ## Context

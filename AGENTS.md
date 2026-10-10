@@ -96,7 +96,7 @@ checks it per commit; no trailer means lane A.
 ## Scope control
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
-- Milestones 0 through 13, 16, 17, 19, 20, 22, 23, and 29 are complete. Milestones 14 and 15 proceed in that order (ADR-0061);
+- Milestones 0 through 14, 16, 17, 19, 20, 22, 23, and 29 are complete. Milestone 15 proceeds next (ADR-0061);
   18 through 31 are parallel workstreams (ADRs 0071–0073, 0077, 0079–0082, 0092, 0097, 0100, 0102, 0111, 0112). Milestone 21 is limited to adaptive
   memory distillation, 22 to the persona surface, 23 to the conversational schedule lifecycle, 24 to SMS through
   the owner's iPhone, 25 to the WhatsApp business surface, 26 to client modes and the email experience, 27 to Bland calling, 28 to People and relationship memory, 29 to chat thread folders and typed judgment, 30 to advisory approval, and 31 to email unsubscribe. Model routing and the plan's remaining roadmap items

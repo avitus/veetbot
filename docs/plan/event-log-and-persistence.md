@@ -79,14 +79,14 @@ Inherited constraints, all of which predate this document:
 ### One event, one short transaction
 
 Appending an event is a single transaction containing exactly three statements
-and no I/O:
+and no I/O. The timestamp assignment below excludes ADR-0167's automatic maintenance.
 
 ```sql
 BEGIN;
 
 UPDATE sessions
    SET next_event_sequence = next_event_sequence + 1,
-       updated_at = GREATEST(updated_at, $event_created_at)
+       updated_at = CASE WHEN $advances_session_activity THEN GREATEST(updated_at, $event_created_at) ELSE updated_at END
  WHERE id = $session_id
 RETURNING next_event_sequence - 1 AS sequence;
 
@@ -122,8 +122,8 @@ The state change that an event describes belongs in the same transaction as the
 event. An event that says `run.completed` while the `runs` row still says
 `RUNNING` is a lie the log tells forever.
 
-The same statement advances `sessions.updated_at` to the persisted event's
-timestamp. ADR-0050 makes that field the authoritative conversation-history
+For activity-bearing events (ADR-0167), the same statement advances
+`sessions.updated_at` to the persisted event's timestamp. ADR-0050 makes that field the authoritative conversation-history
 sort key, so activity ordering is a projection of committed events rather than
 client selection or a later best-effort write. A transaction that rolls back
 the event also rolls back the timestamp.
@@ -1636,3 +1636,14 @@ ceremony identifiers and the bounded continuation content. It replaces neither
 an owner message nor authority. The matching `tool.call.completed`, working-state
 update, full checkpoint and run requeue commit atomically with it, using the
 question-derived idempotency key. Replay preserves exactly one call/result pair.
+
+## Automatic memory maintenance and conversation activity
+
+ADR-0167 refines the append path's activity projection for the owner-requested
+Recent-chat repair. A `memory.decayed` or `memory.retired` event whose actor is
+`memory` and whose run identifier is null still allocates its sequence and
+persists in the same transaction, but leaves `sessions.updated_at` unchanged.
+Both adapters apply this exception; all other events retain the monotonic
+timestamp update. The repair migration restores affected active sessions to
+the latest remaining event or creation time, preserves later independent
+writes and closed sessions, and retains every audit event.

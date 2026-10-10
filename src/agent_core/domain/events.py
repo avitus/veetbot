@@ -36,6 +36,16 @@ SCHEDULE_INSTRUCTION_EVENT_TYPE = "user.message.created"
 SCHEDULE_INSTRUCTION_ACTOR_TYPE = "scheduler"
 
 
+def advances_session_activity(event: NewEvent) -> bool:
+    """Automatic belief decay is audit history, not conversation activity."""
+
+    return not (
+        event.event_type in {"memory.decayed", "memory.retired"}
+        and event.actor_type == "memory"
+        and event.run_id is None
+    )
+
+
 def validate_event_window(
     session_ids: Sequence[UUID],
     since: datetime,

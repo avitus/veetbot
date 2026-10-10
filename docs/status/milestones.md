@@ -11,22 +11,21 @@ milestone appears here under the wrong group, under a stale title, or with a
 checklist that disagrees with that file's `open_items`. Update the state file
 first; this page follows it.
 
-The **verified gate ceiling is Milestone 13** (268 cumulative gates). The
+The **verified gate ceiling is Milestone 14** (289 cumulative gates). The
 parallel workstreams below advance their own gates independently but never
-move that ceiling; it advances only as Milestones 14 and 15 complete in
-order. Which gate belongs to which milestone is the
+move that ceiling; it advances only when Milestone 15 completes. Which gate belongs to which milestone is the
 [milestone map](../plan/milestone-map.md); the authoritative acceptance
 criteria live in the [engineering plan](../plan/engineering-plan.md).
 
 ## At a glance
 
 State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
-runs as release `20260928-202932-e55551f`. Twenty-one of thirty-two milestones
-are complete; ten are in progress and one is authorized but not started.
+runs as release `20260928-202932-e55551f`; Milestone 14's completion was
+recorded on 2026-10-09. Twenty-two of thirty-two milestones are complete; nine
+are in progress and one is authorized but not started.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
-| 14 Inbound surfaces | In progress | Main pull request for the paired `/pair` repair | Engineering, then owner |
 | 15 Operational hardening | Not started | All sixteen gates | Engineering, then owner |
 | 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
 | 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
@@ -59,6 +58,10 @@ are complete; ten are in progress and one is authorized but not started.
   review on its final head; the delegating arm scored above the failed
   single-agent baseline. Recorded on 2026-09-28, moving the verified ceiling
   to Milestone 13.
+- **Milestone 14 — Inbound surfaces and pairing** — completed on 2026-10-07:
+  the owner's production Telegram smoke passed on 2026-10-06, and pull request
+  153 shipped its one finding with hosted CI and a clean CodeRabbit review.
+  Recorded on 2026-10-09, moving the verified ceiling to Milestone 14.
 - **Milestone 16 — Memory evaluation and lifecycle** — the first parallel
   workstream to complete; hosted review finished clean on 2026-08-23.
 - **Milestone 17 — Memory read API and browser** — the second completed
@@ -83,29 +86,6 @@ up; their status was recorded on 2026-09-28 from the pull requests' review and
 hosted-CI records.
 
 ## In progress
-
-### Milestone 14 — Inbound surfaces and pairing
-
-The next sequential milestone. The channel-neutral surface model, five durable
-persistence ports, one-time pairing and lockout ceremony, session-key routing,
-shared ordinary-run submission, Telegram long polling, replies, notifications,
-approval and input round-trips, API and CLI management surfaces, admission
-limits, and isolated surface role are implemented. All twenty-one
-`gate.surface.*` entries resolve to live checks and pass locally, including the
-PostgreSQL migration, RLS, admission, and crash/re-delivery lane. The code
-reached `main` in pull request 104, which merged with sixteen CodeRabbit
-findings on the surface code unresolved. On 2026-09-28 a paired message's run
-gained its own USD 10 budget, which admits it on PostgreSQL (ADR-0064
-amendment), and the findings were resolved on `dev`: fifteen fixed test-first,
-one answered as inapplicable. On 2026-09-29 the surface role gained its own
-least-privilege database login, `veetbot_surface`, whose exact grants the
-release validates. Pull request 143 carried all of it to `main` with hosted CI
-and a clean CodeRabbit review. On 2026-10-06 the owner's production smoke with
-the [Telegram surface runbook](../telegram-surface-runbook.md) passed pairing, a
-run, a question, an approval, the commands, and revocation, and found that a
-paired sender's `/pair` reached the model; the repair is on `dev`. Remaining:
-
-- [ ] Ship the repair that answers a paired sender's /pair deterministically, found by the owner's production smoke, through a dev to main pull request with hosted CI and a clean CodeRabbit review
 
 ### Milestone 25 — WhatsApp business surface
 
@@ -308,9 +288,9 @@ succeeded on merge `a9b81420` (`outside_milestone_evidence` in the state file).
 
 Specified, gated, and authorized, with implementation not yet begun.
 
-- **Milestone 15 — Operational hardening** — sixteen gates; follows
-  Milestone 14, though its backup tranche depends on none of the three before
-  it.
+- **Milestone 15 — Operational hardening** — sixteen gates; the next
+  sequential milestone now that Milestone 14 is complete. Its backup tranche
+  depends on none of the milestones before it.
 
 
 

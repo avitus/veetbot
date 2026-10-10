@@ -647,7 +647,7 @@ name matches, that row decides for that one tool; every other tool in the class
 still gets the class's decision, so the matrix stays total and nothing about the
 class changes. The section exists for a tool whose own mechanism already carries
 the control the class demands, and it is the seam a milestone uses instead of
-editing a matrix row. Milestone 24's `device.sms.send` is the first and only
+editing a matrix row. Milestone 24's `device.sms.send` is the first
 entry: iOS presents the composed message and the owner's Send tap performs the
 send, so the class's approval would duplicate a confirmation the platform
 already enforces (ADR-0081 and ADR-0083, and
@@ -655,6 +655,14 @@ already enforces (ADR-0081 and ADR-0083, and
 first and are unaffected, so a credential-shaped body is still refused before
 anything reaches the device. Two entries for one tool name, like a missing
 side-effect row, are unclassifiable and deny.
+
+ADR-0168 adds `browser.act` with the `bounded_browser_scroll` condition, allowing
+only a validated bounded scroll through the isolated browser provider and
+requiring approval otherwise. It checks the exact tool name, action kind,
+conservative write classification, bounds and closed argument fields; optional
+postconditions must validate as observation predicates. No provider or page
+claim of harmlessness changes the decision. Hardline rules still precede it,
+and the YAML condition changes the content-addressed policy version.
 
 **Trust overlay.** One rule applies across the table: if any argument's trust
 label is `EXTERNAL_UNTRUSTED`, or the proposing turn's origin trust is
@@ -671,6 +679,17 @@ no suppression. The origin half is *tightened*: instead of testing one label,
 it admits only the origins the trust table below marks as able to authorize
 (`PLATFORM`, `TRUSTED_CONFIGURATION`, `USER`), so `MEMORY` and `KNOWLEDGE`
 escalate exactly as `EXTERNAL_UNTRUSTED` does.
+
+The successful `bounded_browser_scroll` condition has its own narrow exception:
+page-derived references do not re-escalate that explicitly permitted gesture.
+`ProposedAction.newest_user_trust` is an optional trusted pipeline fact from the
+newest user message, independent of tool-result taint. Only for this matched
+condition, the origin overlay uses that fact (falling back to `origin_trust`
+when absent). Platform, trusted-configuration and user origins may proceed;
+other origins still ask. An untrusted newer user message cannot borrow an older
+owner's authority. Other actions and conditions ignore this field and retain
+both existing overlay checks. The tool remains non-idempotent and records its
+effect, since a scroll may invoke page scripts even though it is authorized.
 
 **What the origin half does and does not guarantee.** It is defense in depth,
 not a containment boundary. Origin trust is scoped to the *active turn*: the

@@ -239,10 +239,15 @@ predicted from nor cited as redundancy. It does not see the current evidence spa
 narrative that includes that span, later events, assistant answers, or a gold
 memory label.
 
-The output is a bounded list of predictions and, for each prediction, the
-identifiers of the recalled memories that caused it. A prediction without an
+The output is a bounded list of predictions. Each attributed prediction names
+exactly one recalled memory and copies its statement; separate recalled claims
+require separate predictions. The response schema permits at most one memory
+identifier per prediction, so a compound assertion cannot combine independently
+stored facts that no individual memory asserts. A prediction without an
 attributable memory is ordinary model expectation, not evidence that the
-platform already knew the fact.
+platform already knew the fact. Clause verification still checks the prediction
+against that live memory and the source clause. Before distillation, local validation
+rejects an attributed prediction that does not copy its named memory statement.
 
 ### Call 3: prediction-error distillation
 
