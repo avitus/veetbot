@@ -33,6 +33,7 @@ dependencies = [
   "zstandard==0.25.0",
   "pypdf>=6.1,<7",
   "publicsuffixlist==1.0.2.20260925",
+  "pgvector>=0.4,<0.5",
 ]
 
 [project.scripts]
@@ -80,6 +81,11 @@ no_implicit_optional = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
 mypy_path = ["src"]
+
+# pgvector is untyped and confined to the persistence adapter.
+[[tool.mypy.overrides]]
+module = ["pgvector.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["alembic.*"]

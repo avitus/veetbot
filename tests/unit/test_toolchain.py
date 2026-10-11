@@ -917,7 +917,8 @@ def test_compose_has_one_healthy_postgres_service() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     assert set(compose["services"]) == {"postgres"}
     postgres = compose["services"]["postgres"]
-    assert postgres["image"] == "postgres:16-alpine"
+    assert postgres["image"] == "veetbot-postgres:16-alpine-vector0.8.7"
+    assert postgres["build"] == {"context": ".", "dockerfile": "deploy/postgres.Dockerfile"}
     assert postgres["environment"] == {
         "POSTGRES_DB": "${POSTGRES_DB:-agent}",
         "POSTGRES_USER": "${POSTGRES_USER:-agent}",
@@ -1001,7 +1002,7 @@ def test_ci_has_the_required_partitions() -> None:
 
     postgres = jobs["integration"]["docker"][1]
     assert postgres == {
-        "image": "postgres:16-alpine",
+        "image": "pgvector/pgvector:0.8.7-pg16-bookworm",
         "environment": {
             "POSTGRES_DB": "agent",
             "POSTGRES_USER": "agent",

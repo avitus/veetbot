@@ -540,9 +540,8 @@ class PostgresMemoryStore:
             raise NotFoundError("memory not found")
         return _memory(row)
 
-    async def query(self, query: RecallQuery) -> list[MemoryRecord]:
-        if query.known_at is not None:
-            return await self._query_at(query)
+    def current_predicates(self, query: RecallQuery) -> list[Any]:
+        """One hard-filter set for sparse and exact semantic current-source reads."""
         as_of = query.as_of or self._clock.now()
         predicates: list[Any] = [
             MemoryRow.tenant_id == query.tenant_id,
@@ -623,6 +622,12 @@ class PostgresMemoryStore:
                 ),
             )
         )
+        return predicates
+
+    async def query(self, query: RecallQuery) -> list[MemoryRecord]:
+        if query.known_at is not None:
+            return await self._query_at(query)
+        predicates = self.current_predicates(query)
         terms = recall_query_terms(query.text)
         owned_resource = (
             _owned_resource_sql(

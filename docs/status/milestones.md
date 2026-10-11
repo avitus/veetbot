@@ -309,6 +309,10 @@ requires no further blinded packet and does not satisfy unattended quality gates
 
 ### Milestone 33 — General memory search and recall
 
+ADR-0179 adds a version-bound local semantic index and experimental shared recall,
+with correction/erasure fences and exact pgvector search. Provider execution,
+persistent backfill and comparative activation evidence remain open.
+
 Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).
 The staged implementation is in progress; optional channels remain evidence-gated.

@@ -196,3 +196,4 @@ implementation without one.
 - [ADR-0177 — Bounded browser startup recovery (Accepted)](0177-bounded-browser-startup-recovery.md)
 
 - [ADR-0178 — General memory search and recall (Accepted scope; Milestone 33)](0178-general-memory-recall.md)
+- [ADR-0179 — Version-bound semantic memory index (Accepted mechanism; activation gated)](0179-versioned-semantic-index.md)

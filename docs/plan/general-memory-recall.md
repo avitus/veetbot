@@ -133,6 +133,37 @@ test its contribution rather than assuming it wins. Keep separate channels for
 beliefs and source episodes, avoiding multiple derived keys counting as independent
 evidence. A reranker runs on already permitted candidates and has its own ablation.
 
+## Local semantic index implementation
+
+[ADR-0179](../adr/0179-versioned-semantic-index.md) implements the derived-index
+boundary after the measured pilot. `SemanticMemoryIndex` captures version-bound
+originals, compare-and-swaps computed vectors, and supplies bounded immutable-order
+inventory and change pages. It does not serialize sources to a provider or schedule
+backfill. `memory_vectors` uses pgvector exact cosine search, owner-bound foreign
+keys and forced tenant RLS. Both adapters remove vectors transactionally on source
+changes and rejoin current permitted originals before the result limit. Changes to
+usage alone do not re-embed content. Historical and People-scoped queries currently
+retain only their existing sparse path; they never reuse current vectors as past
+or identity-certified evidence.
+
+The experimental `SemanticQueryLookup` is a bounded local lookup of an exact-query
+hash and explicit embedding tuple. It holds query vectors rather than cached
+source content; originals are resolved on every recall. The shared retriever
+admits semantic candidates under the same final item/token caps, lifecycle weights,
+trust scan and rendering. Semantic RRF order follows cosine rank. Verified equivalence transfers semantic
+relevance to permitted originals before scoring, so a partially indexed group
+still cites its canonical fact and contributes only one fused result. Trace policy
+records `semantic@1` and the embedding-space digest. The embedding tuple includes
+provider, model, model revision, dimensions and `memory-text@1` (original subject
+and statement, with no inferred labels).
+
+Production supplies no lookup and `semantic_enabled` remains false. A populated
+index alone cannot activate a provider or change production recall. Provider
+admission/reservations, persistent backfill execution and query population remain
+unimplemented; release evidence must cover them and the withheld query modes.
+Frozen M16/M32 controls continue to select legacy candidates without the semantic
+arm. The complete M33 gates remain pending.
+
 ## Evidence packages and recovery
 
 A selected item carries its original statement, source identifiers, relevant time

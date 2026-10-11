@@ -9,6 +9,7 @@ import re
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
+from time import perf_counter
 from typing import Literal
 from uuid import UUID
 
@@ -43,6 +44,7 @@ from agent_core.domain.memory import (
 from agent_core.domain.reconsolidation_merge import normalize_claim
 from agent_core.domain.reconsolidation_operations import StoredMerge
 from agent_core.domain.runs import Run
+from agent_core.domain.semantic_memory import SemanticHit, checked_vector, query_digest
 from agent_core.memory.identity_recall import identity_scoped_records
 from agent_core.memory.profiles import (
     DEFAULT_RETRIEVAL_PROFILE,
@@ -53,6 +55,7 @@ from agent_core.memory.profiles import (
 from agent_core.memory.reconsolidation_recall import summary_candidates
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
+from agent_core.ports.semantic_memory import SemanticQueryLookup
 
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
 RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@5"
@@ -251,6 +254,7 @@ class HybridMemoryRetriever:
         trace_retention: TraceProfile = DEFAULT_TRACE_PROFILE,
         reconsolidation_enabled: bool | Callable[[], bool] = False,
         reconsolidation_owner_approved_only: bool = False,
+        semantic_queries: SemanticQueryLookup | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -261,6 +265,7 @@ class HybridMemoryRetriever:
         self._trace_retention = trace_retention
         self._reconsolidation_admission = reconsolidation_enabled
         self._owner_approved_only = reconsolidation_owner_approved_only
+        self._semantic_queries = semantic_queries
 
     @property
     def retrieval_profile(self) -> RetrievalProfile:
@@ -353,12 +358,21 @@ class HybridMemoryRetriever:
             # recent provisional rows must not crowd out older active facts.
             # CORE also serves in-turn deltas, where provisional recall is valid.
             effective_query = effective_query.model_copy(update={"include_provisional": False})
+        semantic_hits: list[SemanticHit] = []
+        semantic_key: str | None = None
+        semantic_latency = 0
         if not authorized:
             # Isolation is fail-closed before reaching an adapter query.
             records: list[MemoryRecord] = []
             head = 0
         else:
             records = await uow.memories.query(effective_query)
+            started = perf_counter()
+            semantic_hits, semantic_key = await self._semantic_candidates(uow, effective_query)
+            semantic_latency = round((perf_counter() - started) * 1000)
+            by_id = {record.id: record for record in records}
+            by_id.update((hit.record.id, hit.record) for hit in semantic_hits)
+            records = list(by_id.values())
             if effective_query.people_scope is not None:
                 records = await identity_scoped_records(uow.people, effective_query, records)
 
@@ -389,10 +403,25 @@ class HybridMemoryRetriever:
         if effective_query.include_owned_resources:
             policy_version += f"+{OWNED_RESOURCE_POLICY_VERSION}"
             render_policy += f"+{OWNED_RESOURCE_POLICY_VERSION}"
+        if semantic_key is not None:
+            suffix = f"+semantic@1:{semantic_key}"
+            policy_version += suffix
+            render_policy += suffix
+        semantic_ranks = {hit.record.id: rank for rank, hit in enumerate(semantic_hits, 1)}
         merges: tuple[StoredMerge, ...] = ()
         if authorized and self._reconsolidation_enabled:
             records, merges = await self._merge_candidates(uow, effective_query, records, now)
             head = await uow.memories.head_position(self._principal)
+        # Equivalence transfers relevance before scoring. A permitted canonical
+        # can lack its own vector during backfill; dropping it here would make
+        # citation identity depend on which duplicate finished indexing first.
+        permitted_ids = {record.id for record in records}
+        for merge in merges:
+            ranks = [semantic_ranks[key] for key in merge.plan.member_ids if key in semantic_ranks]
+            if ranks:
+                for member_id in merge.plan.member_ids:
+                    if member_id in permitted_ids:
+                        semantic_ranks[member_id] = min(ranks)
         recalled: list[RecalledBelief] = []
         durable_ids: set[UUID] = set()
         excluded = set(effective_query.exclude_ids)
@@ -401,14 +430,22 @@ class HybridMemoryRetriever:
             # these beliefs at higher trust (persona-surface.md).
             if record.id in excluded:
                 continue
-            candidate = _score(record, effective_query, now=now, profile=self._profile)
+            candidate = _score(
+                record,
+                effective_query,
+                now=now,
+                profile=self._profile,
+                semantic_rank=semantic_ranks.get(record.id),
+            )
             if candidate is None:
                 continue
             if _is_durable(record):
                 durable_ids.add(record.id)
             recalled.append(candidate)
         recalled = _collapse_merges(recalled, merges)
-        recalled = _rrf_fuse(recalled, k=self._profile.reciprocal_rank_fusion_k)
+        recalled = _rrf_fuse(
+            recalled, k=self._profile.reciprocal_rank_fusion_k, semantic_ranks=semantic_ranks
+        )
         recalled = _penalize_near_duplicates(recalled, penalty=self._profile.near_duplicate_penalty)
         ranked = self._ranker.rank(recalled, effective_query)
         collapsed: list[RecalledBelief] = []
@@ -551,7 +588,11 @@ class HybridMemoryRetriever:
             sensitivity_ceiling=effective_query.sensitivity_ceiling,
             rendered=rendered,
             rendered_sha256=hashlib.sha256(rendered_bytes).hexdigest(),
-            arm_latencies_ms={"structured": 0, "lexical": 0},
+            arm_latencies_ms={
+                "structured": 0,
+                "lexical": 0,
+                **({"semantic": semantic_latency} if semantic_key is not None else {}),
+            },
             candidates=len(records),
             returned=[item.belief_id for item in selected_items],
             dropped_for_budget=dropped,
@@ -589,6 +630,34 @@ class HybridMemoryRetriever:
             watermark=head,
             validate_snapshot_dependencies=True,
         )
+
+    async def _semantic_candidates(
+        self, uow: RepositoryUnitOfWork, query: RecallQuery
+    ) -> tuple[list[SemanticHit], str | None]:
+        if (
+            not self._profile.semantic_enabled
+            or self._semantic_queries is None
+            or query.profile is RecallProfile.CORE
+            or not query.text
+            or query.as_of is not None
+            or query.known_at is not None
+            or query.people_scope is not None
+            or query.candidate_selection != "relevance"
+        ):
+            return [], None
+        # This seam is synchronous/local only. Production has no query lookup
+        # until separately admitted; no provider call can run under this UOW.
+        cached = self._semantic_queries.lookup(query)
+        if cached is None or cached.query_sha256 != query_digest(query):
+            return [], None
+        try:
+            vector = checked_vector(cached.vector, cached.space)
+        except ValueError:
+            return [], None
+        hits = await uow.semantic_memory.search(
+            query, cached.space, vector, limit=min(256, max(query.max_items * 8, 64))
+        )
+        return hits, cached.space.key
 
     async def _merge_candidates(
         self,
@@ -900,6 +969,7 @@ def _score(
     *,
     now: datetime | None = None,
     profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
+    semantic_rank: int | None = None,
 ) -> RecalledBelief | None:
     """Score one candidate against one query, as of `now`.
 
@@ -945,11 +1015,21 @@ def _score(
         arms.append("structured")
     if lexical:
         arms.append("lexical")
+    if semantic_rank is not None:
+        arms.append("semantic")
     if query.profile is RecallProfile.CORE:
         match = 0.5 if _is_durable(record) else 0.15
         arms = ["structured"]
     else:
-        match = max(structured, lexical)
+        semantic = (
+            (
+                (profile.reciprocal_rank_fusion_k + 1)
+                / (profile.reciprocal_rank_fusion_k + semantic_rank)
+            )
+            if semantic_rank
+            else 0
+        )
+        match = max(structured, lexical, semantic)
         if match == 0:
             return None
     weights = profile.lifecycle_weights
@@ -1053,7 +1133,9 @@ def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
     return len(left & right) / len(union) if union else 0.0
 
 
-def _rrf_fuse(candidates: list[RecalledBelief], *, k: int = 60) -> list[RecalledBelief]:
+def _rrf_fuse(
+    candidates: list[RecalledBelief], *, k: int = 60, semantic_ranks: dict[UUID, int] | None = None
+) -> list[RecalledBelief]:
     """Fuse independently ranked retrieval arms before the hand-weighted reranker."""
 
     arm_ranks: dict[tuple[str, UUID], int] = {}
@@ -1061,7 +1143,12 @@ def _rrf_fuse(candidates: list[RecalledBelief], *, k: int = 60) -> list[Recalled
     for arm in arms:
         members = sorted(
             (item for item in candidates if arm in item.arms),
-            key=lambda item: (-item.score, str(item.belief_id)),
+            key=lambda item: (
+                semantic_ranks.get(item.belief_id, len(candidates) + 1)
+                if arm == "semantic" and semantic_ranks
+                else -item.score,
+                str(item.belief_id),
+            ),
         )
         arm_ranks.update(
             {

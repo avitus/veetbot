@@ -88,6 +88,7 @@ from agent_core.adapters.memory.in_memory import (
 from agent_core.adapters.memory.reconsolidation import InMemoryReconsolidationStore
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
+from agent_core.adapters.memory.semantic_memory import InMemorySemanticMemoryIndex
 from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -192,6 +193,7 @@ from agent_core.adapters.persistence.schedules import (
     PostgresScheduleOccurrenceRepository,
     PostgresScheduleRepository,
 )
+from agent_core.adapters.persistence.semantic_memory import PostgresSemanticMemoryIndex
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
     PostgresSessionDeletionRepository,
@@ -1203,6 +1205,7 @@ def _memory_uow_repositories(
         episodes=episodes,
         traces=traces,
         personas=InMemoryPersonaStore(),
+        semantic_memory=InMemorySemanticMemoryIndex(memories),
         reconsolidation=reconsolidation,
         memory_transaction=memories._transaction.transaction,
         model_settings=InMemoryModelSettingsStore(),
@@ -1301,6 +1304,7 @@ def _postgres_repository_factory(
             episodes=episodes,
             traces=traces,
             personas=PostgresPersonaStore(session),
+            semantic_memory=PostgresSemanticMemoryIndex(session, memories, clock),
             reconsolidation=reconsolidation,
             model_settings=PostgresModelSettingsStore(session),
             folders=PostgresFolderStore(session),

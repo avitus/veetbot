@@ -186,6 +186,7 @@ for required in \
   deploy/veetbot.env.example \
   deploy/app/owner-scopes.sh \
   deploy/browser-profile-service.Dockerfile \
+  deploy/postgres.Dockerfile \
   deploy/veetbot-schedule.env.example \
   deploy/veetbot-notify.env.example \
   deploy/veetbot-surface.env.example \
@@ -226,6 +227,7 @@ export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
 # recompiles its imports from source.
 uv sync --frozen --no-dev --compile-bytecode
 "$STAGE/.venv/bin/python" -m compileall -q src
+docker build -f deploy/postgres.Dockerfile -t veetbot-postgres:16-alpine-vector0.8.7 .
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
 docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
 

@@ -3,13 +3,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.persistence.reconsolidation_operations import invalidate_source
 from agent_core.adapters.persistence.sqlalchemy_models import (
     MemoryRow,
+    MemoryVectorRow,
     ReconsolidationChangeRow,
     ReconsolidationOwnerRow,
 )
@@ -52,6 +53,13 @@ async def append_change(
     now: datetime,
 ) -> None:
     if reason != "created":
+        await session.execute(
+            delete(MemoryVectorRow).where(
+                MemoryVectorRow.tenant_id == owner.tenant_id,
+                MemoryVectorRow.principal_id == owner.principal_id,
+                MemoryVectorRow.belief_id == belief_id,
+            )
+        )
         await invalidate_source(session, owner.tenant_id, owner.principal_id, belief_id, now)
     owner.change_count += 1
     await session.execute(

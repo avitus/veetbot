@@ -270,6 +270,7 @@ make_stage() {
     "$stage/deploy/docker-compose.production.yml" \
     "$stage/deploy/docker-compose.browser-verification.yml" \
     "$stage/deploy/browser-profile-service.Dockerfile" \
+    "$stage/deploy/postgres.Dockerfile" \
     "$stage/deploy/veetbot-schedule.env.example" \
     "$stage/deploy/veetbot-notify.env.example" \
     "$stage/deploy/veetbot-surface.env.example" \
