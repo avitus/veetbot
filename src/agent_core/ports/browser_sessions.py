@@ -20,6 +20,7 @@ from agent_core.domain.browser import (
     BrowserSnapshot,
 )
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
+from agent_core.domain.tools import ToolExecutionContext
 
 # ADR-0129: a page from the isolated service. A newer service returns the
 # observation with element facts beside it; an older one, the observation.
@@ -78,6 +79,13 @@ class BrowserSessionControlPlane(Protocol):
     async def renew(self, lease_ref: str, *, deadline_at: datetime) -> BrowserLease: ...
 
     async def close(self, lease_ref: str) -> None: ...
+
+
+# Application-owned acquisition policy, injected by trusted composition only.
+type BrowserSessionAcquirer = Callable[
+    [Callable[[], Awaitable[BrowserLease]], ToolExecutionContext],
+    Awaitable[BrowserLease],
+]
 
 
 class BrowserAuthenticationControlPlane(Protocol):

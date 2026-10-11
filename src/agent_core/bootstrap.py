@@ -264,6 +264,7 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.browser_startup import BrowserStartupRecovery
 from agent_core.application.browser_task_grants import (
     BrowserTaskGrantAuthorizer,
     CompositeStandingAuthorizer,
@@ -4837,8 +4838,9 @@ def _browser_provider(
     profile_id: UUID | None,
     profiles: UnitOfWorkFactory,
     sessions: BrowserSessionControlPlane | None,
-    now: Callable[[], datetime],
+    clock: Clock,
 ) -> BrowserProvider | None:
+    now = clock.now
     if kind is BrowserProviderKind.DISABLED:
         return None
     if kind is BrowserProviderKind.PLAYWRIGHT:
@@ -4871,6 +4873,7 @@ def _browser_provider(
                 sessions=sessions,
                 now=now,
                 run_state=read_run_state,
+                acquire_session=BrowserStartupRecovery(clock),
             )
 
         async def select_session_profile(context: ToolExecutionContext) -> UUID:
@@ -4888,6 +4891,7 @@ def _browser_provider(
             sessions=sessions,
             now=now,
             run_state=read_run_state,
+            acquire_session=BrowserStartupRecovery(clock),
         )
     raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
 
@@ -5652,7 +5656,7 @@ async def build(
                 profile_id=effective_settings.browser_profile_id,
                 profiles=uow_factory,
                 sessions=browser_sessions,
-                now=effective_clock.now,
+                clock=effective_clock,
             )
         )
         for package, source in skill_packages:

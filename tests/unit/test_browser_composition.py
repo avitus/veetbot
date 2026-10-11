@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -44,6 +44,7 @@ from agent_core.domain.browser import (
     BrowserActionContext,
     BrowserActionKind,
     BrowserGrant,
+    BrowserLease,
     BrowserObservation,
     BrowserProfile,
     BrowserProfileStatus,
@@ -240,6 +241,28 @@ async def test_configured_playwright_provider_rechecks_a_constraint_on_the_compo
 
 
 async def test_configured_hosted_provider_binds_the_trusted_profile_adapter() -> None:
+    from dataclasses import replace
+
+    from tests.unit.test_hosted_browser_provider import FakeSessions, call_at, profile
+
+    class Sessions(FakeSessions):
+        attempts = 0
+
+        async def acquire(self, *args: Any, **kwargs: Any) -> BrowserLease:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
+            return await super().acquire(*args, **kwargs)
+
+    async def load(owner: Principal, requested_profile_id: UUID) -> BrowserProfile:
+        assert requested_profile_id == PROFILE_ID
+        return profile().model_copy(
+            update={
+                "tenant_id": owner.tenant_id,
+                "principal_id": owner.principal_id,
+            }
+        )
+
     settings = load_settings(
         {
             **base_environment(),
@@ -252,7 +275,7 @@ async def test_configured_hosted_provider_binds_the_trusted_profile_adapter() ->
         }
     )
 
-    async with build(settings=settings) as composition:
+    async with build(settings=settings, fixed_clock_at=GRANT_NOW) as composition:
         navigate = cast(
             RegisteredTool,
             composition.tool_pipeline._registry.get("browser.navigate"),
@@ -260,6 +283,20 @@ async def test_configured_hosted_provider_binds_the_trusted_profile_adapter() ->
 
         assert isinstance(navigate.implementation, BrowserNavigateTool)
         assert isinstance(navigate.implementation._provider, HostedBrowserProvider)
+        provider = navigate.implementation._provider
+        sessions = Sessions()
+        provider._sessions = sessions
+        provider._profiles = load
+        context = replace(
+            call_at(GRANT_NOW),
+            principal=composition.principal,
+            tenant_id=composition.principal.tenant_id,
+        )
+        result = await navigate.implementation.execute(
+            {"url": "https://example.org/lesson"}, context
+        )
+        assert result.ok, result.failure
+        assert sessions.attempts == 2
 
 
 async def test_configured_hosted_provider_can_select_a_profile_from_each_session() -> None:
