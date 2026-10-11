@@ -264,11 +264,40 @@ milestones:
     - Embeddings, external memory providers, learned memory policies, arbitrary multi-hop graph reasoning and external enrichment
     - New source admission, automatic persona edits, changes to People identity merge rules and automatic historical re-extraction
     open_items:
-    - Deploy owner-reviewed dreaming (ADR-0174) and enable its documented shared configuration in every application role
     - Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
-    - Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before unattended production activation
+    - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Owner-reviewed production delivery (2026-10-11 UTC, ADR-0174)
+      outcome: deployed_reviewed_mode
+      detail: >-
+        Authorized pull requests 156 and 155 merged after CodeRabbit review and
+        resolution of every conversation. The final executable change f31094ae
+        has an explicit no-findings review; exact-head CircleCI pipeline 1066
+        passed every required job, including macOS and iPhone/iPad UI journeys.
+        Pipeline 1067 delivered merge d053d1d9 through application, documentation,
+        website and TestFlight upload. Public API readiness and both release.txt
+        endpoints identify 20261011-011606-d053d1d. Migration ea3210a1b00c is active;
+        restarting the surface worker released an old idle snapshot that blocked
+        the concurrent index migration. All eight enabled application roles use
+        reviewed mode with unattended application off. Dedicated worker environment
+        files carry the same five flags without sharing credentials. Public shell
+        assets match the release, remain private/no-store, and the unauthenticated
+        dreaming API returns 401. The first automatic claim completed at
+        2026-10-11T01:30:40Z as blocked/deferred with zero proposals, provider calls
+        and charge; the next claim is due no earlier than 2026-10-12T01:30:38Z.
+        No production proposal was approved by the implementation agent.
+        Regression reds reproduced the native undo container lookup and three
+        email fixture failures at the thirty-day date boundary. Seven native
+        synthesis journeys and 72 focused email cases then passed unchanged.
+        Final sidecar verification passed 6133 static and 1504 contract cases,
+        types, lint, docs, website and deployment checks. Its browser partition
+        retained one navigation-race failure among 331 cases; the unchanged case
+        passed in isolation and the final hosted browser job passed. Sidecar wall
+        time was 1058.85 seconds with 967.18 seconds of stage overlap; browser
+        (901.91 seconds) and static (862.38 seconds) were slowest. Existing frozen
+        evidence and completed owner judgments remain unchanged. This activates
+        supervised review only; unattended quality gates remain failed/unverified.
     - check: Owner-reviewed daily dreaming implementation (2026-10-10, ADR-0174)
       outcome: implemented_pending_deployment
       detail: >-

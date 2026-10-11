@@ -49,10 +49,16 @@ title: Current Milestone
   useful on 2026-10-09. That qualitative review is finished; it supplies no comparative
   or activation evidence. Any new experiment still requires exact-text confirmation
   naming the provider/model and USD 0.25 ceiling. Production attribution is unchanged.
-  The once/dry-run operator controls, complete
-  runtime gates, macOS UI lane and exact-revision release evidence remain required.
-  Authorized PR review, hosted CI and production readback also precede activation. Production
-  stays disabled; no complete runtime gate or verified sequential ceiling advances.
+  Owner-reviewed production mode is live under ADR-0174 after authorized pull
+  requests 156 and 155, clean final-code review, pipeline 1066 verification
+  (including macOS and iPhone/iPad journeys), and pipeline 1067 delivery of
+  `d053d1d9`. The API, documentation and website identify that release; TestFlight
+  upload passed. Daily proposals are enabled in all application roles and only
+  individual owner approval applies them to memory. The first automatic batch
+  deferred with no proposals or provider calls; its next claim is due October 12
+  at 01:30 UTC. Unattended processing stays disabled. The once/dry-run operator
+  controls, remaining complete runtime gates and fresh matching comparative
+  release evidence remain required; no verified sequential ceiling advances.
 - **Active milestone:** Milestone 15 — operational hardening — is the next
   sequential authorized milestone, is specified by
   [operational-hardening.md](operational-hardening.md) with sixteen gates, and

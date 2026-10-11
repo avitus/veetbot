@@ -284,7 +284,7 @@ equivalent and five not equivalent. Precision is 75% on development and 57.14% o
 holdout, below the unchanged 80% floor; recall passes both splits. Every fact is
 preserved with no false merges, but answer lift and development merge-answer
 nonregression still fail. Review artifacts and the recomputed assessment are in
-`evals/observations/memory-reconsolidation/20261008-owner-review-v2/`. Production stays off.
+`evals/observations/memory-reconsolidation/20261008-owner-review-v2/`. Unattended processing stays off.
 
 The ADR-0171 isolated owner-data experiment completed on 2026-10-09, and the
 owner judged its accepted related-memory summary useful. This completes that
@@ -293,13 +293,19 @@ review; legacy bank replay and the comparative quality failures remain unresolve
 The October 9 diagnostic comparison records 14/18/14 development and 17/17/19
 holdout answers out of 36 for original/merge/connections. Merge-answer
 nonregression passes, but answer lift remains below ten percentage points.
-Eleven new hypotheses await their own bound owner review; earlier judgments and
+Eleven new hypotheses remain unverified; earlier judgments and
 failures remain unchanged. The design records the repairs and measured limits.
 
-- [ ] Deploy owner-reviewed dreaming (ADR-0174) and enable its documented shared configuration in every application role
+ADR-0174 owner-reviewed production mode is live on `d053d1d9`: daily proposals,
+the private review page and individually approved application are enabled across
+all eight application roles. macOS and iPhone/iPad journeys, final-code review,
+hosted verification and application/docs/site/TestFlight delivery passed. The first
+daily batch deferred without proposals or provider calls. This supervised path
+requires no further blinded packet and does not satisfy unattended quality gates.
+
 - [ ] Resolve precision and answer-lift failures without repeating completed owner reviews; new hypothesis quality remains unverified under ADR-0170, and release-tuple proof is still required
 - [ ] Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
-- [ ] Complete macOS Synthesis journeys and publish matching upstream, comparative and exact-revision release evidence before unattended production activation
+- [ ] Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
 
 ## Outside a milestone
 
