@@ -23,6 +23,7 @@ from tests.contract.test_hosted_profile_session_service_contract import (
     PROFILE_ID,
     PROVIDER_REF,
     RUN_ID,
+    FakeSessionRuntime,
     HandoffScenario,
     begin_device,
     device_handoff,
@@ -191,6 +192,92 @@ async def test_saved_session_with_wrong_account_is_refused_before_a_lease(tmp_pa
             deadline_at=NOW + timedelta(minutes=1),
         )
     assert all(runtime.closed for runtime in runtimes)
+
+
+@pytest.mark.parametrize("finishes", [True, False])
+async def test_saved_session_verification_uses_its_configured_budget(
+    tmp_path: Path, finishes: bool
+) -> None:
+    """A slow positive account check may finish; an exhausted check publishes no lease."""
+    observed = BrowserObservation(
+        url="https://example.org/current",
+        revision="verified",
+        text="Account ready",
+        regions=(BrowserSemanticRegion(ref="account", kind="heading", text="Account: Owner"),),
+        region_coverage=BrowserRegionCoverage(scanned_nodes=5),
+    )
+    catalog = BrowserVerificationCatalog.model_validate(
+        {
+            "sites": [
+                {
+                    "id": "fixture-account",
+                    "version": 1,
+                    "profile_id": str(PROFILE_ID),
+                    "origin": "https://example.org",
+                    "protected_path": "/current",
+                    "ready": {"kind": "text", "text": "Account ready"},
+                    "account": {
+                        "kind": "region",
+                        "region_kind": "heading",
+                        "text": "Account: Owner",
+                    },
+                }
+            ]
+        }
+    )
+    scenario = HandoffScenario(without_session=None, without_observation=observed)
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path,
+        scenario=scenario,
+        verification=catalog,
+        verification_seconds=30 if finishes else 0.02,
+    )
+    await provision(lifecycle)
+    # Hold the account observation, after protected-page evidence is available,
+    # past the former ten-second cap. This reproduces the live acquisition failure.
+    release = asyncio.Event()
+    factory = sessions._runtime_factory
+
+    def delayed_account(tenant_id: str) -> FakeSessionRuntime:
+        runtime = factory(tenant_id)
+        assert isinstance(runtime, FakeSessionRuntime)
+        runtime.observe_release = release
+        return runtime
+
+    sessions._runtime_factory = delayed_account
+    timer = asyncio.get_running_loop().call_later(11, release.set)
+    try:
+        acquisition = sessions.acquire(
+            PROFILE_ID,
+            principal(),
+            PROVIDER_REF,
+            run_id=RUN_ID,
+            attempt_number=1,
+            deadline_at=NOW + timedelta(minutes=1),
+        )
+        if finishes:
+            lease = await asyncio.wait_for(acquisition, 35)
+            assert (await sessions.observe(lease.lease_ref)).revision == "verified"
+            await sessions.close(lease.lease_ref)
+        else:
+            async with asyncio.timeout(1):
+                with pytest.raises(TimeoutError):
+                    await acquisition
+            assert not sessions._leases
+            # Timeout releases admission capacity and the pending profile slot.
+            release.set()
+            lease = await sessions.acquire(
+                PROFILE_ID,
+                principal(),
+                PROVIDER_REF,
+                run_id=RUN_ID,
+                attempt_number=1,
+                deadline_at=NOW + timedelta(minutes=1),
+            )
+            await sessions.close(lease.lease_ref)
+    finally:
+        timer.cancel()
+    assert all(runtime.closed and not runtime.actions for runtime in runtimes)
 
 
 @pytest.mark.parametrize("mode", ["device", "remote"])

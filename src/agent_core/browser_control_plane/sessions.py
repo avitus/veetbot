@@ -315,7 +315,7 @@ class HostedProfileSessionService:
                     raise BrowserProviderError(
                         "tool.browser.authentication_required", retryable=False
                     )
-                async with asyncio.timeout(min(self._verification_seconds, 10.0)):
+                async with asyncio.timeout(self._verification_seconds):
                     evidence = await runtime.load_page_evidence(
                         definition.origin + definition.protected_path,
                         on_stage=_VerificationLoad("with_session").enter,
