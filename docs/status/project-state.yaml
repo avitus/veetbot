@@ -2521,6 +2521,40 @@ open_items_outside_milestones:
 # Evidence behind changes to the list above: a closed item, or the check that
 # confirmed a newly recorded gap.
 outside_milestone_evidence:
+- check: production account verification and scheduled X feed briefing (ADR-0175 and ADR-0176)
+  outcome: passed
+  detail: >-
+    The owner authorized release, activation and a real scheduled briefing.
+    Pull request 155 delivered the reviewed feed workflow; two initial
+    one-time runs stopped before browser lease publication because the
+    account check had an internal 10-second cap. A read-only diagnostic
+    confirmed the configured account after approximately 14 seconds.
+    Pull request 157 repaired that cap while retaining the configured
+    verification budget, remaining lease lifetime and enclosing deadlines.
+    Final head 8c13470d received substantive CodeRabbit review, all review
+    conversations were resolved, GitGuardian passed, and all eleven
+    requested hosted checks passed in CircleCI pipeline 1071. The final
+    sidecar check passed 6136 static, 1504 contract and 331 Chromium tests.
+    Pull request 157 merged as fb61b578 on 2026-10-11 UTC; pipeline 1072
+    deploy-app 5393, deploy-nginx 5398 and apple-testflight 5395 succeeded.
+    API readiness, docs and website independently reported HTTP 200 and
+    release 20261011-025310-fb61b57. The running browser image was healthy
+    and matched that release; API, worker, asynchronous worker and
+    maintenance processes had the feed workflow enabled. The qualified
+    private account catalog matched the installed file, with mode 0600
+    and a read-only mount into the browser service.
+    A one-time schedule copied the existing morning task's agent version,
+    reviewed instruction, profile, scopes and budgets. The scheduler
+    materialized it, and x-home-briefing reached verified before the run
+    completed in 101 seconds. It collected seven distinct linked posts
+    across four extraction windows and three scrolls, with no retries,
+    uncertain scrolls or approval prompts. All twelve tool calls succeeded;
+    the only interactions were scrolls. The final briefing cited two posts,
+    both present in observed evidence. The recurring source remained active
+    at revision 3, with its next occurrence at 2026-10-11T16:27:00Z, and the
+    saved profile remained ready. This records production acceptance of the
+    qualified workflow without changing a milestone gate. TestFlight upload
+    success does not establish Apple processing or installation on a device.
 - check: first hosted run of the ADR-0152 browser image check
   outcome: passed
   detail: >-
