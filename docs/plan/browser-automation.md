@@ -1737,8 +1737,10 @@ Each profile has one definition. The protected path is a
 literal path, not a selector, script, credential or permission. Both device and
 remote sign-in compare isolated signed-in and empty-session loads. A configured
 site must show the intended account and protected state only in the signed-in
-load. Stored configured sessions undergo another bounded protected-page check
-before lease publication. Wrong accounts and public-page matches fail closed.
+load. Stored configured sessions undergo another protected-page and account
+check within the configured verification budget (30 seconds by default), clamped
+to the remaining lease lifetime, before lease publication. The enclosing tool/run
+deadlines still apply. Wrong accounts and public-page matches fail closed.
 Lease startup and protected-page verification reserve capacity and exclude other
 acquisitions for that profile without holding the service-wide admission lock.
 Publication rechecks the profile identity, revocation and deadline; failure or

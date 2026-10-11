@@ -1499,7 +1499,7 @@ alerts; cleanup and viewed-result acknowledgement require the updated client.
 ## Owner-reviewed dreaming rollout (ADR-0174)
 
 Deploy the reviewed-dreaming build and run its normal migration to
-`ea3210a1b00c`. Configure every application role through the shared environment:
+`ea3210a1b00c`. Apply these same flags to every enabled application role:
 
 ```dotenv
 AGENT_MEMORY_API_ENABLED=1
@@ -1512,7 +1512,12 @@ AGENT_MEMORY_RECONSOLIDATION_RESIDENCY_PROVIDER=<configured-memory-provider>
 The residency provider must match the resolved memory formation provider.
 The provider must be configured and available; ordinary privacy/attribution
 checks still apply to every source. Retain `memory.read,memory.write` in the
-owner's existing token scopes. Restart the API, interactive and asynchronous run
+owner's existing token scopes. The API, interactive/asynchronous workers and
+maintenance read `/etc/veetbot/veetbot.env`; schedule, notify, surface and call
+workers read their own `/etc/veetbot/veetbot-<role>.env` files. Update only the
+five flags in each enabled role's file, preserving its credentials and permissions;
+do not copy the owner's bearer or database credentials between roles.
+Restart the API, interactive and asynchronous run
 workers, maintenance, and other enabled application roles so every process uses
 the same reviewed-recall mode. Then open `https://api.veetbot.com/dreaming` and connect with the owner token. Do
 not place a token in a URL. No additional proxy route or external web service

@@ -23,6 +23,7 @@ from tests.contract.test_hosted_profile_session_service_contract import (
     PROFILE_ID,
     PROVIDER_REF,
     RUN_ID,
+    FakeSessionRuntime,
     HandoffScenario,
     begin_device,
     device_handoff,
@@ -154,6 +155,7 @@ async def test_slow_lease_verification_does_not_block_other_profiles(
 
 
 async def test_saved_session_with_wrong_account_is_refused_before_a_lease(tmp_path: Path) -> None:
+    """Reject a saved session whose observed account does not match the catalog."""
     from datetime import timedelta
 
     from agent_core.domain.browser import BrowserProviderError
@@ -193,6 +195,100 @@ async def test_saved_session_with_wrong_account_is_refused_before_a_lease(tmp_pa
     assert all(runtime.closed for runtime in runtimes)
 
 
+@pytest.mark.parametrize("bound", ["success", "verification", "lease"])
+async def test_saved_session_verification_uses_its_configured_budget(
+    tmp_path: Path, bound: str
+) -> None:
+    """A slow positive account check may finish; an exhausted check publishes no lease."""
+    finishes = bound == "success"
+    observed = BrowserObservation(
+        url="https://example.org/current",
+        revision="verified",
+        text="Account ready",
+        regions=(BrowserSemanticRegion(ref="account", kind="heading", text="Account: Owner"),),
+        region_coverage=BrowserRegionCoverage(scanned_nodes=5),
+    )
+    catalog = BrowserVerificationCatalog.model_validate(
+        {
+            "sites": [
+                {
+                    "id": "fixture-account",
+                    "version": 1,
+                    "profile_id": str(PROFILE_ID),
+                    "origin": "https://example.org",
+                    "protected_path": "/current",
+                    "ready": {"kind": "text", "text": "Account ready"},
+                    "account": {
+                        "kind": "region",
+                        "region_kind": "heading",
+                        "text": "Account: Owner",
+                    },
+                }
+            ]
+        }
+    )
+    scenario = HandoffScenario(without_session=None, without_observation=observed)
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path,
+        scenario=scenario,
+        verification=catalog,
+        verification_seconds=0.02 if bound == "verification" else 30,
+    )
+    await provision(lifecycle)
+    # Hold the account observation, after protected-page evidence is available,
+    # past the former ten-second cap. This reproduces the live acquisition failure.
+    release = asyncio.Event()
+    factory = sessions._runtime_factory
+
+    def delayed_account(tenant_id: str) -> FakeSessionRuntime:
+        """Keep the account read pending after the protected-page evidence arrives."""
+        runtime = factory(tenant_id)
+        assert isinstance(runtime, FakeSessionRuntime)
+        runtime.observe_release = release
+        return runtime
+
+    sessions._runtime_factory = delayed_account
+    timer = asyncio.get_running_loop().call_later(11, release.set)
+    try:
+        acquisition = sessions.acquire(
+            PROFILE_ID,
+            principal(),
+            PROVIDER_REF,
+            run_id=RUN_ID,
+            attempt_number=1,
+            deadline_at=NOW + timedelta(seconds=0.02 if bound == "lease" else 60),
+        )
+        if finishes:
+            lease = await asyncio.wait_for(acquisition, 35)
+            assert (await sessions.observe(lease.lease_ref)).revision == "verified"
+            await sessions.close(lease.lease_ref)
+        else:
+            pending = asyncio.create_task(acquisition)
+            try:
+                done, _ = await asyncio.wait({pending}, timeout=1)
+                assert done, "verification must stop at the earlier verification or lease deadline"
+                with pytest.raises(TimeoutError):
+                    await pending
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+            assert not sessions._leases
+            # Timeout releases admission capacity and the pending profile slot.
+            release.set()
+            lease = await sessions.acquire(
+                PROFILE_ID,
+                principal(),
+                PROVIDER_REF,
+                run_id=RUN_ID,
+                attempt_number=1,
+                deadline_at=NOW + timedelta(minutes=1),
+            )
+            await sessions.close(lease.lease_ref)
+    finally:
+        timer.cancel()
+    assert all(runtime.closed and not runtime.actions for runtime in runtimes)
+
+
 @pytest.mark.parametrize("mode", ["device", "remote"])
 @pytest.mark.parametrize("case", ["verified", "wrong_account", "truncated", "public", "no_success"])
 async def test_curated_verification_requires_unique_complete_account_and_protected_state(
@@ -200,6 +296,7 @@ async def test_curated_verification_requires_unique_complete_account_and_protect
     mode: str,
     case: str,
 ) -> None:
+    """Both authentication methods require private account and protected-page evidence."""
     catalog = BrowserVerificationCatalog.model_validate(
         {
             "sites": [
