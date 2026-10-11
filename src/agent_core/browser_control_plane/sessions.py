@@ -259,6 +259,7 @@ class HostedProfileSessionService:
         attempt_number: int,
         deadline_at: datetime,
     ) -> BrowserLease:
+        """Verify and publish an owned run-attempt lease within its remaining lifetime."""
         if attempt_number < 1:
             raise ConflictError("profile lease attempt is invalid")
         now = self._now()
@@ -315,7 +316,12 @@ class HostedProfileSessionService:
                     raise BrowserProviderError(
                         "tool.browser.authentication_required", retryable=False
                     )
-                async with asyncio.timeout(self._verification_seconds):
+                async with asyncio.timeout(
+                    min(
+                        self._verification_seconds,
+                        max(0.0, (expires_at - self._now()).total_seconds()),
+                    )
+                ):
                     evidence = await runtime.load_page_evidence(
                         definition.origin + definition.protected_path,
                         on_stage=_VerificationLoad("with_session").enter,
