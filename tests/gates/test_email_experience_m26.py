@@ -119,7 +119,8 @@ async def seed_mail(
     composition.services.email.account_servers = {
         "work": {"read": "gmail_read", "send": "gmail_send"}
     }
-    now = datetime(2026, 9, 11, tzinfo=UTC)
+    # Seed fresh mail against the same clock that enforces body retention.
+    now = composition.clock.now()
     thread = EmailThread(
         id=uuid4(),
         account_id="work",
