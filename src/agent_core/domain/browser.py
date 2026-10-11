@@ -838,17 +838,19 @@ class BrowserDispatchConstraint(BaseModel):
 
     The grant kind fixes the other fields: a task grant has one origin, a path
     prefix, an ``unknown`` ceiling and a 256-character text cap; a standing
-    grant has a ``routine`` ceiling and neither prefix nor text cap. Anything
-    else is invalid, and the isolated service answers it with ``400``.
+    grant has a ``routine`` ceiling and neither prefix nor text cap. Specific
+    Follow consent has the exact X origin, handle and profile path. Other field
+    combinations are invalid and the isolated service answers with ``400``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    grant_kind: Literal["task", "standing"]
+    grant_kind: Literal["task", "standing", "follow"]
     origins: tuple[str, ...] = Field(min_length=1, max_length=64)
     path_prefix: str | None = None
     not_after: AwareDatetime
     consequence_ceiling: Literal["routine", "unknown"]
+    follow_handle: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,15}$")
     max_text_characters: Literal[256] | None
 
     @field_validator("origins")
@@ -866,7 +868,15 @@ class BrowserDispatchConstraint(BaseModel):
 
     @model_validator(mode="after")
     def fields_match_grant_kind(self) -> BrowserDispatchConstraint:
-        if self.grant_kind == "task":
+        if self.grant_kind == "follow":
+            valid = (
+                self.origins == ("https://x.com",)
+                and self.follow_handle is not None
+                and self.path_prefix == f"/{self.follow_handle}"
+                and self.consequence_ceiling == "unknown"
+                and self.max_text_characters is None
+            )
+        elif self.grant_kind == "task":
             valid = (
                 self.consequence_ceiling == "unknown"
                 and self.max_text_characters == 256
@@ -879,7 +889,7 @@ class BrowserDispatchConstraint(BaseModel):
                 and self.max_text_characters is None
                 and self.path_prefix is None
             )
-        if not valid:
+        if not valid or (self.grant_kind != "follow" and self.follow_handle is not None):
             raise ValueError("dispatch constraint fields do not match its grant kind")
         return self
 

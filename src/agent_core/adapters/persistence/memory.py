@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import builtins
 from collections import defaultdict, deque
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -162,7 +163,28 @@ class InMemoryAgentRepository:
 
 
 class InMemorySessionRepository:
+    @asynccontextmanager
+    async def admission(self, session_id: UUID, principal: Principal) -> AsyncIterator[Session]:
+        lock = self._admission_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            yield await self.get(session_id, principal)
+
+    async def bind_browser_profile(
+        self, session_id: UUID, principal: Principal, profile_id: UUID
+    ) -> Session:
+        async with self._lock:
+            session = self._owned(session_id, principal)
+            if session is None:
+                raise NotFoundError("session not found")
+            session = session.model_copy(
+                update={"metadata": {**session.metadata, "browser_profile_id": str(profile_id)}},
+                deep=True,
+            )
+            self._sessions[session_id] = session
+            return session.model_copy(deep=True)
+
     def __init__(self) -> None:
+        self._admission_locks: dict[UUID, asyncio.Lock] = {}
         self._sessions: dict[UUID, Session] = {}
         self._chat_sessions: set[UUID] = set()
         # Internal title state (ADR-0155); neither is part of `Session`.

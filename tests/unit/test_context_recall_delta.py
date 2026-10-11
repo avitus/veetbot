@@ -444,3 +444,50 @@ async def test_the_delta_block_is_stamped_with_the_base_query_instant() -> None:
     delta_block = _memory_texts(request)[1]
     assert f'as_of="{as_of.isoformat().replace("+00:00", "Z")}"' in delta_block
     assert NOW.isoformat().replace("+00:00", "Z") not in delta_block
+
+
+async def test_merge_expiry_checks_frozen_dependencies_even_without_a_new_write() -> None:
+    class DependencyRetriever(_Retriever):
+        async def recall(self, query: RecallQuery, **kwargs: object) -> RecallResult:
+            # A clock expiry can invalidate membership before maintenance writes.
+            result = await super().recall(query, **kwargs)  # type: ignore[arg-type]
+            return result.model_copy(update={"validate_snapshot_dependencies": True})
+
+        async def corrections(
+            self, *, snapshot_id: UUID, watermark: int, as_of: datetime | None = None
+        ) -> list[MemoryCorrection]:
+            self.correction_calls.append((snapshot_id, watermark))
+            return [
+                MemoryCorrection(belief_id=CORRECTED_BELIEF, ended_at=NOW, kind="merge_invalidated")
+            ]
+
+    retriever = DependencyRetriever(base_watermark=7)
+    assembled = await _builder(retriever).assemble(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+    assert retriever.correction_calls == [(SNAPSHOT_TRACE, 7)]
+    assert any("equivalence grouping" in text for text in _memory_texts(assembled.request))
+    squeezed = await _builder(
+        DependencyRetriever(base_watermark=7), total_tokens=assembled.pressure.total_tokens - 1
+    ).assemble(run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal())
+    assert squeezed.pressure.yield_steps[0] == "recall"
+    assert any("equivalence grouping" in text for text in _memory_texts(squeezed.request))
+    assert squeezed.request.metadata["prefix_sha256"] == assembled.request.metadata["prefix_sha256"]
+
+
+async def test_delta_failure_preserves_already_fetched_snapshot_corrections() -> None:
+    class FailingDeltaRetriever(_Retriever):
+        async def recall(self, query: RecallQuery, **kwargs: object) -> RecallResult:
+            if query.min_store_position:
+                raise RuntimeError("delta unavailable")
+            return await super().recall(query, **kwargs)  # type: ignore[arg-type]
+
+    retriever = FailingDeltaRetriever()
+    request = await _builder(retriever).build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+    texts = _memory_texts(request)
+    assert retriever.correction_calls == [(SNAPSHOT_TRACE, 7)]
+    assert len(texts) == 2
+    assert "<memory>base</memory>" in texts[0]
+    assert _correction_line() in texts[1]

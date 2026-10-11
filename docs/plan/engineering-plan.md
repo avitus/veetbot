@@ -1164,7 +1164,15 @@ thirty-minute, two-hundred-action browser task grant inside an
 owner-configured site scope (ADR-0129, accepted by the owner 2026-09-25). Do
 not implement any other session-wide or permanent approval grant.
 
-When approval is required:
+ADR-0172 recognizes an authenticated owner's explicit instruction to follow one
+identified X account as approval of that single action. The application records
+the source message and resolved target, expires consent after thirty minutes,
+and consumes it once. It accepts no model-authored, scheduled or page-authored
+consent. The browser rechecks the exact profile and Follow control at dispatch
+and requires positive Following evidence. Sign-in can continue the same request;
+uncertain effects cannot authorize another action. Policy denials still win.
+
+When approval is required and not already supplied by this specific consent:
 
 1.  Persist the proposed tool invocation.
 2.  Persist the approval request.
@@ -3470,7 +3478,9 @@ The milestone does not include the semantic recall arm or `pgvector`, an
 external memory provider, a persona surface, a temporal entity graph, session
 history or artifacts as retrieval sources, belief merge or global
 consolidation, an HTTP memory surface, or experiential and strategy memory.
-Those remain roadmap item B6, each entering on this milestone's evidence.
+Those were left in roadmap item B6, each entering on this milestone's evidence.
+Milestone 32 now authorizes belief merge and whole-store consolidation; its
+detailed design and twenty-four gates are registered; runtime work remains pending.
 
 ### Milestone 17: Memory read API and browser
 
@@ -4244,6 +4254,50 @@ Body links, web-form unsubscribes through browser automation, standing or
 automatic unsubscribe rules, background cleanup, Gmail filters and blocked
 senders, and another provider remain outside this milestone.
 
+### Milestone 32: Memory reconsolidation (dreaming)
+
+The owner authorized this parallel workstream on 2026-10-02: periodically
+revisit the entire eligible memory bank, merge related beliefs and synthesize
+new connections across sessions. This admits belief merge, global
+consolidation within one principal, and bounded evidence-grounded synthesis
+from roadmap B6. It does not change the sequential verified ceiling.
+[memory-reconsolidation.md](memory-reconsolidation.md) and ADR-0169 define
+the mechanism and implementation sequence. Phase 1 on 2026-10-03 registered
+twenty-four gates and froze the deterministic evaluation yardstick. The owner
+approved ADR-0170 on 2026-10-08: a separately versioned, blinded human review may
+adjudicate equivalent hypothesis wording with exact original support. Existing
+v1 results, answer scoring, all numeric floors and release requirements remain intact.
+
+On 2026-10-10 the owner authorized the supervised production path in ADR-0174:
+daily proposals, a private review page and individual owner-approved application.
+Unattended application retains the frozen comparative quality gates. Supervised
+application preserves the same source, privacy, erasure and original-fact contracts.
+
+Requirements and acceptance direction:
+
+- Bound and resume maintenance across the whole eligible store, with fair
+  coverage of old memories, explicit cost limits and no interactive-path work.
+- Distinguish equivalent-claim merging, related summaries and tentative
+  connections. Preserve atomic facts, original provenance, temporal meaning,
+  uncertainty and independently supported evidence; do not silently resolve
+  contradictions or rewrite explicit owner memory.
+- Preserve tenant/principal isolation, sensitivity and portability ceilings,
+  attribution, evidence clocks, durable corrections, deletion and persona
+  authority. Source changes invalidate dependent derived content; retries and
+  model inference do not become fresh evidence.
+- Provide inspectable lineage, review/deletion and safe merge undo, with
+  shared in-memory/PostgreSQL contracts and recovery/concurrency coverage.
+- Demonstrate useful consolidation and cross-session recall improvement against
+  frozen controls, without false merges, lost atomic facts or privacy failures.
+  Bind activation to current comparative evidence; authorization alone is not
+  a passing quality gate. The detailed design specifies the numeric targets.
+
+Phase 1 specifies contracts and provides evaluation tooling; runtime behavior
+and comparative release evidence remain pending. Embeddings, external
+memory providers, learned policies, arbitrary multi-hop graph inference,
+arbitrary history/artifact retrieval and automatic historical re-extraction
+remain outside this milestone. People identity rules remain with Milestone 28.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -4259,7 +4313,7 @@ owner's current ranking, not a schedule.
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
-| B6 | Memory residue after Milestone 28: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, general graph inference and arbitrary session-history/artifact retrieval, belief merge and global consolidation. Excludes the bounded People relational temporal graph, one-hop retrieval and person-linked history admitted by Milestone 28 (ADR-0100); the persona surface entered as Milestone 22 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
+| B6 | Memory residue after Milestone 32 authorization: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, arbitrary multi-hop graph inference and arbitrary session-history/artifact retrieval. Milestone 32 admits belief merge, global consolidation within one principal and bounded grounded connections (ADR-0169; detailed design and gates registered). Excludes the bounded People relational temporal graph, one-hop retrieval and person-linked history admitted by Milestone 28 (ADR-0100); the persona surface entered as Milestone 22 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 24 on 2026-08-26 (ADR-0081); presence-based routing and hand-off still wait here on a concrete use case |
 | B8 | General standing approval grants. The restrictive-only advisory approval signal entered as Milestone 30 on 2026-09-19 (ADR-0111) | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |

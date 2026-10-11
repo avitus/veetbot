@@ -1,0 +1,83 @@
+{
+  "version": "reconsolidation-review@2",
+  "packet_sha256": "a8e565d10c2005fe7c7b5f801ab563e81775bfbc3d9a0fdea86e564c8e025fb0",
+  "reviewer": "owner",
+  "human_reviewed": true,
+  "decisions": [
+    {
+      "candidate_id": "272d2bebd7615771108a6c36401e57042c9696f13449063673b8424ef3311fa6",
+      "verdict": "equivalent",
+      "reference_id": "e4459f78930e695b81086f44b5858ceff35a20c585c83b825109f8ed3816aaee"
+    },
+    {
+      "candidate_id": "337afc6a422cee63e72b565700805a45e097cf4847c86e81c91ed056432235e4",
+      "verdict": "equivalent",
+      "reference_id": "968c16e9bd3746cceba50f6982a6455ea866d2425422c2eb63363938d4587142"
+    },
+    {
+      "candidate_id": "57c094016b744896e511ff547894d58bcb4e94e182ee0ac168c0aeec9dbed73d",
+      "verdict": "equivalent",
+      "reference_id": "b3ff3caf9ae53ba6a4eb822e0fa40a22cfaf8d23b3fd06a94483145874d6bb79"
+    },
+    {
+      "candidate_id": "586ff66ebf0f373eb36e0f77a19f535216ed1db6b0d44768fab6348094383a6c",
+      "verdict": "equivalent",
+      "reference_id": "1194c9ff0e4ce934c5e28baf6c41b84a04937b6b982c7a7752416b85caae32ab"
+    },
+    {
+      "candidate_id": "64286d18fe9eecc4c386d89e51853966791e4ef9472e51c3e1331549385b3656",
+      "verdict": "not_equivalent",
+      "reference_id": null
+    },
+    {
+      "candidate_id": "7c297ab679ea735a93e596ab33c6c76ef3c2dc56d29a506f667d992d38cc7de8",
+      "verdict": "equivalent",
+      "reference_id": "abe93102eca41e7ba596263bdf7242bf4ee2a061e2bd54e5db73adc7baedaf27"
+    },
+    {
+      "candidate_id": "911a036d6ec16a51a5ce2f33c34c2f9ee00c060c824fd77b7e33a3d0c2d17be4",
+      "verdict": "equivalent",
+      "reference_id": "aa3b5adab73bffe8c154685850ef84f0076a461d1ab61fb490f394cb25863a1e"
+    },
+    {
+      "candidate_id": "9289213581b03b46afe9c76107780fda8d6b449fb8079a8e0f6dd6962cdf7e11",
+      "verdict": "not_equivalent",
+      "reference_id": null
+    },
+    {
+      "candidate_id": "9bf89fcfcce51be25bfd5df539eb5fd482d7c1203bcd5b222ca5e087ef72fbc6",
+      "verdict": "equivalent",
+      "reference_id": "44d33d73e41655336ebf94caac1365d09f72ef788534c1840ca01199d9ac2587"
+    },
+    {
+      "candidate_id": "9d89111ec7750355280de9032a92733677de9f2b008d596e58b628f86d08d4ad",
+      "verdict": "equivalent",
+      "reference_id": "94ccd3482696a7c85c4f89ed95b7bd5fa99497bcd75b4b266af820beef09a5a9"
+    },
+    {
+      "candidate_id": "a6ea73c07a9e5d4b697951a76dddef51025ebc9ee1a3ca752a9925018c9f7323",
+      "verdict": "equivalent",
+      "reference_id": "4db411f42ebcb297a3e1e2ea322f5c9a2298dbac3552c0b642f30872d65614ed"
+    },
+    {
+      "candidate_id": "d2533f5deb0712a2550843f2bc6890c6e1f69b22fd06784a7f7ea51e19877680",
+      "verdict": "equivalent",
+      "reference_id": "d0195141d78683377de8c5cf9be3611cbae8c86fca4591136ac1a35b6fd4d6f5"
+    },
+    {
+      "candidate_id": "e8cf60c0397c6062591d5dc189916b635b07df65c1e5379785474c4a40468e93",
+      "verdict": "not_equivalent",
+      "reference_id": null
+    },
+    {
+      "candidate_id": "e9e2e0c0036291602ccbc8141aa2ac6525654f8126f8e1e86a81386cd101ce25",
+      "verdict": "not_equivalent",
+      "reference_id": null
+    },
+    {
+      "candidate_id": "f1fd721f78827133d504642c4fc815132499129dfd94c9bfc2af999128eb71e4",
+      "verdict": "not_equivalent",
+      "reference_id": null
+    }
+  ]
+}

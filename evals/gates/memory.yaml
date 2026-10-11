@@ -545,3 +545,147 @@
   spec: docs/plan/adaptive-memory-distillation.md#hard-gates
   statement: "**Automatic selection prefers the newest evidenced policy and honors a pin.** With every artifact present composition activates formation@9; without it formation@10 outranks formation@8; a pin holds any one of the three; and a pin to an unevidenced policy falls back deterministically with a content-free audit rather than activating another policy."
   check: tests/gates/test_memory_m21.py::test_automatic_selection_prefers_the_newest_evidenced_policy_and_honors_a_pin
+- id: gate.memory.recon_corpus_frozen
+  milestone: 32
+  kind: structural
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "The development and holdout corpus, scorer implementation and unchanged M16 control references match the checked-in manifest; both splits cover all twelve categories and have disjoint case IDs."
+  check: tests/unit/test_memory_reconsolidation_eval.py::test_frozen_corpus_and_control_references_are_intact
+- id: gate.memory.recon_scorer_false_merges
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Overlapping merge groups are scored transitively; joining a distinct fact counts every false pair, loses duplicate-set coverage and reports any missing original."
+  check: tests/unit/test_memory_reconsolidation_eval.py::test_transitive_false_merge_and_lost_fact_are_not_hidden
+- id: gate.memory.recon_repository_parity
+  milestone: 32
+  kind: structural
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "In-memory and PostgreSQL adapters enforce owner-scoped leases, reservations, atomic operations, reverse dependencies, membership uniqueness, paging and undo with shared contracts and reversible migrations."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_lease_recovery
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Crash, retry, lease expiry and parallel workers produce at most one committed operation per input; stale lease tokens cannot settle work or write derived memory."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_fair_inventory
+  milestone: 32
+  kind: property
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "A 100000-record generation is visited within ceil(N/64) successful full-lane slices despite concurrent inserts and recent updates; bounded queues and separate inventory/model coverage prevent false completion."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_bounded_groups
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Each slice selects at most 128 anchors and four groups of at most 32 eligible original beliefs; filters precede limits, generated records are excluded and no all-pairs query or unbounded prompt occurs."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_budget_admission
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Shared durable reservations enforce the 0.25 USD slice and 2 USD daily ceilings across workers, retries and midnight; unknown pricing defers and unknown settlement conservatively charges its reservation."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_provider_contract
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Two bounded calls at most, closed schemas, supplied source IDs, local validation and candidate isolation reject malformed, unsupported or timed-out proposals without changing originals or blocking ordinary maintenance."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_exact_merge
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Only the local equivalence key can authorize automatic membership; original rows and provenance survive, overlapping races cannot duplicate membership and differing person, scope, date, quantity or polarity never merge."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_summary_fidelity
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Each summary clause is an exact supported extractive clause with complete lineage; omitted sources remain inspectable and independently retrievable, and no generalization is mislabeled as a summary."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_connection_grounding
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "A connection needs two distinct admitted original events, exact attributed support, local validation and successful verification; it is tentative at confidence at most 0.35 and cannot serve as fresh evidence."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_dependency_fence
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "A correction, retraction, expiry or attribution change invalidates dependent content atomically; reads and concurrent commits recheck revisions and fences before asynchronous cleanup."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_source_erasure
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Memory, session, principal, email-exclusion and People erasure hide derived current/historical reads and in-flight output, then purge dependencies and generated copies without retaining deleted prose in audits."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_undo_durable
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "An idempotent revision-checked undo removes active merge suppression, restores only valid originals and blocks repeating rejected pairs across retries and policy changes."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_evidence_clock
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Merging, summarizing, citing and repeated passes cannot raise confidence, corroboration or evidence time; hypothesis expiry respects evidence plus thirty days and all supporting validity limits."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_trust_boundary
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Owner isolation, provider sensitivity, source attribution, portability, secrets, injection and prohibited inference checks hold throughout selection, commit and rendering; persona and People identity rules are unchanged."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_recall_visibility
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Equivalent suppression falls back to permitted live originals; derived items obey the same budget/visibility checks, cannot displace needed atoms, and disabled processing restores original recall."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_snapshot_delta
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Existing prefixes stay byte-stable while next-turn deltas report undo and invalidation; erased generated copies cannot enter model input, and ambiguous citations neither reinforce nor refresh evidence."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_scoped_surfaces
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "New list/detail/undo and compatible memory projections enforce scopes, sensitivity-filtered cursors, principal isolation, validation, revisions, idempotency and honest unavailable-server behavior."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_native_journeys
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Native journeys show original versus derived memory, source links and operation history; review/delete and previewed undo handle success, retries, conflict, hidden support and processing-disabled history."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_comparative_quality
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Three complete repeats per split compare the original, merge-only and connections arms at equal budgets: zero false merges/lost facts/boundary violations, duplicate coverage at least 0.80, hypothesis precision at least 0.80 and recall at least 0.60, and cross-session answer coverage lift at least 0.10 with existing recall floors unchanged."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_activation_bound
+  milestone: 32
+  kind: property
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Publication recomputes complete observations and gates; startup refuses missing, withdrawn or mismatched policy/code/model/effort/prompt/schema/scorer/corpus/dependency evidence, and the kill switch leaves erasure and history operational."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_compatibility
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Original memories, controls, provider pins, evidence clocks, People merge/split and erasure, old clients and processing-disabled deployments preserve their established contracts without silent policy substitution."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.recon_release_evidence
+  milestone: 32
+  kind: case
+  spec: docs/plan/memory-reconsolidation.md#hard-gates
+  statement: "Sidecar checks, PostgreSQL and native lanes, authorized PR review and final-head hosted CI pass; production delivery and content-free selection/operation readback verify the intended revision and valid evidence before completion."
+  check: tests/gates/pending.py::pending_gate

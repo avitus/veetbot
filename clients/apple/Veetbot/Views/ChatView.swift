@@ -29,6 +29,7 @@ public struct ChatView: View {
     @State private var textSelection: MessageTextSelection?
     @State private var isDropTargeted = false
     @State private var showingFileImporter = false
+    @State private var showingWebsiteAccess = false
     #if os(iOS)
     @State private var showingPhotoPicker = false
     #endif
@@ -46,7 +47,7 @@ public struct ChatView: View {
 
     private var notificationCovered: Bool {
         var covered = artifactSelection != nil || textSelection != nil || model.isPeopleLookupPresented
-            || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
+            || showingWebsiteAccess || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
         #if os(iOS)
         covered = covered || showingPhotoPicker || model.pendingSmsInvocation != nil
         #endif
@@ -63,6 +64,14 @@ public struct ChatView: View {
     /// Renders the live conversation and composer while the active mode controls the window title.
     public var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button { showingWebsiteAccess = true } label: {
+                    Label("Website Access", systemImage: "globe")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("chat.websiteAccess")
+            }.padding(.horizontal).padding(.top, 8)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
@@ -244,6 +253,9 @@ public struct ChatView: View {
             CallResultSheet(result: result, close: model.dismissCallResult) {
                 Task { await model.deleteCallResult() }
             }
+        }
+        .sheet(isPresented: $showingWebsiteAccess) {
+            ConnectionSettingsView(model: model, embedded: false)
         }
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)

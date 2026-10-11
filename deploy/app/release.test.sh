@@ -94,6 +94,8 @@ write_stub flock 'exit 0'
 write_stub stat '
   file="${!#}"
   owner=veetbot
+  if [[ "$file" == *browser-profile-verification.json ]]; then owner=65532; fi
+  if [[ "${VEETBOT_TEST_BAD_VERIFICATION_OWNER:-0}" == 1 && "$file" == *browser-profile-verification.json ]]; then owner=1; fi
   if [[ "$file" == *bland-signing ]]; then owner=veetbot-call-ingress; fi
   if [[ "${VEETBOT_TEST_BAD_CALL_OWNER:-}" == "$file" ]]; then owner=unrelated; fi
   mode="$(/usr/bin/stat -c %a "$file" 2>/dev/null || /usr/bin/stat -f %Lp "$file")"
@@ -266,6 +268,7 @@ make_stage() {
     "$stage/alembic.ini" \
     "$stage/docker-compose.yml" \
     "$stage/deploy/docker-compose.production.yml" \
+    "$stage/deploy/docker-compose.browser-verification.yml" \
     "$stage/deploy/browser-profile-service.Dockerfile" \
     "$stage/deploy/veetbot-schedule.env.example" \
     "$stage/deploy/veetbot-notify.env.example" \
@@ -429,6 +432,7 @@ grep -Fxq 'execution socket /run/veetbot/execution.sock' "$LOG_FILE"
 grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
+assert_log_lacks '-f deploy/docker-compose.browser-verification.yml'
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
 grep -Fq \
   'systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
@@ -556,6 +560,57 @@ for device_switch in yes 1 TRUE; do
   assert_log_lacks 'docker compose'
 done
 
+# A configured verification catalog must never be silently omitted.
+verification_env="$TEST_ROOT/verification.env"
+cp "$ENV_FILE" "$verification_env"
+printf 'BROWSER_PROFILE_VERIFICATION_FILE=relative-catalog.json\n' >>"$verification_env"
+verification_id="20260810-152238-0000010"
+make_stage "$verification_id"
+: >"$LOG_FILE"
+if VEETBOT_TEST_ENV_FILE="$verification_env" run_release "$verification_id" \
+  >"$TEST_ROOT/verification.out" 2>&1; then
+  printf 'release with invalid verification catalog unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'BROWSER_PROFILE_VERIFICATION_FILE must be an absolute path' \
+  "$TEST_ROOT/verification.out"
+assert_log_lacks 'docker compose'
+assert_log_lacks 'systemctl restart'
+
+verification_file="$TEST_ROOT/browser-profile-verification.json"
+printf '{"version":1,"sites":[]}\n' >"$verification_file"
+chmod 0600 "$verification_file"
+for fault in missing symlink mode owner; do
+  verification_path="$verification_file"
+  expected='BROWSER_PROFILE_VERIFICATION_FILE must be owned by uid 65532 with mode 0600'
+  case "$fault" in
+    missing)
+      verification_path="$TEST_ROOT/missing.json"
+      expected='BROWSER_PROFILE_VERIFICATION_FILE must name an existing non-symlink regular file'
+      ;;
+    symlink)
+      verification_path="$TEST_ROOT/verification-link.json"
+      ln -s "$verification_file" "$verification_path"
+      expected='BROWSER_PROFILE_VERIFICATION_FILE must name an existing non-symlink regular file'
+      ;;
+    mode) chmod 0644 "$verification_file" ;;
+  esac
+  cp "$ENV_FILE" "$verification_env"
+  printf 'BROWSER_PROFILE_VERIFICATION_FILE=%s\n' "$verification_path" >>"$verification_env"
+  make_stage "$verification_id"
+  : >"$LOG_FILE"
+  if VEETBOT_TEST_ENV_FILE="$verification_env" \
+    VEETBOT_TEST_BAD_VERIFICATION_OWNER="$([[ "$fault" == owner ]] && echo 1 || echo 0)" \
+    run_release "$verification_id" >"$TEST_ROOT/verification.out" 2>&1; then
+    printf 'release accepted invalid verification catalog: %s\n' "$fault" >&2
+    exit 1
+  fi
+  grep -Fq "$expected" "$TEST_ROOT/verification.out"
+  assert_log_lacks 'docker compose'
+  assert_log_lacks 'systemctl restart'
+  chmod 0600 "$verification_file"
+done
+
 unsupported_id="20260810-152239-bcdef00"
 make_stage "$unsupported_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
@@ -619,7 +674,9 @@ printf '%s\n' "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-browser-profile-service"
 device_off_env="$TEST_ROOT/device-off.env"
 cp "$ENV_FILE" "$device_off_env"
 printf '%s\n' 'BROWSER_PROFILE_DEVICE_SIGN_IN_ENABLED=false' >>"$device_off_env"
+printf 'BROWSER_PROFILE_VERIFICATION_FILE=%s\n' "$verification_file" >>"$device_off_env"
 VEETBOT_TEST_ENV_FILE="$device_off_env" run_release "$equal_timestamp_id"
+grep -Fq -- '-f deploy/docker-compose.browser-verification.yml up' "$LOG_FILE"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == \
   "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
 # The store already satisfied the retention rule, so the step removes nothing.

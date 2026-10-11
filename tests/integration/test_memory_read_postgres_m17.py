@@ -98,7 +98,7 @@ async def _list(
     limit: int = 50,
     cursor: str | None = None,
 ) -> Page[MemoryView]:
-    return await service.list(
+    page = await service.list(
         principal,
         ceiling=ceiling,
         statuses=statuses,
@@ -108,6 +108,11 @@ async def _list(
         text=text,
         limit=limit,
         cursor=cursor,
+    )
+    assert all(isinstance(item, MemoryView) for item in page.items)
+    return Page[MemoryView](
+        items=[item for item in page.items if isinstance(item, MemoryView)],
+        next_cursor=page.next_cursor,
     )
 
 
@@ -415,6 +420,7 @@ async def test_postgres_ceiling_filters_all_four_sensitivities(tmp_path: Path) -
 
             for identifier in visible:
                 detail = await service.get(principal, identifier, ceiling=ceiling)
+                assert isinstance(detail, MemoryView)
                 assert detail.id == identifier
                 assert SENSITIVITIES.index(detail.sensitivity) <= index
 

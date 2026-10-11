@@ -24,6 +24,7 @@ EXTRACTION_SCRIPT = (
         if (node.matches('table,[role="table"],[role="grid"]')) return 'table';
         if (node.matches('ul,ol,[role="list"]')) return 'list';
         if (node.matches('form,[role="form"]')) return 'form';
+        if (node.matches('main,[role="main"]')) return 'articles';
         return null;
     };
     const visible = node => {
@@ -45,7 +46,7 @@ EXTRACTION_SCRIPT = (
         row_nodes: 0, row_scan_limit_reached: false, omitted_rows: 0
     };
     if (!source) return result;
-    result.source_name = summary(source, 256, true).text;
+    result.source_name = request.kind === 'articles' ? '' : summary(source, 256, true).text;
     const spanning = node => {
         if (!node.matches(cellSelector))
             return false;
@@ -106,6 +107,33 @@ EXTRACTION_SCRIPT = (
         return {text, text_truncated: truncated};
     };
     const literal = value => value === null ? null : {text: String(value), text_truncated: false};
+    const articleCells = article => {
+        const excerpt = summary(article, 256, true, null, true);
+        let child = article.firstChild, scanned = 0;
+        const links = new Set();
+        while (child && scanned < 256) {
+            scanned++;
+            const skip = blocked(child) || child.nodeType === 1
+                && child.matches('article,[role="article"],' + collectionSelector);
+            if (!skip && child.nodeType === 1 && child.tagName === 'TIME' && visible(child)) {
+                const anchor = child.closest('a[href]');
+                // The link and timestamp must belong to this visible article.
+                if (anchor && article.contains(anchor) && visible(anchor)) {
+                    const raw = anchor.getAttribute('href') || '';
+                    if (raw.length <= 256) {
+                        try {
+                            const url = new URL(raw, document.location.href);
+                            if (url.protocol === 'https:' && url.origin === location.origin
+                                && !url.username && !url.password && !url.search && !url.hash
+                                && url.href.length <= 256) links.add(url.href);
+                        } catch (_) { /* An invalid link supplies no evidence. */ }
+                    }
+                }
+            }
+            child = advance(child, article, !skip);
+        }
+        return [excerpt, child === null && links.size === 1 ? literal([...links][0]) : null];
+    };
     const formCells = control => {
         const type = (control.getAttribute('type') || '').toLowerCase();
         const role = control.getAttribute('role') || (
@@ -127,19 +155,31 @@ EXTRACTION_SCRIPT = (
     while (node && result.row_nodes < 4096) {
         result.row_nodes++;
         const skip = blocked(node, request.kind === 'form')
-            || node.nodeType === 1 && node.matches(collectionSelector);
+            || request.kind !== 'articles' && node.nodeType === 1
+                && node.matches(collectionSelector);
+        let article = false;
         if (!skip && node.nodeType === 1 && visible(node)) {
             if (request.kind === 'table' && spanning(node)) result.status = 'unsupported_structure';
             const isRow = request.kind === 'table' ? node.matches('tr,[role="row"]')
                 : request.kind === 'list' ? node.matches('li,[role="listitem"]')
+                : request.kind === 'articles' ? node.matches('article,[role="article"]')
                 : node.matches('input,select,textarea,button,[role="textbox"],'
                     + '[role="checkbox"],[role="radio"],[role="combobox"]');
             if (isRow) {
+                article = request.kind === 'articles';
+                const box = article ? node.getBoundingClientRect() : null;
+                if (article && (box.bottom <= 0 || box.top >= innerHeight
+                    || box.right <= 0 || box.left >= innerWidth)) {
+                    node = advance(node, source, false);
+                    continue;
+                }
                 matched++;
                 if (result.rows.length < request.row_limit) {
                     const table = request.kind === 'table' ? tableCells(node) : null;
                     const form = request.kind === 'form' ? formCells(node) : null;
+                    const articleValues = article ? articleCells(node) : null;
                     const cells = request.fields.map(field => {
+                        if (articleValues) return articleValues[field.column] || null;
                         if (form) return form[field.column] || null;
                         if (table) {
                             if (table.cells[field.column])
@@ -155,7 +195,7 @@ EXTRACTION_SCRIPT = (
         }
         // Native input/select/textarea descendants are values, never new rows.
         const editable = node.nodeType === 1 && node.matches('input,select,textarea');
-        node = advance(node, source, !skip && !editable);
+        node = advance(node, source, !skip && !editable && !article);
     }
     result.row_scan_limit_reached ||= node !== null;
     result.omitted_rows = matched - result.rows.length;
@@ -223,6 +263,7 @@ def extracted_observation(
         row_limit=request.row_limit,
         rows=tuple(rows),
         source_ref=None if raw["status"] == "not_found" else f"{revision}:source",
+        scope="main_document_viewport_articles" if request.kind == "articles" else "main_document",
     )
     while result.rows and len(result.model_dump_json().encode("utf-8")) > 64 * 1024:
         result = result.model_copy(

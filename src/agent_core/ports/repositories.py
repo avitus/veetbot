@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
@@ -59,6 +60,16 @@ class AgentRepository(Protocol):
 
 
 class SessionRepository(Protocol):
+    def admission(
+        self, session_id: UUID, principal: Principal
+    ) -> AbstractAsyncContextManager[Session]:
+        """Serialize message admission and website selection for one owned session."""
+        ...
+
+    async def bind_browser_profile(
+        self, session_id: UUID, principal: Principal, profile_id: UUID
+    ) -> Session: ...
+
     async def create(self, session: Session) -> None: ...
 
     async def get(self, session_id: UUID, principal: Principal) -> Session: ...

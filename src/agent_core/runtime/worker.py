@@ -227,6 +227,7 @@ class MaintenanceWorker:
         sweep_traces: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_consolidation: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_decay: Callable[[], Awaitable[int]] | None = None,
+        sweep_memory_reconsolidation: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
         sweep_people_erasures: Callable[[], Awaitable[int]] | None = None,
         sweep_device_invocations: Callable[[], Awaitable[int]] | None = None,
@@ -301,10 +302,21 @@ class MaintenanceWorker:
         # Duplicate People are merged or suggested on their own slow timer (ADR-0125).
         self._people_duplicate_interval = timedelta(seconds=people_duplicate_interval_seconds)
         self._last_people_duplicate_sweep_at: datetime | None = None
+        self._sweep_memory_reconsolidation = sweep_memory_reconsolidation
+        self._reconsolidation_task: asyncio.Task[None] | None = None
         self._stopping = False
 
     def stop(self) -> None:
         self._stopping = True
+        if self._reconsolidation_task is not None:
+            self._reconsolidation_task.cancel()
+
+    async def _run_reconsolidation(self, sweep: Callable[[], Awaitable[int]]) -> None:
+        try:
+            async with asyncio.timeout(120):
+                await sweep()
+        except Exception as exc:
+            logger.warning("reconsolidation slice ended (%s)", type(exc).__name__)
 
     async def run_once(self) -> int:
         async with self._uow_factory() as uow:
@@ -475,14 +487,28 @@ class MaintenanceWorker:
                 await self._sweep_artifact_orphans()
             except Exception:
                 logger.exception("artifact orphan reconciliation failed")
+        if (
+            not self._stopping
+            and not live_run_leases
+            and self._sweep_memory_reconsolidation is not None
+            and (self._reconsolidation_task is None or self._reconsolidation_task.done())
+        ):
+            self._reconsolidation_task = asyncio.create_task(
+                self._run_reconsolidation(self._sweep_memory_reconsolidation)
+            )
         return reclaimed
 
     async def run_forever(self) -> None:
-        while not self._stopping:
-            try:
-                await self.run_once()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("maintenance worker iteration failed")
-            await self._clock.sleep(self._poll_interval)
+        try:
+            while not self._stopping:
+                try:
+                    await self.run_once()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("maintenance worker iteration failed")
+                await self._clock.sleep(self._poll_interval)
+        finally:
+            self.stop()
+            if self._reconsolidation_task is not None:
+                await asyncio.gather(self._reconsolidation_task, return_exceptions=True)

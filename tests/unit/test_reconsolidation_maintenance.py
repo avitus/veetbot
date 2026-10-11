@@ -1,0 +1,346 @@
+"""M32 inventory and background isolation leave ordinary maintenance responsive."""
+
+import asyncio
+from typing import Literal, cast
+
+import pytest
+
+from agent_core.domain.reconsolidation import ReconsolidationJob
+from agent_core.memory.reconsolidation import ReconsolidationInventoryPass
+from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.runtime.worker import MaintenanceWorker
+from tests.contract.memory_fixtures import memory
+from tests.contract.reconsolidation_cases import Factory, Stores
+from tests.contract.support import memory_uow_factory, principal
+
+
+async def test_inventory_queues_bounded_groups_and_preserves_originals() -> None:
+    clock, factory = await memory_uow_factory()
+    originals = [
+        memory(belief_id=1000 + i).model_copy(update={"store_position": i + 1}) for i in range(40)
+    ]
+    async with factory() as uow:
+        for record in originals:
+            await uow.memories.upsert_belief(record)
+    admitted = False
+    service = ReconsolidationInventoryPass(
+        factory, clock, principal(), worker_id="test", admitted=lambda: admitted
+    )
+    assert await service.run_once() == 0
+    admitted = True
+    assert 1 <= await service.run_once() <= 4, "eligible groups must be durably queued"
+    async with factory() as uow:
+        for record in originals:
+            assert await uow.memories.get(record.id, principal()) == record
+        lease = await uow.reconsolidation.claim_due(principal(), clock.now(), "next")
+        assert lease is not None and lease.full_cursor == lease.full_bound
+        group = await uow.reconsolidation.claim_group(principal(), lease.lease_token, clock.now())
+        assert group is not None and group.attempts == 1
+
+
+async def test_background_slice_does_not_block_sweeps_and_stops_cleanly() -> None:
+    clock, factory = await memory_uow_factory()
+    started, cancelled = asyncio.Event(), asyncio.Event()
+    sweeps = 0
+    calls = 0
+
+    async def background() -> int:
+        nonlocal calls
+        calls += 1
+        assert not factory.is_open()
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        return 0
+
+    async def ordinary() -> int:
+        nonlocal sweeps
+        sweeps += 1
+        return 0
+
+    worker = MaintenanceWorker(
+        uow_factory=factory,
+        clock=clock,
+        sweep_memory_reconsolidation=background,
+        sweep_memory=ordinary,
+    )
+    await worker.run_once()
+    await asyncio.sleep(0)
+    assert started.is_set(), "maintenance should dispatch the bounded background slice"
+    await worker.run_once()
+    assert sweeps == 2 and calls == 1
+    worker.stop()
+    await worker.run_forever()
+    assert cancelled.is_set()
+    await worker.run_once()
+    assert calls == 1
+
+
+async def test_inventory_processes_claimed_work_before_yielding_lease() -> None:
+    clock, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(memory())
+        await uow.memories.upsert_belief(
+            memory(belief_id=502).model_copy(update={"store_position": 2})
+        )
+    processed = []
+
+    class ProcessingPass(ReconsolidationInventoryPass):
+        async def _process(self, lease: ReconsolidationJob) -> int:
+            async with factory() as uow:
+                group = await uow.reconsolidation.claim_group(
+                    principal(), lease.lease_token, clock.now()
+                )
+                assert group is not None
+                processed.append(group.id)
+                await uow.reconsolidation.finish_group(
+                    principal(), lease.lease_token, group.id, "no_change", clock.now()
+                )
+            return 1
+
+    service = ProcessingPass(
+        factory, clock, principal(), worker_id="processor", admitted=lambda: True
+    )
+    assert await service.run_once() == 1
+    assert len(processed) == 1, "queued work must run on the same slice before releasing the lease"
+
+
+async def test_complete_slice_executes_two_calls_and_finishes_groups() -> None:
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+    from tests.contract.reconsolidation_source_cases import seed_sources
+
+    clock, factory = await memory_uow_factory()
+    tracked = TrackedFactory(cast(Factory, factory))
+    async with factory() as uow:
+        await seed_sources(cast(Stores, uow))
+    provider = ExecutionProvider(tracked)
+    service = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        clock,
+        principal(),
+        worker_id="complete",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=policy,
+    )
+    assert await service.run_once() == 1
+    assert len(provider.requests) == 2
+    assert await service.run_once() == 0
+    assert len(provider.requests) == 2
+    async with factory() as uow:
+        assert await uow.reconsolidation.claim_due(principal(), clock.now(), "other") is None
+
+
+async def test_processing_startup_refuses_missing_activation_evidence() -> None:
+    from dataclasses import replace
+
+    import pytest
+
+    from agent_core.bootstrap import build
+    from agent_core.config import ConfigurationError
+    from tests.integration.m2_support import memory_settings
+
+    with pytest.raises(ConfigurationError, match="reconsolidation"):
+        async with build(
+            settings=replace(memory_settings(), memory_reconsolidation_enabled=True),
+            storage="memory",
+        ):
+            pass
+
+
+async def test_reviewed_daily_slice_records_empty_run_once_and_pause() -> None:
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+    tracked = TrackedFactory(cast(Factory, factory))
+    provider = ExecutionProvider(tracked)
+    service = ReconsolidationPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="daily",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=policy,
+        owner_review=True,
+    )
+    assert await service.run_once() == 0
+    assert await service.run_once() == 0
+    async with factory() as uow:
+        runs = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+        assert len(runs) == 1 and runs[0].outcome == "no_change"
+        assert runs[0].provider_calls == 0
+        state = await uow.reconsolidation.dreaming_schedule(principal())
+        await uow.reconsolidation.pause_dreaming(principal(), True, state.revision)
+    assert await service.run_once() == 0
+    assert not provider.requests
+
+
+async def test_reviewed_daily_failure_is_retained_and_not_retried_same_day() -> None:
+    import pytest
+
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+
+    class FailedPass(ReconsolidationPass):
+        async def _inventory(self, lease: ReconsolidationJob) -> int:
+            raise RuntimeError("private failure detail must not be persisted")
+
+    service = FailedPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="failure",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(TrackedFactory(cast(Factory, factory))),
+        egress_policy=policy,
+        owner_review=True,
+    )
+    with pytest.raises(ExceptionGroup):
+        await service.run_once()
+    assert await service.run_once() == 0
+    async with factory() as uow:
+        runs = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+        assert len(runs) == 1 and runs[0].outcome == "failed"
+        assert (
+            runs[0].reason == "execution_failed"
+            and "private failure" not in runs[0].model_dump_json()
+        )
+
+
+async def test_cancelled_reviewed_slice_finishes_history_despite_repeated_cancellation() -> None:
+    import pytest
+
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.domain.dreaming import DreamingRun
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+    started, finishing, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class PausedPass(ReconsolidationPass):
+        async def _inventory(self, lease: ReconsolidationJob) -> int:
+            started.set()
+            await asyncio.Event().wait()
+            return 0
+
+        async def _finish_daily(self, run: DreamingRun, *, failed: bool = False) -> None:
+            finishing.set()
+            await release.wait()
+            await super()._finish_daily(run, failed=failed)
+
+    service = PausedPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="cancelled",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(TrackedFactory(cast(Factory, factory))),
+        egress_policy=policy,
+        owner_review=True,
+    )
+    task = asyncio.create_task(service.run_once())
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        task.cancel()
+        for _ in range(100):
+            if finishing.is_set() or task.done():
+                break
+            await asyncio.sleep(0.001)
+        assert finishing.is_set(), "cancellation must finalize the claimed daily run"
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        async with factory() as uow:
+            [run] = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+            assert run.outcome == "failed" and run.finished_at is not None
+            assert run.reason == "execution_failed"
+        assert await service.run_once() == 0
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("state", ["settled", "reserved", "unknown"])
+async def test_daily_history_only_reports_settled_provider_charges(
+    state: Literal["settled", "reserved", "unknown"],
+) -> None:
+    from decimal import Decimal
+    from uuid import UUID
+
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.domain.reconsolidation import ReconsolidationSpend
+    from agent_core.domain.reconsolidation_execution import (
+        ReconsolidationCall,
+        ReconsolidationExecution,
+    )
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+
+    clock, factory = await memory_uow_factory()
+    service = ReconsolidationPass(
+        factory,
+        clock,
+        principal(),
+        worker_id="charges",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(TrackedFactory(cast(Factory, factory))),
+        egress_policy=policy,
+        owner_review=True,
+    )
+    async with factory() as uow:
+        run = await uow.reconsolidation.claim_dreaming_run(principal(), clock.now())
+    assert run is not None
+    service._last_execution = ReconsolidationExecution(
+        reason="reviewed",
+        calls=(
+            ReconsolidationCall(
+                stage="proposal",
+                reason="reviewed",
+                spend=ReconsolidationSpend(
+                    id=UUID(int=1),
+                    tenant_id=principal().tenant_id,
+                    principal_id=principal().principal_id,
+                    job_id=UUID(int=2),
+                    lease_token=UUID(int=3),
+                    day=clock.now().date(),
+                    request_digest="a" * 64,
+                    maximum_usd=Decimal("0.1"),
+                    charged_usd=Decimal("0.1"),
+                    state=state,
+                ),
+            ),
+        ),
+    )
+    await service._finish_daily(run)
+    async with factory() as uow:
+        [finished] = await uow.reconsolidation.dreaming_runs(principal(), clock.now())
+    assert finished.charged_usd == (Decimal("0.1") if state == "settled" else None)
+    assert finished.provider_calls == 1

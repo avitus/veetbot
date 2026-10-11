@@ -1,0 +1,14 @@
+{
+  "version": "reconsolidation-review@2",
+  "holdout_status": "previously_inspected",
+  "reviewer": "owner",
+  "sha256": {
+    "evals/capability/memory-reconsolidation.v1.json": "ddf8c2a2ce2f09bec8778c57c99ae3244dde9259c4e2f658f520d5a51aa27de3",
+    "evals/capability/memory-reconsolidation.manifest.json": "5a51e86419f23f799d58f16b3f91fbb9a39c16e6a736b394e917edfee8751259",
+    "src/agent_core/evals/memory_reconsolidation.py": "ab875162e543421ca4e2f8d47093cd97a7a1db7292945486393c31484c36dc60",
+    "src/agent_core/evals/memory_benchmark.py": "9fbfbd13c35f394b12133b3a8b07dbc24b9af18136471bcd5c50a17f29bc9176",
+    "src/agent_core/evals/memory_reconsolidation_review.py": "ea9b32a37ab131260952882ebc57b922e1a17962974eb542462bbf6d0732415f",
+    "src/agent_core/evals/memory_reconsolidation_comparison.py": "e80c476e30e727246f03e4fbeed67ba939569f6b18ff6bcc4a53a718dac16203",
+    "src/agent_core/evals/memory_reconsolidation_report.py": "9f5359ac020377c5c341f70769bcf8614f2bc187f890d59e0ee094627474cd5f"
+  }
+}

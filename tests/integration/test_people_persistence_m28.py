@@ -12,6 +12,7 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.database import create_engine, create_session_factory
 from agent_core.adapters.persistence.people import PostgresPeopleStore
 from agent_core.adapters.persistence.sqlalchemy_models import PeopleHeadRow
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import Person
 from tests.contract.people_fixtures import PeopleFields
@@ -279,6 +280,10 @@ async def test_people_forced_rls_and_rollback() -> None:
             )
             await PostgresPeopleStore(session, FixedClock(NOW)).put(person, expected_revision=0)
             await session.rollback()
+            # Transaction-local tenant scope must be restored after rollback.
+            await session.execute(
+                text("SELECT set_config('agent_core.tenant_id', 'tenant-a', true)")
+            )
             assert (
                 await PostgresPeopleStore(session, FixedClock(NOW)).get(
                     owner, person.id, ceiling=Sensitivity.RESTRICTED
@@ -315,10 +320,22 @@ async def test_people_forced_rls_and_rollback() -> None:
                     text("SELECT set_config('agent_core.tenant_id', 'foreign', true)")
                 )
                 assert (await session.execute(select(PeopleHeadRow))).scalars().all() == []
+                with pytest.raises(NotFoundError, match="memory owner not found"):
+                    await PostgresPeopleStore(session, FixedClock(NOW)).put(
+                        person.model_copy(update={"id": uuid4()}), expected_revision=0
+                    )
+                # The adapter guard and database RLS each independently reject the write.
                 with pytest.raises(DBAPIError) as denied:
                     async with session.begin_nested():
-                        await PostgresPeopleStore(session, FixedClock(NOW)).put(
-                            person.model_copy(update={"id": uuid4()}), expected_revision=0
+                        await session.execute(
+                            insert(PeopleHeadRow).values(
+                                tenant_id=owner.tenant_id,
+                                principal_id=owner.principal_id,
+                                id=uuid4(),
+                                kind="person",
+                                revision=1,
+                                sensitivity=1,
+                            )
                         )
                 assert getattr(denied.value.orig, "sqlstate", None) == "42501"
         finally:
@@ -427,6 +444,9 @@ async def test_postgres_alias_search_filters_before_paging() -> None:
     )
     try:
         async with create_session_factory(engine)() as session:
+            await session.execute(
+                text("SELECT set_config('agent_core.tenant_id', 'tenant-a', true)")
+            )
             store = PostgresPeopleStore(session, FixedClock(NOW))
             await store.put(person, expected_revision=0)
             await store.put(alias, expected_revision=0)
@@ -642,12 +662,18 @@ async def test_memory_revisions_enforce_tenant_rls_and_cross_owner_foreign_keys(
         app.uow_factory() as uow,
     ):
         await uow.sessions.create(source_session())
+        await uow.memories.upsert_belief(memory())
+        with pytest.raises(NotFoundError, match="memory owner not found"):
+            await uow.memories.upsert_belief(foreign_belief)
+    async with (
+        build(settings=database_settings(), storage="postgres", principal=foreign) as app,
+        app.uow_factory() as uow,
+    ):
         await uow.sessions.create(
             source_session().model_copy(
                 update={"id": foreign_belief.source_session_id, "tenant_id": foreign.tenant_id}
             )
         )
-        await uow.memories.upsert_belief(memory())
         await uow.memories.upsert_belief(foreign_belief)
     engine = create_engine(database_settings().database_url)
     role = f"memory28_probe_{uuid4().hex}"
@@ -685,6 +711,8 @@ async def test_memory_revisions_enforce_tenant_rls_and_cross_owner_foreign_keys(
                             tenant_id=owner.tenant_id,
                             principal_id=owner.principal_id,
                             belief_id=foreign_belief.id,
+                            creation_sequence=1,
+                            content_revision=1,
                             recorded_at=NOW,
                             payload=memory().model_dump(mode="json"),
                         )

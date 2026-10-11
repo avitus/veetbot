@@ -115,6 +115,11 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   hybrid retrieval with recall traces, governed inspection and deletion,
   document ingestion, and passage retrieval; provider-assisted extraction is
   evidence-gated (Milestones 9 and 10).
+  Milestone 32 adds bounded reconsolidation through the existing maintenance slot:
+  original-only proposal/verification, lossless merges and erasable summaries or
+  tentative connections with complete dependencies. Conflicts retain history without
+  selecting a winner. Processing and derived recall require matching release evidence;
+  default-off owner inspection exposes the Synthesis journal independently.
 - `agent_core.adapters.web` and `agent_core.adapters.browser`, with
   `agent_core.browser_control_plane` as a separately deployed secret-bearing
   process, supply provider-neutral public-web search and fetch and

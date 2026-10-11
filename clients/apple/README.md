@@ -155,6 +155,12 @@ Task permissions row whose menu stops each one. Passwords, payments,
 purchases, account changes and messages still ask every time. The card shows the
 site scope, limits and exceptions before the task permission is selected.
 
+When automatic Email processing reaches its budget, the sidebar shows a compact
+pause reason, the next check time, and Check again. Details expands the daily and
+rolling-month spending, pending costs, and next batch allowance, rounded to cents.
+Cached mail and editing remain available; opening Details does not submit work
+or change the existing automatic retry schedule.
+
 In Email feedback, **This kind of content** offers the topics identified on the
 selected thread. Choose a topic before marking it Important or Less important;
 the confirmation names that topic and offers Undo. If no topics are available,

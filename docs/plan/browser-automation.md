@@ -1153,8 +1153,10 @@ A task grant is bound to the tenant, principal, session, browser profile and
 its generation, agent version, policy version, origin, path prefix, creation
 and expiry times, action cap, and the approval that created it. Only an
 interactive top-level run can use it, in a session that carries the trusted
-browser-profile binding and no schedule binding and whose newest user message
-came from the owner; scheduled, inbound-surface, and device-ingested sessions,
+browser-profile binding and whose newest user message came from the owner. An
+authenticated owner reply has a principal-authored seed message even when its
+session originated from a schedule; the occurrence has a scheduler-authored seed.
+Permission scopes alone never prove owner authorship (ADR-0172). Scheduled occurrences, inbound-surface and device-ingested input,
 delegated child runs, and other sessions cannot. A session holds at most one
 active task grant. Thirty minutes, two hundred actions, and 4,096 typed
 characters are fixed, not configurable, and enforced by database constraints.
@@ -1254,8 +1256,10 @@ accounting. Existing schedules require an explicit full-definition update.
 Hosted adapters compare tenant and principal identity and require the run's
 scopes and roles to be subsets of the configured owner's authority; restricted
 scheduled authority does not change profile ownership.
-This read integration creates no action grant, and model-callable schedule
-creation still selects no profile.
+This read integration creates no action grant. Since ADR-0172, model-callable
+`schedule.create` accepts `use_website=true` to pin the current chat's trusted
+profile and `browser.profile.read` dependency. Missing or unavailable access
+fails visibly; the model cannot choose a profile identifier.
 
 ## Bounds and stable failures
 
@@ -1723,7 +1727,13 @@ The isolated service optionally loads `BROWSER_PROFILE_VERIFICATION_FILE`, a
 private absolute mode-0600 JSON file of at most 64 KiB. Its version-1 `sites`
 catalog contains at most 32 closed definitions: `id`, `version`, `profile_id`,
 `origin`, `protected_path`, positive text/region `ready` evidence and exact region
-`account` evidence. Each profile has one definition. The protected path is a
+or account-control `account` evidence (ADR-0175). A control binds exact button/link
+`role`, accessible `name` and normalized visible `text` (at most 256 characters).
+It requires a unique control in the observation and matching-revision private
+facts with complete labels and field kind `none`; editable, missing, stale,
+truncated and duplicate evidence fails closed. Account text elsewhere on the page
+does not qualify. An interrupted observation cannot confirm readiness.
+Each profile has one definition. The protected path is a
 literal path, not a selector, script, credential or permission. Both device and
 remote sign-in compare isolated signed-in and empty-session loads. A configured
 site must show the intended account and protected state only in the signed-in
@@ -1738,7 +1748,7 @@ change a profile once a newer ceremony exists.
 
 `runtime/browser-workflows.yaml` is a closed version-1 catalog of reviewed
 definitions. A recipe binds ID/version, exact origin, explicit task-intent
-phrases, at most 16 navigate/observe/act/extract steps and a maximum 900-second
+phrases, at most 16 navigate/observe/act/extract or finite collection steps and a maximum 900-second
 duration. Selection requires one unambiguous matching owner request and a ready
 selected profile. Actions require unique fresh role/name targets and a positive
 postcondition. Every tool call uses normal validation, policy, approvals, current
@@ -1749,12 +1759,11 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
-The shipped recipe catalog and site definitions are empty. Engineering-owned
-definitions require site-specific fixtures and review before activation; this
-tranche proves the mechanism using controlled account/report fixtures and makes
-no claim of configured live-site coverage. Users do not author or maintain these
-technical definitions. Unknown sites retain protected-page differential sign-in
-verification and the ordinary agent execution path.
+The shipped catalog includes the reviewed X home-feed briefing below; private
+account definitions remain deployment-owned. Engineering-owned definitions
+require site-specific fixtures and review before activation. Users do not author
+or maintain these technical definitions. Unknown sites retain protected-page
+differential sign-in verification and the ordinary agent execution path.
 
 All hosted browsers remain headed (ADR-0145). A trusted ceremony or differential
 verification explicitly permits login-page reads; headed agent leases still
@@ -1763,3 +1772,77 @@ browsers within the existing service-wide cap of three, until both loads close,
 including after cancellation. Frame and input requests wait for the ceremony
 operation lock without holding the service admission lock, then revalidate the
 capability before accessing the page.
+
+
+### Reviewed X feed briefing (ADR-0176)
+
+The default-off `BROWSER_FEED_WORKFLOW_ENABLED` switch admits the `x-home-briefing`
+recipe. It matches complete normalized owner intent, either an
+explicit phrase or a SHA-256 digest of the reviewed long schedule instruction.
+No private prompt or identity is in the catalog. Ambiguous, changed or untrusted
+requests use ordinary execution; the newest complete owner message controls
+selection. A READY selected X profile and a pinned observation tool supporting
+article extraction are required. Account identity remains the isolated service's
+private ADR-0175 verification responsibility, not a feed-text inference.
+
+`browser.observe@1.8.0` adds `extract.kind: articles`, retaining 1.7.0 for pinned
+runs. Index selects a visible main region; columns 0 and 1 are a bounded visible
+article excerpt and its unique visible timestamp link. Only articles intersecting
+the viewport qualify, with scope `main_document_viewport_articles`. Discovery
+retains the 8,192-source-node and 4,096-row-node ceilings. Per-article text and
+link walks each inspect at most 256 nodes. Excerpts retain 256 characters and
+explicit truncation; incomplete or ambiguous link walks supply no link. Hidden,
+editable, nested-article and frame content is excluded. Links must be public
+HTTPS on the document origin, without credentials, query or fragment. They are
+source evidence, not navigation/action authority or verified dates. Existing
+revision, row, byte, output-admission, trust and atomic-cleanup contracts apply.
+
+The finite `collect_feed` step is restricted to an X home navigation followed by
+collection; it cannot mix other actions into that recipe. It seeks six distinct
+linked excerpts from at most four windows of three articles, accepting explicitly
+partial excerpts but never missing/invalid links. Exact home location and X post
+URL structure are mandatory; post IDs deduplicate evidence. Up to six empty or
+stale-read retries wait one second and recheck bounds before dispatch. The empty
+home shell cannot complete collection. Repeated content ends with an explicit
+insufficient-evidence result. At most three bounded scrolls use one unique fresh
+Account menu control as an anchor, through normal policy and effect accounting.
+A lost scroll response permits read-only collection followed by an uncertain
+stop, never another scroll. Authentication uses verified same-run resumption;
+generation changes clear captured post IDs, restart home navigation and exclude
+earlier evidence, while retaining the retry/scroll ceilings and possible-effect
+state. Calls, steps, cancellation and deadlines remain inside the ordinary run
+budget and the recipe's 180-second ceiling.
+
+Final synthesis has no tools. It uses only qualifying rows from current-generation
+extraction calls, keeps their external-untrusted status, cites observed links and
+describes an observed-feed sample. Six posts verify collection, not the existence
+of two or three trends: fewer supported topics or omitted evidence must be stated
+honestly, without public-trend substitutions. The synthetic fixture suite covers
+the recipe; production activation requires the qualified private account catalog,
+the matching browser/application release and a successful live scheduled briefing.
+
+## Owner continuation and specific Follow consent (ADR-0172)
+
+Website Access is available in an existing chat. Authenticated owner admission
+can bind an owned profile, with serialization against starting another run.
+Changing the selected account during active work is rejected. New runs refresh
+their context for changed bindings even when permission scopes are unchanged.
+
+A complete affirmative request to follow one X handle records a server-resolved
+target on its owner message. Pronouns resolve only to one unique X profile URL
+in the latest assistant answer; quotes, negations, ambiguous or compound requests
+do not grant this specific consent. One matching owned account may be reused;
+multiple matches require selection. Missing access creates a durable preflight
+question. Connecting a READY X profile resolves that question and resumes the
+same run with fresh capability pins, without inventing another user message.
+An already bound account uses the existing verified authentication continuation.
+
+The consent authorizer requires a top-level owner run, the unchanged latest owner
+message, current profile access and a request no older than thirty minutes. It
+consumes an event receipt before dispatch. Its isolated-runtime constraint permits
+only a click on the exact profile's button whose complete labels identify Follow
+for that handle. Following, Unfollow, other accounts, and unrelated controls are
+not covered. Success requires positive Following evidence on the same profile;
+missing evidence reports an uncertain, non-retryable outcome. This initial
+contract is deliberately specific to X Follow; other writes use their existing
+approval paths. An already-followed account is reported without clicking.

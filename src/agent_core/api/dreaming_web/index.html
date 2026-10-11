@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Dreaming · Veetbot</title>
+    <link rel="stylesheet" href="/dreaming/style.css" />
+    <script src="/dreaming/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <div class="brand">◔ veetbot</div>
+        <nav aria-label="Dreaming navigation">
+          <button class="active" data-view="inbox">Dreaming</button
+          ><button data-view="history">Run history</button
+          ><button data-view="settings">Review settings</button>
+        </nav>
+        <div class="sidebar-note">
+          A little space to see what your memories add up to.
+          <div class="owner">Owner workspace · Private review</div>
+          <button class="btn" id="disconnect" hidden>Disconnect</button>
+        </div>
+      </aside>
+      <main>
+        <div class="topline">
+          <span>Memory / Dreaming</span
+          ><span class="pill">Approval required</span>
+        </div>
+        <header class="heading">
+          <div>
+            <h1>Room for new connections.</h1>
+            <p class="subtitle">
+              See what Veetbot noticed. Decide what becomes useful memory.
+            </p>
+          </div>
+          <button class="btn" id="refresh" hidden>Refresh</button>
+        </header>
+        <div id="error" role="alert" hidden></div>
+        <section id="connect" class="panel">
+          <h2>Your private review space.</h2>
+          <p>
+            Connect with your Veetbot access token. It stays in this tab’s
+            memory and is cleared when you disconnect or reload.
+          </p>
+          <label for="token">Access token</label
+          ><input
+            id="token"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste your access token"
+          /><button class="btn primary" id="connect-button">Connect</button>
+          <p>
+            Local development may connect without a token. Use HTTPS for a
+            remote server.
+          </p>
+        </section>
+        <div id="workspace" hidden>
+          <div class="notice">
+            <div>
+              <strong>Dream daily. Apply only what you approve.</strong>
+              <p>
+                Approve and apply makes the exact proposal available to real
+                answers. Originals remain intact. Tentative connections stay
+                tentative.
+              </p>
+            </div>
+          </div>
+          <section id="inbox">
+            <div class="bar">
+              <div class="tabs" aria-label="Filter proposals">
+                <button
+                  class="tab active"
+                  data-state="proposed"
+                  aria-pressed="true"
+                >
+                  Waiting for you</button
+                ><button
+                  class="tab"
+                  data-state="committed"
+                  aria-pressed="false"
+                >
+                  Applied</button
+                ><button class="tab" data-state="" aria-pressed="false">
+                  All history
+                </button>
+              </div>
+              <span id="status" class="batch"></span>
+            </div>
+            <div class="workspace">
+              <div>
+                <div class="cards" id="cards" aria-label="Proposals"></div>
+                <button class="btn" id="load-more" hidden>Load more</button>
+              </div>
+              <article
+                class="detail"
+                id="detail"
+                aria-label="Selected proposal"
+              ></article>
+            </div>
+            <p class="bottom-note">
+              No deadline to review. Unapproved proposals stay out of active
+              memory.
+            </p>
+          </section>
+          <section id="history" class="panel" hidden>
+            <h2>Every run, in one place.</h2>
+            <p>
+              The latest 50 daily runs, including empty and failed attempts. All
+              outcomes remain saved on the server.
+            </p>
+            <div id="runs"></div>
+          </section>
+          <section id="settings" class="panel" hidden>
+            <h2>Dreaming at your pace.</h2>
+            <div class="setting">
+              <div>
+                <strong>Daily proposals</strong>
+                <p id="schedule-copy"></p>
+                <p>
+                  Pause stops new runs. A run already in progress may finish.
+                </p>
+              </div>
+              <button class="btn" id="pause">Pause previews</button>
+            </div>
+            <div class="setting">
+              <div>
+                <strong>Apply changes</strong>
+                <p>
+                  Only your explicit approval applies a proposal. Unattended
+                  application is off.
+                </p>
+              </div>
+            </div>
+            <div class="setting">
+              <div>
+                <strong>Original memories stay intact</strong>
+                <p>
+                  Undo an applied merge here. Summaries and connections can be
+                  rejected or deleted through the memory browser’s existing
+                  controls.
+                </p>
+              </div>
+            </div>
+            <div class="setting">
+              <div>
+                <strong>Bounded daily work</strong>
+                <p>
+                  At most one slice every 24 hours, two model calls and $0.25
+                  reserved per slice. No catch-up burst after downtime. Sources
+                  must pass the existing privacy and attribution checks.
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="toast" id="toast" role="status" hidden></div>
+        <dialog id="confirm">
+          <h2 id="confirm-title">Approve and apply?</h2>
+          <p id="confirm-copy"></p>
+          <div class="actions">
+            <button class="btn" id="cancel">Cancel</button
+            ><button class="btn primary" id="confirm-button">
+              Approve and apply
+            </button>
+          </div>
+        </dialog>
+      </main>
+    </div>
+  </body>
+</html>

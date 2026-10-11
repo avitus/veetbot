@@ -28,6 +28,7 @@ from agent_core.domain.browser_act_views import (
     session_is_task_grant_eligible,
     task_grant_offer,
 )
+from agent_core.domain.browser_follow import profile_handle
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.policies import (
     AuthorizationTurn,
@@ -134,6 +135,7 @@ class BrowserActApprovalPresenter:
                 session_tenant_id=session.tenant_id,
                 session_principal_id=session.principal_id,
                 session_metadata=session.metadata,
+                owner_run_id=context.owner_run_id,
                 tenant_id=principal.tenant_id,
                 principal_id=principal.principal_id,
                 turn=turn,
@@ -227,6 +229,10 @@ class BrowserActTool:
             assert interrupted.failure is not None
             interrupted.failure.external_text = BROWSER_AUTH_INTERRUPTION_MARKER
             return interrupted
+        if constraint is not None and constraint.grant_kind == "follow":
+            condition = BrowserCondition(
+                role="button", name=f"Following @{constraint.follow_handle}"
+            )
         if condition is not None:
             try:
                 observation = await check_browser_condition(self._provider, observation, condition)
@@ -235,6 +241,18 @@ class BrowserActTool:
                 return browser_failure(
                     BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
                 )
+        if (
+            constraint is not None
+            and constraint.grant_kind == "follow"
+            and (
+                observation.condition is None
+                or observation.condition.status != "satisfied"
+                or profile_handle(observation.url) != constraint.follow_handle
+            )
+        ):
+            return browser_failure(
+                BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
+            )
         return observation_result(self._provider, observation, self.spec.maximum_output_bytes)
 
 

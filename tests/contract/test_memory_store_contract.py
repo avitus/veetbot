@@ -7,6 +7,8 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.memory.in_memory import InMemoryMemoryStore
+from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
+from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import (
     BeliefRejection,
@@ -27,7 +29,7 @@ from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, princi
 
 
 def _store() -> InMemoryMemoryStore:
-    return InMemoryMemoryStore(FixedClock(NOW))
+    return InMemoryMemoryStore(FixedClock(NOW), ReconsolidationIndex(MemoryTransaction()))
 
 
 async def test_memory_store_enforces_scope_and_lifecycle() -> None:
@@ -762,7 +764,7 @@ async def test_browse_keyset_predicate_walks_without_skipping_or_repeating_acros
 
 async def test_historical_memory_preserves_corrections_and_current_privacy() -> None:
     clock = FixedClock(NOW)
-    store = InMemoryMemoryStore(clock)
+    store = InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction()))
     await historical_memory_contract(store, clock)
     assert not store._history
 
@@ -884,7 +886,9 @@ async def historical_recall_contract(store: MemoryStore, clock: FixedClock) -> N
 
 async def test_historical_recall_ranks_original_evidence_with_current_privacy() -> None:
     clock = FixedClock(NOW)
-    await historical_recall_contract(InMemoryMemoryStore(clock), clock)
+    await historical_recall_contract(
+        InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction())), clock
+    )
 
 
 async def memory_erasure_fence_contract(store: MemoryStore) -> None:

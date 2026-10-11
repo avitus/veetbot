@@ -319,19 +319,35 @@ attempt to have a completed response or a proven pre-generation rejection and
 the durable usage count to match all started attempts. HTTP 400
 `invalid_json_schema` permanent failures are proven request rejections;
 transport failures, timeouts, missing outcomes, and incomplete accounting keep
-their reservations. Admission reconsiders terminal unsettled tasks under the
-same principal lock before checking the aggregate budget, so a repaired
-accounting path can recover old holds without resetting the allowance.
+actual usage unknown. Live runs retain their full reservations, regardless of
+age. Once work has ended, ADR-0173 replaces the live hold with a separate
+conservative budget charge: the greater of the full reservation and recorded
+run cost, never less than a prior conservative charge. A missing run receives
+the full reservation charge and preserves any greater charge already recorded.
+Count these charges once in the task's original UTC-day and rolling-thirty-day
+buckets. Preserve the reservation, charge and reason for audit; never represent
+uncertain usage as a proven zero-cost settlement. Later complete evidence can
+settle actual usage, which then takes precedence over the retained estimate.
+Admission reconsiders terminal or missing unsettled tasks under the same
+principal lock before checking the aggregate budget, so old holds recover
+idempotently without increasing allowances. No age-based release applies to
+queued, running or suspended work.
 Admission queries select unsettled tasks
 and, for budget calculation, settled tasks created within the rolling thirty-day
 window before pagination. Older settled task records remain available for audit
 and idempotent command replay. Dependent extraction calls cannot escape
 the originating reservation. A finite reservation is not renewed by retry.
+Email model calls cap provider sends at one and disable runtime model retries.
+A failed or empty result ends the slice; a later admitted slice can retry only
+with its own reservation. Raw provider transport failures produce typed failure
+events so reconciliation retains their uncertain accounting evidence.
 
 Meter every model stage through the existing gateway. Lower applicable runtime
 or principal limits prevail. Show a pause reason when a ceiling is reached;
 cached browsing, editing, and feedback remain available. Return spent and
-reserved amounts, both limits and a next budget-check time. Clients retain one
+reserved amounts, both limits and a next budget-check time. Counted spending
+includes conservative charges; `daily_estimated` and `monthly_estimated` identify
+the estimated subset without claiming it is known provider billing. Clients retain one
 pause across foreground visits, continue cached projection reads, and suppress
 automatic admission until that time; manual refresh can explicitly recheck.
 Connection replacement clears the pause. Measure mailbox volume,

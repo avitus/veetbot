@@ -633,7 +633,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:1095-1097`). The gateway translates those hints into
+(`context-engine.md:1102-1104`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -684,7 +684,7 @@ breakpoints, three natural boundaries (`after_system`, `after_tools`,
 marker: the context engine places `after_history_prefix` after the history a
 run carries in and again after its completed exchanges, stopping before fresh
 step context or the latest opaque reasoning that the next step replaces
-(`context-engine.md:240-248`). Each history hint names the conversation item it
+(`context-engine.md:247-255`). Each history hint names the conversation item it
 closes in `through_item`; the Anthropic adapter marks that item's last content
 block, or the nearest earlier one when the item renders no message block, and
 never a thinking block. A history hint without `through_item` marks the final
@@ -722,7 +722,7 @@ they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:1069-1071` and the
+The cached-prefix ratio is defined in `context-engine.md:1076-1078` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -741,7 +741,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:357`
+native tool calling, how much output to reserve. `context-engine.md:364`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -800,7 +800,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:323's second half
+    default_output_reserve: int  # context-engine.md:330's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 3 on shipped OpenAI profiles
     max_tool_count: int | None
 ```
@@ -819,7 +819,7 @@ class ModelPricing(BaseModel):
 ```
 
 The router is a port with one implementation in 0.1, reading the model
-registry described at `engineering-plan.md:1422-1427`. The registry is
+registry described at `engineering-plan.md:1430-1435`. The registry is
 configuration, not code: a YAML file per provider profile, validated at load,
 hashed the way the policy profile is hashed so that a run records which
 registry it resolved against. That document's schema, its validation, and the
@@ -829,8 +829,8 @@ call sites.
 
 ### Pinning, and the contradiction with availability routing
 
-Section 10 (`engineering-plan.md:1406`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:3082-3089`) wants routing to move work
+Section 10 (`engineering-plan.md:1414`) requires a run to be pinned to one
+provider. Milestone 10 (`engineering-plan.md:3090-3097`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -864,9 +864,9 @@ compound that into a provider switch on resume.
 
 ## The provider profile document
 
-`engineering-plan.md:1422` calls a provider profile "a plugin the registry
+`engineering-plan.md:1430` calls a provider profile "a plugin the registry
 loads and the user can override without editing core" and
-`engineering-plan.md:1424-1427` says what it declares: an API mode, aliases
+`engineering-plan.md:1432-1435` says what it declares: an API mode, aliases
 and capabilities and limits and prices, credential pools, and a
 model-catalog import. ADR-0012 decision 2 requires that a new
 OpenAI-compatible provider be addable without writing code. Neither
@@ -1195,7 +1195,7 @@ sentence.
 ## Usage, cost, and where the numbers live
 
 Section 6.5 fixes the precedence order for cost figures and Section 15 has no
-table to put them in. `runs.usage JSONB` at `engineering-plan.md:1822` is the
+table to put them in. `runs.usage JSONB` at `engineering-plan.md:1830` is the
 only persistence the plan gives usage, and a JSONB blob on the run cannot
 answer the questions the budget enforcement in Section 6.5 needs to ask: what
 did this step cost, which attempt burned the tokens, and what were we charged
@@ -1305,8 +1305,8 @@ not an oversight.
 
 ## Provider metadata, and why the key set is closed
 
-`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1339` as
-`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1341`:
+`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1347` as
+`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1349`:
 it "may include response IDs and cache information, but application logic
 must not rely on provider-specific fields." That is a constraint on readers.
 It says nothing about writers, and an adapter is a writer.
@@ -1345,7 +1345,7 @@ yet.
 | key | source | why it earns a key |
 | --- | --- | --- |
 | `provider_api` | the profile | one adapter fronts three APIs, and a row that does not say which is a row that cannot be compared |
-| `response_id` | the response body | `engineering-plan.md:1384` requires the OpenAI adapter to capture it |
+| `response_id` | the response body | `engineering-plan.md:1392` requires the OpenAI adapter to capture it |
 | `request_id` | a response header | the only identifier a vendor support ticket can be opened against |
 | `resolved_model` | the response body | an alias resolves to a dated model, and reproducibility needs the dated one |
 | `previous_response_id` | the request | which continuation this attempt resumed, which is the first thing to check when a reasoning chain breaks |
@@ -1439,14 +1439,14 @@ Flattening `metadata` into columns happens in the persistence adapter and is
 the first of exactly two places in the system that read `ProviderMetadata`
 at all. The second is the span builder in the telemetry section below.
 Nothing in the runtime, the policy engine, the context engine, or any tool
-reads it, which is what `engineering-plan.md:1341`'s "application logic must
+reads it, which is what `engineering-plan.md:1349`'s "application logic must
 not rely on provider-specific fields" means once it is a rule a test can
 evaluate.
 
 ## Retries, and who owns them
 
-`engineering-plan.md:1387` puts retries in the adapter.
-`engineering-plan.md:1722` says "Keep retry decisions in application code, not
+`engineering-plan.md:1395` puts retries in the adapter.
+`engineering-plan.md:1730` says "Keep retry decisions in application code, not
 in provider adapters alone." The word "alone" is doing the work, and the split
 it implies is the right one.
 
@@ -1491,6 +1491,16 @@ cost.
 Every internal adapter retry is recorded on the attempt as
 `internal_retry_count` so that a provider having a bad day is visible in
 telemetry rather than hidden behind eventual success.
+
+A caller may set the optional neutral `ModelRequest.maximum_provider_attempts`
+to a strict integer from one through three. This caps actual adapter sends,
+including transport errors, pre-output stream failures and OpenAI's optional
+reasoning-summary downgrade. It can lower the adapter's ordinary attempt limit;
+it cannot increase that limit except for the existing summary downgrade, which
+still cannot exceed an explicit request cap. `None` preserves existing behavior.
+M32 sets one because every new send requires its own durable spend reservation;
+SDK retries remain disabled. This local control is not sent as a provider wire
+parameter, and neither adapters nor callers retry a reserved M32 request implicitly.
 
 ### Timeouts
 
@@ -1650,7 +1660,7 @@ one, still gets the request without a summary.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:628-632` requires that a
+be answerable by a tool result; `context-engine.md:635-639` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
@@ -1693,7 +1703,7 @@ class ModelRequestStarted(BaseModel):
     model_policy: str
     registry_version: str
     prefix_sha256: str | None    # context-engine.md:151-159
-    prefix_epoch: int            # context-engine.md:214-219
+    prefix_epoch: int            # context-engine.md:221-226
     input_token_estimate: int    # the plan's estimate, pre-call
     cache_breakpoints_sent: int
     cache_breakpoints_dropped: int
@@ -1727,7 +1737,7 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (`engineering-plan.md:2281-2299`) omit the
+Section 19's telemetry attributes (`engineering-plan.md:2289-2307`) omit the
 cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
@@ -1829,8 +1839,8 @@ the failure that grep misses.
 Section 2.3's provider list at `engineering-plan.md:277-281` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
-(`engineering-plan.md:2705`) requires "the same contract suite against OpenAI,
-Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2449`
+(`engineering-plan.md:2713`) requires "the same contract suite against OpenAI,
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2457`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
 a narrower requirement, and this document resolves it in favour of the
@@ -1858,7 +1868,7 @@ the provider boundary.
 
 ### The fake and the recorded adapters
 
-`engineering-plan.md:1347-1359` uses `FakeModelScript`, `ToolCallTurn` and
+`engineering-plan.md:1355-1367` uses `FakeModelScript`, `ToolCallTurn` and
 `FinalTurn` at a call site and never defines them.
 
 ```python

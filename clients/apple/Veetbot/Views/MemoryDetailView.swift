@@ -18,7 +18,7 @@ public struct MemoryDetailView: View {
 
     public var body: some View {
         List {
-            Section("Statement") {
+            Section("Original memory") {
                 Text(memory.statement)
                 if let person = memory.personLink {
                     NavigationLink {

@@ -6,6 +6,8 @@ from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
+
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -253,10 +255,11 @@ async def test_scheduled_instruction_is_context_only_on_public_chat_surfaces() -
         assert "assistant.message.completed" in [frame.event for frame in frames]
 
 
-async def test_scheduled_run_honors_an_explicit_final_synthesis_reserve() -> None:
+@pytest.mark.parametrize("dimension", ["steps", "model_calls"])
+async def test_scheduled_run_honors_an_explicit_final_synthesis_reserve(dimension: str) -> None:
     limits = RunLimits(
-        max_steps=2,
-        max_model_calls=4,
+        max_steps=2 if dimension == "steps" else 4,
+        max_model_calls=3 if dimension == "model_calls" else 4,
         max_tool_calls=2,
         max_cost=Decimal("2"),
         synthesis_reserve_steps=1,
@@ -292,6 +295,16 @@ async def test_scheduled_run_honors_an_explicit_final_synthesis_reserve() -> Non
             ScriptedTurn(
                 text="The bounded result is 4.",
                 context_contains="Runtime control: the final-synthesis reserve is active",
+            ),
+            # A provider that was not told to synthesize keeps researching.
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "3 + 3"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
             ),
         ]
     )
@@ -337,7 +350,11 @@ async def test_scheduled_run_honors_an_explicit_final_synthesis_reserve() -> Non
         if isinstance(part, TextPart)
     ]
     assert any("the final-synthesis reserve is active" in text for text in controls)
-    assert any("because the run steps budget is exhausted" in text for text in controls)
+    assert any(f"because the run {dimension} budget is exhausted" in text for text in controls)
+    assert requests[0].tool_choice is None
+    assert requests[1].tool_choice == "none"
+    assert completed.model_call_count == 2
+    assert completed.tool_call_count == 1
     assert all("research steps budget" not in text for text in controls)
 
 

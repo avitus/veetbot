@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType
@@ -35,6 +36,7 @@ from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.personas import PersonaStore
+from agent_core.ports.reconsolidation import ReconsolidationStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -106,6 +108,7 @@ class UnitOfWorkRepositories:
     skills: SkillRepository
     mcp_servers: MCPServerRepository
     memories: MemoryStore
+    reconsolidation: ReconsolidationStore
     episodes: IntegratedEpisodeStore
     traces: TraceStore
     personas: PersonaStore
@@ -128,6 +131,7 @@ class UnitOfWorkRepositories:
     delegations: DelegationRepository
     surfaces: SurfaceRepositories
     queue: RunQueue | None
+    memory_transaction: Callable[[], AbstractAsyncContextManager[None]] | None = None
 
 
 type PostgresRepositoryFactory = Callable[
@@ -136,17 +140,18 @@ type PostgresRepositoryFactory = Callable[
 
 
 class MemoryUnitOfWork:
-    """Group memory repositories without claiming transactional rollback.
+    """Original memory and reconsolidation commit or roll back together.
 
-    Mutations are retained even when the context exits with an exception. The
-    adapter exists for deterministic evaluation; PostgreSQL is the tier that
-    supplies atomic commit and rollback.
+    People state and touched generated copies erased with memory share that journal.
+    Other independent repository operations retain their per-method behavior.
     """
 
     def __init__(
         self,
         repositories: UnitOfWorkRepositories,
     ) -> None:
+        self._memory_transaction_factory = repositories.memory_transaction
+        self._memory_transaction: AbstractAsyncContextManager[None] | None = None
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
@@ -172,6 +177,7 @@ class MemoryUnitOfWork:
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
         self.memories = repositories.memories
+        self.reconsolidation = repositories.reconsolidation
         self.episodes = repositories.episodes
         self.traces = repositories.traces
         self.personas = repositories.personas
@@ -201,6 +207,11 @@ class MemoryUnitOfWork:
         self._rollback_callbacks.append(callback)
 
     async def __aenter__(self) -> MemoryUnitOfWork:
+        self._memory_transaction = (
+            self._memory_transaction_factory() if self._memory_transaction_factory else None
+        )
+        if self._memory_transaction is not None:
+            await self._memory_transaction.__aenter__()
         self._depth_token = _enter_unit_of_work()
         return self
 
@@ -210,13 +221,20 @@ class MemoryUnitOfWork:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        if exc_type is not None:
-            await self._run_rollback_callbacks()
-        else:
-            self._rollback_callbacks.clear()
-        if self._depth_token is not None:
-            _exit_unit_of_work(self._depth_token)
-            self._depth_token = None
+        try:
+            if exc_type is not None:
+                await self._run_rollback_callbacks()
+            else:
+                self._rollback_callbacks.clear()
+        finally:
+            try:
+                if self._memory_transaction is not None:
+                    await self._memory_transaction.__aexit__(exc_type, exc, traceback)
+            finally:
+                self._memory_transaction = None
+                if self._depth_token is not None:
+                    _exit_unit_of_work(self._depth_token)
+                    self._depth_token = None
 
     async def _run_rollback_callbacks(self) -> None:
         callbacks = list(self._rollback_callbacks)
@@ -294,6 +312,7 @@ class PostgresUnitOfWork:
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
         self.memories = repositories.memories
+        self.reconsolidation = repositories.reconsolidation
         self.episodes = repositories.episodes
         self.traces = repositories.traces
         self.personas = repositories.personas

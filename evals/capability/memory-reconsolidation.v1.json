@@ -1,0 +1,1047 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "development-equivalent",
+      "split": "development",
+      "category": "equivalent",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner prefers Celsius.",
+          "subject": "equivalent",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner prefers Celsius.",
+          "subject": "equivalent",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [
+        [
+          "m1",
+          "m2"
+        ]
+      ],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Which temperature unit does the owner prefer?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "Celsius"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-same_evidence",
+      "split": "development",
+      "category": "same_evidence",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner uses a standing desk.",
+          "subject": "same_evidence",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner uses a standing desk.",
+          "subject": "same_evidence",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [
+        [
+          "m1",
+          "m2"
+        ]
+      ],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What kind of desk does the owner use?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "standing desk"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-quantity",
+      "split": "development",
+      "category": "quantity",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The greenhouse has 12 sensors.",
+          "subject": "quantity",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The workshop has 21 sensors.",
+          "subject": "quantity",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "How many sensors are in the greenhouse?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "12 sensors"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-time",
+      "split": "development",
+      "category": "time",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The design review is on October 8.",
+          "subject": "time",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The release review is on October 18.",
+          "subject": "time",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "When is the design review?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "October 8"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-attribution",
+      "split": "development",
+      "category": "attribution",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner prefers brief emails.",
+          "subject": "attribution",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "Alex prefers detailed emails.",
+          "subject": "attribution",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "attribution": "correspondent:alex"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Who prefers detailed emails?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "Alex"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-negation",
+      "split": "development",
+      "category": "negation",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner likes coffee.",
+          "subject": "negation",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner does not like decaffeinated coffee.",
+          "subject": "negation",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What coffee does the owner dislike?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "decaffeinated coffee"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-scope",
+      "split": "development",
+      "category": "scope",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "Use spaces for indentation.",
+          "subject": "scope",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "scope": "project:orchard"
+        },
+        {
+          "id": "m2",
+          "statement": "Use tabs for indentation.",
+          "subject": "scope",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "scope": "project:harbor"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What indentation does project Orchard use?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "spaces"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-connection_focus",
+      "split": "development",
+      "category": "connection_focus",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner blocks mornings for focused work.",
+          "subject": "connection_focus",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner schedules meetings after lunch.",
+          "subject": "connection_focus",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [
+        {
+          "statement": "The owner may prefer uninterrupted mornings.",
+          "support": [
+            "m1",
+            "m2"
+          ]
+        }
+      ],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "When does the owner schedule meetings?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "after lunch"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-connection_travel",
+      "split": "development",
+      "category": "connection_travel",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner takes the train between cities.",
+          "subject": "connection_travel",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner chooses hotels near rail stations.",
+          "subject": "connection_travel",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [
+        {
+          "statement": "Rail access may influence the owner's travel planning.",
+          "support": [
+            "m1",
+            "m2"
+          ]
+        }
+      ],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Where does the owner choose hotels?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "near rail stations"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-summary",
+      "split": "development",
+      "category": "summary",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "Project Cedar must work offline.",
+          "subject": "summary",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "Project Cedar keeps documents on the device.",
+          "subject": "summary",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Where does Project Cedar keep documents?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "on the device"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-expiry",
+      "split": "development",
+      "category": "expiry",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner is testing a folding bicycle.",
+          "subject": "expiry",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "status": "expired"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner prefers walking short distances.",
+          "subject": "expiry",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What does the owner prefer for short distances?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "walking"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "development-correction",
+      "split": "development",
+      "category": "correction",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner previously lived in Portland.",
+          "subject": "correction",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "status": "deleted"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner now lives in Salem.",
+          "subject": "correction",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Where does the owner live now?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "Salem"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-equivalent",
+      "split": "holdout",
+      "category": "equivalent",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner prefers 24-hour time.",
+          "subject": "equivalent",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner prefers 24-hour time.",
+          "subject": "equivalent",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [
+        [
+          "m1",
+          "m2"
+        ]
+      ],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Which clock format does the owner prefer?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "24-hour time"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-same_evidence",
+      "split": "holdout",
+      "category": "same_evidence",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner uses a mechanical keyboard.",
+          "subject": "same_evidence",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner uses a mechanical keyboard.",
+          "subject": "same_evidence",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [
+        [
+          "m1",
+          "m2"
+        ]
+      ],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What kind of keyboard does the owner use?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "mechanical keyboard"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-quantity",
+      "split": "holdout",
+      "category": "quantity",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The orchard has 18 apple trees.",
+          "subject": "quantity",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The garden has 8 pear trees.",
+          "subject": "quantity",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "How many apple trees are in the orchard?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "18"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-time",
+      "split": "holdout",
+      "category": "time",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The museum visit is on November 4.",
+          "subject": "time",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The concert is on November 14.",
+          "subject": "time",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "When is the museum visit?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "November 4"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-attribution",
+      "split": "holdout",
+      "category": "attribution",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner prefers direct flights.",
+          "subject": "attribution",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "Jordan prefers overnight trains.",
+          "subject": "attribution",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "attribution": "correspondent:jordan"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Who prefers overnight trains?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "Jordan"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-negation",
+      "split": "holdout",
+      "category": "negation",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner likes sparkling water.",
+          "subject": "negation",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner does not like sweetened sparkling water.",
+          "subject": "negation",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What sparkling water does the owner dislike?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "sweetened sparkling water"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-scope",
+      "split": "holdout",
+      "category": "scope",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "Use metric measurements.",
+          "subject": "scope",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "scope": "project:summit"
+        },
+        {
+          "id": "m2",
+          "statement": "Use imperial measurements.",
+          "subject": "scope",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "scope": "project:valley"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Which measurements does project Summit use?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "metric"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-connection_focus",
+      "split": "holdout",
+      "category": "connection_focus",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner silences notifications while drawing.",
+          "subject": "connection_focus",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner reserves an uninterrupted hour for illustration.",
+          "subject": "connection_focus",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [
+        {
+          "statement": "The owner may value distraction-free creative sessions.",
+          "support": [
+            "m1",
+            "m2"
+          ]
+        }
+      ],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What does the owner silence while drawing?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "notifications"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-connection_travel",
+      "split": "holdout",
+      "category": "connection_travel",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner cycles to the library.",
+          "subject": "connection_travel",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner selects cafes with bicycle parking.",
+          "subject": "connection_travel",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [
+        {
+          "statement": "Bicycle access may influence the owner's local destination choices.",
+          "support": [
+            "m1",
+            "m2"
+          ]
+        }
+      ],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What parking influences the owner's cafe choice?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "bicycle parking"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-summary",
+      "split": "holdout",
+      "category": "summary",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "Project Amber exports plain text.",
+          "subject": "summary",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        },
+        {
+          "id": "m2",
+          "statement": "Project Amber opens exported files without an account.",
+          "subject": "summary",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m1",
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What format does Project Amber export?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "plain text"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-expiry",
+      "split": "holdout",
+      "category": "expiry",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner is trying a pottery course.",
+          "subject": "expiry",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "status": "expired"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner enjoys landscape photography.",
+          "subject": "expiry",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "What kind of photography does the owner enjoy?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "landscape photography"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "holdout-correction",
+      "split": "holdout",
+      "category": "correction",
+      "seeds": [
+        {
+          "id": "m1",
+          "statement": "The owner previously worked on Atlas.",
+          "subject": "correction",
+          "session": "s1",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z",
+          "status": "deleted"
+        },
+        {
+          "id": "m2",
+          "statement": "The owner now works on Beacon.",
+          "subject": "correction",
+          "session": "s2",
+          "event": 1,
+          "evidence_at": "2026-10-01T12:00:00Z"
+        }
+      ],
+      "duplicate_classes": [],
+      "required_survivors": [
+        "m2"
+      ],
+      "hypotheses": [],
+      "probes": [
+        {
+          "id": "q1",
+          "question": "Which project does the owner work on now?",
+          "answer": {
+            "kind": "exact",
+            "values": [
+              "Beacon"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

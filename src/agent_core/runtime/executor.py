@@ -79,6 +79,7 @@ from agent_core.runtime.loop import (
     bind_browser_auth_question,
     checkpoint,
     guard_tool_turn,
+    prepare_browser_connection_question,
     recover_browser_failure,
     run_loop,
 )
@@ -730,7 +731,17 @@ class RunExecutor:
             async with self._uow_factory() as uow:
                 agent = await uow.agents.get_version(run.agent_id, run.agent_version)
                 session = await uow.sessions.get(run.session_id, principal)
-                await validate_scheduled_browser(uow, session, principal)
+                seed = await uow.events.latest_before(
+                    run.session_id, run.seed_event_sequence + 1, "user.message.created", principal
+                )
+                owner_submitted = (
+                    seed is not None
+                    and seed.run_id == run.id
+                    and seed.actor_type == "principal"
+                    and seed.actor_id == principal.principal_id
+                )
+                if not owner_submitted:
+                    await validate_scheduled_browser(uow, session, principal)
                 if self._validate_browser_binding is not None:
                     self._validate_browser_binding(session)
                 chat_choice = (
@@ -793,7 +804,8 @@ class RunExecutor:
                     or checkpoint_state.pending_tool_calls
                 ),
             )
-            require_scheduled_browser_tools(session, context_plan)
+            if not owner_submitted:
+                require_scheduled_browser_tools(session, context_plan)
             await self._register_snapshot_use(run, context_plan, principal, lease)
             self._apply_tool_pins(
                 checkpoint_state,
@@ -843,6 +855,7 @@ class RunExecutor:
                 await checkpoint(context, "provider_pinned")
             task_outcome: RunOutcome | None = None
             try:
+                await prepare_browser_connection_question(context)
                 if self._task_runner is not None:
                     task_outcome = await self._task_runner(context)
                 if task_outcome is None:

@@ -1,0 +1,6028 @@
+{
+  "schema_version": 1,
+  "purpose": "three_arm_comparison",
+  "activation_evidence": false,
+  "code_commit": "b31e4bac8de89394cdde567a6c1e7f3f2d69a91f",
+  "working_tree_dirty": true,
+  "implementation_sha256": "2623b2de26ec1dfa38a54c245cc92520cee804fa49ce89031c19f8e233a2a773",
+  "corpus_sha256": "ddf8c2a2ce2f09bec8778c57c99ae3244dde9259c4e2f658f520d5a51aa27de3",
+  "scorer_sha256": "936e81cb8ef6258576ae744e617e39cbd4ca5992d27df69f8f6c224a16d414c9",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "provider-default",
+  "model_configuration_sha256": "65eca975f4d5f78fffeca3e444cc7d18c7f1fd2d7c2cf5ae29f91e6d726bcee7",
+  "privacy_sha256": "edf4e8c34a4b91c3b0b00fb28f557a546d7a92b36e18bc96eabf73f615db50b2",
+  "retrieval_policy": "retrieval@4",
+  "clock_at": "2026-10-02T12:00:00+00:00",
+  "budget": {
+    "tokens": 2000,
+    "items": 20,
+    "min_score": 0.12,
+    "scope": "general"
+  },
+  "original_control_sha256": "74c325bcf30ac7003c6e22b59e2604ffa5e4ef88cb362d55f2a392bbb123e8bc",
+  "rows": [
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 2385,
+      "trace_sha256": [
+        "261af70e9ffe4c25689b7563d6e18cfd17db8b1fedf5e32bc69f3e596e1065e1"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088500",
+      "elapsed_ms": 1372,
+      "trace_sha256": [
+        "fc1a19927f331cb16a787b0b0d3c8a37988853adb4a0e0567999ad0a29f92ca2"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The greenhouse has 12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00101500",
+      "elapsed_ms": 1797,
+      "trace_sha256": [
+        "a5509ab5fe26ee1a848c768a49e26be753708bcc4186b808f0b941e146b33e98"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00109500",
+      "elapsed_ms": 996,
+      "trace_sha256": [
+        "d5e2bdf2f2e06ace96a6b08272b0813576df5e97c08a1e76c2352477ce2a4314"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00070500",
+      "elapsed_ms": 1527,
+      "trace_sha256": [
+        "c98f44eaca75fc8b8404f00875d5792c01f3398c71fc3b0b6817d5a4c464efd4"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00095500",
+      "elapsed_ms": 863,
+      "trace_sha256": [
+        "ddf73bd1e51fb5b513d3e7c9a328be24f1b6d6f0228d3f47ef1d92d32ca76956"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1007,
+      "trace_sha256": [
+        "e35ae197999110965200d91fe332f120cb9c47eb78385810b91e0c62726a2afe"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00090000",
+      "elapsed_ms": 998,
+      "trace_sha256": [
+        "c9e10f94f9115b724555ae4ecccc560cd6df6ecdd49348e60eaf870d49303b1f"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00093500",
+      "elapsed_ms": 2330,
+      "trace_sha256": [
+        "5d57bf01d812359e32f56d96f81d6e6805144b3c60003e335694fe969ad7e650"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00103000",
+      "elapsed_ms": 1501,
+      "trace_sha256": [
+        "90f9c9e22d152d05c8e33f24e1e98b822f617a08fcce70427358538e913791ee"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088000",
+      "elapsed_ms": 948,
+      "trace_sha256": [
+        "d55d57b44937c91c6fa22d5b716ae7e4711ca98957039c5000006a7f6b5889e2"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00075500",
+      "elapsed_ms": 1257,
+      "trace_sha256": [
+        "46f0f07ff3c85a6e8d80337910c3b15a94cb76c4321e7886718d01bb495b8293"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers the 24-hour clock format."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00098000",
+      "elapsed_ms": 1070,
+      "trace_sha256": [
+        "0fd0e0ba97607de0c61e7abba67f43534784f6c102baf5ecb4872d05be21c165"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00080000",
+      "elapsed_ms": 1052,
+      "trace_sha256": [
+        "a1bca03d6c33e2d7754c3ce54e2d0189aa711719253db3d625c611bfff89c695"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00094000",
+      "elapsed_ms": 1087,
+      "trace_sha256": [
+        "c1fa49517cdcf821f2fe34b8d97aebef7310eb6b5ab7dec10e1a2441912d0738"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00080000",
+      "elapsed_ms": 1578,
+      "trace_sha256": [
+        "39242dcfcca49454beafd8987d246fa7bf9597c969b945a495ffe4e09a4179b6"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1235,
+      "trace_sha256": [
+        "5adbf6258297b076bec20536fd00ceeb60128a6306ca63653470f420a2a825d8"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00096500",
+      "elapsed_ms": 1045,
+      "trace_sha256": [
+        "0496545e3ce8b952718725465d0a615d3e4d19492251e5fa85217a5b74bd1aa3"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1058,
+      "trace_sha256": [
+        "eaa82ca56c529a401d91128e0a22303713dd6016cc0d98812518a540a1957ffb"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 1155,
+      "trace_sha256": [
+        "35f4b872704fb177a099929b9286548c8991bd5b0ef08f9fda9c7208c4a95d72"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00079500",
+      "elapsed_ms": 807,
+      "trace_sha256": [
+        "3182cdc5ea8d8fa72d433cb7277b680dabadc090e1f18365dcc49a4ca33b0c5e"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00098500",
+      "elapsed_ms": 1063,
+      "trace_sha256": [
+        "ece06ab835d461c7dd02d195cff7045a2a2d72c51a26abc0bf6f9bf79a38e643"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 1579,
+      "trace_sha256": [
+        "b54951a97ddacc7201595e0add696141f36d5882be321770d3c9e5933a7f0c1c"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now works on Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00089000",
+      "elapsed_ms": 919,
+      "trace_sha256": [
+        "e447cf5d02babfe33d99d580fa062bd95f15ec478728d325f25226eeed3f7be6"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 898,
+      "trace_sha256": [
+        "b3dd0a0032444a5a1ed14a74e4aa62db0adf1fe25c6f5c805880c516c49c6d74"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088500",
+      "elapsed_ms": 1250,
+      "trace_sha256": [
+        "1c12984d0ebe8eea1e35e6e13f845b2225a1d05fe799d8c1003c302269205f28"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00089500",
+      "elapsed_ms": 1842,
+      "trace_sha256": [
+        "d2830917fc7818301a8d94edc31417c9c0856c400ad7f72d1acd719238338299"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00094500",
+      "elapsed_ms": 1599,
+      "trace_sha256": [
+        "4cbfe464e1ae73d6894ede8d4812b8b65fc6b08f369f9620fd2ab13dcae9a01f"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00070500",
+      "elapsed_ms": 934,
+      "trace_sha256": [
+        "9ad51bc458de79ae356e666c6c48660e02f236982de9e1a85c3cd52f0b378cc1"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00095500",
+      "elapsed_ms": 904,
+      "trace_sha256": [
+        "6238693fef61d0f0b715fb8c15dde3c8185a4c3a5db0b88e2b2d54367f16666a"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 943,
+      "trace_sha256": [
+        "2f8d1332945537c8137586f9b9ecd64b19c410c94f08a01206083da43e33adb8"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00090000",
+      "elapsed_ms": 952,
+      "trace_sha256": [
+        "bde8b270260fba5ec1794380bc42ff93c7399faca473f16f2168fec160919bd8"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00093500",
+      "elapsed_ms": 1122,
+      "trace_sha256": [
+        "3b7e60beda4d2970c8585cedc56485bb5bf7092c78e4982190b7958b0729bcc8"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00103000",
+      "elapsed_ms": 1120,
+      "trace_sha256": [
+        "e405ea3b79726af80a3c258dbdac1e77fd8d250f6d88025fdecc51d2c832526f"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking for short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00091000",
+      "elapsed_ms": 1143,
+      "trace_sha256": [
+        "d1622262b5dd986426f605b3091bf1b426ecc0e3a95649bc2eefd9f417210505"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now lives in Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 994,
+      "trace_sha256": [
+        "825a835e0d5432ac85901b2a1e8d1644cf35ca29d9f23b45f4983a5a9fcaed81"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "24-hour time."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00080000",
+      "elapsed_ms": 996,
+      "trace_sha256": [
+        "9ffe6e7b355f304f386774811fcb529bf2dfa129010e59f93b9d5328f68ac719"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00080000",
+      "elapsed_ms": 1259,
+      "trace_sha256": [
+        "43b8b54668bcb2ea4e9a3326a1b3825d067a59cd67df3d959a3e6edf784f5385"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00094000",
+      "elapsed_ms": 1053,
+      "trace_sha256": [
+        "b881ea39566206d7b7eaa4a042554b7e59e7faa3e21a0e1aa20f2243eb1ba60a"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00080000",
+      "elapsed_ms": 1040,
+      "trace_sha256": [
+        "5512a3a42e80ae8468944ee69dcd644e52b41eb81c526232a66c2898518c988f"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1400,
+      "trace_sha256": [
+        "2b4759186ec25ebd4685e0862415a19e5bca5eb9656ba06d61415668dc78bfb8"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00096500",
+      "elapsed_ms": 1286,
+      "trace_sha256": [
+        "82ce5ac56c71577723eba0fe6f6b168ba4e544692d29a02664eaf0d38be0f00b"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1250,
+      "trace_sha256": [
+        "5c9a2fa6f41abf1229bddfea3035e852b2fe92435d2758ed04bc4f923d3e7206"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner silences notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00099500",
+      "elapsed_ms": 997,
+      "trace_sha256": [
+        "5493a9d6a0c30d23874b6b9c6908adbdf63fb5a81eb59b7ee0ab04d4680f961f"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00079500",
+      "elapsed_ms": 1663,
+      "trace_sha256": [
+        "a441eee3c670dbb4942212c114ce3fe955ed0c510146907901fd5dc4f8e966c0"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00098500",
+      "elapsed_ms": 1353,
+      "trace_sha256": [
+        "0db41ba68c4e3355f147881081488664ec2142713bc93a9e612661ac2eb1c1cb"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 959,
+      "trace_sha256": [
+        "604a992304f33e4f2e32e7af8e1979a35292b9b11901b5f9ce119755c1c14fc0"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now works on Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00089000",
+      "elapsed_ms": 1095,
+      "trace_sha256": [
+        "86b6909bbbd5a09e746b503f34a650b379581b457c97113a7f37c38010562950"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 1051,
+      "trace_sha256": [
+        "6999cd3db1080b298c88efe80cb152e1ee47443c7b0db4040111907aa7ac709d"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00079500",
+      "elapsed_ms": 999,
+      "trace_sha256": [
+        "a2b0207b8636a8ddc39bc42aca20e3b122929f1dd3948bb524b6108f1ff204c4"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The greenhouse has 12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00101500",
+      "elapsed_ms": 1046,
+      "trace_sha256": [
+        "da204e61d57f338d7d332f3862c6a58433198ce205b2b98c1bc41e86b1b4201c"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00109500",
+      "elapsed_ms": 1324,
+      "trace_sha256": [
+        "fc717b3bc828990707fb4f0436ff1349cb70dd5ffca52db1598a5be82fff58f5"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00070500",
+      "elapsed_ms": 868,
+      "trace_sha256": [
+        "3f92e0f2f18047c32abf8a6f8fa95d61de233ba028b2da8153f90700429f3135"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00095500",
+      "elapsed_ms": 1101,
+      "trace_sha256": [
+        "b4201ae0ecb588381160f18a82ba85eae65bb47d720fa056135041a568d4ea53"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 778,
+      "trace_sha256": [
+        "380669d194c74bb461b5a7caa34130cb8cbb5f1dc98796a41a5553e8d1799ffb"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00090000",
+      "elapsed_ms": 900,
+      "trace_sha256": [
+        "520725621d4ec3b8b2069b1e57f22321c85ae3b0ac9df366e7821bca049652d6"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00093500",
+      "elapsed_ms": 829,
+      "trace_sha256": [
+        "bd868d5454a99bfc5f603687dc5a670fdcc176da0d0490048ae030ba67087bef"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00103000",
+      "elapsed_ms": 1537,
+      "trace_sha256": [
+        "f699ee1fbac91faf51e74c7992b4b6ede61ef00e0ec66ff03ff554000c63ae44"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088000",
+      "elapsed_ms": 1044,
+      "trace_sha256": [
+        "7a3ac71d68e95b3930ba0279fea95ca499bf1072b870d6e5b7a6bb4c87cd7a29"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now lives in Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 1049,
+      "trace_sha256": [
+        "24f53dadccc146254bb7e0b18759acf8427f4a8fa9ad390fec3fc630c8cdf2f4"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers the 24-hour clock format."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00098000",
+      "elapsed_ms": 930,
+      "trace_sha256": [
+        "1a0961c2362f5b716bde07d009a9b31d41f86ab821e46067f718add9974a50fe"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00080000",
+      "elapsed_ms": 909,
+      "trace_sha256": [
+        "8a3ed9fb9e2bd557ef9d286c8051cd272fa682d7276df1fe22a837a75bc0cbb0"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00094000",
+      "elapsed_ms": 839,
+      "trace_sha256": [
+        "5523f66fb32c9ab5a7a1e44cf7310b8cd26cc826fd1b6b7f51a35074f24d5eec"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The museum visit is on November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00095000",
+      "elapsed_ms": 993,
+      "trace_sha256": [
+        "7b756a189fbb3b3c7cd2fb1751348ebcab8946634fe37c96c74f0b0257cf87ca"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1661,
+      "trace_sha256": [
+        "fce631773c0b4dbb444c2dfe8ad76f13ec26c7c44bd518b3e653cb976216f4ed"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00096500",
+      "elapsed_ms": 1087,
+      "trace_sha256": [
+        "4e47a4d27fc25ec12f57210c755b68ea0160da743b3cba976f1e0e491ef6a0d7"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 918,
+      "trace_sha256": [
+        "30eed739b05eff4904a93ed596605ec912a59b4e0f7728a95bcdfd68b2d53b2d"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 856,
+      "trace_sha256": [
+        "d534933bdcdaa23989dbe30002badf419bfe6049743dbb36661f91129abaf66d"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00079500",
+      "elapsed_ms": 954,
+      "trace_sha256": [
+        "5f97167565bceb68fac185943e104e0cd788534f02d3e16e038ec6f74701a5ba"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00098500",
+      "elapsed_ms": 1346,
+      "trace_sha256": [
+        "af384ab91b14f05eb7f4abd2c6124f7559982628cf184bfda5ad27cd8657f213"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 899,
+      "trace_sha256": [
+        "4bd7523ce467c5dc6d407b59136b48082375723bad55b91c86d45bc806df1daf"
+      ]
+    },
+    {
+      "arm": "original_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00074000",
+      "elapsed_ms": 821,
+      "trace_sha256": [
+        "272f734f5d9cfae09408950b7d4a4f0c04ccce763e22e61560a10e1ce9d5ba50"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03185875",
+      "elapsed_ms": 6242,
+      "trace_sha256": [
+        "2f568f22f83432aab24dbee8ec242c41b53b0886852265233851e607d214218d"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03036250",
+      "elapsed_ms": 6419,
+      "trace_sha256": [
+        "60426d5485ebf1fcd6ed8409538945a261bcd4d23f78de3de16560027f9336e4"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The greenhouse has 12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03441875",
+      "elapsed_ms": 7710,
+      "trace_sha256": [
+        "0df6d60fb9011ef578d9e0ace6b6766acdb527cc10d406b5e378967bf6965a1b"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03686125",
+      "elapsed_ms": 7615,
+      "trace_sha256": [
+        "735394c941c3a8d58adc7e99505e7335f521079b991dae4cee22d3face3a9fa2"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00070500",
+      "elapsed_ms": 1241,
+      "trace_sha256": [
+        "c0c2e97d7f34a09087af6c1960944705ddb17151ef0067559afb8214f2a1e8a0"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03526875",
+      "elapsed_ms": 7296,
+      "trace_sha256": [
+        "a9ef5eaf2fbbe43ab91e423a66fc82890f98ba53b1ae20680b5d56d096ebeae7"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1290,
+      "trace_sha256": [
+        "6dfa8d57a1d923c11d738ffec14f4f8b082d5830a5a2042de91ca49456ccea87"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03564875",
+      "elapsed_ms": 8020,
+      "trace_sha256": [
+        "e1a567a446e583789513425b8e51c3edf1303d780d71a52186ab59a3a4875854"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.04039875",
+      "elapsed_ms": 8993,
+      "trace_sha256": [
+        "6135898b36fbef1009b6bf42c9a4c01e2fdfe7044b1aac48c48da619a9efd628"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03947000",
+      "elapsed_ms": 10386,
+      "trace_sha256": [
+        "04b32c2894ffd50c2508e92ee2c1769fb3ae52e560ff84462e5d5b9682b290e4"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking for short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00091000",
+      "elapsed_ms": 1043,
+      "trace_sha256": [
+        "cf532556c6b6eebcd5a0d096a66b4679bb27d2c8f31e081e6c6a379f4e86f4fd"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00075500",
+      "elapsed_ms": 1106,
+      "trace_sha256": [
+        "71e39f88ba6090271b859028a92ff497e93c5afbc503adcee27d9309d5189b0a"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "24-hour time."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03218375",
+      "elapsed_ms": 6580,
+      "trace_sha256": [
+        "19df26152880dca8dd7143f3e68d95abd5a89fbc48a64004230a188667592c3c"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03088500",
+      "elapsed_ms": 5780,
+      "trace_sha256": [
+        "830b235e4c7638c1d85e8b37c1b74737b88e31e25ba5893e415d56f0864294da"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03776875",
+      "elapsed_ms": 9605,
+      "trace_sha256": [
+        "9dd97504abd37120ebf46c6820877823c0203fbad1b37449192d3f9ae9cdc41e"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The museum visit is on November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03614625",
+      "elapsed_ms": 7481,
+      "trace_sha256": [
+        "f957ae4327bdbf661f15a7b495fbc6ee97a1a5192a26fcfae4858ceba320b0b2"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1060,
+      "trace_sha256": [
+        "e717961426d8308630ab20779594eae2b49201616c9c76ec31d47d3f18ede8f8"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03502000",
+      "elapsed_ms": 7239,
+      "trace_sha256": [
+        "08b5e3eb27493aae3547a2b78537a9cd01625073f73111f9edd6daf06a33d9aa"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1531,
+      "trace_sha256": [
+        "d0937c55bb4326a95a954e159dd412a7b9c5a54605272f65396b93cf584d5cca"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03659875",
+      "elapsed_ms": 8766,
+      "trace_sha256": [
+        "d61bfc3eb062099db84532207e3434f0e40bb00e3b744c0211fdf2cf4240b0a9"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03387250",
+      "elapsed_ms": 7179,
+      "trace_sha256": [
+        "d06c147b62ee6547e68980e803a1bb298a9bc9646a6c9b96c6f5105690781d46"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03771750",
+      "elapsed_ms": 8868,
+      "trace_sha256": [
+        "558ad14949edd86c616e368f7afff7c8f696119383284be703f11b1fd84426e2"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 860,
+      "trace_sha256": [
+        "d4a5602189e9ce02175e8dcf77ba6471ce990379f83003a548952571b76e0c0c"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now works on Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00089000",
+      "elapsed_ms": 801,
+      "trace_sha256": [
+        "2a57cdc975be98f116be303f673cadc301bcc2ec95cab9b6556c3f25374fb1eb"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03184250",
+      "elapsed_ms": 6337,
+      "trace_sha256": [
+        "27650c21a1645ccebe5cb14a14be9bdb5c90bf9d30158e033e6eb132d01869f4"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03056250",
+      "elapsed_ms": 6612,
+      "trace_sha256": [
+        "da13a5d505515a5e58a3f9cb9d2c65a818cbb46735245be4e09ac6c9397437da"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03642375",
+      "elapsed_ms": 6972,
+      "trace_sha256": [
+        "d7af5b93ac11bd0d89ac493d6026d61da5567c7b6b79b8164847f6c649806ff0"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03454875",
+      "elapsed_ms": 7196,
+      "trace_sha256": [
+        "7d449d60c8351b9e37c68c3e3bbf601b03271dd4b86f3cfc9650e41550a151bd"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00070500",
+      "elapsed_ms": 1438,
+      "trace_sha256": [
+        "de9783e71db575ff89162f31a1196f0de5f0789ca5e5e55320f61671926328e5"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner dislikes decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03611750",
+      "elapsed_ms": 8384,
+      "trace_sha256": [
+        "ebad7007a0b01dcfa1fab15d4d27302d2586bd703ea8b7213c4e4b593c160588"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 896,
+      "trace_sha256": [
+        "4799116fdde1e65b6f5b0fc3e4bfa15c0535ca81fd82efb11dc56044250207c2"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03623000",
+      "elapsed_ms": 10636,
+      "trace_sha256": [
+        "90909e35300b7a74ae9207819e3c9670bd9d375a5093b4f933413742ad4524f2"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03418625",
+      "elapsed_ms": 7750,
+      "trace_sha256": [
+        "3e8faefcb80a0894f5559e8a95dc81cd795dae81009307059a31505b6838b94b"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03998250",
+      "elapsed_ms": 8932,
+      "trace_sha256": [
+        "3b1b1ae8c9e2182a51d381d2a5b8a0a4d084d00b223d14c361f66f5489a949a7"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088000",
+      "elapsed_ms": 1146,
+      "trace_sha256": [
+        "fecd0422bf813be62779acdc6e54ac50e4dbca3e319b6e14465f89ae60acddb5"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now lives in Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 1931,
+      "trace_sha256": [
+        "72189a4b97e3655456a742d4e7904fa9be05306136df2dce5e6c756f2f9e47b3"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "24-hour time."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03234375",
+      "elapsed_ms": 6172,
+      "trace_sha256": [
+        "23a164a03e21b3eb125ac63d6dca157cdd446371ebd076da277136483f204325"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03070250",
+      "elapsed_ms": 5867,
+      "trace_sha256": [
+        "225d335b3e3a856c1af71592dbdc7ae3ce9d95d2639e170696c5c1baa7ccecc0"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03533125",
+      "elapsed_ms": 8703,
+      "trace_sha256": [
+        "b4cb8dea69268801464bfd61e77cf36da83219065245f891d398c24ac1995d8d"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The museum visit is on November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03605500",
+      "elapsed_ms": 7499,
+      "trace_sha256": [
+        "15b35a29c17fdc652c31b36ce9697208f51f34d7eeac7ff51e26df5834325e34"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1098,
+      "trace_sha256": [
+        "111611a01ff1fe02fa903760cd2c81f737be69e87062ce970f84da44e52a8e65"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03623875",
+      "elapsed_ms": 7856,
+      "trace_sha256": [
+        "f10092c49af679761bf59ec0dbadabe781c898fa95508f8176c04a726223726a"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 935,
+      "trace_sha256": [
+        "d1fd80be84459188a210dc1b2692e615a10e70e8b5dbefff6035ce655df5708b"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03740375",
+      "elapsed_ms": 8757,
+      "trace_sha256": [
+        "7012dc37906ca0dbfbf57aabd4d0a380f9e76387284e9d3eacafae03dbe1c030"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03586125",
+      "elapsed_ms": 10039,
+      "trace_sha256": [
+        "bc0db5568fbd477b9a5e2ee6723dd7ba95e88032ef6b09dd8f85aeef3df3f28e"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03511625",
+      "elapsed_ms": 8488,
+      "trace_sha256": [
+        "26d06ab93dbfb828960b9eb5fb6e820cd35c8de58139c3c98033ddbf4ec9dbcc"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 2367,
+      "trace_sha256": [
+        "e97d72084e178553cab1aacf2a0e62ccd0371b0a0899ace69a2d561a1e1692e0"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now works on Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00089000",
+      "elapsed_ms": 922,
+      "trace_sha256": [
+        "8e37b1875a685c710b2436b94c7f1888fa3d65b9b47de10dba44bd30af90423e"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03220625",
+      "elapsed_ms": 6247,
+      "trace_sha256": [
+        "8db96d622c58d413e73784c86a1bd9be663748f42803efc3db4e4c059b62ed54"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03068000",
+      "elapsed_ms": 6673,
+      "trace_sha256": [
+        "599d0f90704f88b1ab39120f705a93fa9bd2fb864bc4caf532f8715f69abe4d0"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03653750",
+      "elapsed_ms": 8465,
+      "trace_sha256": [
+        "ed079f1644b612330ed667396afb223b59a7dad817c51480af3d0a503fc8f325"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03653625",
+      "elapsed_ms": 7647,
+      "trace_sha256": [
+        "539ea682247a566165b23b44854807cfab1a576886236e01802e4a9fd7afe362"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown. The memory only says the owner prefers brief emails."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00100500",
+      "elapsed_ms": 982,
+      "trace_sha256": [
+        "bfd8386d4b7afc43b21d3c19667535c55a6d664017010ef8e92f03ecb9a7a305"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner dislikes decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": "answer_failure",
+      "boundary_failures": 0,
+      "provider_calls": 2,
+      "cost_usd": "0.16235625",
+      "elapsed_ms": 13911,
+      "trace_sha256": [
+        "8b2e4a212409319532c12d62d27eb0a141da3c89cd65325364b613be99e6b08c"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1025,
+      "trace_sha256": [
+        "a1cc66b46aa67426bbe0f923240fbf8752051991226f0ff62b9feb6d0363bbb1"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03783750",
+      "elapsed_ms": 8959,
+      "trace_sha256": [
+        "04e62f237ba3c199779b3a559e9c85b50278f40aad5ad8d185d069420ea5e7d9"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.04240500",
+      "elapsed_ms": 11220,
+      "trace_sha256": [
+        "a1c2462cb431c31533e5f5ec2bea7bf5ea99a803c9950dbdd31f0a84b49dba75"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03553375",
+      "elapsed_ms": 7686,
+      "trace_sha256": [
+        "565a9c038b9e2ac7ef3da9c1bbea2385d8547fd3bf041ba0e565c74e4edb00db"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088000",
+      "elapsed_ms": 1050,
+      "trace_sha256": [
+        "e3182fe452aecd697c1677fa2534d668d3b6f952c962aa60a5e6901af0f44390"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00075500",
+      "elapsed_ms": 1007,
+      "trace_sha256": [
+        "c73ededf41e626d0abb7935afb94486690d846f4796fe940be0f294e6745b224"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "24-hour time."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03235625",
+      "elapsed_ms": 6345,
+      "trace_sha256": [
+        "a8768dbfe781bc7c5a4ee375e4322a22e8ee5a3dbe3ae99fad35c8900e40a010"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03085375",
+      "elapsed_ms": 7050,
+      "trace_sha256": [
+        "fb8326e0dee159c29981d615f6d47826455610b97f1caf8ab9022d284d879ade"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03519875",
+      "elapsed_ms": 7579,
+      "trace_sha256": [
+        "8d1cd3f1df9fcbebf211fc7964aa476bc9a015d5bf5667969c65cae3acbf8b45"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The museum visit is on November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03545000",
+      "elapsed_ms": 7570,
+      "trace_sha256": [
+        "7499bf890773b60682545b2e8c229dd0e0f7c1867ade3f4b791539d8376f7523"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1089,
+      "trace_sha256": [
+        "467532b3a40a48d7dab5f35c960288142da684d1b9e216f08a1c3df0c2a5670c"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03657500",
+      "elapsed_ms": 8653,
+      "trace_sha256": [
+        "3200755582608e5a6e0e0496e0d94ad6f5d180150396e1aeaefcc4c0867f52d1"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1266,
+      "trace_sha256": [
+        "db8712c7fa20182a30f1a7d44416a2deb984eab39e6dbd5886c7eae6c2ac897c"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner silences notifications while drawing."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03526375",
+      "elapsed_ms": 8242,
+      "trace_sha256": [
+        "92f7d5ba4c4e8abfc42c8f0418a7bd38c54c35ceb08b1eb3be9083375e75671d"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03447000",
+      "elapsed_ms": 7133,
+      "trace_sha256": [
+        "3468028cd655f715a5c5b69f96f863ae1d956dc0c83b0756b38e4d493f1b76e6"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03708000",
+      "elapsed_ms": 9464,
+      "trace_sha256": [
+        "aa4358ba9198082993d590a161cc4f1a9c2dfda15139394aff043635bc331800"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 943,
+      "trace_sha256": [
+        "17768aa57190fc8fd5c867cd7ab153d126bb618a138760884508d5b6a73614a2"
+      ]
+    },
+    {
+      "arm": "merge_only",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now works on Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00089000",
+      "elapsed_ms": 1155,
+      "trace_sha256": [
+        "27f25e2bb5c29a6276fdd98613a3f54a23af503d330acf16bfcd7e1b9d16b644"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03166500",
+      "elapsed_ms": 7046,
+      "trace_sha256": [
+        "8a6e3c75954e247e55c074311dcb5abc3bb72bdbf1c0b1820ad8f0307ee27d07"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03050375",
+      "elapsed_ms": 6813,
+      "trace_sha256": [
+        "c85b956ac4943b96561fe68eda87c2bc22482b04830d755485d4b88df2326e85"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03619625",
+      "elapsed_ms": 8022,
+      "trace_sha256": [
+        "a3d47c2f49c8fc1b9976e5cbfea8cf36ee4b63b977c2fb1897b3d13c8babaf47"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03583625",
+      "elapsed_ms": 7081,
+      "trace_sha256": [
+        "e61556381af00077bd394a62b421081eeb9622a38f5c6831b8e48a395d73e7f8"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00070500",
+      "elapsed_ms": 861,
+      "trace_sha256": [
+        "dcc5d96d01c0bd06f6ae3b0b58287157f19bc0c0dd4f71958c3acc9e2922076d"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03583625",
+      "elapsed_ms": 9203,
+      "trace_sha256": [
+        "52af650aaa5928151c357cf8ff3587e6a0fd41f50b3b9ed14b458f7d150c22cc"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1193,
+      "trace_sha256": [
+        "33c5731d2867bbf1f061dcf7ec39957ed02ac9a9a5365a7f6aef3923eef26cef"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03908000",
+      "elapsed_ms": 9577,
+      "trace_sha256": [
+        "aab19e06c80e56532069020aabd241874b66d7bb45780d89c7ac80f80df4dad1"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03978625",
+      "elapsed_ms": 10201,
+      "trace_sha256": [
+        "7fbbb333a97434021035ece5951fab7beed8f160d2dbb16d4fa95b6e6d7a6717"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03607750",
+      "elapsed_ms": 9433,
+      "trace_sha256": [
+        "b625753a7c1724682d5e5bea2c80e525f054e9ac7ef6ee41bc9b44270df3a205"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088000",
+      "elapsed_ms": 1098,
+      "trace_sha256": [
+        "26c097c13df189bc4413b7ffe8c7ea7a6cd6e52977cece8ae4f34a0c73f0816f"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now lives in Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 998,
+      "trace_sha256": [
+        "b711f11d38c7c22df04aab03dd6e94bd80201faae8351798008deb236c7d0832"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "24-hour time."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03258875",
+      "elapsed_ms": 6486,
+      "trace_sha256": [
+        "37e7653dd4540d05c2ccf1d08dd092561e2698a9a57a70686ecfe96b78727e05"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03086250",
+      "elapsed_ms": 7144,
+      "trace_sha256": [
+        "e4fa1b9662d0d3ec0b7d87d94e62075cc77ba75114735dc78828788b02ecffc3"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03614000",
+      "elapsed_ms": 8803,
+      "trace_sha256": [
+        "44143e1320258df2236b9b2154bf73ed5a085dd85e2edad51b6a108b9a765e44"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The museum visit is on November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03496625",
+      "elapsed_ms": 7834,
+      "trace_sha256": [
+        "125f0b52cba5c8498a54eec4a879019a06563502a8af8bfdbf50659eb481a668"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1053,
+      "trace_sha256": [
+        "c52df619948439c9e9913ddc56e5878ea06f0f548f3b67e7adc8183adb95408a"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03560625",
+      "elapsed_ms": 8522,
+      "trace_sha256": [
+        "ec5698755477fb61036e526bf23bb6f06eaf068a43073b3a0887760b71678d2b"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 824,
+      "trace_sha256": [
+        "213491d154caa7be971748eeb4e3a070c8f5bb033a1afe70289fe897a1e947f0"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03793125",
+      "elapsed_ms": 9146,
+      "trace_sha256": [
+        "522dec63897563d131d03cd57ce4cff0d3059662302ef16d15b1987d1229d47f"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03865875",
+      "elapsed_ms": 10692,
+      "trace_sha256": [
+        "54eb60f3f74204684bddc2e96b4d0b6039c53af17bb26768a0ec4391ea26eed9"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03375375",
+      "elapsed_ms": 7219,
+      "trace_sha256": [
+        "57636db3f937c44f62f3a5b0899aceda6f2bc007c98816cd29abc134cd211a83"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 808,
+      "trace_sha256": [
+        "b35e4970d0a3dfd9e90a5c2eaff107ee590c1649957bbbeee063ca6c1ae16d99"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 1,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00074000",
+      "elapsed_ms": 1405,
+      "trace_sha256": [
+        "65500cb10a43d33d2652388fb62fc0b0579b4745a2c17dc3998a1e552efe563e"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03188375",
+      "elapsed_ms": 5988,
+      "trace_sha256": [
+        "bbd2d0b55c046790b0ffea732a19bd7ccaaff49b846ee9e443cab5e1809f587c"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03085375",
+      "elapsed_ms": 7522,
+      "trace_sha256": [
+        "d23143fd3423e47c94df16903e51a0f661381f6256a938599c1baec023298bba"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03565625",
+      "elapsed_ms": 7252,
+      "trace_sha256": [
+        "e14e325cc57a9ed4a139aa75142b41c858840b954704f28138821299d15938ca"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03575875",
+      "elapsed_ms": 7721,
+      "trace_sha256": [
+        "b0c2debf7a5cf808bbfdbda628c9cde66e5f4b8ce8c00d3da330ecfe85e568c2"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown. The memory only says the owner prefers brief emails."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00100500",
+      "elapsed_ms": 1062,
+      "trace_sha256": [
+        "7ac2644aa176aac7f556cace7ba42f8aa90553491545fc3a80b28ee45184fa6c"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03519750",
+      "elapsed_ms": 7517,
+      "trace_sha256": [
+        "4017cced5df3e88f73fde6d87ddfdb2447c57bc49ac224a405a006ec3a41e2bb"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 998,
+      "trace_sha256": [
+        "f334b0a5ea88bab769008e412952b3d51bc9196b16ddae3c56d7b5d5ae881fb7"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03879875",
+      "elapsed_ms": 9777,
+      "trace_sha256": [
+        "e16d3e872deb2c1151c5fe794fade27292469a9e58f4e150a905e724bc679d57"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03939375",
+      "elapsed_ms": 14154,
+      "trace_sha256": [
+        "2e7763ee1f8fd5d94fa0900543a016b682575cc3b3ef1151255a818a448f81ee"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03758000",
+      "elapsed_ms": 10186,
+      "trace_sha256": [
+        "9f3ae1e7e6602a52a7af7d04c69ea0cbd35e776c3b24e5860d8745e0558372f7"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088000",
+      "elapsed_ms": 1104,
+      "trace_sha256": [
+        "0bc8e82273abdea1c1c12b25398fc24d375aae1529649ca6c04082111e01fb2d"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now lives in Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 845,
+      "trace_sha256": [
+        "806d8a62e405af6cfa6e3aecb0ad9bbc840897cd8d85d55fc83d23870f76bb9c"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "24-hour time."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03207375",
+      "elapsed_ms": 6399,
+      "trace_sha256": [
+        "0fd63ce2d67bf9e1385eff803cbc274f2e861f60081dbc189d22f50b235c9300"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03091750",
+      "elapsed_ms": 6602,
+      "trace_sha256": [
+        "40106860516060fc7fece71072971fd5c7cce9a5e7a681746b882f93276391fa"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03622375",
+      "elapsed_ms": 7752,
+      "trace_sha256": [
+        "2c2fb71bb5703fae5dda5f33431a09bfebb73f581bff9a1637aa4821e9df1148"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03627875",
+      "elapsed_ms": 8067,
+      "trace_sha256": [
+        "7d600f55a52785892587cc1162ebf10f1b79c91b1b1b1c923d1d9bba417c598b"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 984,
+      "trace_sha256": [
+        "5cb3004c6448b6ae6e33d1cdce578c81d352ea07b1d668831fb117e224fce3fb"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03671250",
+      "elapsed_ms": 7919,
+      "trace_sha256": [
+        "643018991770cce896597818abc5c03668fd700bc4b379e8ce128738b01815c7"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1182,
+      "trace_sha256": [
+        "cb1228b88c7d47f831d8b818856ac446edc047d84ce504a7d792c42a9ae7d622"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03831875",
+      "elapsed_ms": 10381,
+      "trace_sha256": [
+        "46ca478fd3bdb885a55e1f75442dfd9770dd18a46961a6cf8a541d37e5222d53"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03460250",
+      "elapsed_ms": 9824,
+      "trace_sha256": [
+        "ad2c1a58d6c62dfdb34efbc7c07c764eea6bafc39e7400e6b38df5f9fc8bd667"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03415000",
+      "elapsed_ms": 7631,
+      "trace_sha256": [
+        "fd6f4a1a692955e8bae4b9e803e3982e402052a4091af86460c08572293fbbfa"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 795,
+      "trace_sha256": [
+        "d22b48f5ead57180f82d5a430f7b641248f258006ee1e7f7dbcd17f4447f411c"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 2,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00074000",
+      "elapsed_ms": 1262,
+      "trace_sha256": [
+        "39dc647048ec83d40373a90dfb90f015d4b7832dc7e050fb21a98b7834d8329d"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Celsius."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03147625",
+      "elapsed_ms": 6494,
+      "trace_sha256": [
+        "a0f3f4cc54d5c86989a1d86d63f69caebe3b88e54586bf60a83d2a66ad50be98"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner uses a standing desk."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03044125",
+      "elapsed_ms": 5972,
+      "trace_sha256": [
+        "bc5e8e7c9f1bc016d861316ccc2e9987ab00c71fc54d18d1e3eae125db6919e5"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "12 sensors."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03573750",
+      "elapsed_ms": 7873,
+      "trace_sha256": [
+        "ac1310e2685f0e48dd65e22cf5a9b918077ddad018fd73a0af253074b671cabc"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The design review is on October 8."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03592250",
+      "elapsed_ms": 7333,
+      "trace_sha256": [
+        "faca351319f92a1f754b5db01fde0918b3490b3cab8f8539f0e886610bc9a30d"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown. The owner prefers brief emails."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088500",
+      "elapsed_ms": 1003,
+      "trace_sha256": [
+        "a7c05c5c086120cdf20464f09f25725d8b3408e16395f0016106b7df35341b15"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Decaffeinated coffee."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03606250",
+      "elapsed_ms": 7677,
+      "trace_sha256": [
+        "c1f2975ed158acdbc7d3728d3bfa031650e9de1ae264c995e5297464a67a01b1"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 1078,
+      "trace_sha256": [
+        "c9ae51f91c022972705d1d1667c2e9439a46ff6b9c69950846d71f50a1c11615"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "After lunch."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.04160000",
+      "elapsed_ms": 13978,
+      "trace_sha256": [
+        "56b37f7ddea102787e2550116d67708647c26d892655c136f2e5e813d1b9a291"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Near rail stations."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03816250",
+      "elapsed_ms": 9590,
+      "trace_sha256": [
+        "6b0a05aa55323725c4450d15d89f3b51206f0d05a7c2578657c11e14c3ac8c1a"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Cedar keeps documents on the device."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03981500",
+      "elapsed_ms": 9813,
+      "trace_sha256": [
+        "6028995895bdd984fbe630c57ce64d26d0e373e55cb776e1b6d0345a560cb546"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner prefers walking short distances."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00088000",
+      "elapsed_ms": 1003,
+      "trace_sha256": [
+        "c0d125bf294b35890eb06c559b2566664b92e95b4239881448101959d84b07a0"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "development-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The owner now lives in Salem."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00087500",
+      "elapsed_ms": 918,
+      "trace_sha256": [
+        "b8170f853987a8f0a2749ffde49c990288b66c030ff0914528e977c9773fc4f9"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-equivalent",
+        "merges": [
+          [
+            "m2",
+            "m1"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "24-hour time."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03213500",
+      "elapsed_ms": 6621,
+      "trace_sha256": [
+        "c1e8cfd33ba0adb1c8d832d8c604dc13ec8c969b73b3aa744ab12c9d41513b4a"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-same_evidence",
+        "merges": [
+          [
+            "m1",
+            "m2"
+          ]
+        ],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "A mechanical keyboard."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03118875",
+      "elapsed_ms": 6736,
+      "trace_sha256": [
+        "6c2b5bad31d1fce59ec1fb808680a3fe90d4e09d21b2577bfc6f32401912ff60"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-quantity",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "18 apple trees."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03649375",
+      "elapsed_ms": 7975,
+      "trace_sha256": [
+        "bc07770acc8545262f15e4180c8a6ea136a3e173ab480d1c22687095bcc3b56e"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-time",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "The museum visit is on November 4."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03682750",
+      "elapsed_ms": 8756,
+      "trace_sha256": [
+        "1a5233f34d6dc61f28b0b52ec1c5a92e83b17111b823a92479dcaa5aa8ad00ed"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-attribution",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00071000",
+      "elapsed_ms": 1388,
+      "trace_sha256": [
+        "810b3507c50e15abb07d83570a6c035355e859a2d982c9d704a6610792c22d3b"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-negation",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Sweetened sparkling water."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03622625",
+      "elapsed_ms": 7613,
+      "trace_sha256": [
+        "78d035155467039e2f51fa2f6560b01cc3317b6d0ddf4b17fe8a3870bf34485c"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-scope",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Unknown."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00060000",
+      "elapsed_ms": 885,
+      "trace_sha256": [
+        "71751e65cb71a08ab8670f981c2374d461b1b22e61580e206d56f1f03561ba68"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-connection_focus",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Notifications."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03932875",
+      "elapsed_ms": 9254,
+      "trace_sha256": [
+        "b643b53b5a82bc68e9b8bfe86b0e9f202838e6e32005e36aa0d3f6f7411e9c3a"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-connection_travel",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Bicycle parking."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03933125",
+      "elapsed_ms": 11238,
+      "trace_sha256": [
+        "6e473992f3f700192506d96b15894c5bd9480251423bb005b8880e463bb2ea07"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-summary",
+        "merges": [],
+        "surviving_ids": [
+          "m1",
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Project Amber exports plain text."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 3,
+      "cost_usd": "0.03660250",
+      "elapsed_ms": 7680,
+      "trace_sha256": [
+        "f23b6d59045032e744380181fdd25b411ae74fccc0531713a426a13c93cfa58d"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-expiry",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Landscape photography."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00076000",
+      "elapsed_ms": 1035,
+      "trace_sha256": [
+        "ad6f1a0cdc6eb7f1f209a278fa9805584a77fc1864fc49f4062a605255686ca9"
+      ]
+    },
+    {
+      "arm": "connections",
+      "repeat": 3,
+      "observation": {
+        "case_id": "holdout-correction",
+        "merges": [],
+        "surviving_ids": [
+          "m2"
+        ],
+        "hypotheses": [],
+        "answers": [
+          {
+            "probe_id": "q1",
+            "text": "Beacon."
+          }
+        ]
+      },
+      "failure": null,
+      "boundary_failures": 0,
+      "provider_calls": 1,
+      "cost_usd": "0.00074000",
+      "elapsed_ms": 1378,
+      "trace_sha256": [
+        "715cd4530bad17eb0ab5df753b51427c8fb22a516412e8a5eaec5973900cc1fc"
+      ]
+    }
+  ],
+  "counts": {
+    "development:original_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 0,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 16,
+      "invalid_observations": 0
+    },
+    "development:merge_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 14,
+      "invalid_observations": 0
+    },
+    "development:connections": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 15,
+      "invalid_observations": 0
+    },
+    "holdout:original_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 0,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 18,
+      "invalid_observations": 0
+    },
+    "holdout:merge_only": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 17,
+      "invalid_observations": 0
+    },
+    "holdout:connections": {
+      "false_merge_pairs": 0,
+      "lost_facts": 0,
+      "duplicate_sets": 6,
+      "covered_duplicate_sets": 6,
+      "hypothesis_labels": 6,
+      "hypothesis_outputs": 0,
+      "hypothesis_matches": 0,
+      "probes": 36,
+      "covered_probes": 22,
+      "invalid_observations": 0
+    }
+  },
+  "failures": [
+    "failed_cases",
+    "development:hypothesis_quality",
+    "development:answer_coverage_lift",
+    "development:merge_answer_regression",
+    "holdout:hypothesis_quality",
+    "holdout:merge_answer_regression",
+    "unknown_usage"
+  ],
+  "provider_calls": 407,
+  "cost_usd": "3.61994125",
+  "unknown_usage_calls": 1
+}

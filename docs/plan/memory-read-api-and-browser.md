@@ -20,7 +20,7 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:503-513). That surface is right for an
+(memory-formation-and-consolidation.md:506-516). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
@@ -123,6 +123,7 @@ belief_type  repeatable; BeliefType values
 subject      lowercased (exact, case-insensitive)
 session_id   the source session's identifier
 text         any-term search over subject and statement
+include_derived default false; opt in to the M32 derived projection when enabled
 flagged      true selects the review queue, false everything else;
              absent selects both (ADR-0117)
 ```
@@ -166,13 +167,24 @@ natural and the only one a client will guess right.
 The response is the shared `Page` envelope, `items` and `next_cursor`, the same
 shape `GET /v1/sessions` and `GET /v1/approvals` return.
 
+M32 adds `include_derived=false` behind the reconsolidation surface flag. When
+true, active summaries join the existing keyset ordering with a distinct
+`record_kind=summary` view and complete source links. Ordinary `MemoryView`
+fields are unchanged. Summary filters apply to rendered output, inherited types,
+review state and any supporting session; omitted source prose does not become
+searchable derived output. An opt-in request while the surface is disabled returns
+`400 malformed_request`. The exact derived projection, review/delete semantics,
+historical restrictions, erasure and receipt contract are specified in
+[memory-reconsolidation.md](memory-reconsolidation.md). Derived detail and writes
+use the same four routes and scopes; no additional memory text-write route exists.
+
 ### `GET /v1/memories/{memory_id}`
 
 `ceiling` is required here too, and for the same reason. A belief that is above
 the supplied ceiling, that belongs to another principal or another tenant, or
 that does not exist at all is uniformly `not_found` with status 404. This
 extends the existing cross-tenant-404 rule
-(http-api-and-streaming.md:321-339) to the ceiling, because the alternative
+(http-api-and-streaming.md:328-346) to the ceiling, because the alternative
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
@@ -233,7 +245,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1662-1679) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1694-1711) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text
@@ -399,6 +411,14 @@ the device surface.
   decision 9, and none of the ten gates below is satisfied by client code.
 
 ## Store and lifecycle interplay
+
+M32 extends the native browser with a separate **Synthesis** collection, specified
+in [memory-reconsolidation.md](memory-reconsolidation.md). Its evidence journal
+distinguishes derived summaries and duplicate merges from the original records in
+Memories, expands claims into their supporting originals, and offers governed
+summary controls and a merge-undo preview. The original collection retains its
+existing search, filters and wire projection; the journal uses server kind/state
+filters rather than pretending to search an incompletely loaded history locally.
 
 Browse reads a store that Milestone 16's sweeps are actively moving, and the
 two designs meet at three points.

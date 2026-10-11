@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agent_core.domain import errors as domain_errors
+from agent_core.domain.reconsolidation_views import ReconsolidationValidationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,7 @@ class ErrorMapping:
 
 
 ERROR_STATUS_MAP: dict[type[BaseException], ErrorMapping] = {
+    ReconsolidationValidationError: ErrorMapping("validation_error", 400),
     domain_errors.AuthenticationError: ErrorMapping("authentication_error", 401),
     domain_errors.AuthorizationError: ErrorMapping("authorization_error", 403),
     domain_errors.NotFoundError: ErrorMapping("not_found", 404),

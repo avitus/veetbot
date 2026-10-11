@@ -34,6 +34,11 @@ from sqlalchemy.sql.elements import ColumnElement
 from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
 from agent_core.adapters.persistence.people_erasure import lock_run_erasure
+from agent_core.adapters.persistence.reconsolidation_sources import (
+    append_change,
+    erase_sources,
+    lock_owner,
+)
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
@@ -45,8 +50,11 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     MemoryRevisionRow,
     MemoryRow,
     RecallTraceRow,
+    ReconsolidationDependencyRow,
+    ReconsolidationOperationRow,
     RunRow,
 )
+from agent_core.adapters.trace_projection import trace_beliefs
 from agent_core.domain.agents import Principal
 from agent_core.domain.erasure import erased_rejection, memory_erasure_tombstone
 from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
@@ -86,9 +94,11 @@ from agent_core.domain.memory import (
     lexical_query_terms,
     recall_query_terms,
 )
+from agent_core.domain.reconsolidation import content_signature
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
 from agent_core.ports.people import PeopleStore
+from agent_core.ports.reconsolidation import ReconsolidationStore
 
 _LIVE = (MemoryStatus.ACTIVE.value, MemoryStatus.PROVISIONAL.value)
 
@@ -399,6 +409,12 @@ class PostgresMemoryStore:
         self._clock = clock
 
     async def _remember_revision(self, record: MemoryRecord) -> None:
+        row = await self._session.scalar(
+            select(MemoryRow)
+            .where(MemoryRow.id == record.id)
+            .execution_options(populate_existing=True)
+        )
+        assert row is not None
         await self._session.execute(
             pg_insert(MemoryRevisionRow).values(
                 tenant_id=record.tenant_id,
@@ -406,8 +422,36 @@ class PostgresMemoryStore:
                 belief_id=record.id,
                 recorded_at=self._clock.now(),
                 payload=record.model_dump(mode="json"),
+                content_revision=row.content_revision,
+                creation_sequence=row.creation_sequence,
             )
         )
+
+    async def _source_values(self, record: MemoryRecord) -> dict[str, int]:
+        principal = Principal(tenant_id=record.tenant_id, principal_id=record.principal_id)
+        owner = await lock_owner(self._session, principal)
+        row = await self._session.scalar(
+            select(MemoryRow)
+            .where(MemoryRow.id == record.id)
+            .execution_options(populate_existing=True)
+        )
+        if row is not None and (row.tenant_id, row.principal_id) != (
+            record.tenant_id,
+            record.principal_id,
+        ):
+            raise NotFoundError("memory not found")
+        if row is None:
+            owner.creation_count += 1
+            revision, creation, reason = 1, owner.creation_count, "created"
+        else:
+            revision, creation, reason = row.content_revision, row.creation_sequence, "changed"
+            if content_signature(_memory(row)) == content_signature(record):
+                return {"content_revision": revision, "creation_sequence": creation}
+            revision += 1
+        await append_change(
+            self._session, owner, record.id, revision, creation, reason, self._clock.now()
+        )
+        return {"content_revision": revision, "creation_sequence": creation}
 
     async def get_at(
         self, belief_id: UUID, principal: Principal, *, known_at: datetime
@@ -452,7 +496,13 @@ class PostgresMemoryStore:
                 ~MemoryRow.erasure_pending,
             )
         )
-        return 0 if value is None else int(value)
+        operation_head = await self._session.scalar(
+            select(func.max(ReconsolidationOperationRow.store_position)).where(
+                ReconsolidationOperationRow.tenant_id == principal.tenant_id,
+                ReconsolidationOperationRow.principal_id == principal.principal_id,
+            )
+        )
+        return max(int(value or 0), int(operation_head or 0))
 
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord:
         row = (
@@ -485,7 +535,54 @@ class PostgresMemoryStore:
         if query.include_ids is not None:
             predicates.append(MemoryRow.id.in_(query.include_ids))
         if query.min_store_position:
-            predicates.append(MemoryRow.store_position > query.min_store_position)
+            changed = MemoryRow.store_position > query.min_store_position
+            if query.include_merge_changes and query.as_of is None:
+                # Reverse dependencies retain an index by original ID after
+                # undo/invalidation; the membership uniqueness index is active-only.
+                membership_changed = (
+                    select(ReconsolidationDependencyRow.belief_id)
+                    .join(
+                        ReconsolidationOperationRow,
+                        and_(
+                            ReconsolidationOperationRow.tenant_id
+                            == ReconsolidationDependencyRow.tenant_id,
+                            ReconsolidationOperationRow.principal_id
+                            == ReconsolidationDependencyRow.principal_id,
+                            ReconsolidationOperationRow.id
+                            == ReconsolidationDependencyRow.operation_id,
+                        ),
+                    )
+                    .where(
+                        ReconsolidationDependencyRow.tenant_id == query.tenant_id,
+                        ReconsolidationDependencyRow.principal_id == query.principal_id,
+                        ReconsolidationDependencyRow.belief_id == MemoryRow.id,
+                        ReconsolidationOperationRow.store_position > query.min_store_position,
+                        ReconsolidationOperationRow.payload["kind"].astext == "merge",
+                        or_(
+                            false()
+                            if query.owner_reviewed_merges_only
+                            else ReconsolidationOperationRow.payload["owner_review"][
+                                "decision"
+                            ].astext.is_(None),
+                            and_(
+                                ReconsolidationOperationRow.payload["owner_review"][
+                                    "decision"
+                                ].astext
+                                == "approved",
+                                sql_cast(
+                                    ReconsolidationOperationRow.payload["owner_review"][
+                                        "decided_at"
+                                    ].astext,
+                                    DateTime(timezone=True),
+                                )
+                                <= (query.as_of or self._clock.now()),
+                            ),
+                        ),
+                    )
+                    .exists()
+                )
+                changed = or_(changed, membership_changed)
+            predicates.append(changed)
         if not query.include_superseded and query.as_of is None:
             predicates.append(MemoryRow.status.in_(_LIVE))
         if not query.include_provisional:
@@ -675,9 +772,22 @@ class PostgresMemoryStore:
         return [_memory(row) for row in rows]
 
     async def upsert_belief(self, belief: MemoryRecord) -> MemoryRecord:
+        await lock_owner(
+            self._session, Principal(tenant_id=belief.tenant_id, principal_id=belief.principal_id)
+        )
+        existing_row = await self._session.scalar(
+            select(MemoryRow)
+            .where(MemoryRow.id == belief.id)
+            .execution_options(populate_existing=True)
+        )
+        if existing_row is not None:
+            if existing_row.erasure_pending or _memory(existing_row) != belief:
+                raise ConflictError("memory id identifies different content")
+            return belief
+        source_values = await self._source_values(belief)
         statement = (
             pg_insert(MemoryRow)
-            .values(**_memory_values(belief))
+            .values(**_memory_values(belief), **source_values)
             .on_conflict_do_nothing(index_elements=[MemoryRow.id])
         )
         result = await self._session.execute(statement)
@@ -692,6 +802,13 @@ class PostgresMemoryStore:
         return belief
 
     async def reinforce(self, belief: MemoryRecord) -> MemoryRecord:
+        await lock_owner(
+            self._session, Principal(tenant_id=belief.tenant_id, principal_id=belief.principal_id)
+        )
+        await self.get(
+            belief.id, Principal(tenant_id=belief.tenant_id, principal_id=belief.principal_id)
+        )
+        source_values = await self._source_values(belief)
         result = await self._session.execute(
             update(MemoryRow)
             .where(
@@ -700,7 +817,7 @@ class PostgresMemoryStore:
                 MemoryRow.principal_id == belief.principal_id,
                 ~MemoryRow.erasure_pending,
             )
-            .values(**_memory_values(belief))
+            .values(**_memory_values(belief), **source_values)
         )
         if not _rowcount(result):
             raise NotFoundError("memory not found")
@@ -715,11 +832,19 @@ class PostgresMemoryStore:
         # stale-current conflict cannot leave that replacement behind when the
         # caller handles the conflict and continues the outer transaction.
         async with self._session.begin_nested():
+            await lock_owner(
+                self._session,
+                Principal(tenant_id=current.tenant_id, principal_id=current.principal_id),
+            )
             if await self._session.scalar(
                 select(MemoryRow.id).where(MemoryRow.id == replacement.id)
             ):
                 raise ConflictError("replacement memory already exists")
-            await self._session.execute(pg_insert(MemoryRow).values(**_memory_values(replacement)))
+            replacement_values = await self._source_values(replacement)
+            await self._session.execute(
+                pg_insert(MemoryRow).values(**_memory_values(replacement), **replacement_values)
+            )
+            current_values = await self._source_values(current)
             result = await self._session.execute(
                 update(MemoryRow)
                 .where(
@@ -727,7 +852,7 @@ class PostgresMemoryStore:
                     MemoryRow.status.in_(_LIVE),
                     ~MemoryRow.erasure_pending,
                 )
-                .values(**_memory_values(current))
+                .values(**_memory_values(current), **current_values)
             )
             if not _rowcount(result):
                 raise ConflictError("memory was already inactive")
@@ -877,6 +1002,7 @@ class PostgresMemoryStore:
         )
 
     async def fence_for_erasure(self, principal: Principal, belief_ids: Sequence[UUID]) -> int:
+        await erase_sources(self._session, principal, list(belief_ids), self._clock.now())
         result = await self._session.execute(
             update(MemoryRow)
             .where(
@@ -896,6 +1022,7 @@ class PostgresMemoryStore:
     ) -> int:
         if len(belief_ids) > 256:
             raise ValueError("memory erasure batches contain at most 256 beliefs")
+        await lock_owner(self._session, principal)
         rows = list(
             (
                 await self._session.scalars(
@@ -934,6 +1061,7 @@ class PostgresMemoryStore:
     async def delete(
         self, belief_id: UUID, principal: Principal, tombstone: BeliefRejection
     ) -> None:
+        await erase_sources(self._session, principal, [belief_id], self._clock.now())
         result = await self._session.execute(
             delete(MemoryRow).where(
                 MemoryRow.id == belief_id,
@@ -950,6 +1078,9 @@ class PostgresMemoryStore:
         )
 
     async def reject(self, rejection: BeliefRejection, updated: MemoryRecord) -> MemoryRecord:
+        await lock_owner(
+            self._session, Principal(tenant_id=updated.tenant_id, principal_id=updated.principal_id)
+        )
         await self._session.execute(
             pg_insert(MemoryRejectionRow)
             .values(**_rejection_values(rejection))
@@ -1084,9 +1215,18 @@ class PostgresMemoryStore:
 
 
 class PostgresTraceStore:
-    def __init__(self, session: AsyncSession, people: PeopleStore | None = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        people: PeopleStore | None = None,
+        *,
+        reconsolidation: ReconsolidationStore | None = None,
+        clock: Clock | None = None,
+    ) -> None:
         self._session = session
         self._people = people
+        self._reconsolidation = reconsolidation
+        self._clock = clock
 
     async def erase_people(
         self, principal: Principal, record_ids: Sequence[UUID], belief_ids: Sequence[UUID] = ()
@@ -1112,6 +1252,12 @@ class PostgresTraceStore:
             RecallTraceRow.trace.contains({"query": {field: [str(belief_id)]}})
             for belief_id in belief_ids
             for field in ("include_ids", "expand_ids")
+        )
+        predicates.extend(
+            RecallTraceRow.trace.contains({"beliefs": [{"record_kind": kind, field: [str(key)]}]})
+            for key in {*record_ids, *belief_ids}
+            for kind in ("summary", "hypothesis")
+            for field in ("support_ids", "source_ids", "source_session_ids")
         )
         if not predicates:
             return 0
@@ -1232,22 +1378,7 @@ class PostgresTraceStore:
             effective = min(
                 SENSITIVITY_ORDER[trace.sensitivity_ceiling], SENSITIVITY_ORDER[ceiling]
             )
-            beliefs.extend(
-                TracedBelief(
-                    belief_id=item.belief_id,
-                    subject=item.subject,
-                    statement=item.statement,
-                    learned_at=item.valid_from,
-                    origin_scope=item.origin_scope,
-                    carried=item.carried,
-                    authority=item.authority,
-                    source_event_id=item.source_event_ids[0] if item.source_event_ids else None,
-                    confidence_band=item.confidence_band,
-                    used=item.belief_id in trace.cited,
-                )
-                for item in trace.beliefs
-                if SENSITIVITY_ORDER[item.sensitivity] <= effective and not item.blocked
-            )
+            beliefs.extend(await trace_beliefs(trace, ceiling, self._reconsolidation, self._clock))
             passages.extend(
                 item for item in trace.passages if SENSITIVITY_ORDER[item.sensitivity] <= effective
             )

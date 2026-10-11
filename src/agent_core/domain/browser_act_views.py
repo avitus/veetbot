@@ -13,6 +13,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from agent_core.domain.browser import (
     BrowserAction,
@@ -102,6 +103,7 @@ class TaskGrantSessionContext:
     profile: BrowserProfile | None
     active_grant: BrowserTaskGrant | None = None
     scopes: tuple[BrowserTaskGrantScope, ...] = ()
+    owner_run_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,9 +292,10 @@ def session_allows_task_grant(
     session_metadata: Mapping[str, Any],
     tenant_id: str,
     principal_id: str,
+    owner_run_id: UUID | None = None,
 ) -> bool:
     """D1 without the turn: a top-level interactive run of the principal's
-    own chat bound to a website profile, never a scheduled one."""
+    own chat bound to a website profile, never a scheduled occurrence."""
 
     selected = session_metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
     return (
@@ -302,7 +305,7 @@ def session_allows_task_grant(
         and (session_tenant_id, session_principal_id) == (tenant_id, principal_id)
         and isinstance(selected, str)
         and bool(selected)
-        and SESSION_SCHEDULE_ID_METADATA_KEY not in session_metadata
+        and (SESSION_SCHEDULE_ID_METADATA_KEY not in session_metadata or owner_run_id == run.id)
     )
 
 
@@ -315,6 +318,7 @@ def session_is_task_grant_eligible(
     tenant_id: str,
     principal_id: str,
     turn: AuthorizationTurn | None,
+    owner_run_id: UUID | None = None,
 ) -> bool:
     """D1: an owner-driven, top-level interactive run of a profile-bound chat,
     in a turn opened by the owner's own message."""
@@ -327,6 +331,7 @@ def session_is_task_grant_eligible(
             session_metadata=session_metadata,
             tenant_id=tenant_id,
             principal_id=principal_id,
+            owner_run_id=owner_run_id,
         )
         and turn is not None
         and turn.newest_user_trust is TrustLevel.USER

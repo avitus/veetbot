@@ -768,3 +768,66 @@ async def test_the_worker_selects_only_in_a_select_and_checks_only_a_check_box()
         "select in the select": (True, DISPATCHED),
     }
     assert state == [True, "perro", ["hints"]]
+
+
+@pytest.mark.parametrize("changed", [False, True])
+async def test_owner_follow_constraint_rechecks_live_x_target(changed: bool) -> None:
+    from datetime import timedelta
+
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.responses import HTMLResponse
+    from starlette.routing import Route
+
+    from agent_core.domain.browser import BrowserDispatchConstraint
+    from tests.real_browser_support import (
+        RealBrowserRuntime,
+        local_https_site,
+        require_real_browser,
+    )
+
+    require_real_browser()
+
+    async def account(request: Request) -> HTMLResponse:
+        del request
+        return HTMLResponse("""<!doctype html><title>Account</title>
+            <button aria-label="Follow @mitsuhiko" onclick="window.effects++;
+            this.setAttribute('aria-label','Following @mitsuhiko');
+            this.textContent='Following'">Follow</button>
+            <script>window.effects=0;</script>""")
+
+    async with local_https_site(
+        Starlette(routes=[Route("/mitsuhiko", account)]), host="x.com"
+    ) as site:
+        runtime = RealBrowserRuntime()
+        await runtime.start(site.proxy_url, (site.origin,))
+        try:
+            page = await runtime.navigate(site.url("/mitsuhiko"))
+            target = next(
+                element for element in page.elements if element.name == "Follow @mitsuhiko"
+            )
+            action = BrowserAction(
+                kind=BrowserActionKind.CLICK, expected_revision=page.revision, ref=target.ref
+            )
+            constraint = BrowserDispatchConstraint(
+                grant_kind="follow",
+                origins=("https://x.com",),
+                path_prefix="/mitsuhiko",
+                follow_handle="mitsuhiko",
+                not_after=GRANT_NOW + timedelta(minutes=1),
+                consequence_ceiling="unknown",
+                max_text_characters=None,
+            )
+            if changed:
+                await runtime._current_page().evaluate(
+                    "document.querySelector('button').setAttribute("
+                    "'aria-label','Follow @someone_else')"
+                )
+                with pytest.raises(BrowserProviderError):
+                    await runtime.act(action, constraint=constraint, now=GRANT_NOW)
+            else:
+                result = await runtime.act(action, constraint=constraint, now=GRANT_NOW)
+                assert any(element.name == "Following @mitsuhiko" for element in result.elements)
+            assert await runtime._current_page().evaluate("window.effects") == (0 if changed else 1)
+        finally:
+            await runtime.close()

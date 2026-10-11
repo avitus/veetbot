@@ -28,8 +28,10 @@ public struct MemoryBrowserView: View {
                 Picker("Memory collection", selection: $collection) {
                     Text("Memories").tag("memories")
                     Text("People").tag("people")
+                    Text("Synthesis").tag("synthesis")
                 }.pickerStyle(.segmented).padding()
                 if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
+                else if collection == "synthesis" { MemorySynthesisBrowserView() }
                 else { content }
             }
                 .navigationTitle("Memory")
@@ -39,12 +41,13 @@ public struct MemoryBrowserView: View {
                 // placed on this chain would land on the content underneath
                 // it instead of the field itself. XCUITest reaches the field
                 // the way it reaches any search bar: `app.searchFields`.
-                .searchable(
+                .memoryCollectionSearch(
                     text: Binding(
                         get: { collection == "people" ? people.searchText : model.searchText },
                         set: { if collection == "people" { people.setSearchText($0) } else { model.setSearchText($0) } }
                     ),
-                    prompt: collection == "people" ? "Search people" : "Search memories"
+                    prompt: collection == "people" ? "Search people" : "Search memories",
+                    enabled: collection != "synthesis"
                 )
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -198,6 +201,8 @@ public struct MemoryBrowserView: View {
                 .appFont(.body)
                 .lineLimit(3)
             HStack(spacing: 6) {
+                Text("Original")
+                Text("\u{00B7}")
                 Text(item.displaySubject)
                 Text("\u{00B7}")
                 Text(memoryDisplayText(item.beliefType))
@@ -466,5 +471,11 @@ struct MemorySensitivityBadge: View {
         case .restricted: return "lock.shield"
         case nil: return "questionmark.circle"
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder func memoryCollectionSearch(text: Binding<String>, prompt: String, enabled: Bool) -> some View {
+        if enabled { searchable(text: text, prompt: Text(prompt)) } else { self }
     }
 }

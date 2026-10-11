@@ -142,7 +142,7 @@ is the same "zero rows updated means stop, not retry" discipline that
 An append that carries no state change has no guarded `UPDATE` to inspect and is
 not subject to the check. The diagnostic `run.fenced` is the case in point: a
 fenced worker performs no transition, no lease release, and no checkpoint write,
-and appends exactly one event, which must commit (`runtime-loop.md:890-899`).
+and appends exactly one event, which must commit (`runtime-loop.md:896-905`).
 
 ### Gaps are normal; missing writes are not
 
@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:903`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:935`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.

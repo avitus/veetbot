@@ -134,6 +134,11 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    memory_reconsolidation_api_enabled: bool = False
+    memory_dreaming_review_enabled: bool = False
+    memory_reconsolidation_enabled: bool = False
+    memory_reconsolidation_evidence: Path | None = None
+    memory_reconsolidation_residency_provider: str | None = None
     people_enabled: bool = True
     persona_api_enabled: bool = False
     thread_folders_api_enabled: bool = False
@@ -185,6 +190,7 @@ class Settings:
     # ADR-0129: task grants from the browser.act approval card, and the exact
     # site scopes an owner may allow; environment-layer deployment controls.
     browser_task_grants_enabled: bool = False
+    browser_feed_workflow_enabled: bool = False
     browser_task_grant_scopes: tuple[BrowserTaskGrantScope, ...] = ()
     browser_profile_service_url: str | None = None
     browser_profile_id: UUID | None = None
@@ -1972,6 +1978,20 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        memory_reconsolidation_api_enabled=_parse_flag(
+            values, "AGENT_MEMORY_RECONSOLIDATION_API_ENABLED"
+        ),
+        memory_dreaming_review_enabled=_parse_flag(values, "AGENT_MEMORY_DREAMING_REVIEW_ENABLED"),
+        memory_reconsolidation_enabled=_parse_flag(values, "AGENT_MEMORY_RECONSOLIDATION_ENABLED"),
+        memory_reconsolidation_evidence=(
+            Path(values["AGENT_MEMORY_RECONSOLIDATION_EVIDENCE"]).expanduser()
+            if values.get("AGENT_MEMORY_RECONSOLIDATION_EVIDENCE", "").strip()
+            else None
+        ),
+        memory_reconsolidation_residency_provider=values.get(
+            "AGENT_MEMORY_RECONSOLIDATION_RESIDENCY_PROVIDER", ""
+        ).strip()
+        or None,
         people_enabled=people_enabled,
         persona_api_enabled=persona_api_enabled,
         thread_folders_api_enabled=thread_folders_api_enabled,
@@ -2021,6 +2041,7 @@ def _load_settings(
         judgment_provider=judgment_provider,
         browser_allowed_origins=browser_allowed_origins,
         browser_task_grants_enabled=browser_task_grants_enabled,
+        browser_feed_workflow_enabled=_parse_flag(values, "BROWSER_FEED_WORKFLOW_ENABLED"),
         browser_task_grant_scopes=browser_task_grant_scopes,
         browser_profile_service_url=browser_profile_service_url,
         browser_profile_id=browser_profile_id,

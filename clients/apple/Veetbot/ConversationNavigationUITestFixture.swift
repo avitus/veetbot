@@ -325,7 +325,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let memoryLock = NSLock()
     /// Set by a governed delete, after which the browser's reads omit the belief.
     private static var memoryDeleted = false
-    static func resetMemory() { memoryLock.withLock { memoryDeleted = false } }
+    private static var synthesisReviewed = false
+    private static var synthesisDeleted = false
+    private static var synthesisUndone = false
+    static func resetMemory() { memoryLock.withLock {
+        memoryDeleted = false; synthesisReviewed = false; synthesisDeleted = false; synthesisUndone = false
+    } }
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
         emailLock.lock()
@@ -358,6 +363,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let statusCode: Int
         var holdOpen = false
         switch (request.httpMethod, url.path) {
+        case (_, let path) where path.hasPrefix("/v1/memory-reconsolidations") || path.hasPrefix("/v1/memories/00000000-0000-0000-0000-00000000320"):
+            let result = Self.synthesisResponse(request)
+            statusCode = result.0
+            body = result.1
+        case ("GET", "/v1/memories/\(ConversationNavigationUITestFixture.memoryID)"):
+            statusCode = 200
+            body = Self.memoryJSON
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"):
             statusCode = 200
             body = """
@@ -599,8 +611,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 200
             body = Self.emailThreadJSON
         case ("POST", "/v1/email/refresh"):
-            statusCode = 202
-            body = "{\"operation_id\":\"\(Self.emailThreadID)\",\"run_id\":\"\(Self.emailRunID)\",\"status\":\"COMPLETED\",\"replayed\":false}"
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-budget-pause") {
+                statusCode = 402
+                body = """
+                {"error":{"code":"budget_exceeded","message":"Automatic email work is paused. Today: $16.30 spent, $23.00 reserved, $40.00 limit. Rolling 30 days: $347.57 spent, $400.00 limit. The next batch needs $1.00 available. Cached mail and editing remain available.","details":{"daily_spent":"16.2966295","daily_reserved":"23","daily_limit":"40","monthly_spent":"347.5703420","monthly_reserved":"23","monthly_limit":"400","next_reservation":"1","retry_at":"2099-01-01T00:00:00Z"},"request_id":"ui-budget"}}
+                """
+            } else {
+                statusCode = 202
+                body = "{\"operation_id\":\"\(Self.emailThreadID)\",\"run_id\":\"\(Self.emailRunID)\",\"status\":\"COMPLETED\",\"replayed\":false}"
+            }
         case ("POST", "/v1/email/feedback"):
             statusCode = 200
             body = "{\"feedback_id\":\"\(Self.emailThreadID)\",\"thread\":\(Self.emailThreadJSON)}"
@@ -1430,6 +1449,62 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         .replacingOccurrences(of: ConversationNavigationUITestFixture.memoryID, with: "00000000-0000-0000-0000-0000000007A5")
         .replacingOccurrences(of: "\"subject\":\"the user\"", with: "\"subject\":\"Maya Chen\"")
         .replacingOccurrences(of: "The user prefers dark mode.", with: "Maya Chen leads the design review team.")
+
+    private static func synthesisResponse(_ request: URLRequest) -> (Int, String) {
+        memoryLock.withLock {
+            let args = ProcessInfo.processInfo.arguments
+            let missing = (404, #"{"error":{"code":"not_found","message":"Not found","details":{},"request_id":"fixture"}}"#)
+            guard args.contains("--ui-testing-synthesis") else { return missing }
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            guard query.contains(URLQueryItem(name: "ceiling", value: "restricted")) else { return (400, "") }
+            var operation = try! JSONSerialization.jsonObject(with: Data(synthesisOperationJSON.utf8)) as! [String: Any]
+            var summary = try! JSONSerialization.jsonObject(with: Data(synthesisSummaryJSON.utf8)) as! [String: Any]
+            let merge = args.contains("--ui-testing-synthesis-merge")
+            let hidden = args.contains("--ui-testing-synthesis-hidden")
+            operation["kind"] = merge ? "merge" : "summary"
+            operation["reason"] = merge ? "equivalent" : "summarized"
+            if args.contains("--ui-testing-synthesis-connection") {
+                operation["kind"] = "hypothesis"; operation["reason"] = "inferred"
+                summary["record_kind"] = "hypothesis"
+                var content = summary["content"] as! [String: Any]
+                content["statement"] = "User may prefer calm environments."
+                content["subject"] = "Tentative connection"
+                content["authority"] = "inferred"; content["confidence"] = 0.35
+                let sources = (summary["sources"] as! [[String: Any]]).map { source in
+                    var value = source; value["omitted"] = false; return value
+                }
+                content["clauses"] = [["text": "User may prefer calm environments.", "source_ids": sources.map { $0["belief_id"] as! String }]]
+                summary["sources"] = sources; operation["sources"] = sources
+                summary["content"] = content
+                var operationContent = operation["content"] as! [String: Any]
+                operationContent["statement"] = content["statement"]
+                operationContent["subject"] = content["subject"]
+                operation["content"] = operationContent
+            }
+            if request.httpMethod == "POST" && request.url!.path.hasSuffix("/undo") {
+                guard request.value(forHTTPHeaderField: "Idempotency-Key") != nil else { return (400, "") }
+                synthesisUndone = true
+            } else if request.httpMethod == "POST" { synthesisReviewed = true }
+            else if request.httpMethod == "DELETE" { synthesisDeleted = true; return (204, "") }
+            if hidden || synthesisDeleted {
+                operation["content"] = NSNull(); operation["sources"] = []; operation["state"] = "invalidated"
+            }
+            if synthesisUndone { operation["state"] = "undone"; operation["revision"] = 2 }
+            summary["flagged_for_review"] = !synthesisReviewed
+            func encoded(_ object: Any) -> String { String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self) }
+            if request.url!.path == "/v1/memory-reconsolidations" {
+                let kind = query.first { $0.name == "kind" }?.value
+                let state = query.first { $0.name == "state" }?.value
+                let matches = (kind == nil || kind == operation["kind"] as? String) && (state == nil || state == operation["state"] as? String)
+                return (200, encoded(["items": matches ? [operation] : [], "next_cursor": NSNull()]))
+            }
+            if request.url!.path.hasPrefix("/v1/memory-reconsolidations/") { return (200, encoded(operation)) }
+            if request.url!.path.contains("00000000-0000-0000-0000-000000003202") { return synthesisDeleted ? missing : (200, encoded(summary)) }
+            return missing
+        }
+    }
+    private static let synthesisOperationJSON = #"{"id":"00000000-0000-0000-0000-000000003201","kind":"summary","state":"committed","revision":1,"reason":"summarized","policy":"reconsolidation@1","model_identity":"extractive@1","created_at":"2026-10-06T01:00:00Z","committed_at":"2026-10-06T01:00:00Z","content":{"memory_id":"00000000-0000-0000-0000-000000003202","subject":"the user","statement":"The user prefers dark mode.","clauses":[{"text":"The user prefers dark mode.","source_ids":["00000000-0000-0000-0000-000000000321"]}]},"sources":[{"belief_id":"00000000-0000-0000-0000-000000000321","content_revision":1,"subject":"the user","statement":"The user prefers dark mode.","session_id":"00000000-0000-0000-0000-000000000123","event_ids":[10,11],"omitted":false},{"belief_id":"00000000-0000-0000-0000-000000003203","content_revision":1,"subject":"the user","statement":"The user prefers quiet mornings.","session_id":"00000000-0000-0000-0000-000000000124","event_ids":[10,11],"omitted":true}]}"#
+    private static let synthesisSummaryJSON = #"{"id":"00000000-0000-0000-0000-000000003202","record_kind":"summary","operation_id":"00000000-0000-0000-0000-000000003201","revision":1,"status":"active","flagged_for_review":true,"created_at":"2026-10-06T01:00:00Z","updated_at":"2026-10-06T01:00:00Z","content":{"subject":"the user","statement":"The user prefers dark mode.","clauses":[{"text":"The user prefers dark mode.","source_ids":["00000000-0000-0000-0000-000000000321"]}],"belief_types":["preference"],"scope":"user","portability":"portable","sensitivity":"restricted","authority":"user","confidence":0.8,"last_evidence_at":"2026-09-01T00:00:00Z","valid_from":"2026-09-01T00:00:00Z","expires_at":null},"sources":[{"belief_id":"00000000-0000-0000-0000-000000000321","content_revision":1,"subject":"the user","statement":"The user prefers dark mode.","session_id":"00000000-0000-0000-0000-000000000123","event_ids":[10,11],"omitted":false},{"belief_id":"00000000-0000-0000-0000-000000003203","content_revision":1,"subject":"the user","statement":"The user prefers quiet mornings.","session_id":"00000000-0000-0000-0000-000000000124","event_ids":[10,11],"omitted":true}]}"#
 
     private static let memoryJSON = """
         {"id":"\(ConversationNavigationUITestFixture.memoryID)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}

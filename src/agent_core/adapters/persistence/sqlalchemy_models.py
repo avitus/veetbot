@@ -1027,8 +1027,18 @@ class MCPToolCatalogRow(Base):
 
 
 class MemoryRow(Base):
+    content_revision: Mapped[int] = mapped_column(BigInteger, server_default=text("1"))
+    creation_sequence: Mapped[int] = mapped_column(BigInteger)
     __tablename__ = "memories"
     __table_args__ = (
+        Index(
+            "ix_memories_recon_creation",
+            "tenant_id",
+            "principal_id",
+            "creation_sequence",
+            "id",
+            unique=True,
+        ),
         UniqueConstraint("tenant_id", "principal_id", "id", name="uq_memories_tenant_principal_id"),
         Index(
             "ix_memories_principal_live_position",
@@ -1140,6 +1150,8 @@ class IntegratedEpisodeRow(Base):
 
 
 class MemoryRevisionRow(Base):
+    content_revision: Mapped[int] = mapped_column(BigInteger, server_default=text("1"))
+    creation_sequence: Mapped[int] = mapped_column(BigInteger)
     __tablename__ = "memory_revisions"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -2195,6 +2207,22 @@ class PeopleHeadRow(Base):
             "id",
             postgresql_where=text("erased OR excluded"),
         ),
+        Index(
+            "ix_people_attribution_belief",
+            "tenant_id",
+            "principal_id",
+            text("(memory_attribution->>'belief_id')"),
+        ),
+        Index(
+            "ix_people_attribution_source",
+            "tenant_id",
+            "principal_id",
+            text("(memory_attribution->>'source_id')"),
+        ),
+        CheckConstraint(
+            "memory_attribution IS NULL OR jsonb_typeof(memory_attribution) = 'object'",
+            name="people_attribution_object",
+        ),
         CheckConstraint("revision > 0", name="people_head_revision_positive"),
         CheckConstraint("sensitivity BETWEEN 0 AND 3", name="people_head_sensitivity"),
         CheckConstraint(
@@ -2212,6 +2240,8 @@ class PeopleHeadRow(Base):
     sensitivity: Mapped[int] = mapped_column(Integer)
     erased: Mapped[bool] = mapped_column(Boolean, default=False)
     excluded: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    memory_attribution: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class PeopleRevisionRow(Base):
@@ -2291,3 +2321,392 @@ class PeopleLinkRow(Base):
     revision: Mapped[int] = mapped_column(Integer, primary_key=True)
     target_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     role: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class ReconsolidationOwnerRow(Base):
+    dreaming_state: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    __tablename__ = "reconsolidation_owners"
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    creation_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    change_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    current_job_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
+
+class ReconsolidationChangeRow(Base):
+    __tablename__ = "reconsolidation_changes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id"],
+            ["reconsolidation_owners.tenant_id", "reconsolidation_owners.principal_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    belief_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    content_revision: Mapped[int] = mapped_column(BigInteger)
+    creation_sequence: Mapped[int] = mapped_column(BigInteger)
+    reason: Mapped[str] = mapped_column(Text)
+
+
+class ReconsolidationDayRow(Base):
+    __tablename__ = "reconsolidation_days"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id"],
+            ["reconsolidation_owners.tenant_id", "reconsolidation_owners.principal_id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("charged_usd >= 0 AND charged_usd <= 2", name="recon_day_budget"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    charged_usd: Mapped[Decimal] = mapped_column(Numeric(20, 10), server_default=text("0"))
+
+
+class ReconsolidationJobRow(Base):
+    __tablename__ = "reconsolidation_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "principal_id", "id", name="uq_reconsolidation_jobs_owner_id"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id"],
+            ["reconsolidation_owners.tenant_id", "reconsolidation_owners.principal_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id", "principal_id", "due_day", "policy", name="uq_recon_jobs_due"
+        ),
+        CheckConstraint(
+            "slice_spent >= 0 AND slice_spent <= 0.25 AND requests BETWEEN 0 AND 2",
+            name="recon_slice_budget",
+        ),
+        CheckConstraint(
+            "claimed_groups BETWEEN 0 AND 4 AND operations BETWEEN 0 AND 8", name="recon_slice_work"
+        ),
+        Index("ix_recon_jobs_due", "state", "lease_expires_at"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    policy: Mapped[str] = mapped_column(Text)
+    due_day: Mapped[date] = mapped_column(Date)
+    generation: Mapped[int] = mapped_column(BigInteger)
+    full_bound: Mapped[int] = mapped_column(BigInteger)
+    change_bound: Mapped[int] = mapped_column(BigInteger)
+    full_cursor: Mapped[int] = mapped_column(BigInteger)
+    change_cursor: Mapped[int] = mapped_column(BigInteger)
+    lease_owner: Mapped[str] = mapped_column(Text)
+    lease_token: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    slice_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    slice_day: Mapped[date] = mapped_column(Date)
+    slice_spent: Mapped[Decimal] = mapped_column(Numeric(20, 10))
+    requests: Mapped[int] = mapped_column(Integer)
+    claimed_groups: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    operations: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    lease_expirations: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(BigInteger)
+
+
+class ReconsolidationGroupRow(Base):
+    __tablename__ = "reconsolidation_groups"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "principal_id", "id", name="uq_reconsolidation_groups_owner_id"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "job_id"],
+            [
+                "reconsolidation_jobs.tenant_id",
+                "reconsolidation_jobs.principal_id",
+                "reconsolidation_jobs.id",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id", "principal_id", "policy", "input_digest", name="uq_recon_groups_input"
+        ),
+        Index("ix_recon_groups_pending", "tenant_id", "principal_id", "state", "created_at", "id"),
+        CheckConstraint("attempts BETWEEN 0 AND 3", name="recon_group_attempts"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    policy: Mapped[str] = mapped_column(Text)
+    sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    input_digest: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer)
+    lease_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    reason: Mapped[str] = mapped_column(Text)
+
+
+class ReconsolidationSpendRow(Base):
+    __tablename__ = "reconsolidation_spend"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "principal_id", "id", name="uq_reconsolidation_spend_owner_id"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "job_id"],
+            [
+                "reconsolidation_jobs.tenant_id",
+                "reconsolidation_jobs.principal_id",
+                "reconsolidation_jobs.id",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "principal_id",
+            "lease_token",
+            "request_digest",
+            name="uq_recon_spend_request",
+        ),
+        Index("ix_recon_spend_day", "tenant_id", "principal_id", "day"),
+        CheckConstraint(
+            "maximum_usd > 0 AND maximum_usd <= 0.25 "
+            "AND charged_usd >= 0 AND charged_usd <= maximum_usd",
+            name="recon_reservation_budget",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    lease_token: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    day: Mapped[date] = mapped_column(Date)
+    request_digest: Mapped[str] = mapped_column(String(64))
+    maximum_usd: Mapped[Decimal] = mapped_column(Numeric(20, 10))
+    charged_usd: Mapped[Decimal] = mapped_column(Numeric(20, 10))
+    state: Mapped[str] = mapped_column(Text)
+    call_audit: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+
+
+class ReconsolidationAuditRow(Base):
+    __tablename__ = "reconsolidation_audits"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "job_id"],
+            [
+                "reconsolidation_jobs.tenant_id",
+                "reconsolidation_jobs.principal_id",
+                "reconsolidation_jobs.id",
+            ],
+            ondelete="CASCADE",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    lease_token: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    inspected: Mapped[int] = mapped_column(Integer)
+    excluded: Mapped[int] = mapped_column(Integer)
+    selected_groups: Mapped[int] = mapped_column(Integer)
+    not_selected: Mapped[int] = mapped_column(Integer)
+
+
+class ReconsolidationOperationRow(Base):
+    __tablename__ = "reconsolidation_operations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "group_id"],
+            [
+                "reconsolidation_groups.tenant_id",
+                "reconsolidation_groups.principal_id",
+                "reconsolidation_groups.id",
+            ],
+            ondelete="CASCADE",
+        ),
+        Index("ix_recon_operation_group", "tenant_id", "principal_id", "group_id"),
+        CheckConstraint("revision > 0 AND store_position > 0", name="recon_operation_revision"),
+        CheckConstraint(
+            "state IN ('committed', 'invalidated', 'undone')", name="recon_operation_state"
+        ),
+        Index("ix_recon_operation_page", "tenant_id", "principal_id", "created_at", "id"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    group_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    state: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(BigInteger)
+    store_position: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class ReconsolidationDependencyRow(Base):
+    __tablename__ = "reconsolidation_dependencies"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "operation_id"],
+            [
+                "reconsolidation_operations.tenant_id",
+                "reconsolidation_operations.principal_id",
+                "reconsolidation_operations.id",
+            ],
+            ondelete="CASCADE",
+        ),
+        Index("ix_recon_dependency_source", "tenant_id", "principal_id", "belief_id"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    belief_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_revision: Mapped[int] = mapped_column(BigInteger)
+    source_session_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    source_event_ids: Mapped[list[int]] = mapped_column(JSONB)
+    evidence_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReconsolidationMemberRow(Base):
+    __tablename__ = "reconsolidation_members"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "operation_id"],
+            [
+                "reconsolidation_operations.tenant_id",
+                "reconsolidation_operations.principal_id",
+                "reconsolidation_operations.id",
+            ],
+            ondelete="CASCADE",
+        ),
+        Index(
+            "uq_recon_active_member",
+            "tenant_id",
+            "principal_id",
+            "member_id",
+            unique=True,
+            postgresql_where=text("active"),
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    member_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    canonical_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    active: Mapped[bool] = mapped_column(Boolean)
+
+
+class ReconsolidationBlockRow(Base):
+    __tablename__ = "reconsolidation_blocks"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id"],
+            ["reconsolidation_owners.tenant_id", "reconsolidation_owners.principal_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    signature: Mapped[str] = mapped_column(Text, primary_key=True)
+    reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReconsolidationUndoRow(Base):
+    __tablename__ = "reconsolidation_undo"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "operation_id"],
+            [
+                "reconsolidation_operations.tenant_id",
+                "reconsolidation_operations.principal_id",
+                "reconsolidation_operations.id",
+            ],
+            ondelete="CASCADE",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    key_digest: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class ReconsolidationOperationHistoryRow(Base):
+    __tablename__ = "reconsolidation_operation_history"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "operation_id"],
+            [
+                "reconsolidation_operations.tenant_id",
+                "reconsolidation_operations.principal_id",
+                "reconsolidation_operations.id",
+            ],
+            ondelete="CASCADE",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    revision: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class ReconsolidationSummaryRow(Base):
+    __tablename__ = "reconsolidation_summaries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "operation_id"],
+            [
+                "reconsolidation_operations.tenant_id",
+                "reconsolidation_operations.principal_id",
+                "reconsolidation_operations.id",
+            ],
+            ondelete="CASCADE",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class ReconsolidationMemoryWriteRow(Base):
+    __tablename__ = "reconsolidation_memory_writes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "operation_id"],
+            [
+                "reconsolidation_operations.tenant_id",
+                "reconsolidation_operations.principal_id",
+                "reconsolidation_operations.id",
+            ],
+            ondelete="CASCADE",
+        ),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    key_digest: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class DreamingRunRow(Base):
+    __tablename__ = "dreaming_runs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id"],
+            ["reconsolidation_owners.tenant_id", "reconsolidation_owners.principal_id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_dreaming_runs_owner_time", "tenant_id", "principal_id", "started_at", "id"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)

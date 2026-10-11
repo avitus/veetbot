@@ -120,7 +120,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:776-779).
+  (email-experience.md:792-795).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -579,7 +579,7 @@ Gmail's own filter already holds back most spam, and Spam is excluded from
 refresh, so the target is junk that reached the Inbox anyway.
 
 **The verdict.** The importance assessment
-(email-experience.md:376-399) gains one boolean, `spam`, beside `bulk`. Spam
+(email-experience.md:392-415) gains one boolean, `spam`, beside `bulk`. Spam
 is unsolicited mail that is deceptive or unwanted and comes from a party with
 no relationship to the owner: phishing, scams, fake invoices and account
 notices, and mass cold marketing. Mail the owner signed up for is `bulk`, not
@@ -627,7 +627,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:774-794): the owner names one thread and the
+delta (email-experience.md:790-810): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.

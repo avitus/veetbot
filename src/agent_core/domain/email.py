@@ -272,6 +272,9 @@ class EmailTask(EmailValue):
     created_at: datetime
     reservation: Decimal = Decimal("0")
     settled_cost: Decimal | None = None
+    # A budget estimate, never a claim of known provider usage (ADR-0173).
+    budget_charge: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
+    budget_charge_reason: Literal["incomplete_usage", "missing_run"] | None = None
     stage: str = "queued"
     state: dict[str, object] = Field(default_factory=dict)
 

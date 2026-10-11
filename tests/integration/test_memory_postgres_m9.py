@@ -20,6 +20,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from agent_core.adapters.memory.in_memory import InMemoryMemoryStore
+from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
+from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
 from agent_core.domain.errors import ConflictError, NotFoundError
@@ -69,7 +71,7 @@ async def test_postgres_recall_common_word_and_snapshot_candidate_filters(
             )
             for index in range(321)
         ]
-        mirror = InMemoryMemoryStore(app.clock)
+        mirror = InMemoryMemoryStore(app.clock, ReconsolidationIndex(MemoryTransaction()))
         async with app.uow_factory() as uow:
             for record in noise:
                 await uow.memories.upsert_belief(record)
@@ -437,7 +439,7 @@ async def test_postgres_and_memory_stores_agree_on_lexical_matching(tmp_path: Pa
                 belief_type=BeliefType.FACT,
             )
 
-        mirror = InMemoryMemoryStore(composition.clock)
+        mirror = InMemoryMemoryStore(composition.clock, ReconsolidationIndex(MemoryTransaction()))
         for record in await composition.memory.list_memories():
             await mirror.upsert_belief(record)
 
@@ -488,7 +490,7 @@ async def test_postgres_and_memory_stores_agree_on_browse_filters_and_text(
             subject=non_ascii_subject,
         )
 
-        mirror = InMemoryMemoryStore(composition.clock)
+        mirror = InMemoryMemoryStore(composition.clock, ReconsolidationIndex(MemoryTransaction()))
         for record in await composition.memory.list_memories():
             await mirror.upsert_belief(record)
 
@@ -1364,7 +1366,7 @@ async def test_postgres_local_scope_filter_precedes_candidate_limit(tmp_path: Pa
             )
             for index in range(65)
         ]
-        mirror = InMemoryMemoryStore(app.clock)
+        mirror = InMemoryMemoryStore(app.clock, ReconsolidationIndex(MemoryTransaction()))
         async with app.uow_factory() as uow:
             for record in noise:
                 await uow.memories.upsert_belief(record)

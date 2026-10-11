@@ -181,7 +181,8 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         act = cast(RegisteredTool, registry.get("browser.act"))
         assert isinstance(navigate.implementation, BrowserNavigateTool)
         assert isinstance(observe.implementation, BrowserObserveTool)
-        assert observe.spec.version == "1.7.0"
+        assert observe.spec.version == "1.8.0"
+        assert registry.get("browser.observe", version="1.7.0").spec.version == "1.7.0"
         paged = cast(RegisteredTool, registry.get("browser.observe", version="1.1.0"))
         assert isinstance(paged.implementation, PagedBrowserObserveTool)
         legacy = cast(RegisteredTool, registry.get("browser.observe", version="1.0.0"))
@@ -1259,7 +1260,12 @@ async def test_task_grants_flag_off_composes_nothing() -> None:
         paths = _task_grant_paths(composition)
         standing = composition.tool_pipeline._standing_authorizer
 
-    assert standing is None
+    # ADR-0172 adds specific owner-action consent independently of task grants.
+    from agent_core.application.browser_follow_consent import BrowserFollowConsentAuthorizer
+
+    assert isinstance(standing, CompositeStandingAuthorizer)
+    assert len(standing._authorizers) == 1
+    assert isinstance(standing._authorizers[0], BrowserFollowConsentAuthorizer)
     assert act._presenter._enabled is False
     assert composition.services.browser_task_grants is None
     assert composition.services.approvals._task_grants is None  # type: ignore[attr-defined]

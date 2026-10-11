@@ -18,7 +18,7 @@ from agent_core.domain.browser_extraction import BrowserExtractionField
 class BrowserWorkflowStep(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    kind: Literal["navigate", "observe", "act", "extract"]
+    kind: Literal["navigate", "observe", "act", "extract", "collect_feed"]
     url: str | None = Field(default=None, max_length=4096)
     role: str | None = Field(default=None, min_length=1, max_length=64)
     name: str | None = Field(default=None, min_length=1, max_length=1024)
@@ -39,11 +39,15 @@ class BrowserWorkflowStep(BaseModel):
             "observe": {"kind", "postcondition"},
             "act": {"kind", "role", "name", "action", "value", "key", "delta_y", "postcondition"},
             "extract": {"kind", "collection_kind", "index", "fields", "row_limit"},
+            "collect_feed": {"kind", "role", "name"},
         }[self.kind]
         if not self.model_fields_set <= permitted:
             raise ValueError("workflow step mixes modes")
         if self.kind == "navigate":
             browser_origin(self.url or "")
+        elif self.kind == "collect_feed":
+            if not self.role or not self.name:
+                raise ValueError("feed collection requires a semantic scroll anchor")
         elif self.kind == "act":
             if not self.role or not self.name or self.postcondition is None:
                 raise ValueError("actions require a unique semantic target and postcondition")
@@ -73,7 +77,8 @@ class BrowserWorkflowRecipe(BaseModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     version: int = Field(ge=1, le=10000, strict=True)
     origin: str
-    intents: list[str] = Field(min_length=1, max_length=8)
+    intents: list[str] = Field(default_factory=list, max_length=8)
+    intent_sha256: list[str] = Field(default_factory=list, max_length=8)
     steps: list[BrowserWorkflowStep] = Field(min_length=1, max_length=16)
     maximum_seconds: int = Field(default=900, ge=1, le=900, strict=True)
 
@@ -84,6 +89,12 @@ class BrowserWorkflowRecipe(BaseModel):
 
     @model_validator(mode="after")
     def confined_recipe(self) -> BrowserWorkflowRecipe:
+        import re
+
+        if not self.intents and not self.intent_sha256:
+            raise ValueError("workflow requires exact intent evidence")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", digest) for digest in self.intent_sha256):
+            raise ValueError("workflow intent digests must be SHA-256")
         if any(not intent.strip() or len(intent) > 512 for intent in self.intents):
             raise ValueError("workflow intent is empty or too long")
         if self.steps[0].kind != "navigate":
@@ -92,6 +103,13 @@ class BrowserWorkflowRecipe(BaseModel):
             step.url is not None and browser_origin(step.url) != self.origin for step in self.steps
         ):
             raise ValueError("workflow navigation leaves its origin")
+        if any(step.kind == "collect_feed" for step in self.steps) and (
+            self.origin != "https://x.com"
+            or len(self.steps) != 2
+            or self.steps[0].url != "https://x.com/home"
+            or self.steps[1].kind != "collect_feed"
+        ):
+            raise ValueError("the reviewed feed recipe only reads the X home feed")
         return self
 
 

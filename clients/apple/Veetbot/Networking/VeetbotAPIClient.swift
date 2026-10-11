@@ -130,17 +130,28 @@ public struct VeetbotAPIClient: Sendable {
     public func submitMessage(
         sessionID: UUID,
         content: [ContentBlock],
-        idempotencyKey: String = UUID().uuidString.lowercased()
+        idempotencyKey: String = UUID().uuidString.lowercased(),
+        browserProfileID: UUID? = nil
     ) async throws -> SubmitResult {
         try await transport.send(
             TransportRequest(
                 method: .post,
                 path: "/v1/sessions/\(sessionID.uuidString)/messages",
-                body: try JSONEncoder.server.encode(MessageBody(content: content)),
+                body: try JSONEncoder.server.encode(MessageBody(content: content, browserProfileID: browserProfileID)),
                 headers: ["Idempotency-Key": idempotencyKey],
                 retryAttempts: 3
             )
         )
+    }
+
+    public func connectWebsite(sessionID: UUID, profileID: UUID) async throws -> UUID? {
+        let result: BrowserConnectionResult = try await transport.send(TransportRequest(
+            method: .put,
+            path: "/v1/sessions/\(sessionID.uuidString)/website",
+            body: try JSONEncoder.server.encode(BrowserConnectionBody(browserProfileID: profileID)),
+            retryAttempts: 3
+        ))
+        return result.runID
     }
 
     public func getRun(_ runID: UUID) async throws -> RunView {
@@ -1085,6 +1096,21 @@ struct BeginBrowserAuthenticationBody: Encodable {
 
 private struct MessageBody: Encodable {
     let content: [ContentBlock]
+    var browserProfileID: UUID? = nil
+    enum CodingKeys: String, CodingKey {
+        case content
+        case browserProfileID = "browser_profile_id"
+    }
+}
+
+private struct BrowserConnectionBody: Encodable {
+    let browserProfileID: UUID
+    enum CodingKeys: String, CodingKey { case browserProfileID = "browser_profile_id" }
+}
+
+private struct BrowserConnectionResult: Decodable {
+    let runID: UUID?
+    enum CodingKeys: String, CodingKey { case runID = "run_id" }
 }
 
 private struct InputBody: Encodable {

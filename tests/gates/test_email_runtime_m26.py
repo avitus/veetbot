@@ -664,6 +664,40 @@ async def test_email_schema_rejection_releases_automatic_reservation() -> None:
         assert task.stage == "failed"
 
 
+async def test_email_unknown_model_failure_is_recorded_without_automatic_retry() -> None:
+    """An uncertain request must not silently spend another attempt in the same slice."""
+    from dataclasses import replace
+    from uuid import UUID
+
+    from agent_core.domain.messages import FakeModelScript, ModelTransientError
+    from tests.gates.test_email_m18 import _email_settings
+
+    failure = ModelTransientError(
+        provider="fake",
+        model="scripted",
+        attempt_id=UUID(int=0),
+        message="The model transport timed out.",
+        provider_code="transport_error",
+        stream_had_output=False,
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[ScriptedTurn(fail_with=failure), _assessment_turn()]),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.FAILED
+        assert run.usage.model_calls == 1
+        provider = app.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        assert [request.maximum_provider_attempts for request in provider.requests] == [1]
+        async with app.uow_factory() as uow:
+            events = await uow.events.list_after(run.session_id, 0, app.principal, run_id=run.id)
+        assert len([event for event in events if event.event_type == "model.request.started"]) == 1
+        assert len([event for event in events if event.event_type == "model.response.failed"]) == 1
+
+
 def _assessment_turn(
     *, needs_reply: bool = False, evidence: str = "Please approve the board materials."
 ) -> ScriptedTurn:

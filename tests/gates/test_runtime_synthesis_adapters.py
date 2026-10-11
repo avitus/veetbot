@@ -26,7 +26,10 @@ from tests.gates.test_runtime_tool_budget import _settings
 
 
 @pytest.mark.parametrize("adapter", ["openai", "anthropic", "chat_completions"])
-async def test_real_adapter_loop_synthesizes_before_repeated_call_failure(adapter: str) -> None:
+@pytest.mark.parametrize("trigger", ["repetition", "model_calls"])
+async def test_real_adapter_loop_synthesizes_before_dispatch_guard_failure(
+    adapter: str, trigger: str
+) -> None:
     """The application, runtime and real request encoder agree on the final turn."""
 
     requests: list[dict[str, Any]] = []
@@ -73,7 +76,12 @@ async def test_real_adapter_loop_synthesizes_before_repeated_call_failure(adapte
             adapter
         ],
         model_provider_overrides={adapter: provider},
-        limits=RunLimits(max_steps=12, max_model_calls=12, max_tool_calls=20),
+        limits=RunLimits(
+            max_steps=12,
+            max_model_calls=4 if trigger == "model_calls" else 12,
+            max_tool_calls=20,
+            synthesis_reserve_model_calls=2 if trigger == "model_calls" else 0,
+        ),
     ) as composition:
         run_id = await composition.runs.submit("Research and report what you found.")
         run = await composition.runs.wait_terminal(run_id)
@@ -81,7 +89,8 @@ async def test_real_adapter_loop_synthesizes_before_repeated_call_failure(adapte
 
     assert run.status is RunStatus.COMPLETED, run.failure
     assert run.final_message == "Findings are partial; research repeated."
-    assert len(requests) == 5
+    research_calls = 1 if trigger == "model_calls" else 4
+    assert len(requests) == research_calls + 1
     assert all("tool_choice" not in request for request in requests[:-1])
     if adapter == "chat_completions":
         assert "Available tool schemas" in str(requests[0])
@@ -89,5 +98,5 @@ async def test_real_adapter_loop_synthesizes_before_repeated_call_failure(adapte
         assert all("tools" not in request for request in requests)
     else:
         assert requests[-1]["tools"] == requests[0]["tools"]
-    assert [event.event_type for event in events].count("tool.call.completed") == 4
+    assert [event.event_type for event in events].count("tool.call.completed") == research_calls
     assert [event.event_type for event in events].count("run.completed") == 1

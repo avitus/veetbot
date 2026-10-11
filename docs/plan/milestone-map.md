@@ -6,6 +6,11 @@ canonical: true
 
 # Milestone map
 
+Milestone 32 memory reconsolidation was authorized on 2026-10-02. Its
+[detailed design](memory-reconsolidation.md) declares twenty-four gates,
+registered on 2026-10-03. The first two observe the frozen evaluation yardstick;
+all runtime and release gates remain pending. The verified ceiling stays 14.
+
 The gate registry makes `milestone` a required field on every gate. Ten
 specifications declared eighty-nine gates between them when this
 document was written. One of the ten supplied that field per gate, four
@@ -327,9 +332,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 34 subject specifications declare 565 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 574
-declarations, 571 registry entries once the 3 aliases are subtracted.
+The 35 subject specifications declare 589 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 598
+declarations, 595 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1690,6 +1695,36 @@ Milestone 31 gates in the existing email area.
 23 gate.email.unsubscribe_release_evidence case 31
 ```
 
+[memory-reconsolidation.md](memory-reconsolidation.md) declares twenty-four
+Milestone 32 gates in the memory area.
+
+```text
+1 gate.memory.recon_corpus_frozen structural 32
+2 gate.memory.recon_scorer_false_merges case 32
+3 gate.memory.recon_repository_parity structural 32
+4 gate.memory.recon_lease_recovery case 32
+5 gate.memory.recon_fair_inventory property 32
+6 gate.memory.recon_bounded_groups case 32
+7 gate.memory.recon_budget_admission case 32
+8 gate.memory.recon_provider_contract case 32
+9 gate.memory.recon_exact_merge case 32
+10 gate.memory.recon_summary_fidelity case 32
+11 gate.memory.recon_connection_grounding case 32
+12 gate.memory.recon_dependency_fence case 32
+13 gate.memory.recon_source_erasure case 32
+14 gate.memory.recon_undo_durable case 32
+15 gate.memory.recon_evidence_clock case 32
+16 gate.memory.recon_trust_boundary case 32
+17 gate.memory.recon_recall_visibility case 32
+18 gate.memory.recon_snapshot_delta case 32
+19 gate.memory.recon_scoped_surfaces case 32
+20 gate.memory.recon_native_journeys case 32
+21 gate.memory.recon_comparative_quality case 32
+22 gate.memory.recon_activation_bound property 32
+23 gate.memory.recon_compatibility case 32
+24 gate.memory.recon_release_evidence case 32
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1790,6 +1825,7 @@ milestone  new gates  cumulative  the earliest of them
 30                 5         548  restrictive-only advisory approval through the judgment port
 31                23         571  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent,
                                   suspected-spam flag and thread Report spam
+32                24         595  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1810,15 +1846,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of five hundred and seventy-one gates are green before
+2.  **Forty-one of five hundred and ninety-five gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches five hundred and seventy-one, which is every
-registry entry, at Milestone 31. Six of Milestone 10's gates are
+The cumulative column reaches five hundred and ninety-five, which is every
+registry entry, at Milestone 32. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1838,7 +1874,8 @@ and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29 adds thir
 `gate.folder.*` entries and four `gate.judgment.*` entries, and Milestone 30
 returns to the `gate.policy.*` area with five. Milestone 31 adds twenty
 `gate.email.unsubscribe_*` and three `gate.email.spam_*` entries to the email
-area. Every authorized milestone now has a specification
+area. Milestone 32 adds twenty-four
+`gate.memory.recon_*` entries. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

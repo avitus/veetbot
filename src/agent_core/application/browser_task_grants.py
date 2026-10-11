@@ -111,8 +111,25 @@ async def read_task_grant_context(
             profile = None
     grant = await uow.browser_task_grants.active_for_session(session_id, principal, now=now)
     scopes = await uow.browser_task_grants.get_scopes(principal)
+    owner_run_id = None
+    active = await uow.runs.active_for_session(session_id, principal)
+    if active is not None:
+        seed = await uow.events.latest_before(
+            session_id, active.seed_event_sequence + 1, "user.message.created", principal
+        )
+        if (
+            seed is not None
+            and seed.run_id == active.id
+            and seed.actor_type == "principal"
+            and seed.actor_id == principal.principal_id
+        ):
+            owner_run_id = active.id
     return TaskGrantSessionContext(
-        session=session, profile=profile, active_grant=grant, scopes=scopes.scopes
+        session=session,
+        profile=profile,
+        active_grant=grant,
+        scopes=scopes.scopes,
+        owner_run_id=owner_run_id,
     )
 
 
@@ -170,6 +187,7 @@ class BrowserTaskGrantAuthorizer:
             session_tenant_id=session.tenant_id,
             session_principal_id=session.principal_id,
             session_metadata=session.metadata,
+            owner_run_id=context.owner_run_id,
             tenant_id=principal.tenant_id,
             principal_id=principal.principal_id,
             turn=turn,

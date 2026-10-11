@@ -86,13 +86,29 @@ class BrowserWorkflowRunner:
             if latest_input is None or latest_input.trust is not TrustLevel.USER:
                 return None
             inputs = [part.text for part in latest_input.content if isinstance(part, TextPart)]
+            text = _intent("\n".join(inputs))
+            digest = hashlib.sha256(text.encode()).hexdigest()
             candidates = [
                 recipe
                 for recipe in self._catalog.recipes
                 if recipe.origin in profile.allowed_origins
-                and any(
-                    _intent(text) in {_intent(intent) for intent in recipe.intents}
-                    for text in inputs[-1:]
+                and len(inputs) == len(latest_input.content)
+                and (
+                    text in {_intent(intent) for intent in recipe.intents}
+                    or digest in recipe.intent_sha256
+                )
+                and (
+                    not any(step.kind == "collect_feed" for step in recipe.steps)
+                    or any(
+                        spec.name == "browser.observe"
+                        and "articles"
+                        in spec.input_schema.get("properties", {})
+                        .get("extract", {})
+                        .get("properties", {})
+                        .get("kind", {})
+                        .get("enum", [])
+                        for spec in context.context_plan.pinned_tool_specs
+                    )
                 )
             ]
             if len(candidates) != 1 or profile.status is not BrowserProfileStatus.READY:
@@ -110,6 +126,11 @@ class BrowserWorkflowRunner:
                 "phase": "start",
                 "call_id": None,
                 "status": "running",
+                "report": (
+                    "x_home_briefing"
+                    if any(step.kind == "collect_feed" for step in recipe.steps)
+                    else None
+                ),
                 "expires_at": (
                     context.clock.now() + timedelta(seconds=recipe.maximum_seconds)
                 ).isoformat(),
@@ -139,6 +160,19 @@ class BrowserWorkflowRunner:
             ):
                 raise ConflictError("browser workflow action belongs to an old profile generation")
             state["generation"] = profile.generation
+            if state.get("report") == "x_home_briefing":
+                uncertain = state["phase"] == "feed_scroll" or state.get("feed", {}).get(
+                    "uncertain_scroll", False
+                )
+                state.update(completed_steps=0, phase="start", call_id=None)
+                state["feed"] = {
+                    "post_ids": [],
+                    "evidence_call_ids": [],
+                    "windows": 0,
+                    "scrolls": state.get("feed", {}).get("scrolls", 0),
+                    "retries": state.get("feed", {}).get("retries", 0),
+                    "uncertain_scroll": uncertain,
+                }
             # An interrupted write is reconciled below. Only pre-action reads can restart.
             if state["phase"] not in {"action", "verify"}:
                 state.update(phase="start", call_id=None)
@@ -169,6 +203,15 @@ class BrowserWorkflowRunner:
                 None,
             )
             observed = _observation(result)
+            if step.kind == "collect_feed":
+                from agent_core.runtime.browser_feed import advance_feed
+
+                await advance_feed(
+                    context, state, step, result, observed, queue=self._queue, stop=self._stop
+                )
+                if state["status"] != "running":
+                    return None
+                continue
             if result is not None:
                 if state["phase"] == "action":
                     if (
@@ -288,6 +331,15 @@ class BrowserWorkflowRunner:
         name: str,
         arguments: dict[str, Any],
     ) -> None:
+        # A delayed retry must recheck admission after sleeping, not only at the loop head.
+        context.token.raise_if_cancelled()
+        if (
+            context.clock.now() >= datetime.fromisoformat(state["expires_at"])
+            or state["calls"] >= 64
+            or context.run.step_count >= context.run.limits.max_steps - 1
+        ):
+            await self._stop(context, state, "bounded_stop")
+            return
         available = set(context.context_plan.tool_names) | set(
             context.context_plan.deferred_tool_names
         )
@@ -353,7 +405,13 @@ class BrowserWorkflowRunner:
         context.checkpoint.conversation.extend(results)
         apply_tool_evidence(context.checkpoint.working_state, calls)
         context.checkpoint.pending_tool_calls = []
-        await recover_browser_failure(context, step, calls, results)
+        before_recovery = context.run.tool_call_count
+        try:
+            await recover_browser_failure(context, step, calls, results)
+        finally:
+            # Recovery reads/questions spend this workflow's ceiling too, including
+            # a question that suspends before returning to this dispatcher.
+            state["calls"] += context.run.tool_call_count - before_recovery
         await checkpoint(context, "browser_workflow_progress")
 
     async def _stop(self, context: RunContext, state: dict[str, Any], status: str) -> None:
