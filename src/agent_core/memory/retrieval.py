@@ -9,6 +9,7 @@ import re
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -54,6 +55,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
+RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@5"
 OWNED_RESOURCE_POLICY_VERSION = "owned-resources@1"
 RECONSOLIDATION_RETRIEVAL_POLICY_VERSION = "retrieval-reconsolidation@2"
 # Episode search reads the session stream in bounded pages: never the whole
@@ -183,12 +185,14 @@ class DeterministicQueryFormer:
         budget_tokens: int = 2_000,
         max_items: int = 20,
         min_score: float = 0.12,
+        candidate_selection: Literal["recent", "relevance"] = "relevance",
     ) -> None:
         self._principal = principal
         self._scope = current_scope
         self._budget_tokens = budget_tokens
         self._max_items = max_items
         self._min_score = min_score
+        self._candidate_selection = candidate_selection
 
     def form(
         self,
@@ -219,6 +223,7 @@ class DeterministicQueryFormer:
                 subjects=subjects,
                 structured_belief_types=_personal_belief_types(text),
                 include_owned_resources=recalls_owned_resources(text),
+                candidate_selection=self._candidate_selection,
                 profile=RecallProfile.TASK,
                 budget_tokens=self._budget_tokens,
                 max_items=self._max_items,
@@ -375,6 +380,12 @@ class HybridMemoryRetriever:
             else RETRIEVAL_POLICY_VERSION
         )
         render_policy = RETRIEVAL_POLICY_VERSION
+        if effective_query.candidate_selection == "relevance":
+            if policy_version == RETRIEVAL_POLICY_VERSION:
+                policy_version = RELEVANCE_RETRIEVAL_POLICY_VERSION
+            else:
+                policy_version += f"+{RELEVANCE_RETRIEVAL_POLICY_VERSION}"
+            render_policy = RELEVANCE_RETRIEVAL_POLICY_VERSION
         if effective_query.include_owned_resources:
             policy_version += f"+{OWNED_RESOURCE_POLICY_VERSION}"
             render_policy += f"+{OWNED_RESOURCE_POLICY_VERSION}"
@@ -615,6 +626,7 @@ class HybridMemoryRetriever:
                     query.model_copy(
                         update={
                             "include_ids": batch,
+                            "exclude_ids": (),
                             "min_store_position": 0,
                             "max_items": len(batch),
                         }

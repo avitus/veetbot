@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:837), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:841), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:779-781).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:299-301), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:879-882),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:883-886),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:874), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:878), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:806) are
 all written down, and none of them runs.
 
@@ -702,6 +702,10 @@ maintenance worker gains a trace sweep beside the memory sweep. Knowledge
 retrieval writes the same trace record, so it stamps its expiry from the same
 profile the memory retriever reads rather than from a literal of its own.
 
+Milestone 33 supersedes newest-first task candidate selection below through
+[general memory recall](general-memory-recall.md) and ADR-0178. The frozen M16
+control retains its explicit legacy policy and original baseline.
+
 **Lexical parity between the adapters.** PostgreSQL full-text search currently
 requires every query term; the in-memory adapter applies no lexical predicate
 at all, so the two stores answer differently and the in-memory tier is not a
@@ -819,7 +823,7 @@ moves to now; `last_evidence_at` and the compatibility-only
 `last_reinforced_at` do not move. A returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:879-882): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:883-886): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.

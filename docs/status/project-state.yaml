@@ -12,6 +12,8 @@ project:
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   current_milestone: 14
   active_milestone: 15
+  # ADR-0178 authorizes parallel Milestone 33 on 2026-10-11: general recall,
+  # measured semantic search and bounded source recovery; activation needs evidence.
   # ADR-0172 records the owner-approved same-chat website continuation repair,
   # interactive authority for owner replies, and specific single-action X follow
   # consent. No milestone or gate moves; production acceptance awaits delivery.
@@ -2499,6 +2501,31 @@ milestones:
         still point at the pending check, and binding them to the dashboard
         and live evidence above will change the milestone's head. Verified
         from GitHub on 2026-09-28.
+
+  "33":
+    title: General memory search and recall
+    status: in_progress
+    authorized_on: 2026-10-11
+    design: docs/plan/general-memory-recall.md
+    adr: docs/adr/0178-general-memory-recall.md
+    gates_registered: 12
+    implementation_status: candidate_selection_repaired_semantic_pilot_measured
+    diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
+    limitations:
+      - seeded retrieval is not formation, answer-use or held-out release evidence
+      - semantic candidate recall reaches 97 percent but index lifecycle and answer-use gates remain open
+    authorized_scope:
+      - cross-category retrieval and implicit-use evaluation with frozen controls
+      - relevance before candidate limits with persistence parity
+      - measured semantic retrieval and optional pgvector after material lift
+      - bounded task-aware query formation, reranking and source recovery
+      - versioned derived indexes, invalidation and evidence-gated activation
+    deferred_scope:
+      - external memory services, arbitrary graph inference, training and RL
+      - automatic historical re-extraction and unattended dreaming activation
+    open_items:
+      - complete the staged implementation and comparative activation evidence
+      - authorized PR review, hosted CI and separately authorized production delivery
 
 # Open work that no active milestone owns: owner-only steps of non-milestone
 # ADRs, and specification-versus-code gaps found in completed milestones.

@@ -1,0 +1,402 @@
+# Synthetic, independently specified information needs. Columns: family, subject, stored statement, question.
+# Paraphrases and load variants are not independent cases. No real owner data.
+attributes	vehicle	User drives an Aster S8 hybrid.	Which fuel should I put in my car?
+attributes	computer	User works on a Framework 13 laptop.	Which charger fits my laptop?
+attributes	telephone	User carries a Fairphone 5.	Find a protective case for my phone.
+attributes	printer	User prints with a Brother HL-L2350DW.	Which cartridge fits my printer?
+attributes	camera	User shoots with a Fujifilm X-T5.	Which spare battery fits my camera?
+attributes	bicycle	User rides a Brompton C Line.	How should I pack my bike for the train?
+attributes	instrument	User plays a Yamaha P-125 keyboard.	Which sustain pedal works with my instrument?
+attributes	coffee equipment	User brews with an AeroPress Original.	How fine should I grind beans for my brewer?
+attributes	vacuum	User cleans with a Miele C3.	Which replacement bags fit my vacuum?
+attributes	router	User's home network uses an Asus RT-AX86U.	Where do I change the Wi-Fi password on my router?
+attributes	watch	User wears a Garmin Forerunner 265.	Which charging cable fits my watch?
+attributes	reader	User reads on a Kobo Clara BW.	Can I borrow library books on my reader?
+attributes	stove	User cooks on an induction hob.	Will my new copper pan work on the stove?
+attributes	heating	User heats the house with an air-source heat pump.	Why might the outdoor heating unit frost over?
+attributes	water supply	User's house uses a private well.	Who is responsible for testing our drinking water?
+attributes	sewer	User's house uses a septic tank.	Can I flush disposable wipes at home?
+attributes	garden soil	User's garden has heavy clay soil.	How should I improve drainage in the flower beds?
+attributes	balcony exposure	User's balcony faces north.	Which flowers tolerate the light on my balcony?
+attributes	parking clearance	User's garage doorway is 1.95 metres high.	Will a roof box clear my garage entrance?
+attributes	workspace dimensions	User's desk is 90 centimetres wide.	Can I fit two large monitors on my desk?
+attributes	screen	User uses a Dell U2723QE display.	Can my monitor charge a laptop over USB-C?
+attributes	workstation architecture	User's workstation has an ARM processor.	Which architecture should I download for my desktop?
+attributes	operating system	User's main workstation runs Fedora Linux.	How do I install this package on my usual computer?
+attributes	internet connection	User's home broadband uploads at 20 megabits per second.	How long will uploading a large backup take at home?
+attributes	electrical service	User's workshop has only 120-volt outlets.	Can I plug a 240-volt tool into the workshop?
+attributes	suitcase	User's carry-on measures 55 by 35 by 20 centimetres.	Compare my bag with this airline's cabin limit.
+attributes	shoe size	User wears EU size 42 shoes.	Which size should I select for these trainers?
+attributes	handedness	User is left-handed.	Which ergonomic mouse layout suits me?
+attributes	vision aid	User needs reading glasses for close work.	Suggest a comfortable setup for small-print proofreading.
+attributes	wheelchair dimensions	User's wheelchair is 68 centimetres wide.	Check whether a 65-centimetre doorway works for me.
+attributes	dog size	User's dog weighs 28 kilograms.	What size travel crate should I look for?
+attributes	cat feeding device	User has a PetSafe five-meal feeder.	How many meals can my automatic feeder hold?
+attributes	fish tank	User keeps a 90-litre freshwater aquarium.	Estimate how much water a quarter tank change requires.
+attributes	solar installation	User has a five-kilowatt rooftop solar array.	Use my installed system size in the solar estimate.
+attributes	electricity tariff	User has a time-of-use electricity tariff.	When might running appliances cost me less?
+attributes	charging access	User can charge an electric vehicle overnight at home.	Would daily public charging be necessary for me?
+attributes	tennis equipment	User plays with a Wilson Clash 100 racquet.	Which stringing advice applies to my racquet?
+attributes	ski equipment	User's skis are 172 centimetres long.	Will a 165-centimetre travel bag fit my skis?
+attributes	sewing machine	User sews with a Janome HD3000.	Find the bobbin type for my sewing machine.
+attributes	yarn supplies	User has worsted-weight wool yarn.	Which knitting pattern weight matches my supplies?
+attributes	bread machine	User has a Panasonic SD-YR2550 bread maker.	Does my bread machine have a gluten-free program?
+attributes	oven capacity	User's countertop oven holds a 30-centimetre tray.	Will this 35-centimetre baking sheet fit?
+attributes	freezer space	User has only one small freezer drawer.	Scale the batch-cooking plan to my storage space.
+attributes	photography lens	User owns a 35-millimetre prime lens.	Which focal length should the camera-bag checklist include?
+attributes	microphone	User records with a Shure SM58 microphone.	Does my microphone need phantom power?
+attributes	audio interface	User has a Focusrite Scarlett 2i2 interface.	How many microphone inputs do I have available?
+attributes	boat storage	User keeps a kayak outdoors without a roof.	Suggest winter protection for where I keep the kayak.
+attributes	language level	User can converse in Spanish at B1 level.	Choose a Spanish practice exercise at my level.
+attributes	professional qualification	User is a certified civil engineer.	Tailor the bridge-design explanation to my background.
+attributes	home altitude	User's home is 1800 metres above sea level.	Should a baking recipe account for where I live?
+preferences	diet	User eats vegetarian meals.	What should we order for dinner?
+preferences	food intolerance	User avoids lactose.	Suggest a creamy dessert I can eat.
+preferences	nut restriction	User must avoid peanuts.	Check this snack choice against my food restrictions.
+preferences	spice tolerance	User likes mild food.	Which curry heat level should I order?
+preferences	caffeine	User avoids caffeine after noon.	Suggest a drink for this afternoon.
+preferences	breakfast	User dislikes sweet breakfasts.	Give me a breakfast idea for tomorrow.
+preferences	texture	User avoids mushrooms because of their texture.	Suggest a suitable pasta filling.
+preferences	coffee style	User drinks black filter coffee.	What should I ask the cafe to make for me?
+preferences	tea choice	User prefers unsweetened green tea.	Pick a tea order that suits me.
+preferences	cooking effort	User wants weeknight meals ready within twenty minutes.	Plan dinner for a busy Tuesday.
+preferences	serving count	User usually cooks for three people.	How many portions should tonight's recipe make?
+preferences	food waste	User prioritizes using vegetables already in the fridge.	How should we choose this week's recipes?
+preferences	transport	User prefers trains to short-haul flights.	Suggest how I should travel between nearby cities.
+preferences	airline seating	User prefers aisle seats.	Which seat should I select when checking in?
+preferences	hotel location	User prefers quiet hotels away from nightlife.	Choose a suitable area for my hotel.
+preferences	accommodation access	User needs step-free access to accommodation.	What must I verify before booking this guesthouse?
+preferences	trip pace	User prefers one major attraction per day.	How packed should the sightseeing itinerary be?
+preferences	museums	User enjoys small local history museums.	Suggest a rainy-day activity on the trip.
+preferences	crowds	User avoids crowded tourist sites.	Choose between a busy landmark and a quiet neighborhood walk.
+preferences	flight timing	User avoids departures before seven in the morning.	Which outbound flight timing suits me?
+preferences	writing length	User prefers concise prose.	Draft the project update in my usual style.
+preferences	formatting	User dislikes bullet-heavy reports.	How should you format this briefing for me?
+preferences	spelling	User prefers British English spelling.	Edit this paragraph using my language convention.
+preferences	measurements	User prefers metric units.	Present the recipe quantities in my preferred units.
+preferences	temperature units	User understands temperatures in Celsius.	Use the right units in tomorrow's forecast summary.
+preferences	date notation	User prefers ISO-format dates.	Format the dates in this export as I prefer.
+preferences	name pronunciation	User pronounces their name as Ree-ah.	How should the introduction pronounce my name?
+preferences	communication channel	User prefers email for nonurgent updates.	How should a routine project update reach me?
+preferences	notifications	User wants notifications only for actionable changes.	Should an unchanged monitoring result interrupt me?
+preferences	meeting length	User prefers meetings capped at twenty-five minutes.	How long should this routine catch-up be?
+preferences	meeting style	User wants an agenda before accepting meetings.	What should the invitation include before I respond?
+preferences	feedback style	User prefers direct feedback with concrete examples.	How should you explain the weaknesses in this draft?
+preferences	learning style	User learns best by working through examples.	Teach me this new concept in a useful way.
+preferences	code examples	User prefers Python examples.	Which language should the tutorial snippets use?
+preferences	editor theme	User prefers a light editor theme.	Choose a default appearance for my new coding setup.
+preferences	keyboard noise	User dislikes loud mechanical keyboards.	Which keyboard characteristic should the recommendation prioritize?
+preferences	clothing materials	User avoids wool next to the skin.	Suggest a comfortable base-layer material for me.
+preferences	shoe fastening	User prefers slip-on shoes.	Which shoe fastening should I look for?
+preferences	furniture finish	User prefers matte finishes.	Choose between glossy and matte desk surfaces for me.
+preferences	cleaning fragrance	User prefers fragrance-free cleaning products.	What kind of detergent should I buy?
+preferences	music focus	User concentrates best with instrumental music.	Choose background audio for my writing session.
+preferences	reading genre	User enjoys historical mysteries.	Suggest the kind of novel I might enjoy next.
+preferences	film intensity	User avoids graphic violence in films.	What should the movie selection screen out?
+preferences	games	User prefers cooperative board games.	Pick a game style for our evening.
+preferences	exercise setting	User prefers outdoor exercise.	Suggest where I should do a light workout.
+preferences	workout impact	User prefers low-impact workouts.	Choose between jumping drills and a gentle cycling session.
+preferences	shopping repairability	User prioritizes repairability over thinness in electronics.	What should matter most when comparing these laptops?
+preferences	packaging	User prefers refillable toiletries.	Which packaging option fits my shopping priorities?
+preferences	budget style	User prefers fixed-price quotes.	Which billing arrangement should I request from the contractor?
+preferences	gift style	User prefers experiences to physical gifts.	What kind of birthday present would suit me?
+relationships	sister occupation	User's sister Mara is a landscape architect.	Who in my family could advise on a garden layout?
+relationships	brother hobby	User's brother Theo enjoys birdwatching.	Suggest a birthday activity for my brother.
+relationships	partner dietary needs	User's partner Jules eats vegan food.	What food constraint applies when planning dinner for my partner?
+relationships	mother mobility	User's mother Elena uses a walking frame.	What access detail matters for a restaurant visit with my mother?
+relationships	father interests	User's father Sam likes railway history.	Choose a museum theme for an outing with my father.
+relationships	child reading level	User's daughter Nina reads independently at age eight.	What reading level should a book gift for my daughter target?
+relationships	son sport	User's son Arlo plays badminton.	Which sport should his birthday equipment gift support?
+relationships	grandmother language	User's grandmother Lian prefers Mandarin.	Which language should I use for a message to my grandmother?
+relationships	grandfather transport	User's grandfather Hugo no longer drives.	What transport assumption should I avoid when inviting my grandfather?
+relationships	emergency contact	User's emergency contact is their cousin Priya.	Who should I list as my emergency contact?
+relationships	manager	User reports to Dana Ortiz.	Who should receive my leave request at work?
+relationships	project sponsor	Morgan Lee sponsors the user's warehouse migration.	Who should be consulted on a major scope change to the migration?
+relationships	teammate specialty	User's teammate Noor handles database performance.	Who on my team can help investigate slow queries?
+relationships	design collaborator	User works with Inez on accessibility design.	Who should review the interface for accessibility?
+relationships	release approver	User's colleague Victor approves production releases.	Who signs off before our release goes live?
+relationships	finance contact	User sends expense questions to Beatrice in finance.	Who can resolve a question about my reimbursement?
+relationships	legal contact	User's contracts contact is Omar in legal.	Who should review the vendor agreement?
+relationships	mentor	User meets mentor Keiko for career advice.	Who have I been consulting about career decisions?
+relationships	mentee	User mentors a junior engineer named Ellis.	Who is the junior colleague in my mentoring arrangement?
+relationships	accountant	User's accountant is Tessa Park.	Who helps prepare my annual accounts?
+relationships	landlord	User rents their apartment from Malik.	Who should I contact about a repair in my rented apartment?
+relationships	building manager	User's building manager is Ada Chen.	Who coordinates maintenance in my building?
+relationships	neighbor pet care	User's neighbor Ben looks after the cat during trips.	Who usually feeds my cat when I am away?
+relationships	neighbor tools	User borrows gardening tools from neighbor Rosa.	Who has been lending me garden equipment?
+relationships	childcare pickup	User's aunt Freya handles Wednesday school pickup.	Who covers the school run on Wednesday?
+relationships	dog walker	User's dog walker is Luca.	Who should I tell about a change to the dog's walking schedule?
+relationships	piano teacher	User takes piano lessons from Soren.	Who teaches my instrument lessons?
+relationships	language tutor	User practices French with Amelie.	Who is my French conversation tutor?
+relationships	coach	User's running coach is Nikhil.	Who should receive an update on my training progress?
+relationships	book club host	User's book club meets at Hazel's house.	Whose place hosts the book club?
+relationships	cycling companion	User usually cycles with Dev on Sundays.	Who is my usual Sunday riding companion?
+relationships	travel companion	User is planning the autumn holiday with Rowan.	Who is joining me on the autumn trip?
+relationships	wedding role	User is best person at Finley's wedding.	What role am I taking in Finley's wedding?
+relationships	cousin graduation	User's cousin Esme is graduating this year.	Which relative needs a graduation congratulations message?
+relationships	friend relocation	User's friend Mateo moved to Lisbon.	Which city should I consider when arranging to visit Mateo?
+relationships	friend accessibility	User's friend Quinn needs captions on video calls.	What should I enable before a video call with Quinn?
+relationships	friend gift restriction	User's friend Asha dislikes scented candles.	What gift should I avoid for Asha?
+relationships	friend occupation	User's friend Emil restores antique furniture.	Who do I know who might advise on restoring a chair?
+relationships	friend equipment	User's friend Petra owns a cargo van.	Who might be able to help transport a large desk?
+relationships	friend dietary restriction	User's friend Zoya cannot eat gluten.	What should I check when choosing food for Zoya?
+relationships	housemate chores	User's housemate Felix handles recycling.	Who normally takes care of recycling at home?
+relationships	housemate work hours	User's housemate Mina works night shifts.	Why should daytime noise at home be kept down for Mina?
+relationships	team time zone	User's collaborator Ravi works in India Standard Time.	Which time zone should I account for when scheduling Ravi?
+relationships	client contact	User's primary contact at Cedar Labs is Tess.	Who should receive the Cedar Labs project update?
+relationships	volunteer coordinator	User volunteers under coordinator Idris.	Who organizes my volunteer shifts?
+relationships	choir director	User's choir is directed by Celeste.	Who decides the choir rehearsal program?
+relationships	community treasurer	User's community group's treasurer is Martin.	Who manages the community group's money?
+relationships	lease co-signer	User's older sibling Alex co-signed their lease.	Who else is named in the guarantee on my lease?
+relationships	pet owner distinction	User's friend Jade owns the husky; the user owns a cat.	Which pet is mine rather than Jade's?
+relationships	same-name distinction	User's manager Casey works in engineering; cousin Casey is a baker.	Which Casey should receive my sprint status?
+goals	marathon preparation	User is preparing for a first half marathon.	What running goal should this week's training support?
+goals	language exam	User is studying for a German B2 exam.	Which language milestone should the study plan target?
+goals	music practice	User is learning to play jazz piano.	What musical skill should today's practice develop?
+goals	certification	User is preparing for a cloud architecture certification.	Which professional exam belongs in my revision schedule?
+goals	portfolio	User is building a photography portfolio focused on urban wildlife.	Which theme should the next portfolio shoot support?
+goals	garden project	User is turning the back lawn into a native wildflower meadow.	What outcome should the gardening plan aim for?
+goals	kitchen project	User is renovating the kitchen while keeping the existing cabinets.	Which part of the kitchen renovation should stay in place?
+goals	insulation project	User is insulating the attic before winter.	Which home improvement is my current seasonal priority?
+goals	decluttering	User aims to clear the spare room for a home office.	What is the purpose of the spare-room decluttering?
+goals	move planning	User plans to move closer to a railway station.	Which location feature should the housing search prioritize?
+goals	accessibility project	User is making the club website accessible to screen readers.	What user need should the website improvements address?
+goals	data migration	User is migrating the billing database to PostgreSQL.	What is the destination platform for the billing migration?
+goals	latency target	User's service project aims for responses below 200 milliseconds.	What latency target should the performance work meet?
+goals	backup project	User is setting up off-site backups for family photographs.	What data is the backup project intended to protect?
+goals	archive project	User is digitizing grandparents' letters.	Which family materials am I preserving digitally?
+goals	newsletter	User is launching a monthly local history newsletter.	What cadence and subject should the launch plan use?
+goals	community event	User is organizing a neighborhood repair cafe.	What kind of community event am I preparing?
+goals	fundraising	User's fundraiser supports the town library's reading room.	What cause should the fundraising announcement explain?
+goals	volunteer recruitment	User is recruiting weekend volunteers for an animal shelter.	Which shifts and organization should the recruitment post cover?
+goals	conference talk	User is preparing a talk on accessible data visualization.	What is the subject of my upcoming presentation?
+goals	research project	User is comparing urban tree canopy coverage across districts.	Which geographic measure belongs in my research dataset?
+goals	thesis	User's thesis examines public transport reliability.	Which research topic should my literature review cover?
+goals	writing project	User is writing a mystery set in a coastal village.	What setting should the next story scene use?
+goals	reading challenge	User aims to read twelve translated novels this year.	Which books count toward my reading goal?
+goals	cooking goal	User wants to learn five reliable lentil recipes.	What cooking skill should this weekend's practice build?
+goals	bread baking	User is trying to maintain a sourdough starter.	Which ongoing baking project needs a feeding schedule?
+goals	cycling goal	User wants to complete a 100-kilometre ride.	What distance should the cycling training build toward?
+goals	swimming goal	User is learning front crawl breathing technique.	What skill should a swim lesson emphasize?
+goals	walking goal	User aims to walk outdoors for thirty minutes each day.	What daily activity target should the habit tracker show?
+goals	sleep routine	User is working toward a consistent bedtime of ten thirty.	Which bedtime should the evening routine target?
+goals	digital habits	User wants to stop checking work messages after dinner.	What boundary should the evening notification setup support?
+goals	meeting reduction	User wants two meeting-free afternoons each week.	What calendar outcome should the meeting review preserve?
+goals	mentoring program	User is establishing a peer mentoring program for new hires.	Who is the audience for my mentoring initiative?
+goals	documentation	User is documenting the deployment recovery procedure.	Which operational process am I writing up?
+goals	test coverage	User is adding contract tests for payment-provider adapters.	Which interface should the testing work exercise?
+goals	localization	User is translating the app into Portuguese.	Which language is the current localization target?
+goals	release objective	User is preparing version 2.0 for a November beta.	What release stage and month are we aiming for?
+goals	prototype scope	User's prototype only needs offline note capture.	Which capability defines the prototype's initial scope?
+goals	inventory cleanup	User is cataloguing the workshop's hand tools.	What items belong in the workshop inventory project?
+goals	energy reduction	User aims to reduce household electricity consumption by ten percent.	What reduction target should the energy comparison track?
+goals	water conservation	User is installing rain barrels for garden irrigation.	What will the collected rainwater be used for?
+goals	composting	User wants to start a small balcony compost system.	Which space constraint should the composting setup account for?
+goals	travel planning	User is planning a two-week rail trip through northern Italy.	What duration and transport should the itinerary assume?
+goals	family reunion	User is arranging a reunion for twenty relatives.	How many people should reunion logistics accommodate?
+goals	birthday planning	User is planning a surprise picnic for their partner.	What format should the birthday arrangements preserve?
+goals	board game design	User is prototyping a cooperative game about restoring habitats.	What theme and interaction style guide the game prototype?
+goals	podcast	User is creating interviews with local craftspeople.	Who should the podcast's guest search focus on?
+goals	career transition	User is moving from support engineering into developer education.	Which career direction should my portfolio support?
+goals	open source	User wants to contribute documentation to an open-source mapping project.	What type of contribution am I preparing to make?
+goals	work handover	User is preparing to hand the monitoring service to the platform team.	Who is intended to take over the service?
+decisions	database choice	The team chose PostgreSQL because transactional consistency mattered more than schema flexibility.	Why did we choose our database?
+decisions	queue choice	The team kept the job queue in PostgreSQL to avoid another service to operate.	Why did we avoid adding a separate message broker?
+decisions	frontend choice	The team selected server-rendered pages to reduce client complexity.	What motivated the frontend architecture?
+decisions	mobile scope	The team postponed Android support until the iOS workflow was stable.	Why is Android outside the current release?
+decisions	cache policy	The team disabled caching for account settings because stale permissions were unacceptable.	Why are account settings fetched fresh?
+decisions	rollout strategy	The team chose gradual rollout to detect failures before broad exposure.	What was the reason for staging the release?
+decisions	feature flag	The team kept the new parser behind a flag until legacy files passed compatibility tests.	What must happen before the parser becomes the default?
+decisions	API format	The team selected JSON because its existing clients already supported it.	Why did we settle on this API format?
+decisions	identifier design	The team chose UUIDs to let offline clients create records independently.	Why do our records use UUID identifiers?
+decisions	time storage	The team stores timestamps in UTC to avoid ambiguity across regions.	What was the reason for the timestamp convention?
+decisions	deletion behavior	The team chose immediate access revocation followed by asynchronous cleanup.	What should happen first when an account is deleted?
+decisions	retry policy	The team limits retries because duplicate external actions are costly.	Why is our retry count conservative?
+decisions	idempotency	The team requires idempotency keys for payment submissions.	Which safeguard prevents duplicate payment submission?
+decisions	logging	The team excludes message bodies from logs to protect private content.	Why are message bodies absent from our logs?
+decisions	observability	The team chose structured logs so incidents could be queried by request identifier.	What motivated the logging format?
+decisions	deployment window	The team avoids Friday deployments because weekend support is limited.	Why is Friday excluded from our release window?
+decisions	dependency choice	The team rejected the library because its license conflicted with distribution plans.	Why did we decline that dependency?
+decisions	build reproducibility	The team pins toolchain versions so builds can be reproduced.	Why are tool versions fixed in the build configuration?
+decisions	backup retention	The team retains thirty daily backups to cover delayed discovery of corruption.	Why do we keep a month of backup history?
+decisions	recovery testing	The team tests restores because successful backup uploads do not prove recoverability.	Why do we run restore rehearsals?
+decisions	design simplification	The team removed the sidebar to give the main editor more space.	Why did the layout lose its sidebar?
+decisions	accessibility color	The team added icons because color alone was insufficient to communicate status.	Why do status indicators include symbols?
+decisions	form flow	The team split the form into steps because users abandoned the long version.	What problem motivated the multi-step form?
+decisions	notification batching	The team batches routine notifications to reduce interruptions.	Why do routine alerts arrive together?
+decisions	search default	The team defaults to current records so obsolete results do not mislead users.	Why does ordinary search hide historical versions?
+decisions	pricing presentation	The team shows the total price before checkout to avoid surprise charges.	Why is the full price displayed early?
+decisions	onboarding	The team delayed account creation until after the product preview.	Why can visitors try the preview before signing up?
+decisions	content structure	The team grouped documentation by user task instead of internal module.	Why is the documentation organized around workflows?
+decisions	translation scope	The team postponed machine translation for legal text pending review.	Why are legal pages excluded from automatic translation?
+decisions	support process	The team routes billing disputes to a human specialist.	Who should handle a disputed invoice?
+decisions	meeting decision	The committee replaced weekly status meetings with written updates.	What did we decide to use instead of recurring status calls?
+decisions	event venue	The club chose the library hall because it has step-free access.	Why did we select the library for the event?
+decisions	catering decision	The organizers chose a vegetarian menu to simplify shared dietary planning.	What was the reason for the event menu?
+decisions	travel decision	The family chose the train to avoid airport transfers with children.	Why did we decide against flying on the family trip?
+decisions	hotel decision	The group chose a central hotel so everyone could walk to the venue.	What made the central hotel preferable?
+decisions	purchase decision	User chose a refurbished laptop to reduce cost and electronic waste.	Why did I choose a refurbished computer?
+decisions	repair decision	User chose to repair the bicycle because its frame was still sound.	Why did I repair the bike instead of replacing it?
+decisions	garden decision	User chose native plants to support local pollinators.	Why did we prioritize native species in the garden?
+decisions	insulation decision	User chose loft insulation before new windows because it had the faster payback.	What was the reason for doing the attic first?
+decisions	work schedule	User moved focused writing to mornings because afternoons were interrupted.	Why is writing scheduled early in my day?
+decisions	training decision	User chose cycling over running temporarily to reduce impact.	Why did my training switch to the bike?
+decisions	study decision	User selected short daily practice instead of a long weekly session.	What study cadence did we settle on?
+decisions	book choice	The book club selected a short novel so members could finish before the holiday.	Why did the club choose a shorter book?
+decisions	budget decision	The group capped decorations so more money could go to accessibility.	Why is the decoration budget limited?
+decisions	charity decision	The committee selected a local food bank after members prioritized immediate community need.	Why was that charity selected?
+decisions	archive decision	The family keeps original letters after scanning them for sentimental value.	Why are the paper originals being retained?
+decisions	photo format	User keeps RAW photographs to preserve editing flexibility.	Why do I retain the larger photo files?
+decisions	password manager	User chose a family password-manager plan to share emergency access.	What was the purpose of choosing a family plan?
+decisions	home office	User placed the desk by the side wall to avoid glare from the window.	Why is my desk positioned away from the window?
+decisions	contract boundary	The team decided the pilot excludes automated sending until approval controls are verified.	Why can the pilot draft messages but not send them automatically?
+routines	morning exercise	User walks before breakfast on weekdays.	When does my usual weekday walk fit?
+routines	running days	User runs on Tuesday and Saturday mornings.	Which days should the running plan preserve?
+routines	strength training	User lifts weights on Monday and Thursday evenings.	When are my usual strength sessions?
+routines	yoga	User attends yoga on Wednesday at six in the evening.	What is already on my Wednesday evening routine?
+routines	swimming	User swims at lunchtime every Friday.	Which regular activity occupies Friday lunch?
+routines	cycling	User joins a cycling group on Sunday mornings.	What should I avoid scheduling over Sunday morning?
+routines	dog walks	User walks the dog at seven in the morning and eight in the evening.	Which daily times should the dog-care schedule preserve?
+routines	cat feeding	User feeds the cat at six thirty each morning.	When does the cat normally get breakfast?
+routines	plant watering	User checks indoor plants every Saturday.	Which day belongs on the houseplant checklist?
+routines	garden maintenance	User weeds the vegetable beds on Sunday afternoons.	Where does garden maintenance normally fit in my week?
+routines	grocery shopping	User buys groceries on Thursday after work.	When should the weekly shopping list be ready?
+routines	meal preparation	User prepares weekday lunches on Sunday evening.	When should the batch-cooking plan happen?
+routines	laundry	User does laundry on Saturday mornings.	Which household task normally uses Saturday morning?
+routines	cleaning	User cleans the kitchen thoroughly on Friday evening.	When is the regular deep kitchen clean?
+routines	recycling	User puts recycling out on Tuesday night.	When should the recycling reminder appear?
+routines	library visits	User visits the library on the first Saturday of each month.	Which monthly outing should the calendar preserve?
+routines	book club	User's book club meets on the third Thursday each month.	When does the regular book discussion take place?
+routines	choir	User rehearses with the choir on Monday nights.	Which recurring commitment occupies Monday evening?
+routines	piano practice	User practices piano for twenty minutes before dinner.	Where should instrument practice fit in today's routine?
+routines	language practice	User practices French during the morning train commute.	When do I normally do language exercises?
+routines	commute	User takes the 8:10 train on office days.	Which departure anchors my usual office commute?
+routines	office days	User works in the office on Tuesday and Wednesday.	Which days usually require travel to work?
+routines	remote days	User works from home every Friday.	Where am I normally working at the end of the week?
+routines	focus block	User protects nine to eleven each morning for focused work.	Which hours should routine meetings avoid?
+routines	email checks	User checks email at eleven and four.	When do I normally process email?
+routines	team planning	User's team plans the week on Monday at ten.	What recurring team activity occupies Monday midmorning?
+routines	weekly review	User reviews the week's progress on Friday at three.	When should the weekly progress summary be ready?
+routines	mentoring	User meets their mentee every second Wednesday.	What is the cadence of my mentoring meetings?
+routines	manager meeting	User has a manager one-to-one every other Tuesday.	How often is my regular manager catch-up?
+routines	invoicing	User prepares invoices on the last working day of the month.	When do I normally complete client billing?
+routines	expense review	User reviews household expenses on the first Sunday of each month.	Which monthly time belongs to the household budget review?
+routines	backup check	User checks backup reports every Monday morning.	When should the backup status digest arrive?
+routines	software updates	User installs personal-device updates on Saturday evening.	When is my usual device maintenance window?
+routines	photo organization	User sorts new photographs on Sunday nights.	When do I usually organize the latest pictures?
+routines	journal	User writes in a journal just before bed.	Where does journaling belong in my evening sequence?
+routines	reading	User reads fiction for half an hour after lunch.	When is my usual leisure reading period?
+routines	bedtime	User normally goes to bed at ten thirty.	Which bedtime should an evening plan respect?
+routines	wake time	User normally wakes at six forty-five.	What waking time should tomorrow's routine assume?
+routines	quiet time	User keeps the first hour after waking free of work messages.	When should work notifications begin relative to waking?
+routines	family calls	User calls their parents on Sunday at five.	What regular family commitment occupies late Sunday afternoon?
+routines	child pickup	User collects their child at three fifteen on school days.	Which afternoon time must remain free on school days?
+routines	volunteering	User volunteers at the food bank on alternate Saturdays.	How often should the volunteer shift appear?
+routines	community meeting	User attends the neighborhood council on the second Monday each month.	When is the regular neighborhood meeting?
+routines	farmers market	User visits the farmers market on Saturday after the morning walk.	What follows my Saturday walk in the usual routine?
+routines	baking	User bakes bread every Sunday morning.	When should the dough preparation plan lead into baking?
+routines	coffee cutoff	User has their last coffee before eleven thirty.	What cutoff should a coffee reminder respect?
+routines	stretching	User stretches for ten minutes after each cycle ride.	What activity follows my bike rides?
+routines	lunch break	User takes lunch from twelve thirty to one.	Which midday interval is my normal break?
+routines	water filter	User changes the drinking-water filter every three months.	What maintenance interval applies to my water filter?
+routines	annual planning	User reviews annual goals during the first week of January.	When do I normally do the yearly goal review?
+temporal	residence	User moved from Harbor City to Pinehaven in September and now lives in Pinehaven.	Where do I currently live?
+temporal	employer	User left Atlas Works in August and now works at Cedar Labs.	Which company is my current employer?
+temporal	job role	User changed from analyst to engineering manager in July.	What is my current role?
+temporal	manager change	User now reports to Amina instead of Owen.	Who is my manager now?
+temporal	phone change	User replaced their Pixel 6 with a Fairphone 5 last month.	Which phone case should I look for now?
+temporal	computer change	User's current laptop is a ThinkPad T14; the old MacBook was sold.	Which computer do I use now?
+temporal	vehicle change	User sold the hatchback and now drives an electric estate car.	What kind of car is mine now?
+temporal	bicycle change	User replaced the road bike with a folding bicycle.	Which bicycle should a new storage solution accommodate?
+temporal	pet update	User's household now has one cat after the older cat died.	How many cats should the feeding plan cover now?
+temporal	partner name	User's partner changed their surname to Rivera after the wedding.	Which surname should I use for my partner now?
+temporal	contact address	User's preferred postal address changed to the new office in June.	Which location should receive my post now?
+temporal	email change	User now uses the work address for invoices instead of their personal address.	Where should new invoices be directed?
+temporal	time zone change	User moved from London to Helsinki and now schedules in Helsinki time.	Which local time zone should a new meeting use?
+temporal	work pattern	User switched from five office days to two office days per week.	How often am I currently commuting to the office?
+temporal	meeting cadence	The team changed its planning meeting from weekly to fortnightly.	What is the current planning-meeting cadence?
+temporal	project status	The reporting migration completed yesterday and is no longer active work.	Should the reporting migration still appear in my active tasks?
+temporal	deadline update	The launch deadline moved from October 20 to November 5.	Which date is the current launch deadline?
+temporal	venue update	The reunion moved from the park to the community hall because of rain.	Where is the reunion taking place now?
+temporal	flight update	User rebooked the outbound flight from Monday to Wednesday.	Which day should the departure checklist target?
+temporal	hotel update	User cancelled the airport hotel and booked a downtown guesthouse.	Where am I staying on the trip now?
+temporal	food preference update	User used to eat fish but now follows a vegetarian diet.	Should a current dinner suggestion include fish?
+temporal	coffee update	User stopped drinking caffeinated coffee this month.	What kind of coffee should I order for myself now?
+temporal	exercise update	User paused running for six weeks and is swimming instead.	Which activity belongs in the current exercise plan?
+temporal	lesson update	User's piano lessons moved from Tuesday to Thursday.	Which evening now needs to stay free for piano?
+temporal	club update	User left the photography club and joined the local history society.	Which group is my current membership with?
+temporal	newsletter update	User changed the newsletter from monthly to quarterly.	How often should the next issues be scheduled?
+temporal	service ownership	The platform team took over the monitoring service from the user last week.	Who currently owns the monitoring service?
+temporal	API version	The project switched from API version 1 to version 2 in the last release.	Which API version should new examples target?
+temporal	deployment region	The service moved from the western region to the central region.	Which region is currently hosting the service?
+temporal	database migration	The app has completed its move from SQLite to PostgreSQL.	Which database does the app use now?
+temporal	feature availability	The export feature was experimental but became generally available in September.	Is export still restricted to the experiment?
+temporal	contract renewal	The supplier contract was extended through the end of next year.	Is the old year-end expiry still the current contract end?
+temporal	budget revision	The event budget increased from 800 to 1200 units after sponsorship.	Which spending ceiling should the event plan use?
+temporal	attendee update	The workshop attendance changed from twelve to eighteen people.	How many places should the workshop setup provide now?
+temporal	team size	The project team grew from four to six people this month.	How many team members should the planning session include?
+temporal	rental status	User bought the apartment they previously rented.	Am I currently renting or owning my apartment?
+temporal	garden change	User replaced the lawn with vegetable beds this spring.	What currently occupies the former lawn area?
+temporal	heating update	User replaced the gas boiler with a heat pump in May.	Which heating system should maintenance advice address now?
+temporal	internet upgrade	User's home connection was upgraded from copper to fibre.	What connection type do I have at home now?
+temporal	tariff update	User changed from a flat electricity tariff to time-of-use pricing.	Does time of day affect my current electricity rate?
+temporal	reader update	User now reads library books on a Kobo rather than a Kindle.	Which reading device should the borrowing instructions use?
+temporal	language progress	User advanced from beginner French to B1 conversation level.	What difficulty should the next French exercise target?
+temporal	qualification update	User passed the certification and is no longer studying for that exam.	Should certification revision remain on my study plan?
+temporal	research status	The interview phase ended and the project is now analyzing transcripts.	Which phase of the research is currently active?
+temporal	writing status	User finished the first draft and is now revising the manuscript.	What kind of writing work should this week's plan emphasize?
+temporal	training target	User changed the race target from five kilometres to ten kilometres.	What distance should the training plan now prepare for?
+temporal	pickup change	User's partner now handles Monday school pickup instead of the user.	Do I still need to reserve Monday pickup time for myself?
+temporal	volunteer shift	User moved their volunteer shift from Saturday to Sunday.	Which day is my current volunteer commitment?
+temporal	subscription status	User cancelled the print magazine and kept only the digital subscription.	Which magazine format am I still subscribed to?
+temporal	preference correction	User corrected the earlier note: they prefer detailed technical explanations, not short ones.	How much technical detail should your next explanation contain?
+complex	travel constraints	User avoids flights and must arrive before noon.	Which two constraints should the travel options satisfy?
+complex	meal constraints	User eats vegetarian food and only has fifteen minutes to cook.	What should a suitable dinner plan account for?
+complex	gift constraints	User's sister likes gardening and has no outdoor space.	What makes a gardening gift suitable for my sister?
+complex	meeting constraints	User is free after two; collaborator Noor must finish by four.	What shared afternoon interval can the meeting use?
+complex	purchase constraints	User needs a repairable laptop that weighs less than 1.5 kilograms.	Which two requirements should the laptop shortlist meet?
+complex	venue constraints	The club needs step-free access and seating for forty people.	What must an event venue provide?
+complex	project constraints	The prototype must work offline and cannot require account creation.	Which capabilities must the prototype preserve?
+complex	itinerary constraints	User enjoys museums but wants no more than one scheduled activity per day.	How should the museum itinerary balance my interests and pace?
+complex	workout constraints	User prefers outdoor exercise and avoids high-impact activity.	What combination should the exercise suggestion satisfy?
+complex	reading constraints	User wants a historical mystery shorter than 300 pages.	Which genre and length should a book recommendation fit?
+complex	home office constraints	User's desk is 90 centimetres wide and the monitor stand occupies 45 centimetres.	How much desk width remains beside the monitor stand?
+complex	budget arithmetic	The event has 1200 units available and the venue costs 450 units.	How much of the event budget remains after the venue?
+complex	journey arithmetic	User's train departs at 8:10 and the walk to the station takes twenty minutes.	When should I leave home to arrive ten minutes before departure?
+complex	cooking arithmetic	User cooks for three and wants two meals from the batch.	How many portions should the batch recipe produce?
+complex	storage arithmetic	User has two 500-gigabyte backup drives and needs two copies of each file.	What unique data capacity does that backup arrangement provide?
+complex	relationship chain	Mara is the user's sister, and Mara's daughter is Poppy.	What is Poppy's relationship to me?
+complex	work chain	Dana manages the user, and Alex manages Dana.	Who is my skip-level manager?
+complex	project dependency	The app release waits for the API migration, which waits for the backup rehearsal.	Which dependency must complete first for the release?
+complex	family delegation	User's partner Jules handles travel bookings, and Jules asked Theo to reserve the train.	Who is actually making the train reservation?
+complex	decision dependency	The team chose a train-accessible venue because several attendees do not drive.	What transport need explains our venue choice?
+complex	duplicate name	User has a colleague Robin and a cousin Robin; only the colleague works on billing.	Which Robin belongs in the billing project update?
+complex	possession distinction	User owns a folding bike; their friend owns the touring bike they borrowed.	Which bicycle is mine?
+complex	preference distinction	User likes quiet hotels, while their travel companion prefers lively hostels.	Which lodging preference belongs to me?
+complex	goal distinction	User is training for a ten-kilometre race; their partner is training for a marathon.	What race distance should my personal training plan use?
+complex	diet distinction	User eats vegetarian food, while their brother eats fish.	Whose diet permits fish, mine or my brother's?
+complex	conflicting schedule	Two unresolved notes place the club meeting on Tuesday and Wednesday.	Which day is the club meeting definitely on?
+complex	conflicting location	Two unresolved messages give different venues for the same workshop.	Can you confidently state the workshop venue?
+complex	conflicting quantity	The supply count is unresolved: one note says twelve chairs and another says sixteen.	How many chairs do we definitely have?
+complex	uncertain plan	User is considering moving to the coast but has not decided.	Have I committed to moving to the coast?
+complex	tentative invitation	User might join the Friday dinner, pending a work deadline.	Am I definitely attending Friday dinner?
+complex	missing address	User mentioned enjoying a neighborhood cafe but never supplied their home address.	What is my street address?
+complex	missing vehicle year	User said they drive an Aster S8 but did not specify its model year.	Which model year is my car?
+complex	missing contact detail	User named their accountant but never shared the accountant's telephone number.	What is my accountant's phone number?
+complex	missing date	User plans to visit their sister but has not chosen travel dates.	On which date am I visiting my sister?
+complex	missing preference	User asked about several coffee drinks without stating a favorite.	What is my favorite coffee drink?
+complex	negated purchase	User considered buying a kayak but decided against it.	Do I own the kayak we discussed buying?
+complex	negated membership	User attended a choir concert but did not join the choir.	Am I a member of that choir?
+complex	negated move	User visited Lisbon and explicitly said they were not moving there.	Did I move to Lisbon?
+complex	negated allergy	User said they dislike walnuts but do not have a walnut allergy.	Did I tell you I have a walnut allergy?
+complex	negated decision	The team discussed Rust but did not decide to migrate from Python.	Has the team committed to a Rust migration?
+complex	conditioned preference	User likes detailed explanations for technical topics and short answers for logistics.	How detailed should a technical design explanation be?
+complex	conditioned schedule	User works remotely on Friday unless a client workshop is scheduled.	Does my normal Friday routine guarantee I will be at home?
+complex	conditioned access	The community hall is available on weekends only when booked a week ahead.	What condition applies to a weekend hall booking?
+complex	conditioned transport	User cycles to work in dry weather and takes the train when it rains.	Which commute option fits a rainy morning?
+complex	conditioned diet	User eats vegetarian food at home and asks for vegan food when cooking for Jules.	Which diet should dinner for Jules follow?
+complex	project scope distinction	Project Cedar uses PostgreSQL while Project Birch uses SQLite.	Which database belongs in instructions for Project Birch?
+complex	location scope distinction	User's home has induction cooking while the holiday cabin has a gas stove.	Which heat source should a cabin cooking plan assume?
+complex	time scope distinction	User worked in Berlin in 2024 and has worked in Oslo since 2025.	Where was I working in 2024?
+complex	past preference	User preferred aisle seats before an injury but currently requests window seats.	Which seat should a new reservation request?
+complex	source attribution	A coworker said the user likes skiing, but the user has never confirmed it.	Is skiing an interest I personally confirmed?

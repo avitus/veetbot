@@ -269,6 +269,10 @@ promotion candidate.
 An explicit per-project override always outranks a carried belief. Learning globally
 does not mean ignoring local instruction.
 
+Milestone 33's [general recall design](general-memory-recall.md) supersedes the
+newest-first candidate selection and governs the measured extension of this
+pipeline under ADR-0178. Optional channels require comparative evidence.
+
 ## The pipeline
 
 Given a goal and the current working state:

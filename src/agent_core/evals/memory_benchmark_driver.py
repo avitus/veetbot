@@ -324,6 +324,7 @@ async def scenario_composition(
     consolidations: list[ConsolidationCounts] = []
     async with bootstrap.build(
         settings=settings,
+        memory_legacy_retrieval_control=True,
         storage="memory",
         script=script,
         principal=EVALUATION_PRINCIPAL,

@@ -926,6 +926,9 @@ class RecallQuery(BaseModel):
     # A bounded structured arm for personal possessions whose stored model
     # name need not share words with a question about "my car" or "my laptop".
     include_owned_resources: bool = False
+    # Older persisted queries keep their original selection semantics. New
+    # task queries explicitly select relevance (ADR-0178).
+    candidate_selection: Literal["recent", "relevance"] = "recent"
     as_of: datetime | None = None
     known_at: AwareDatetime | None = None
     include_superseded: bool = False

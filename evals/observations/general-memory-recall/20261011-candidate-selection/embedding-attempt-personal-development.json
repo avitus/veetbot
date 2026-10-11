@@ -1,0 +1,17 @@
+{
+  "experiment": "general-semantic-ablation@1",
+  "activation_eligible": false,
+  "seed_sha256": "bdca4b4b0d3db1f919ed8031fa59bb0d9b994601e238adb8e40ce7b3500dc132",
+  "sparse_sha256": "7974ea79a58757cac058982e999e1bf1848c3cb8bedfe65ff36947408485c924",
+  "model": "text-embedding-3-small",
+  "dimensions": 256,
+  "cost_ceiling_usd": "0.05",
+  "conservative_reservation_usd": "0.00243990",
+  "batch_size": 64,
+  "timeout_seconds": 120,
+  "input_count": 1800,
+  "noise": 1000,
+  "inputs_sha256": "92a7a3ecbda5b6a6722cbf05fb5f6c589dd50b330b31e16119ca717f7704b875",
+  "status": "failed",
+  "cost_reservation_retained": true
+}

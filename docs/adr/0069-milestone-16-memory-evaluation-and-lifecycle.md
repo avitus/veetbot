@@ -39,6 +39,10 @@ alongside Milestones 12 through 15, rather than as a roadmap item, because the
 missing yardstick blocks every remaining memory decision and the missing
 lifecycle is already specified work.
 
+Decision 6's newest-first task selection is superseded by ADR-0178 on
+2026-10-11. The frozen M16 control keeps that historical behavior; new recall
+evidence is separately versioned and does not overwrite its baseline.
+
 ## Decisions
 
 1. **Milestone 16 is authorized as a parallel workstream.** It may be developed

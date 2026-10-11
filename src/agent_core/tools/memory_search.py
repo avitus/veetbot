@@ -47,7 +47,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 class MemorySearchTool:
     spec = ToolSpec(
         name="memory.search",
-        version="1.0.2",
+        version="1.1.0",
         description=(
             "Search governed beliefs before asking the user to repeat personal context "
             "(home location, preferences, standing constraints). A missing snapshot or automatic "
@@ -78,6 +78,7 @@ class MemorySearchTool:
                 "principal_id": context.principal.principal_id,
                 "current_scope": arguments["scope"],
                 "text": arguments["text"],
+                "candidate_selection": self._retriever.retrieval_profile.candidate_selection,
                 "subjects": arguments.get("subjects", []),
                 "include_owned_resources": recalls_owned_resources(
                     arguments["text"], deliberate=True

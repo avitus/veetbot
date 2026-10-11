@@ -2610,7 +2610,9 @@ async def _compose(
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
-    query_former = DeterministicQueryFormer(principal)
+    query_former = DeterministicQueryFormer(
+        principal, candidate_selection=memory_profiles.retrieval.candidate_selection
+    )
     schedule_service = ScheduleService(
         uow_factory=uow_factory,
         clock=clock,
@@ -5079,6 +5081,7 @@ async def build(
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
     memory_distillation_evaluation_mode: bool = False,
     memory_people_evaluation_mode: bool = False,
+    memory_legacy_retrieval_control: bool = False,
     memory_reasoning_effort: ReasoningEffort | None = None,
     service_logging: bool = False,
 ) -> AsyncIterator[Composition]:
@@ -5260,6 +5263,14 @@ async def build(
     memory_profiles = MemoryProfiles.from_document(
         load_config_document(effective_settings, "memory/profiles.yaml")
     )
+    if memory_legacy_retrieval_control:
+        memory_profiles = memory_profiles.model_copy(
+            update={
+                "retrieval": memory_profiles.retrieval.model_copy(
+                    update={"candidate_selection": "recent"}
+                )
+            }
+        )
     folder_profiles = FolderProfiles.from_document(
         load_config_document(effective_settings, "folders/profiles.yaml")
     )

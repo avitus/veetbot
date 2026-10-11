@@ -81,6 +81,7 @@ nav:
       - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
       - Memory Reconsolidation (Dreaming): plan/memory-reconsolidation.md
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
+      - General Memory Search and Recall: plan/general-memory-recall.md
       - People and Relationship Memory: plan/people-and-relationships.md
       - Evaluation Harness: plan/evaluation-harness.md
       - Runtime Loop: plan/runtime-loop.md
@@ -147,6 +148,7 @@ nav:
       - ADR-0174 Owner-reviewed dreaming: adr/0174-owner-reviewed-dreaming.md
       - ADR-0175 Private account-control verification: adr/0175-private-account-control-verification.md
       - ADR-0176 Reviewed X feed briefing: adr/0176-reviewed-x-feed-briefing.md
+      - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md
       - ADR-0177 Bounded browser startup recovery: adr/0177-bounded-browser-startup-recovery.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
       - ADR-0002 Provider-neutral model protocol: adr/0002-provider-neutral-model-protocol.md

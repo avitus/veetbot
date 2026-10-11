@@ -16,6 +16,7 @@ formation:
     max_open: 5
 retrieval:
   semantic_enabled: false
+  candidate_selection: relevance
   reciprocal_rank_fusion_k: 60
   durable_item_share: 0.6666666667
   ranking_weights:

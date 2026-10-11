@@ -229,6 +229,7 @@ async def collect_comparison_case(
                         budget_tokens=budget.tokens,
                         max_items=budget.items,
                         min_score=budget.min_score,
+                        candidate_selection="recent",
                     )
                     (query,) = former.from_text(probe.question)
                     query = query.model_copy(update={"as_of": CONTROL_AT})

@@ -410,6 +410,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "device.invocation_poll_seconds",
         ),
         "memory/profiles.yaml": (
+            "retrieval.candidate_selection",
             "formation.model_policy",
             "formation.session_boundary_enabled",
             "formation.scheduled_enabled",

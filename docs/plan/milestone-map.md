@@ -332,9 +332,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 35 subject specifications declare 589 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 598
-declarations, 595 registry entries once the 3 aliases are subtracted.
+The 36 subject specifications declare 601 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 610
+declarations, 607 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1725,6 +1725,24 @@ Milestone 32 gates in the memory area.
 24 gate.memory.recon_release_evidence case 32
 ```
 
+[general-memory-recall.md](general-memory-recall.md) declares twelve Milestone 33
+gates, authorized on 2026-10-11 under ADR-0178.
+
+```text
+1 gate.memory.general_corpus_independence structural 33
+2 gate.memory.general_relevance_before_limits case 33
+3 gate.memory.general_visibility_parity case 33
+4 gate.memory.general_shared_recall case 33
+5 gate.memory.general_query_planning_bounds case 33
+6 gate.memory.general_semantic_index_lifecycle case 33
+7 gate.memory.general_grounded_recovery case 33
+8 gate.memory.general_stage_attribution case 33
+9 gate.memory.general_comparative_quality case 33
+10 gate.memory.general_operational_budget case 33
+11 gate.memory.general_frozen_compatibility structural 33
+12 gate.memory.general_activation_evidence case 33
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1826,6 +1844,7 @@ milestone  new gates  cumulative  the earliest of them
 31                23         571  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent,
                                   suspected-spam flag and thread Report spam
 32                24         595  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
+33                12         607  general recall: candidate relevance, semantic search, evidence use and comparative activation
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1846,15 +1865,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of five hundred and ninety-five gates are green before
+2.  **Forty-one of six hundred and seven gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches five hundred and ninety-five, which is every
-registry entry, at Milestone 32. Six of Milestone 10's gates are
+The cumulative column reaches six hundred and seven, which is every
+registry entry, at Milestone 33. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1875,7 +1894,8 @@ and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29 adds thir
 returns to the `gate.policy.*` area with five. Milestone 31 adds twenty
 `gate.email.unsubscribe_*` and three `gate.email.spam_*` entries to the email
 area. Milestone 32 adds twenty-four
-`gate.memory.recon_*` entries. Every authorized milestone now has a specification
+`gate.memory.recon_*` entries. Milestone 33 adds twelve `gate.memory.general_*`
+entries. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

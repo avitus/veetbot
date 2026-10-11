@@ -47,6 +47,7 @@ from agent_core.domain.memory import (
     lexical_text_matches,
     recall_query_terms,
 )
+from agent_core.domain.memory_candidates import select_candidates
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
 from agent_core.ports.people import PeopleStore
@@ -296,6 +297,8 @@ class InMemoryMemoryStore:
             for record in self._records.values():
                 if record.id in self._erasure_pending:
                     continue
+                if record.id in query.exclude_ids:
+                    continue
                 if record.tenant_id != query.tenant_id or record.principal_id != query.principal_id:
                     continue
                 if query.known_at is not None:
@@ -379,14 +382,7 @@ class InMemoryMemoryStore:
                     if not lexical_text_matches(term_lexemes, text):
                         continue
                 result.append(record.model_copy(deep=True))
-            result.sort(
-                key=lambda record: (
-                    -int(query.include_owned_resources and is_owned_resource(record)),
-                    -record.store_position,
-                    str(record.id),
-                )
-            )
-            return result[: max(query.max_items * 8, 64)]
+            return select_candidates(result, query)
 
     async def related(
         self,

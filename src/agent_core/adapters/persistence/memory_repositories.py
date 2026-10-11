@@ -34,6 +34,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
+from agent_core.adapters.persistence.memory_candidates import ranked_candidates
 from agent_core.adapters.persistence.people_erasure import lock_run_erasure
 from agent_core.adapters.persistence.reconsolidation_sources import (
     append_change,
@@ -554,6 +555,8 @@ class PostgresMemoryStore:
         ]
         if query.include_ids is not None:
             predicates.append(MemoryRow.id.in_(query.include_ids))
+        if query.exclude_ids:
+            predicates.append(MemoryRow.id.not_in(query.exclude_ids))
         if query.min_store_position:
             changed = MemoryRow.store_position > query.min_store_position
             if query.include_merge_changes and query.as_of is None:
@@ -667,14 +670,16 @@ class PostgresMemoryStore:
         rows = list(
             (
                 await self._session.scalars(
-                    select(MemoryRow)
-                    .where(*predicates)
-                    .order_by(
-                        *([owned_resource.desc()] if query.include_owned_resources else []),
-                        MemoryRow.store_position.desc(),
-                        MemoryRow.id,
+                    ranked_candidates(
+                        select(MemoryRow).where(*predicates),
+                        query,
+                        identifier=MemoryRow.id,
+                        subject=MemoryRow.subject,
+                        statement=MemoryRow.statement,
+                        belief_type=MemoryRow.belief_type,
+                        position=MemoryRow.store_position,
+                        owned_resource=owned_resource,
                     )
-                    .limit(max(query.max_items * 8, 64))
                 )
             ).all()
         )
@@ -730,6 +735,8 @@ class PostgresMemoryStore:
         ]
         if query.include_ids is not None:
             predicates.append(latest.c.belief_id.in_(query.include_ids))
+        if query.exclude_ids:
+            predicates.append(latest.c.belief_id.not_in(query.exclude_ids))
         if not query.include_superseded and query.as_of is None:
             predicates.append(payload["status"].astext.in_(_LIVE))
         if query.belief_types:
@@ -770,7 +777,7 @@ class PostgresMemoryStore:
                     latest.c.belief_id.in_(query.expand_ids),
                 )
             )
-        rows = await self._session.execute(
+        base = (
             select(payload, MemoryRow.sensitivity)
             .join(
                 MemoryRow,
@@ -781,12 +788,18 @@ class PostgresMemoryStore:
                 ),
             )
             .where(*predicates)
-            .order_by(
-                *([owned_resource.desc()] if query.include_owned_resources else []),
-                sql_cast(payload["store_position"].astext, Integer).desc(),
-                latest.c.belief_id,
+        )
+        rows = await self._session.execute(
+            ranked_candidates(
+                base,
+                query,
+                identifier=latest.c.belief_id,
+                subject=payload["subject"].astext,
+                statement=payload["statement"].astext,
+                belief_type=payload["belief_type"].astext,
+                position=sql_cast(payload["store_position"].astext, Integer),
+                owned_resource=owned_resource,
             )
-            .limit(max(query.max_items * 8, 64))
         )
         result = []
         for data, sensitivity in rows:

@@ -4298,6 +4298,18 @@ memory providers, learned policies, arbitrary multi-hop graph inference,
 arbitrary history/artifact retrieval and automatic historical re-extraction
 remain outside this milestone. People identity rules remain with Milestone 28.
 
+### Milestone 33: General memory search and recall
+
+The owner authorized the six-stage literature-based plan on 2026-10-11 under
+ADR-0178. [General memory recall](general-memory-recall.md) declares twelve
+gates and admits measured semantic search, optional pgvector after material
+benefit, and bounded supporting-source recovery from B6. It requires a
+400-scenario cross-category corpus, relevance before candidate limits, shared
+automatic/deliberate search, bounded task-aware queries, grounded evidence use,
+source/index invalidation, and version-bound comparative activation evidence.
+M16/M32 frozen controls and unattended dreaming gates remain unchanged. This
+parallel workstream does not advance the sequential verified ceiling.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -4313,7 +4325,7 @@ owner's current ranking, not a schedule.
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling residue after Milestone 20: arbitrary cron or RFC 5545 input, interval multipliers, continuous-session recurrence, dependency graphs | Separate evidence and ADRs; not alternate implementations of Milestones 11 or 20 |
-| B6 | Memory residue after Milestone 32 authorization: the semantic arm and `pgvector`, an external memory provider, a learned memory policy, arbitrary multi-hop graph inference and arbitrary session-history/artifact retrieval. Milestone 32 admits belief merge, global consolidation within one principal and bounded grounded connections (ADR-0169; detailed design and gates registered). Excludes the bounded People relational temporal graph, one-hop retrieval and person-linked history admitted by Milestone 28 (ADR-0100); the persona surface entered as Milestone 22 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
+| B6 | Memory residue after Milestone 33 authorization: an external memory provider, a learned memory policy, arbitrary multi-hop graph inference and arbitrary session-history/artifact retrieval. Milestone 33 admits measured semantic recall, pgvector after material benefit and bounded supporting-source recovery (ADR-0178). Milestone 32 admits belief merge, global consolidation within one principal and bounded grounded connections (ADR-0169; detailed design and gates registered). Excludes the bounded People relational temporal graph, one-hop retrieval and person-linked history admitted by Milestone 28 (ADR-0100); the persona surface entered as Milestone 22 (ADR-0079) | Milestone 16 and 21 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: presence-based routing, hand-off | The device channel and device-scoped tools entered as Milestone 24 on 2026-08-26 (ADR-0081); presence-based routing and hand-off still wait here on a concrete use case |
 | B8 | General standing approval grants. The restrictive-only advisory approval signal entered as Milestone 30 on 2026-09-19 (ADR-0111) | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |

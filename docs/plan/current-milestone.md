@@ -4,6 +4,18 @@ title: Current Milestone
 
 # Current milestone
 
+- **Milestone 33 — General memory search and recall:** the owner authorized
+  the six-stage plan on 2026-10-11 under ADR-0178.
+  [General memory recall](general-memory-recall.md) registers twelve gates for
+  cross-category evaluation, relevance before candidate limits, measured semantic
+  retrieval, task-aware queries, governed source recovery and release evidence.
+  The category-independent candidate repair is implemented; the 400-seed diagnostic
+  improves recall from 67% to 68.75%, leaving semantic/implicit-use work open.
+  The synthetic semantic comparison reaches 97% top-20 candidate recall;
+  production indexing, source lifecycle and answer-use evidence remain open.
+  Optional-channel activation remains evidence-gated.
+  M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
+
 - **Milestone 32 — Memory reconsolidation (dreaming):** authorized on
   2026-10-02 as a parallel workstream. [memory-reconsolidation.md](memory-reconsolidation.md)
   and ADR-0169 define twenty-four registered gates. The owner authorized ADR-0174

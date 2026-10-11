@@ -194,3 +194,5 @@ implementation without one.
 - [ADR-0175 — Private account-control verification (Accepted; amends ADR-0164)](0175-private-account-control-verification.md)
 - [ADR-0176 — Reviewed X feed briefing (Accepted; amends ADR-0164)](0176-reviewed-x-feed-briefing.md)
 - [ADR-0177 — Bounded browser startup recovery (Accepted)](0177-bounded-browser-startup-recovery.md)
+
+- [ADR-0178 — General memory search and recall (Accepted scope; Milestone 33)](0178-general-memory-recall.md)

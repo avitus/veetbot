@@ -95,8 +95,8 @@ async def test_personal_advice_recalls_older_owned_model_before_candidate_flood(
         assert target.id in [item.belief_id for item in recalled.items]
         async with factory() as uow:
             trace = await uow.traces.get(recalled.trace_id, principal())
-        assert trace.retrieval_policy_version == "retrieval@4+owned-resources@1"
-        assert 'policy="retrieval@4+owned-resources@1"' in recalled.rendered
+        assert trace.retrieval_policy_version == "retrieval@5+owned-resources@1"
+        assert 'policy="retrieval@5+owned-resources@1"' in recalled.rendered
 
 
 @pytest.mark.parametrize(
