@@ -769,6 +769,7 @@ class BudgetedContextBuilder:
                             "text": None,
                             "subjects": [],
                             "structured_belief_types": [],
+                            "include_owned_resources": False,
                             "min_store_position": snapshot_watermark,
                             "budget_tokens": remaining,
                         }

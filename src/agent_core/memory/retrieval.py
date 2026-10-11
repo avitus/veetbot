@@ -34,6 +34,7 @@ from agent_core.domain.memory import (
     RecallTrace,
     Sensitivity,
     TracedPersonContext,
+    is_owned_resource,
     lexical_term_lexemes,
     lexical_tokens,
     recall_query_terms,
@@ -53,6 +54,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
+OWNED_RESOURCE_POLICY_VERSION = "owned-resources@1"
 RECONSOLIDATION_RETRIEVAL_POLICY_VERSION = "retrieval-reconsolidation@2"
 # Episode search reads the session stream in bounded pages: never the whole
 # stream at once, and never more pages than a bounded read is worth.
@@ -154,6 +156,24 @@ def _personal_belief_types(text: str) -> list[BeliefType]:
     return sorted(types, key=lambda item: item.value)
 
 
+def recalls_owned_resources(text: str, *, deliberate: bool = False) -> bool:
+    """Resolve possessive context without guessing a brand from a generic noun.
+
+    Deliberate searches also accept the model's keyword-style owner query.
+    Generic advice and third-party questions do not browse possessions.
+    """
+
+    for clause in re.split(r"[,;?!]|\band\b", text, flags=re.I):
+        types = _personal_belief_types(clause)
+        if types and BeliefType.USER_MODEL_ATTR not in types:
+            continue
+        if re.search(r"\bmy\s+\w", clause, re.I) or (
+            deliberate and re.search(r"\b(?:user|owner)\b", clause, re.I)
+        ):
+            return True
+    return False
+
+
 class DeterministicQueryFormer:
     def __init__(
         self,
@@ -198,6 +218,7 @@ class DeterministicQueryFormer:
                 text=text or None,
                 subjects=subjects,
                 structured_belief_types=_personal_belief_types(text),
+                include_owned_resources=recalls_owned_resources(text),
                 profile=RecallProfile.TASK,
                 budget_tokens=self._budget_tokens,
                 max_items=self._max_items,
@@ -346,6 +367,17 @@ class HybridMemoryRetriever:
         # and the rendered stamp all read the query's as-of or the clock, so a
         # historical query is scored as of the moment it asks about.
         now = effective_query.as_of or self._clock.now()
+        policy_version = (
+            RECONSOLIDATION_RETRIEVAL_POLICY_VERSION
+            if self._reconsolidation_enabled
+            else "retrieval-people@1"
+            if query.people_scope is not None
+            else RETRIEVAL_POLICY_VERSION
+        )
+        render_policy = RETRIEVAL_POLICY_VERSION
+        if effective_query.include_owned_resources:
+            policy_version += f"+{OWNED_RESOURCE_POLICY_VERSION}"
+            render_policy += f"+{OWNED_RESOURCE_POLICY_VERSION}"
         merges: tuple[StoredMerge, ...] = ()
         if authorized and self._reconsolidation_enabled:
             records, merges = await self._merge_candidates(uow, effective_query, records, now)
@@ -428,7 +460,8 @@ class HybridMemoryRetriever:
             # shrinks a snapshot that has no durable belief left to seat.
             held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
             candidate_tokens = measure_tokens(
-                render_memory([*selected, item], as_of=now) + people_rendered
+                render_memory([*selected, item], as_of=now, policy_version=render_policy)
+                + people_rendered
             )
             if (
                 len(selected) + len(selected_people) + held >= effective_query.max_items
@@ -438,7 +471,9 @@ class HybridMemoryRetriever:
                 continue
             selected.append(item)
             durable_selected += int(durable)
-        rendered = render_memory(selected, as_of=now) + people_rendered
+        rendered = (
+            render_memory(selected, as_of=now, policy_version=render_policy) + people_rendered
+        )
         for person_item in eligible_people:
             if person_item in selected_people:
                 continue
@@ -470,9 +505,9 @@ class HybridMemoryRetriever:
                 claims = {normalize_claim(line[2:]) for line in summary.statement.splitlines()[1:]}
                 if claims & selected_claims:
                     continue
-                proposed = render_memory([*selected_items, summary], as_of=now) + "".join(
-                    "\n" + _person_line(item) for item in selected_people
-                )
+                proposed = render_memory(
+                    [*selected_items, summary], as_of=now, policy_version=render_policy
+                ) + "".join("\n" + _person_line(item) for item in selected_people)
                 if (
                     len(selected_items) + len(selected_people) >= effective_query.max_items
                     or measure_tokens(proposed) > effective_query.budget_tokens
@@ -513,13 +548,7 @@ class HybridMemoryRetriever:
             carried_in=[item.belief_id for item in selected_items if item.carried],
             beliefs=[item.model_copy(deep=True) for item in selected_items],
             people=selected_people,
-            retrieval_policy_version=(
-                RECONSOLIDATION_RETRIEVAL_POLICY_VERSION
-                if self._reconsolidation_enabled
-                else "retrieval-people@1"
-                if query.people_scope is not None
-                else RETRIEVAL_POLICY_VERSION
-            ),
+            retrieval_policy_version=policy_version,
             created_at=self._clock.now(),
             operator_fields_expire_at=(
                 self._clock.now() + timedelta(days=self._trace_retention.operator_retention_days)
@@ -893,6 +922,8 @@ def _score(
             or (query.include_ids is not None and record.id in query.include_ids)
             or record.id in query.expand_ids
         )
+        else 0.5
+        if query.include_owned_resources and is_owned_resource(record)
         else 0.25
         if record.belief_type in query.structured_belief_types
         else 0
@@ -1039,9 +1070,11 @@ def _rrf_fuse(candidates: list[RecalledBelief], *, k: int = 60) -> list[Recalled
     return fused
 
 
-def render_memory(items: Sequence[RecalledItem], *, as_of: object) -> str:
+def render_memory(
+    items: Sequence[RecalledItem], *, as_of: object, policy_version: str = RETRIEVAL_POLICY_VERSION
+) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
-    lines = [f'<memory as_of="{html.escape(stamp)}" policy="{RETRIEVAL_POLICY_VERSION}">']
+    lines = [f'<memory as_of="{html.escape(stamp)}" policy="{html.escape(policy_version)}">']
     for item in items:
         lines.append(f"  {_line(item)}")
     lines.append("</memory>")

@@ -1,6 +1,7 @@
 """Production-derived recall failures, using synthetic personal information."""
 
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -12,11 +13,15 @@ from agent_core.domain.context import WorkingState
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
+    MemoryClaimKind,
+    MemoryDerivation,
     MemoryStatus,
+    Polarity,
     Portability,
     RecallProfile,
     RecallQuery,
     Sensitivity,
+    is_owned_resource,
     recall_query_terms,
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn, TextPart, UserMessage
@@ -28,6 +33,174 @@ from tests.contract.support import NOW, SESSION_ID, principal, run, tool_context
 from tests.integration.m2_support import memory_settings
 
 HYDRANGEA_QUESTION = "Is it worth adding iron fertilizer to my hydrangeas this late in the season?"
+
+
+@pytest.mark.parametrize("deliberate", [False, True])
+@pytest.mark.parametrize(
+    ("question", "search", "statement"),
+    [
+        (
+            "What octane gas should I use for my car? Does it make a difference?",
+            "user car vehicle make model year engine gasoline octane",
+            "User has a 2026 Aster S8.",
+        ),
+        (
+            "Which charger should I get for my laptop?",
+            "user laptop computer model charger",
+            "User owns a Framework 13.",
+        ),
+    ],
+)
+async def test_personal_advice_recalls_older_owned_model_before_candidate_flood(
+    deliberate: bool, question: str, search: str, statement: str
+) -> None:
+    clock, factory, _service, retriever = await formation_stack()
+    target = memory(statement=statement).model_copy(
+        update={
+            "subject": "owned model",
+            "belief_type": BeliefType.USER_MODEL_ATTR,
+            "claim_kind": MemoryClaimKind.PROJECT_FACT,
+            "status": MemoryStatus.PROVISIONAL,
+            "authority": MemoryAuthority.INFERRED,
+            "confidence": 0.65,
+            "utility": -1.0,
+        }
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(target)
+        for index in range(161):
+            await uow.memories.upsert_belief(
+                target.model_copy(
+                    update={
+                        "id": UUID(int=20000 + index),
+                        "subject": f"project {index}",
+                        "statement": f"User wants to improve project {index}.",
+                        "store_position": index + 2,
+                        "utility": 0.0,
+                    }
+                )
+            )
+    clock.advance(timedelta(days=14))
+    snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
+    assert snapshot.items == []
+    if deliberate:
+        result = await MemorySearchTool(retriever).execute(
+            {"text": search, "scope": "project-a"}, tool_context()
+        )
+        assert result.structured is not None
+        assert str(target.id) in result.structured["belief_ids"]
+    else:
+        query = DeterministicQueryFormer(principal()).from_text(question)[0]
+        recalled = await retriever.recall(query, session_id=SESSION_ID)
+        assert target.id in [item.belief_id for item in recalled.items]
+        async with factory() as uow:
+            trace = await uow.traces.get(recalled.trace_id, principal())
+        assert trace.retrieval_policy_version == "retrieval@4+owned-resources@1"
+        assert 'policy="retrieval@4+owned-resources@1"' in recalled.rendered
+
+
+@pytest.mark.parametrize(
+    "question", ["Who is my mother?", "Who is my emergency contact?", "How do I like my coffee?"]
+)
+def test_explicit_relationship_and_preference_queries_do_not_browse_possessions(
+    question: str,
+) -> None:
+    assert not DeterministicQueryFormer(principal()).from_text(question)[0].include_owned_resources
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "User wants a new vehicle.",
+        "User no longer owns a sedan.",
+        "User has no vehicle.",
+        "User has to buy a new vehicle.",
+        "User's friend owns a sedan.",
+        "A sender reports that User owns a sedan.",
+    ],
+)
+def test_owned_resource_anchor_does_not_infer_an_owner(statement: str) -> None:
+    record = memory(statement=statement).model_copy(
+        update={"belief_type": BeliefType.USER_MODEL_ATTR, "claim_kind": MemoryClaimKind.RESOURCE}
+    )
+    assert not is_owned_resource(record)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"principal_id": "someone-else"},
+        {"tenant_id": "somewhere-else"},
+        {"sensitivity": Sensitivity.RESTRICTED},
+        {"portability": Portability.LOCAL, "scope": "another-project"},
+        {"status": MemoryStatus.RETIRED},
+        {"expires_at": NOW - timedelta(seconds=1)},
+        {"derivation": MemoryDerivation.HYPOTHESIS},
+        {"polarity": Polarity.RETRACT},
+    ],
+)
+async def test_owned_resource_anchor_keeps_visibility_and_evidence_boundaries(
+    changes: dict[str, object],
+) -> None:
+    _clock, factory, _service, retriever = await formation_stack()
+    record = memory(statement="User owns a Framework 13.").model_copy(
+        update={
+            "subject": "Framework 13",
+            "belief_type": BeliefType.USER_MODEL_ATTR,
+            "claim_kind": MemoryClaimKind.RESOURCE,
+            **changes,
+        }
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(record)
+    query = DeterministicQueryFormer(principal()).from_text("Charger for my laptop?")[0]
+    query = query.model_copy(update={"sensitivity_ceiling": Sensitivity.INTERNAL})
+    result = await retriever.recall(query, session_id=SESSION_ID)
+    assert result.items == []
+
+
+async def test_personal_advice_model_request_contains_stored_model_without_snapshot_promotion(
+    tmp_path: Path,
+) -> None:
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+    ) as app:
+        source_session = await app.sessions.create()
+        target = memory(statement="User has a 2026 Aster S8.").model_copy(
+            update={
+                "tenant_id": app.principal.tenant_id,
+                "principal_id": app.principal.principal_id,
+                "source_session_id": source_session,
+                "subject": "Aster S8",
+                "belief_type": BeliefType.USER_MODEL_ATTR,
+                "claim_kind": MemoryClaimKind.PROJECT_FACT,
+                "status": MemoryStatus.PROVISIONAL,
+                "authority": MemoryAuthority.INFERRED,
+                "confidence": 0.65,
+            }
+        )
+        async with app.uow_factory() as uow:
+            await uow.memories.upsert_belief(target)
+        session_id = await app.sessions.create()
+        await app.runs.wait_terminal(
+            await app.runs.submit("What octane gas should I use for my car?", session_id)
+        )
+        provider = app.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        request = provider.requests[0]
+        assert any(
+            target.statement in part.text
+            for item in request.conversation
+            if isinstance(item, UserMessage)
+            for part in item.content
+            if isinstance(part, TextPart)
+        )
+        plan = await app.executor._context_planner.current(session_id)
+        assert plan is not None and target.statement not in plan.memory_snapshot
+        await app.runs.wait_terminal(await app.runs.submit("Thanks", session_id))
+        assert provider.requests[-1].metadata["prefix_sha256"] == request.metadata["prefix_sha256"]
 
 
 @pytest.mark.parametrize(
@@ -242,10 +415,13 @@ def test_recall_filter_preserves_negation_names_and_non_english_terms() -> None:
 
 
 def test_historical_trace_queries_load_without_new_fields() -> None:
-    payload = recall_query().model_dump(exclude={"include_provisional", "structured_belief_types"})
+    payload = recall_query().model_dump(
+        exclude={"include_provisional", "structured_belief_types", "include_owned_resources"}
+    )
     loaded = RecallQuery.model_validate(payload)
     assert loaded.include_provisional is True
     assert loaded.structured_belief_types == []
+    assert loaded.include_owned_resources is False
 
 
 async def test_structured_profile_preserves_scope_ceiling_and_ranking() -> None:
