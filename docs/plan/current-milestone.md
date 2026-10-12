@@ -18,7 +18,9 @@ title: Current Milestone
   the local cache under the same durable budget (ADR-0181). Run-bound shared recall
   now binds saved task state and effective query policy (ADR-0182). Context assembly
   now re-reads current evidence instead of retaining completed recall (ADR-0183).
-  Production admission/authority resolution, scheduling/configuration,
+  Release-bundle validation now recomputes cross-category recall and implicit
+  answer lift with exact-version admission and revocation (ADR-0185).
+  Production composition/authority resolution, scheduling/configuration,
   historical/People parity and answer-use evidence remain open.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.

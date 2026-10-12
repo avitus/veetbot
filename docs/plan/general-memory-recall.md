@@ -183,9 +183,10 @@ including after query preparation, expiry or admission withdrawal, while the fro
 prefix remains unchanged. The runtime already uses one atomic assembly for pressure
 and the model request. A complete dependency revision can explicitly opt other
 callers into reuse; absent or unavailable validation always reads fresh evidence.
-Production admission, the authority resolver, explicit preparation scheduling and
-indexing maintenance scheduling remain open; release evidence must cover them and
-the withheld query modes.
+[ADR-0185](../adr/0185-general-recall-release-admission.md) adds the release-bundle
+verifier described below. Production composition, trusted dependency/authority
+resolution, explicit preparation scheduling and indexing maintenance scheduling
+remain open; release evidence must cover them and the withheld query modes.
 Frozen M16/M32 controls continue to select legacy candidates without the semantic
 arm. The complete M33 gates remain pending.
 
@@ -263,6 +264,32 @@ candidate selection, model, embedding dimension, index state, budgets and seed.
 Retain failed runs; never resample only failures and publish the favorable subset.
 Publication recomputes gates from observations and refuses missing or mixed tuples.
 Synthetic offline retrieval lift does not establish live answer lift.
+
+## Release admission mechanism
+
+`general-recall-release@1` binds reviewed scenario/independence manifests, exact
+implementation/scorer/model/configuration/index versions, frozen controls and
+preregistered budgets. Every observation and gate receipt binds that same tuple.
+The verifier requires all scenarios across both recall paths, seeded and full
+formation pipelines, and sparse/dense/hybrid comparisons. It recomputes stage
+recall and mechanically observed answer success rather than trusting a pass flag.
+Top-twenty ranked and rendered recall use the same context cap. Explicit-question
+success cannot supply the held-out implicit answer-lift requirement. Correct
+clarification/abstention, unsupported answers, boundary failures, invalid current
+facts, known incidents and family regressions remain distinct outcomes. Paired
+normal-approximation confidence intervals, noise, latency, tokens and cost are
+reported. Preregistration and the eleven supporting gate receipts are mandatory.
+
+The production caller must independently resolve the active dependency tuple.
+The binder additionally checks local source/scorer bytes and reads only bounded
+regular files. Observed evidence changes permanently revoke a binding; restoring
+old bytes does not revive it. As [ADR-0185](../adr/0185-general-recall-release-admission.md)
+explains, the operator still trusts the runner, reviewer and publication process:
+hash equality does not establish authorship, honest instrumentation or complete
+receipt provenance. Actual harness/publication integration and reviewed release
+inputs remain open. The unit tests' fabricated metric matrices are not a release
+corpus, and the existing diagnostic remains ineligible. Production composition
+still supplies no semantic channel and all twelve gates remain pending.
 
 ## First implementation and diagnostic status (2026-10-11)
 

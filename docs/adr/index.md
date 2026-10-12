@@ -206,3 +206,5 @@ implementation without one.
 
 - [ADR-0183 — Fresh evidence on context assembly (Accepted mechanism; activation gated)](0183-fresh-context-recall.md)
 - [ADR-0184 — Manually file email discussions from Chat (Proposed repair)](0184-email-discussion-folder-filing.md)
+
+- [ADR-0185 — General recall release admission (Accepted mechanism; activation gated)](0185-general-recall-release-admission.md)
