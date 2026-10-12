@@ -150,6 +150,7 @@ nav:
       - ADR-0176 Reviewed X feed briefing: adr/0176-reviewed-x-feed-briefing.md
       - ADR-0179 Version-bound semantic memory index: adr/0179-versioned-semantic-index.md
       - "ADR-0180: Bounded semantic indexing": adr/0180-bounded-semantic-indexing.md
+      - "ADR-0181: Bounded semantic query preparation": adr/0181-bounded-semantic-query-preparation.md
       - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md
       - ADR-0177 Bounded browser startup recovery: adr/0177-bounded-browser-startup-recovery.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md

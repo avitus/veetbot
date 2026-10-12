@@ -1,12 +1,12 @@
 """Content-free cursors, leases and conservative embedding spend (M33)."""
 
 import hashlib
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.domain.semantic_memory import EmbeddingSpace
 
@@ -70,6 +70,15 @@ class SemanticSpend(SemanticValue):
     maximum_usd: Decimal = Field(gt=0, allow_inf_nan=False)
     actual_usd: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     state: Literal["reserved", "known", "unknown"] = "reserved"
+
+    kind: Literal["index", "query"] = "index"
+    deadline: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def query_deadline(self) -> Self:
+        if self.kind == "query" and self.deadline is None:
+            raise ValueError("query reservation requires a deadline")
+        return self
 
     @property
     def charge(self) -> Decimal:
@@ -184,4 +193,41 @@ def settled_spend(spend: SemanticSpend, actual: Decimal | None) -> SemanticSpend
         raise ConflictError("semantic spend already settled")
     return spend.model_copy(
         update={"actual_usd": actual, "state": "unknown" if actual is None else "known"}
+    )
+
+
+def require_query(spend: SemanticSpend | None, now: datetime) -> SemanticSpend:
+    from agent_core.domain.errors import ConflictError
+
+    if spend is None or spend.kind != "query" or spend.deadline is None or now >= spend.deadline:
+        raise ConflictError("semantic query reservation unavailable")
+    return spend
+
+
+def query_reservation(
+    tenant: str,
+    owner: str,
+    config: EmbeddingConfig,
+    digest: str,
+    maximum: Decimal,
+    spent: Decimal,
+    request_id: UUID,
+    now: datetime,
+) -> SemanticSpend | None:
+    if not maximum.is_finite():
+        return None
+    maximum = maximum.quantize(QUANTUM, rounding=ROUND_CEILING)
+    if not 0 < maximum <= config.request_usd or spent + maximum > config.daily_usd:
+        return None
+    return SemanticSpend(
+        id=request_id,
+        tenant_id=tenant,
+        principal_id=owner,
+        config_key=config.key,
+        lease_token=request_id,
+        day=now.astimezone(UTC).date(),
+        request_digest=digest,
+        maximum_usd=maximum,
+        kind="query",
+        deadline=now + timedelta(seconds=15),
     )

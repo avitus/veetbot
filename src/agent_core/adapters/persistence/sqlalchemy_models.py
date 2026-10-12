@@ -2752,5 +2752,13 @@ class SemanticSpendRow(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     __table_args__ = (
         Index("ix_semantic_spend_owner_day", "tenant_id", "principal_id", "day"),
+        Index(
+            "uq_semantic_pending_query",
+            "tenant_id",
+            "principal_id",
+            unique=True,
+            postgresql_where=(payload["kind"].astext == "query")
+            & (payload["state"].astext == "reserved"),
+        ),
         CheckConstraint("charge >= 0", name="semantic_spend_nonnegative"),
     )

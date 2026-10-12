@@ -161,8 +161,15 @@ Production supplies no lookup and `semantic_enabled` remains false. A populated
 index alone cannot activate a provider or change production recall. The bounded
 indexing service now implements explicit provider admission, durable reservations
 and resumable inventory under [ADR-0180](../adr/0180-bounded-semantic-indexing.md).
-It is not scheduled in production. Query population and production configuration
-admission remain open; release evidence must cover them and the withheld query modes.
+It is not scheduled in production. Explicit bounded query preparation now populates
+that local lookup under [ADR-0181](../adr/0181-bounded-semantic-query-preparation.md).
+It accepts at most four queries, classifies text with an explicit sensitivity floor,
+reserves one request against the same durable owner/day budget as indexing, and
+makes the provider call outside repository transactions. Lookup itself never calls
+a provider or enqueues work. The bounded five-minute cache binds the complete query,
+current policy, surface, task and embedding configuration; it holds no source evidence.
+Production composition, current task/policy binding and configuration admission
+remain open; release evidence must cover them and the withheld query modes.
 Frozen M16/M32 controls continue to select legacy candidates without the semantic
 arm. The complete M33 gates remain pending.
 

@@ -1,4 +1,4 @@
-"""Durable semantic indexing admission, independent of dreaming activation."""
+"""Durable semantic indexing/query admission, independent of dreaming activation."""
 
 from datetime import date, datetime
 from decimal import Decimal
@@ -49,3 +49,27 @@ class SemanticWorkStore(Protocol):
     ) -> SemanticJob: ...
 
     async def spent(self, principal: Principal, day: date) -> Decimal: ...
+
+    async def reserve_query(
+        self,
+        principal: Principal,
+        config: EmbeddingConfig,
+        digest: str,
+        maximum: Decimal,
+        now: datetime,
+    ) -> SemanticSpend | None: ...
+
+    async def query_current(
+        self,
+        principal: Principal,
+        spend_id: UUID,
+        now: datetime,
+    ) -> SemanticSpend: ...
+
+    async def settle_query(
+        self,
+        principal: Principal,
+        spend_id: UUID,
+        actual: Decimal | None,
+        now: datetime,
+    ) -> SemanticSpend: ...

@@ -2509,12 +2509,12 @@ milestones:
     design: docs/plan/general-memory-recall.md
     adr: docs/adr/0178-general-memory-recall.md
     gates_registered: 12
-    implementation_status: bounded_semantic_indexing_and_provider_admission_implemented
+    implementation_status: bounded_semantic_query_preparation_implemented
     diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
     limitations:
       - seeded retrieval is not formation, answer-use or held-out release evidence
       - semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
-      - production scheduling/configuration, query population, historical/People parity and activation evidence remain open
+      - production composition/scheduling/configuration, task/policy binding, historical/People parity and activation evidence remain open
     authorized_scope:
       - cross-category retrieval and implicit-use evaluation with frozen controls
       - relevance before candidate limits with persistence parity

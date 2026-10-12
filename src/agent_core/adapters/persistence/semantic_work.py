@@ -1,10 +1,10 @@
 """Owner-serialized semantic cursors and durable, content-free spend receipts."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_CEILING, Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,9 @@ from agent_core.domain.semantic_work import (
     check_cursors,
     claim_job,
     finish_job,
+    query_reservation,
     require_job,
+    require_query,
     settled_spend,
 )
 from agent_core.ports.determinism import IdFactory
@@ -90,7 +92,9 @@ class PostgresSemanticWorkStore:
                 if row is not None:
                     spend = SemanticSpend.model_validate(row.payload)
                     if spend.state == "reserved":
-                        row.payload = settled_spend(spend, None).model_dump(mode="json")
+                        row.payload = settled_spend(spend, None).model_dump(
+                            mode="json", exclude={"kind", "deadline"}
+                        )
             await self._save(value)
         return value
 
@@ -140,7 +144,7 @@ class PostgresSemanticWorkStore:
                 principal_id=value.principal_id,
                 day=value.day,
                 charge=value.charge,
-                payload=value.model_dump(mode="json"),
+                payload=value.model_dump(mode="json", exclude={"kind", "deadline"}),
             )
         )
         await self._save(
@@ -172,7 +176,9 @@ class PostgresSemanticWorkStore:
         if value.lease_token != token:
             raise ConflictError("semantic reservation unavailable")
         result = settled_spend(value, actual)
-        row.payload, row.charge = result.model_dump(mode="json"), result.charge
+        # Preserve the legacy index receipt shape for application rollback.
+        row.payload = result.model_dump(mode="json", exclude={"kind", "deadline"})
+        row.charge = result.charge
         await self._session.flush()
         return result
 
@@ -201,3 +207,81 @@ class PostgresSemanticWorkStore:
             )
         )
         return Decimal(value or 0)
+
+    async def reserve_query(
+        self,
+        principal: Principal,
+        config: EmbeddingConfig,
+        digest: str,
+        maximum: Decimal,
+        now: datetime,
+    ) -> SemanticSpend | None:
+        await lock_owner(self._session, principal)
+        row = await self._session.scalar(
+            select(SemanticSpendRow)
+            .where(
+                SemanticSpendRow.tenant_id == principal.tenant_id,
+                SemanticSpendRow.principal_id == principal.principal_id,
+                # Keep the fixed predicate literal so generic prepared plans can use
+                # the partial unique index, rather than scan the owner's spend history.
+                text("payload->>'kind' = 'query' AND payload->>'state' = 'reserved'"),
+            )
+            .execution_options(populate_existing=True)
+        )
+        if row is not None:
+            old = SemanticSpend.model_validate(row.payload)
+            if old.deadline is not None and now < old.deadline:
+                return None
+            row.payload = settled_spend(old, None).model_dump(mode="json")
+            await self._session.flush()
+        value = query_reservation(
+            principal.tenant_id,
+            principal.principal_id,
+            config,
+            digest,
+            maximum,
+            await self.spent(principal, now.astimezone(UTC).date()),
+            self._ids.new_id(),
+            now,
+        )
+        if value is not None:
+            await self._session.execute(
+                pg_insert(SemanticSpendRow).values(
+                    id=value.id,
+                    tenant_id=value.tenant_id,
+                    principal_id=value.principal_id,
+                    day=value.day,
+                    charge=value.charge,
+                    payload=value.model_dump(mode="json"),
+                )
+            )
+        return value
+
+    async def query_current(
+        self,
+        principal: Principal,
+        spend_id: UUID,
+        now: datetime,
+    ) -> SemanticSpend:
+        await lock_owner(self._session, principal)
+        row = await self._spend(principal, spend_id)
+        value = require_query(SemanticSpend.model_validate(row.payload) if row else None, now)
+        if value.state != "reserved":
+            raise ConflictError("semantic query reservation already settled")
+        return value
+
+    async def settle_query(
+        self,
+        principal: Principal,
+        spend_id: UUID,
+        actual: Decimal | None,
+        now: datetime,
+    ) -> SemanticSpend:
+        await lock_owner(self._session, principal)
+        row = await self._spend(principal, spend_id)
+        value = require_query(SemanticSpend.model_validate(row.payload) if row else None, now)
+        result = settled_spend(value, actual)
+        assert row is not None
+        row.payload, row.charge = result.model_dump(mode="json"), result.charge
+        await self._session.flush()
+        return result

@@ -1,7 +1,7 @@
 """Transactional in-memory semantic maintenance repository."""
 
 from collections.abc import MutableMapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_CEILING, Decimal
 from uuid import UUID
 
@@ -17,7 +17,9 @@ from agent_core.domain.semantic_work import (
     check_cursors,
     claim_job,
     finish_job,
+    query_reservation,
     require_job,
+    require_query,
     settled_spend,
 )
 from agent_core.ports.determinism import IdFactory
@@ -150,3 +152,58 @@ class InMemorySemanticWorkStore:
                 (v.charge for key, v in self._spend.items() if key[:2] == owner and v.day == day),
                 Decimal(0),
             )
+
+    async def reserve_query(
+        self,
+        principal: Principal,
+        config: EmbeddingConfig,
+        digest: str,
+        maximum: Decimal,
+        now: datetime,
+    ) -> SemanticSpend | None:
+        owner = (principal.tenant_id, principal.principal_id)
+        async with self._transaction.owner(owner):
+            for key, old in list(self._spend.items()):
+                if key[:2] == owner and old.kind == "query" and old.state == "reserved":
+                    if old.deadline is not None and now < old.deadline:
+                        return None
+                    self._spend[key] = settled_spend(old, None)
+            value = query_reservation(
+                *owner,
+                config,
+                digest,
+                maximum,
+                await self.spent(principal, now.astimezone(UTC).date()),
+                self._ids.new_id(),
+                now,
+            )
+            if value is not None:
+                self._spend[*owner, value.id] = value
+            return value
+
+    async def query_current(
+        self,
+        principal: Principal,
+        spend_id: UUID,
+        now: datetime,
+    ) -> SemanticSpend:
+        owner = (principal.tenant_id, principal.principal_id)
+        async with self._transaction.owner(owner):
+            value = require_query(self._spend.get((*owner, spend_id)), now)
+            if value.state != "reserved":
+                raise ConflictError("semantic query reservation already settled")
+            return value
+
+    async def settle_query(
+        self,
+        principal: Principal,
+        spend_id: UUID,
+        actual: Decimal | None,
+        now: datetime,
+    ) -> SemanticSpend:
+        owner = (principal.tenant_id, principal.principal_id)
+        async with self._transaction.owner(owner):
+            value = require_query(self._spend.get((*owner, spend_id)), now)
+            result = settled_spend(value, actual)
+            self._spend[*owner, spend_id] = result
+            return result
