@@ -20,8 +20,10 @@ title: Current Milestone
   now re-reads current evidence instead of retaining completed recall (ADR-0183).
   Release-bundle validation now recomputes cross-category recall and implicit
   answer lift with exact-version admission and revocation (ADR-0185).
-  Production composition/authority resolution, scheduling/configuration,
-  historical/People parity and answer-use evidence remain open.
+  Source indexing now has default-off configuration and maintenance composition,
+  bound to independently reviewed release dependencies (ADR-0187). Query authority,
+  semantic recall composition, explicit preparation scheduling, historical/People
+  parity and answer-use evidence remain open.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
 

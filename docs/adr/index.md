@@ -209,3 +209,5 @@ implementation without one.
 
 - [ADR-0185 — General recall release admission (Accepted mechanism; activation gated)](0185-general-recall-release-admission.md)
 - [ADR-0186 — Persistent dreaming review sign-in (Proposed; implementation authorized)](0186-dreaming-review-session.md)
+
+- [ADR-0187 — Semantic index production composition (Accepted mechanism; activation gated)](0187-semantic-index-production-composition.md)

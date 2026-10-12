@@ -316,7 +316,9 @@ explicit query preparation and a bounded local cache sharing the indexing budget
 ADR-0182 binds shared preparation and recall to saved run/checkpoint state and
 current query policy. ADR-0183 refreshes current evidence on every production
 context assembly. ADR-0185 adds exact-version release-bundle validation and
-recomputes quality/budget admission. Production composition/authority resolution, scheduling,
+recomputes quality/budget admission. Source indexing has default-off maintenance
+composition and configuration bound to reviewed release dependencies (ADR-0187).
+Trusted query authority, semantic recall composition, query scheduling,
 historical/People semantic parity and comparative activation evidence remain open.
 
 Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),

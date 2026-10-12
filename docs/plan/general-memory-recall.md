@@ -161,7 +161,7 @@ Production supplies no lookup and `semantic_enabled` remains false. A populated
 index alone cannot activate a provider or change production recall. The bounded
 indexing service now implements explicit provider admission, durable reservations
 and resumable inventory under [ADR-0180](../adr/0180-bounded-semantic-indexing.md).
-It is not scheduled in production. Explicit bounded query preparation now populates
+Its optional maintenance composition is described below. Explicit bounded query preparation now populates
 that local lookup under [ADR-0181](../adr/0181-bounded-semantic-query-preparation.md).
 It accepts at most four queries, classifies text with an explicit sensitivity floor,
 reserves one request against the same durable owner/day budget as indexing, and
@@ -184,9 +184,14 @@ prefix remains unchanged. The runtime already uses one atomic assembly for press
 and the model request. A complete dependency revision can explicitly opt other
 callers into reuse; absent or unavailable validation always reads fresh evidence.
 [ADR-0185](../adr/0185-general-recall-release-admission.md) adds the release-bundle
-verifier described below. Production composition, trusted dependency/authority
-resolution, explicit preparation scheduling and indexing maintenance scheduling
-remain open; release evidence must cover them and the withheld query modes.
+verifier described below. [ADR-0187](../adr/0187-semantic-index-production-composition.md)
+connects source indexing to maintenance with explicit configuration and matching
+release evidence. It ships disabled, starts only without live foreground leases,
+and cancels/joins bounded work on shutdown. It independently binds effective
+composition and embedding configuration to a reviewed manifest before accessing
+credentials; either evidence file changing permanently withdraws admission.
+Production query authority, recall composition and explicit query preparation
+scheduling remain open; release evidence must cover them and withheld query modes.
 Frozen M16/M32 controls continue to select legacy candidates without the semantic
 arm. The complete M33 gates remain pending.
 

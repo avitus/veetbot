@@ -57,6 +57,7 @@ from agent_core.adapters.determinism import (
 from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
+from agent_core.adapters.embeddings.openai import OpenAIEmbeddingProvider
 from agent_core.adapters.execution.docker import (
     DockerExecutionEnvironment,
     resolve_local_image_digest,
@@ -550,6 +551,7 @@ from agent_core.memory.retrieval import (
     EventEpisodeSearch,
     HybridMemoryRetriever,
 )
+from agent_core.memory.semantic_deployment import compose_indexing
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
@@ -3331,6 +3333,75 @@ async def _compose(
             egress_policy=local_egress_policy(settings.memory_reconsolidation_residency_provider),
             owner_review=True,
         )
+    semantic_index_pass = None
+    if settings.memory_semantic_index_enabled:
+        registry_identity = {
+            "policies": model_router.registry.policies.model_dump(mode="json"),
+            "profiles": {
+                name: {
+                    "profile_hash": profile.profile_hash,
+                    "registry_version": profile.registry_version,
+                    "models": [
+                        {
+                            "id": model.model_id,
+                            "aliases": model.aliases,
+                            "limits": model.limits.model_dump(mode="json"),
+                            "pricing": model.pricing.model_dump(mode="json"),
+                            "reasoning_efforts": list(model.reasoning_efforts),
+                        }
+                        for model in profile.models
+                    ],
+                }
+                for name, profile in model_router.registry.profiles.items()
+            },
+        }
+        semantic_index_pass = await compose_indexing(
+            root=REPOSITORY_ROOT,
+            settings=settings,
+            principal=principal,
+            factory=uow_factory,
+            clock=clock,
+            credentials=credential_resolver,
+            configuration={
+                "policy_version": ruleset.policy_version,
+                "agent": agent.model_dump(mode="json"),
+                "principal": {
+                    "tenant": principal.tenant_id,
+                    "owner": principal.principal_id,
+                    "scopes": sorted(principal.scopes),
+                    "roles": sorted(principal.roles),
+                },
+                "context": dict(context_config),
+                "memory": memory_profiles.model_dump(mode="json"),
+                "storage": storage,
+                "people_enabled": settings.people_enabled,
+                "reviewed_dreaming": settings.memory_dreaming_review_enabled,
+                "unattended_dreaming": settings.memory_reconsolidation_enabled,
+                "query_authority": "withheld",
+                "query_preparation": "disabled",
+            },
+            formation={
+                "policy": memory_policy_version,
+                "profiles": memory_profiles.formation.model_dump(mode="json"),
+                "registry": registry_identity,
+                "default": memory_default_choice.model_dump(mode="json"),
+                "alternatives": [
+                    option.model_dump(mode="json") for option in memory_alternative_options
+                ],
+                "upstream_build": evidence_build_ref,
+                "upstream_corpus": evidence_corpus_sha256,
+            },
+            reader={
+                "registry": registry_identity,
+                "catalog": model_settings_catalog.model_dump(mode="json"),
+            },
+            provider_factory=OpenAIEmbeddingProvider,
+        )
+
+    async def sweep_semantic_index() -> int:
+        assert semantic_index_pass is not None
+        return (await semantic_index_pass.run_slice()).indexed
+
     memory_retriever = HybridMemoryRetriever(
         uow_factory,
         clock,
@@ -4655,6 +4726,9 @@ async def _compose(
                     sweep_memory=sweep_memory,
                     sweep_traces=sweep_traces,
                     sweep_memory_consolidation=sweep_memory_consolidation,
+                    sweep_memory_semantic_index=sweep_semantic_index
+                    if semantic_index_pass is not None
+                    else None,
                     sweep_memory_reconsolidation=recon_pass.run_once
                     if recon_pass is not None
                     else None,

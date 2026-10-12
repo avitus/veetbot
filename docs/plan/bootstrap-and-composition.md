@@ -1604,3 +1604,31 @@ process cache. Durations and caps remain constants in
 `agent_core.domain.browser_task_grants`.
 The detailed contract is [browser-automation.md](browser-automation.md) and
 [ADR-0129](../adr/0129-time-boxed-task-grant-from-the-approval-card.md).
+
+
+## General memory source-index composition
+
+[ADR-0187](../adr/0187-semantic-index-production-composition.md) connects the bounded
+source indexer to maintenance through `AGENT_MEMORY_SEMANTIC_INDEX_ENABLED` (default
+`0`), `AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST` and
+`AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE`. The paths identify an independently reviewed
+release identity and its measured passing bundle. They contain no credentials.
+The existing release identity must be configured, and production requires PostgreSQL.
+
+The checked-in `memory/semantic-index.yaml` catalog ships with `schema_version: 1`
+and an empty `configurations` list. Its operator overlay must contain exactly one
+entry with `credential_ref` and the complete `EmbeddingConfig` under `embedding`.
+The credential reference names the existing worker credential broker entry, such
+as `openai`; the provider's existing secret-loading path supplies its value. Model,
+revision, dimensions, price/revision, egress revision, residency and request/day
+limits are explicit reviewed file values. Interpolation is forbidden. The empty
+optional catalog is metadata, not a new populated default in the knob inventory.
+
+Composition compares locally derived policy/profile/agent/owner, context, model
+catalog and embedding identities with the independent manifest, then invokes the
+complete release scorer before accessing credentials. Both files remain revocable.
+Disabling the flag skips evidence and credential access. Configuration changes
+require recomposition and matching evidence; source originals remain authoritative.
+This flag activates indexing only. It grants no query egress authority and leaves
+the production semantic recall channel absent until its separate integration and
+release evidence are complete.

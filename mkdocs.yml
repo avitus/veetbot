@@ -156,6 +156,7 @@ nav:
       - "ADR-0184: Manually file email discussions from Chat": adr/0184-email-discussion-folder-filing.md
       - "ADR-0185: General recall release admission": adr/0185-general-recall-release-admission.md
       - "ADR-0186: Persistent dreaming review sign-in": adr/0186-dreaming-review-session.md
+      - "ADR-0187: Semantic index production composition": adr/0187-semantic-index-production-composition.md
       - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md
       - ADR-0177 Bounded browser startup recovery: adr/0177-bounded-browser-startup-recovery.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
