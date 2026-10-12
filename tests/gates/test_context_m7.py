@@ -466,6 +466,13 @@ async def test_memory_context_marks_snapshot_and_recall_provenance() -> None:
 async def test_measure_and_build_share_one_recall_trace() -> None:
     retriever = _CountingMemoryRetriever()
     builder = _builder(memory_retriever=retriever, query_former=_StaticQueryFormer())
+
+    async def immutable_fixture_revision() -> int:
+        # This fixture's evidence and clock are fixed. Production mutable
+        # evidence cannot make this promise and uses one atomic assemble call.
+        return 0
+
+    builder._recall_revision = immutable_fixture_revision
     active_run = run(status=RunStatus.RUNNING)
     checkpoint = RunCheckpoint(
         run_id=active_run.id,

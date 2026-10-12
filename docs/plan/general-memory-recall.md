@@ -177,9 +177,15 @@ handles share one 128-vector cache; state changes, cancellation and eviction rev
 their handles without clearing another chat's valid vectors. Ordinary recall
 performs no provider work. Binding is limited to one second; the ten-second
 preparation budget includes state reads, with up to three seconds of failure cleanup.
-Production admission, the authority resolver, explicit preparation scheduling,
-context-builder recall-cache invalidation and indexing maintenance scheduling
-remain open; release evidence must cover them and the withheld query modes.
+[ADR-0183](../adr/0183-fresh-context-recall.md) removes completed evidence reuse
+from production context assembly. Every assembly reaches current-source recall,
+including after query preparation, expiry or admission withdrawal, while the frozen
+prefix remains unchanged. The runtime already uses one atomic assembly for pressure
+and the model request. A complete dependency revision can explicitly opt other
+callers into reuse; absent or unavailable validation always reads fresh evidence.
+Production admission, the authority resolver, explicit preparation scheduling and
+indexing maintenance scheduling remain open; release evidence must cover them and
+the withheld query modes.
 Frozen M16/M32 controls continue to select legacy candidates without the semantic
 arm. The complete M33 gates remain pending.
 

@@ -16,8 +16,9 @@ title: Current Milestone
   with source-version fences (ADR-0179). Bounded provider admission and persistent
   indexing slices are implemented (ADR-0180). Explicit query preparation now feeds
   the local cache under the same durable budget (ADR-0181). Run-bound shared recall
-  now binds saved task state and effective query policy (ADR-0182). Production
-  admission/authority resolution, scheduling/configuration, context-cache integration,
+  now binds saved task state and effective query policy (ADR-0182). Context assembly
+  now re-reads current evidence instead of retaining completed recall (ADR-0183).
+  Production admission/authority resolution, scheduling/configuration,
   historical/People parity and answer-use evidence remain open.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.

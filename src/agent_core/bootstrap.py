@@ -3578,7 +3578,8 @@ async def _compose(
             people_retriever or memory_retriever,
             query_former,
             session_project_scope,
-            recall_revision=None if people_retriever is None else people_retriever.revision,
+            # Memory/People watermarks do not cover elapsed expiry, semantic
+            # cache availability or admission. Read current evidence per assembly.
             inline_output_bytes=inline_output_bytes,
         )
         compactor = StructuredCompactor(

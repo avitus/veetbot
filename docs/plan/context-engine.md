@@ -885,6 +885,18 @@ statement — behind a profile flag and under the same candidate ceiling. The
 same document adds the recall delta and the correction lines this builder
 assembles beside the recall block.
 
+### Freshness of in-turn recall
+
+Production assembly re-reads current permitted memory instead of retaining rendered
+recall across calls ([ADR-0183](../adr/0183-fresh-context-recall.md)). Checkpoint and
+store-watermark equality do not establish continued validity: elapsed expiry,
+semantic query preparation and withdrawn admission can change the answer without
+a source write. The runtime obtains pressure and its request in one `assemble`
+call, preserving one retrieval for that step. New evidence remains in Region B.
+Only an explicit complete dependency revision permits completed-result reuse;
+missing or failed revision validation discards retained evidence and reads again.
+The bounded semantic cache retains query vectors, never recalled source content.
+
 ## Ports and data model
 
 `ContextBuilder` (Section 7) is unchanged. These are additions.

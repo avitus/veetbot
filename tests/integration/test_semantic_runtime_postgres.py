@@ -7,9 +7,10 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.bootstrap import build
+from agent_core.domain.messages import TextPart, UserMessage
 from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.memory.profiles import DEFAULT_RETRIEVAL_PROFILE
-from agent_core.memory.retrieval import HybridMemoryRetriever
+from agent_core.memory.retrieval import DeterministicQueryFormer, HybridMemoryRetriever
 from agent_core.memory.semantic_runtime import RunSemanticQueries
 from agent_core.tools.memory_search import MemorySearchTool
 from tests.contract.memory_fixtures import memory
@@ -26,10 +27,11 @@ from tests.contract.support import (
     tool_context,
 )
 from tests.contract.test_runtime_semantic_queries_contract import AUTHORITY, query
+from tests.gates.test_context_m7 import _builder
 from tests.integration.m2_support import database_settings
 
 
-@pytest.mark.parametrize("path", ["automatic", "deliberate"])
+@pytest.mark.parametrize("path", ["automatic", "deliberate", "context"])
 async def test_runtime_binding_and_source_correction(path: str) -> None:
     clock = FixedClock(NOW)
     async with build(
@@ -44,19 +46,19 @@ async def test_runtime_binding_and_source_correction(path: str) -> None:
             status=RunStatus.RUNNING,
             created_at=NOW,
             working_state={"objective": "Plan breakfast"},
+            conversation=[UserMessage(content=[TextPart(text="Suggest breakfast options")])],
         )
         async with app.uow_factory() as uow:
             await uow.agents.put(agent())
             await uow.sessions.create(session())
-            await uow.runs.create(
-                run(status=RunStatus.RUNNING).model_copy(
-                    update={
-                        "lease_owner": "worker",
-                        "lease_epoch": 1,
-                        "lease_expires_at": NOW + timedelta(minutes=10),
-                    }
-                )
+            live_run = run(status=RunStatus.RUNNING).model_copy(
+                update={
+                    "lease_owner": "worker",
+                    "lease_epoch": 1,
+                    "lease_expires_at": NOW + timedelta(minutes=10),
+                }
             )
+            await uow.runs.create(live_run)
             await uow.checkpoints.write(RUN_ID, checkpoint, full=True)
             await uow.memories.upsert_belief(original)
             source = await uow.semantic_memory.capture(principal(), original.id, SPACE)
@@ -81,14 +83,27 @@ async def test_runtime_binding_and_source_correction(path: str) -> None:
             reconsolidation_owner_approved_only=True,
             runtime_semantic_queries=runtime,
         )
+        context_builder = _builder(
+            memory_retriever=retriever,
+            query_former=DeterministicQueryFormer(principal(), current_scope="project-a"),
+        )
+        if path == "context":
+            before = await context_builder.build(live_run, checkpoint, agent(), principal())
+            assert original.statement not in before.model_dump_json()
         assert (
             await retriever.prepare_semantic_queries(
-                [query(path)], session_id=SESSION_ID, run_id=RUN_ID
+                [query("automatic" if path == "context" else path)],
+                session_id=SESSION_ID,
+                run_id=RUN_ID,
             )
             == 1
         )
 
         async def recall() -> str:
+            if path == "context":
+                request = await context_builder.build(live_run, checkpoint, agent(), principal())
+                assert request.metadata["prefix_sha256"] == before.metadata["prefix_sha256"]
+                return request.model_dump_json()
             if path == "automatic":
                 return (
                     await retriever.recall(query(path), session_id=SESSION_ID, run_id=RUN_ID)

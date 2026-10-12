@@ -2509,15 +2509,17 @@ milestones:
     design: docs/plan/general-memory-recall.md
     adr: docs/adr/0178-general-memory-recall.md
     gates_registered: 12
-    implementation_status: run_bound_semantic_recall_implemented
+    implementation_status: fresh_context_recall_implemented
     implementation_evidence:
       - tests/contract/test_runtime_semantic_queries_contract.py
+      - tests/contract/test_context_recall_freshness.py
+      - tests/unit/test_context_recall_cache.py
       - tests/integration/test_semantic_runtime_postgres.py
     diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
     limitations:
       - seeded retrieval is not formation, answer-use or held-out release evidence
       - semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
-      - production admission/authority resolution, scheduling/configuration, context-cache integration, historical/People parity and activation evidence remain open
+      - production admission/authority resolution, scheduling/configuration, historical/People parity and activation evidence remain open
     authorized_scope:
       - cross-category retrieval and implicit-use evaluation with frozen controls
       - relevance before candidate limits with persistence parity

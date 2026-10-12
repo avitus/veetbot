@@ -293,7 +293,7 @@ class BudgetedContextBuilder:
         memory_retriever: MemoryRetriever | None = None,
         query_former: QueryFormer | None = None,
         session_scope: Callable[[UUID], Awaitable[str]] | None = None,
-        recall_revision: Callable[[], Awaitable[int]] | None = None,
+        recall_revision: Callable[[], Awaitable[int | None]] | None = None,
         inline_output_bytes: int = 4096,
     ) -> None:
         self._planner = planner
@@ -445,7 +445,7 @@ class BudgetedContextBuilder:
         )
         recall_items: list[ConversationItem] = []
         correction_items: list[ConversationItem] = []
-        recalled = await self._recall_once(run, checkpoint, state, active, plan)
+        recalled = await self._recall_once(run, checkpoint, state, active, plan, principal)
         for block in (recalled.base, recalled.delta):
             if block is not None:
                 recall_items.append(
@@ -636,16 +636,44 @@ class BudgetedContextBuilder:
         state: WorkingState,
         active: list[ConversationItem],
         plan: ContextPlan,
+        principal: Principal,
     ) -> _RecallBundle:
         if self._memory_retriever is None or self._query_former is None:
             return _RecallBundle()
         message = _current_user_text(active)
         if message is None:
             return _RecallBundle()
+        # A checkpoint identifies a question, not the continued validity of its
+        # evidence. Only a complete, trusted dependency revision may opt into
+        # reuse. A store watermark alone misses expiry and optional-channel
+        # admission/cache changes. Production therefore reads on every assembly.
+        revision = None
+        if self._recall_revision is not None:
+            try:
+                revision = await self._recall_revision()
+            except Exception as exc:
+                logger.warning(
+                    "context_memory_revision_failed",
+                    extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+                )
+        if revision is None:
+            for old_key in list(self._recall_tasks):
+                if old_key[0] == run.id:
+                    self._recall_tasks.pop(old_key)
+            # Do not detach a task: cancellation owns and stops this read.
+            return await self._compute_recall(
+                run.model_copy(deep=True),
+                state.model_copy(deep=True),
+                message,
+                snapshot_id=plan.snapshot_id,
+                snapshot_watermark=plan.snapshot_watermark,
+            )
         checkpoint_identity = hashlib.sha256(
             _canonical_json(
                 {
-                    "version": checkpoint.version,
+                    "principal": principal.model_dump(mode="json"),
+                    "run": run.model_dump(mode="json"),
+                    "checkpoint": checkpoint.model_dump(mode="json"),
                     "last_event_sequence": checkpoint.last_event_sequence,
                     "conversation": [item.model_dump(mode="json") for item in active],
                     "working_state": state.model_dump(mode="json"),
@@ -656,9 +684,7 @@ class BudgetedContextBuilder:
                     "epoch": plan.epoch,
                     "snapshot_id": None if plan.snapshot_id is None else str(plan.snapshot_id),
                     "snapshot_watermark": plan.snapshot_watermark,
-                    "recall_revision": None
-                    if self._recall_revision is None
-                    else await self._recall_revision(),
+                    "recall_revision": revision,
                 }
             )
         ).hexdigest()

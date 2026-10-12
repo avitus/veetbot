@@ -314,8 +314,9 @@ with correction/erasure fences and exact pgvector search. ADR-0180 adds bounded
 provider admission, durable spending and resumable indexing slices. ADR-0181 adds
 explicit query preparation and a bounded local cache sharing the indexing budget.
 ADR-0182 binds shared preparation and recall to saved run/checkpoint state and
-current query policy. Production admission/authority resolution, scheduling,
-context-cache integration and comparative activation evidence remain open.
+current query policy. ADR-0183 refreshes current evidence on every production
+context assembly. Production admission/authority resolution, scheduling,
+historical/People semantic parity and comparative activation evidence remain open.
 
 Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).

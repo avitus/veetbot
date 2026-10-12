@@ -203,3 +203,5 @@ implementation without one.
 - [ADR-0181 — Bounded semantic query preparation (Accepted mechanism; activation gated)](0181-bounded-semantic-query-preparation.md)
 
 - [ADR-0182 — Run-bound semantic recall (Accepted mechanism; activation gated)](0182-run-bound-semantic-recall.md)
+
+- [ADR-0183 — Fresh evidence on context assembly (Accepted mechanism; activation gated)](0183-fresh-context-recall.md)
