@@ -72,6 +72,7 @@ from agent_core.ports.models import ModelProvider
 from agent_core.ports.notifications import RunNotificationProducer
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.repositories import BudgetLedger
+from agent_core.runtime.response_text import response_text_stream
 
 type ToolDispatch = Callable[..., Awaitable[list[ToolResultItem]]]
 type ModelEventCallback = Callable[[Run, ModelEvent], Awaitable[None]]
@@ -950,7 +951,7 @@ async def _invoke_model(
                 ),
             )
             async with aclosing(stream):
-                async for event in validated_stream(stream):
+                async for event in response_text_stream(validated_stream(stream)):
                     if event.sequence != expected_sequence:
                         return _failure(
                             context,

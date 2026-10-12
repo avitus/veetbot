@@ -1210,6 +1210,17 @@ in the checkpoint and is the outcome's `final_message`, so `run.completed`
 repeats exactly what `assistant.message.completed` recorded. A fenced lease or a
 People erasure fence rolls the three writes back together.
 
+The runtime removes echoed context trust-envelope markers from assistant text
+before live callbacks, response events and checkpoints. It buffers a possible
+marker across text deltas (at most 1,024 characters), retaining enclosed text
+and ordinary HTML. Only the canonical nonced marker syntax and a recognized
+truncated header are removed. Each output item and attempt has its own buffer;
+completed and failed partial turns receive the same cleanup, including a
+completion without deltas. Trust labels, tool arguments, usage, attachments and
+provider reasoning are preserved. Model-input envelopes and escaping remain
+governed by [context-engine.md](context-engine.md#every-non-platform-region-is-enveloped).
+Existing persisted replies are not rewritten by this output repair.
+
 ### After the run
 
 Four things happen after a terminal transition and none of them is in
