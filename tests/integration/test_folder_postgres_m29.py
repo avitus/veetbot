@@ -26,11 +26,31 @@ from agent_core.domain.folders import (
     ThreadFolder,
 )
 from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.policy.scopes import PLATFORM_SCOPES
+from tests.gates.test_email_folder_filing import assert_email_discussion_can_be_filed
+from tests.gates.test_folder_api_boundary_m29 import _client
 from tests.integration.m2_support import PRINCIPAL, database_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
 AGENT_ID = UUID("00000000-0000-0000-0000-000000000010")
+
+
+async def test_email_discussion_folder_filing_preserves_source_on_postgres(tmp_path: Path) -> None:
+    settings = replace(
+        database_settings(),
+        artifact_root=tmp_path / "artifacts",
+        email_mode_enabled=True,
+        thread_folders_api_enabled=True,
+    )
+    owner = PRINCIPAL.model_copy(
+        update={"scopes": {*PLATFORM_SCOPES, "mcp.gmail_read.use", "mcp.gmail_send.use"}}
+    )
+    async with (
+        build(settings=settings, storage="postgres", principal=owner) as composition,
+        _client(composition) as client,
+    ):
+        await assert_email_discussion_can_be_filed(composition, client)
 
 
 def _alembic(*arguments: str) -> None:

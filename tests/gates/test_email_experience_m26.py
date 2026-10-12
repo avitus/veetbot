@@ -78,7 +78,10 @@ async def test_email_api_is_flag_gated_scope_checked_and_private() -> None:
 
 
 @asynccontextmanager
-async def email_client() -> AsyncIterator[tuple[Composition, httpx.AsyncClient]]:
+async def email_client(
+    *,
+    thread_folders_api_enabled: bool = False,
+) -> AsyncIterator[tuple[Composition, httpx.AsyncClient]]:
     principal = Principal(
         tenant_id="local",
         principal_id="owner",
@@ -95,7 +98,11 @@ async def email_client() -> AsyncIterator[tuple[Composition, httpx.AsyncClient]]
         },
     )
     async with build(
-        settings=replace(memory_settings(), email_mode_enabled=True),
+        settings=replace(
+            memory_settings(),
+            email_mode_enabled=True,
+            thread_folders_api_enabled=thread_folders_api_enabled,
+        ),
         storage="memory",
         principal=principal,
     ) as composition:

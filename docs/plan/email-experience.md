@@ -144,6 +144,10 @@ Discuss in Chat opens the ordinary session associated with that thread. It
 carries the selected thread and draft references into the conversation, uses
 the same memories, and returns to the same Email state. Merely browsing Email
 does not replace the owner's previously selected Chat conversation.
+The owner can manually file that discussion in a Chat folder, including an
+existing discussion made visible by an owner message, while preserving its
+thread and draft association. Draft-only email sessions remain ineligible;
+the folder proposal pass still excludes email-linked sessions (ADR-0184).
 
 Existing content-free approval notifications and pending-action recovery use
 the server-owned thread/session association to open the correct Email draft,

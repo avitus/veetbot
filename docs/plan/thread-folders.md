@@ -60,11 +60,11 @@ not find it here should find the reason here.
 1. **Nested or shared folders.** One level, one owner. Hierarchy and sharing
    each need a design of their own and nothing in the owner's request asks
    for either.
-2. **Email-mode conversations.** Email discussion sessions are already
-   organized by their thread and account (email-experience.md is their
-   design); scheduled and delegated sessions are the scheduler's and the
-   delegation service's. Folders file chat conversations only, and the
-   predicate is the reserved metadata the platform already writes.
+2. **Email-mode organization.** Draft-only email sessions remain organized by
+   their thread and account. An email discussion opened in Chat may be filed
+   manually under ADR-0184, using the owner-interaction evidence specified
+   below. Email-linked sessions remain excluded from grouping proposals;
+   scheduled, operational and delegated sessions remain excluded entirely.
 3. **Automatic filing.** No threshold, similarity score, or model confidence
    files a conversation without the owner's acceptance. The pass proposes;
    the owner disposes. This is the persona surface's rule
@@ -220,8 +220,11 @@ process event with a stable derivation key and a content-free payload.
   `target_gone`. Records `folder.deleted`.
 - **Move** takes a session and a folder identifier or null. The session must
   be owned and must be a chat session — its metadata carries none of
-  `email_thread_id`, `email_operational`, `schedule_id`, or `run_kind` — or
-  the request is `conflict` with `details.reason = "session_not_chat"`.
+  `email_operational`, `schedule_id`, or `run_kind`. A session carrying
+  `email_thread_id` additionally requires an existing `email.discussion.opened`
+  or `user.message.created` event whose actor type is `principal` and actor
+  identifier is the session owner (ADR-0184). Otherwise the request is
+  `conflict` with `details.reason = "session_not_chat"`.
   The folder, when given, must be owned. Moving to the folder a session is
   already in, or unfiling an unfiled session, is a 200 with no event. A real
   change upserts or deletes the membership row, withdraws every open proposal
@@ -636,10 +639,12 @@ when no folder exists. The audit event is the ledger.
    in one transaction; and every write records an event. Registered as
    `gate.folder.crud_invariants`, case. **M29.**
 3. **Move semantics are exact.** Filing and unfiling are idempotent; a
-   foreign or unknown folder or session is an indistinguishable 404; an
-   email, operational, scheduled, or delegated session is `conflict`
+   foreign or unknown folder or session is an indistinguishable 404; a
+   draft-only email, operational, scheduled, or delegated session is `conflict`
    with reason `session_not_chat`; and ADR-0050 session deletion leaves no
-   membership behind. Registered as `gate.folder.move_semantics`, case.
+   membership behind. Owner-opened email discussions support manual filing
+   without losing their thread or draft association (ADR-0184).
+   Registered as `gate.folder.move_semantics`, case.
    **M29.**
 4. **Proposal eligibility is closed.** Only the maintenance pass proposes,
    only over unfiled chat sessions with titles, only at or above the

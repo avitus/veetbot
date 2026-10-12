@@ -4165,6 +4165,12 @@ authorized production delivery. The verified sequential ceiling stays at
 Milestone 12. Nested or shared folders, Email-mode conversations, automatic
 filing, embeddings and search remain outside this milestone.
 
+ADR-0184 records the owner's manual-filing repair: an email-linked session
+opened in Chat by an owner discussion action or owner message may be filed
+without changing its email association. Draft-only email sessions and all
+operational, scheduled and delegated sessions remain excluded. Grouping
+proposals still exclude email-linked sessions; no gate or milestone moves.
+
 ADR-0110 amended this milestone on 2026-09-19. Implement
 [typed-judgment.md](typed-judgment.md): a provider-neutral port for closed,
 typed questions — the probability that a statement holds, a choice among
