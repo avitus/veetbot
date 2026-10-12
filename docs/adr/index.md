@@ -197,3 +197,5 @@ implementation without one.
 
 - [ADR-0178 — General memory search and recall (Accepted scope; Milestone 33)](0178-general-memory-recall.md)
 - [ADR-0179 — Version-bound semantic memory index (Accepted mechanism; activation gated)](0179-versioned-semantic-index.md)
+
+- [ADR-0180 — Bounded semantic indexing and provider admission (Accepted mechanism; activation gated)](0180-bounded-semantic-indexing.md)

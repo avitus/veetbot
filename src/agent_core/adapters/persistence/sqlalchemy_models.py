@@ -2733,3 +2733,24 @@ class DreamingRunRow(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class SemanticJobRow(Base):
+    __tablename__ = "semantic_index_jobs"
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class SemanticSpendRow(Base):
+    __tablename__ = "semantic_index_spend"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text, nullable=False)
+    principal_id: Mapped[str] = mapped_column(Text, nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    charge: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    __table_args__ = (
+        Index("ix_semantic_spend_owner_day", "tenant_id", "principal_id", "day"),
+        CheckConstraint("charge >= 0", name="semantic_spend_nonnegative"),
+    )

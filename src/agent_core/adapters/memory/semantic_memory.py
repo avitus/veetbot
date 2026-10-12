@@ -58,6 +58,20 @@ class InMemorySemanticMemoryIndex:
                 content_digest=text_digest(record),
             )
 
+    async def indexed(self, principal: Principal, source: SemanticSource) -> bool:
+        async with self._index.transaction.owner((principal.tenant_id, principal.principal_id)):
+            current = await self.capture(principal, source.source.belief_id, source.space)
+            entry = self._index.semantic_vectors.get(
+                (principal.tenant_id, principal.principal_id, source.source.belief_id), {}
+            ).get(source.space.key)
+            return (
+                current is not None
+                and current.source == source.source
+                and entry is not None
+                and entry[0].source == current.source
+                and entry[0].content_digest == current.content_digest
+            )
+
     async def put(
         self, principal: Principal, source: SemanticSource, vector: tuple[float, ...]
     ) -> bool:

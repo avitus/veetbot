@@ -22,6 +22,10 @@ class SemanticMemoryIndex(Protocol):
         """Capture a current live original and its source version, without egress."""
         ...
 
+    async def indexed(self, principal: Principal, source: SemanticSource) -> bool:
+        """Whether this exact source/space already has a current vector."""
+        ...
+
     async def put(
         self, principal: Principal, source: SemanticSource, vector: tuple[float, ...]
     ) -> bool:

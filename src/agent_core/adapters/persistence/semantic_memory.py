@@ -69,6 +69,25 @@ class PostgresSemanticMemoryIndex:
             content_digest=text_digest(record),
         )
 
+    async def indexed(self, principal: Principal, source: SemanticSource) -> bool:
+        current = await self.capture(principal, source.source.belief_id, source.space)
+        if current is None or current.source != source.source:
+            return False
+        return (
+            await self._session.scalar(
+                select(MemoryVectorRow.belief_id).where(
+                    MemoryVectorRow.tenant_id == principal.tenant_id,
+                    MemoryVectorRow.principal_id == principal.principal_id,
+                    MemoryVectorRow.belief_id == source.source.belief_id,
+                    MemoryVectorRow.space_key == source.space.key,
+                    MemoryVectorRow.content_revision == source.source.content_revision,
+                    MemoryVectorRow.creation_sequence == source.source.creation_sequence,
+                    MemoryVectorRow.content_digest == current.content_digest,
+                )
+            )
+            is not None
+        )
+
     async def put(
         self, principal: Principal, source: SemanticSource, vector: tuple[float, ...]
     ) -> bool:

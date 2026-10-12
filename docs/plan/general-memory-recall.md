@@ -158,9 +158,11 @@ provider, model, model revision, dimensions and `memory-text@1` (original subjec
 and statement, with no inferred labels).
 
 Production supplies no lookup and `semantic_enabled` remains false. A populated
-index alone cannot activate a provider or change production recall. Provider
-admission/reservations, persistent backfill execution and query population remain
-unimplemented; release evidence must cover them and the withheld query modes.
+index alone cannot activate a provider or change production recall. The bounded
+indexing service now implements explicit provider admission, durable reservations
+and resumable inventory under [ADR-0180](../adr/0180-bounded-semantic-indexing.md).
+It is not scheduled in production. Query population and production configuration
+admission remain open; release evidence must cover them and the withheld query modes.
 Frozen M16/M32 controls continue to select legacy candidates without the semantic
 arm. The complete M33 gates remain pending.
 

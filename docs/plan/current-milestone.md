@@ -13,8 +13,9 @@ title: Current Milestone
   improves recall from 67% to 68.75%, leaving semantic/implicit-use work open.
   The synthetic semantic comparison reaches 97% top-20 candidate recall;
   the local pgvector index and shared experimental recall path are implemented
-  with source-version fences (ADR-0179). Provider admission, persistent backfill,
-  historical/People semantic parity and answer-use evidence remain open.
+  with source-version fences (ADR-0179). Bounded provider admission and persistent
+  indexing slices are implemented (ADR-0180); production scheduling/configuration,
+  query population, historical/People parity and answer-use evidence remain open.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
 

@@ -89,6 +89,7 @@ from agent_core.adapters.memory.reconsolidation import InMemoryReconsolidationSt
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
 from agent_core.adapters.memory.semantic_memory import InMemorySemanticMemoryIndex
+from agent_core.adapters.memory.semantic_work import InMemorySemanticWorkStore
 from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -194,6 +195,7 @@ from agent_core.adapters.persistence.schedules import (
     PostgresScheduleRepository,
 )
 from agent_core.adapters.persistence.semantic_memory import PostgresSemanticMemoryIndex
+from agent_core.adapters.persistence.semantic_work import PostgresSemanticWorkStore
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
     PostgresSessionDeletionRepository,
@@ -1206,6 +1208,7 @@ def _memory_uow_repositories(
         traces=traces,
         personas=InMemoryPersonaStore(),
         semantic_memory=InMemorySemanticMemoryIndex(memories),
+        semantic_work=InMemorySemanticWorkStore(memories._transaction, RandomIdFactory()),
         reconsolidation=reconsolidation,
         memory_transaction=memories._transaction.transaction,
         model_settings=InMemoryModelSettingsStore(),
@@ -1305,6 +1308,7 @@ def _postgres_repository_factory(
             traces=traces,
             personas=PostgresPersonaStore(session),
             semantic_memory=PostgresSemanticMemoryIndex(session, memories, clock),
+            semantic_work=PostgresSemanticWorkStore(session, RandomIdFactory()),
             reconsolidation=reconsolidation,
             model_settings=PostgresModelSettingsStore(session),
             folders=PostgresFolderStore(session),
