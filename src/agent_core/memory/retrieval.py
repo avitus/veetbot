@@ -8,6 +8,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Literal
@@ -55,7 +56,7 @@ from agent_core.memory.profiles import (
 from agent_core.memory.reconsolidation_recall import summary_candidates
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
-from agent_core.ports.semantic_memory import SemanticQueryLookup
+from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQueryLookup
 
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
 RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@5"
@@ -255,6 +256,7 @@ class HybridMemoryRetriever:
         reconsolidation_enabled: bool | Callable[[], bool] = False,
         reconsolidation_owner_approved_only: bool = False,
         semantic_queries: SemanticQueryLookup | None = None,
+        runtime_semantic_queries: RuntimeSemanticQueries | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -266,6 +268,9 @@ class HybridMemoryRetriever:
         self._reconsolidation_admission = reconsolidation_enabled
         self._owner_approved_only = reconsolidation_owner_approved_only
         self._semantic_queries = semantic_queries
+        self._runtime_semantic_queries = runtime_semantic_queries
+        if semantic_queries is not None and runtime_semantic_queries is not None:
+            raise ValueError("choose either an experimental or a runtime semantic lookup")
 
     @property
     def retrieval_profile(self) -> RetrievalProfile:
@@ -280,6 +285,46 @@ class HybridMemoryRetriever:
     def _reconsolidation_enabled(self) -> bool:
         admission = self._reconsolidation_admission
         return admission() if callable(admission) else admission
+
+    async def prepare_semantic_queries(
+        self,
+        queries: Sequence[RecallQuery],
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        surface_id: str = "private",
+    ) -> int:
+        """Explicit slow path; ordinary recall never prepares a missing vector."""
+        if (
+            not self._profile.semantic_enabled
+            or self._runtime_semantic_queries is None
+            or not 1 <= len(queries) <= 4
+        ):
+            return 0
+        # Keep foreign-owner input foreign; normalization never grants access.
+        if any(
+            (q.tenant_id, q.principal_id)
+            != (self._principal.tenant_id, self._principal.principal_id)
+            for q in queries
+        ):
+            return 0
+        return await self._runtime_semantic_queries.prepare(
+            [self._effective_query(q, "in_turn") for q in queries],
+            session_id=session_id,
+            run_id=run_id,
+            surface_id=surface_id,
+        )
+
+    def _effective_query(self, query: RecallQuery, moment: str) -> RecallQuery:
+        updates: dict[str, object] = {
+            "owner_reviewed_merges_only": self._owner_approved_only,
+            "include_merge_changes": self._reconsolidation_enabled
+            and query.as_of is None
+            and query.known_at is None,
+        }
+        if moment == RecallMoment.SNAPSHOT.value:
+            updates["include_provisional"] = False
+        return query.model_copy(update=updates)
 
     async def recall(
         self,
@@ -300,6 +345,27 @@ class HybridMemoryRetriever:
         and the recall trace share one transaction and never reacquire its lock.
         """
 
+        semantic_queries = self._semantic_queries
+        if self._runtime_semantic_queries is not None:
+            # Bind before taking the erasure-fenced read transaction. A caller
+            # already inside a UOW (People) retains sparse recall for now.
+            semantic_queries = None
+            if (
+                self._profile.semantic_enabled
+                and existing_uow is None
+                and run_id is not None
+                and query.profile != RecallProfile.CORE
+                and query.tenant_id == self._principal.tenant_id
+                and query.principal_id == self._principal.principal_id
+            ):
+                # Optional binding failure preserves ordinary recall.
+                with suppress(Exception):
+                    semantic_queries = await self._runtime_semantic_queries.bind(
+                        session_id=session_id,
+                        run_id=run_id,
+                        surface_id=surface_id,
+                    )
+
         async def apply(uow: RepositoryUnitOfWork) -> RecallResult:
             return await self._recall(
                 query,
@@ -311,6 +377,7 @@ class HybridMemoryRetriever:
                 surface_id=surface_id,
                 measure_rendered_tokens=measure_rendered_tokens,
                 people_items=people_items,
+                semantic_queries=semantic_queries,
             )
 
         if existing_uow is not None:
@@ -330,6 +397,7 @@ class HybridMemoryRetriever:
         surface_id: str,
         measure_rendered_tokens: Callable[[str], int] | None,
         people_items: list[TracedPersonContext] | None,
+        semantic_queries: SemanticQueryLookup | None,
     ) -> RecallResult:
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
@@ -344,20 +412,7 @@ class HybridMemoryRetriever:
                 }
             )
         )
-        effective_query = effective_query.model_copy(
-            update={
-                "owner_reviewed_merges_only": self._owner_approved_only,
-                "include_merge_changes": self._reconsolidation_enabled
-                and query.as_of is None
-                and query.known_at is None,
-            }
-        )
-        if moment == RecallMoment.SNAPSHOT.value:
-            # ADR-0019 excludes provisional beliefs from the frozen core.
-            # Filter before the store's candidate cap, not after ranking:
-            # recent provisional rows must not crowd out older active facts.
-            # CORE also serves in-turn deltas, where provisional recall is valid.
-            effective_query = effective_query.model_copy(update={"include_provisional": False})
+        effective_query = self._effective_query(effective_query, moment)
         semantic_hits: list[SemanticHit] = []
         semantic_key: str | None = None
         semantic_latency = 0
@@ -368,7 +423,9 @@ class HybridMemoryRetriever:
         else:
             records = await uow.memories.query(effective_query)
             started = perf_counter()
-            semantic_hits, semantic_key = await self._semantic_candidates(uow, effective_query)
+            semantic_hits, semantic_key = await self._semantic_candidates(
+                uow, effective_query, semantic_queries
+            )
             semantic_latency = round((perf_counter() - started) * 1000)
             by_id = {record.id: record for record in records}
             by_id.update((hit.record.id, hit.record) for hit in semantic_hits)
@@ -632,11 +689,14 @@ class HybridMemoryRetriever:
         )
 
     async def _semantic_candidates(
-        self, uow: RepositoryUnitOfWork, query: RecallQuery
+        self,
+        uow: RepositoryUnitOfWork,
+        query: RecallQuery,
+        semantic_queries: SemanticQueryLookup | None,
     ) -> tuple[list[SemanticHit], str | None]:
         if (
             not self._profile.semantic_enabled
-            or self._semantic_queries is None
+            or semantic_queries is None
             or query.profile is RecallProfile.CORE
             or not query.text
             or query.as_of is not None
@@ -647,7 +707,7 @@ class HybridMemoryRetriever:
             return [], None
         # This seam is synchronous/local only. Production has no query lookup
         # until separately admitted; no provider call can run under this UOW.
-        cached = self._semantic_queries.lookup(query)
+        cached = semantic_queries.lookup(query)
         if cached is None or cached.query_sha256 != query_digest(query):
             return [], None
         try:

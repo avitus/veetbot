@@ -201,3 +201,5 @@ implementation without one.
 - [ADR-0180 — Bounded semantic indexing and provider admission (Accepted mechanism; activation gated)](0180-bounded-semantic-indexing.md)
 
 - [ADR-0181 — Bounded semantic query preparation (Accepted mechanism; activation gated)](0181-bounded-semantic-query-preparation.md)
+
+- [ADR-0182 — Run-bound semantic recall (Accepted mechanism; activation gated)](0182-run-bound-semantic-recall.md)

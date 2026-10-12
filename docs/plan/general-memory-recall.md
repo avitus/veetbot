@@ -168,7 +168,17 @@ reserves one request against the same durable owner/day budget as indexing, and
 makes the provider call outside repository transactions. Lookup itself never calls
 a provider or enqueues work. The bounded five-minute cache binds the complete query,
 current policy, surface, task and embedding configuration; it holds no source evidence.
-Production composition, current task/policy binding and configuration admission
+[ADR-0182](../adr/0182-run-bound-semantic-recall.md) adds a run-bound lookup to the
+shared retriever. Explicit preparation and recall normalize the same effective
+query, including the current merge policy. Binding reads the authorized run,
+session and saved checkpoint, requires a live lease and trusted policy/surface/
+sensitivity authority, and hashes the complete saved task context. Separate chat
+handles share one 128-vector cache; state changes, cancellation and eviction revoke
+their handles without clearing another chat's valid vectors. Ordinary recall
+performs no provider work. Binding is limited to one second; the ten-second
+preparation budget includes state reads, with up to three seconds of failure cleanup.
+Production admission, the authority resolver, explicit preparation scheduling,
+context-builder recall-cache invalidation and indexing maintenance scheduling
 remain open; release evidence must cover them and the withheld query modes.
 Frozen M16/M32 controls continue to select legacy candidates without the semantic
 arm. The complete M33 gates remain pending.

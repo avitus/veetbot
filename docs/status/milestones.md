@@ -313,8 +313,9 @@ ADR-0179 adds a version-bound local semantic index and experimental shared recal
 with correction/erasure fences and exact pgvector search. ADR-0180 adds bounded
 provider admission, durable spending and resumable indexing slices. ADR-0181 adds
 explicit query preparation and a bounded local cache sharing the indexing budget.
-Production composition/scheduling/configuration, task/policy binding and comparative
-activation evidence remain open.
+ADR-0182 binds shared preparation and recall to saved run/checkpoint state and
+current query policy. Production admission/authority resolution, scheduling,
+context-cache integration and comparative activation evidence remain open.
 
 Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).

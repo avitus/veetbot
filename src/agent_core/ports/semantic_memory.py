@@ -1,5 +1,6 @@
 """Local derived index; provider calls and activation are separate concerns."""
 
+from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
@@ -65,4 +66,18 @@ class SemanticQueryLookup(Protocol):
         sensitivity, exclusions and the task; current sources are rejoined later.
         Production composition remains absent until activation evidence passes.
         """
+        ...
+
+
+class RuntimeSemanticQueries(Protocol):
+    async def bind(
+        self, *, session_id: UUID, run_id: UUID, surface_id: str
+    ) -> SemanticQueryLookup | None:
+        """Resolve a local cache against current trusted runtime state; no provider I/O."""
+        ...
+
+    async def prepare(
+        self, queries: Sequence[RecallQuery], *, session_id: UUID, run_id: UUID, surface_id: str
+    ) -> int:
+        """Explicit bounded slow path, called outside repository transactions."""
         ...
