@@ -844,6 +844,7 @@ async def _serve_api() -> None:
             composition.principal,
             composition.new_request_id,
             composition.readiness_probe,
+            clock=composition.clock,
         )
         server = uvicorn.Server(
             uvicorn.Config(

@@ -1007,3 +1007,6 @@ remain independent. The deployment's authenticated model-settings read must
 return HTTP 200 before the release succeeds. See
 [ADR-0149](../adr/0149-release-managed-owner-permissions.md) and the
 [deployment runbook](../deployment.md) for the mechanism and operator boundary.
+
+ADR-0186 additionally redacts all Cookie and Set-Cookie fields, including nested
+headers, because the dreaming review cookie is an authentication credential.

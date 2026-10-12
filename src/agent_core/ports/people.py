@@ -24,6 +24,10 @@ class PeopleStore(Protocol):
         at_revision: int | None = None,
     ) -> PeopleRecord | None: ...
 
+    async def memory_attribution_complete(self, principal: Principal) -> bool:
+        """Whether every owner head retains its opaque reverse attribution."""
+        ...
+
     async def memory_attribution_records(
         self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
     ) -> tuple[PeopleRecord, ...] | None:

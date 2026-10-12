@@ -105,6 +105,14 @@ class ReconsolidationRequestAdmission:
         # Both adapters acquire the memory owner guard before the People lock.
         # Keep source reads stable through local policy and reservation.
         async with self._factory() as uow, uow.people.lock(self._principal):
+            if not await uow.people.memory_attribution_complete(self._principal):
+                return ProposalPreparation(
+                    prepared=None,
+                    deferred=tuple(
+                        InputDeferral(group_id=key, reason="legacy_attribution_unavailable")
+                        for key in group_ids
+                    ),
+                ), None
             groups = await self._snapshots(uow, token, group_ids)
             result = prepare_proposal_request(
                 self._principal,

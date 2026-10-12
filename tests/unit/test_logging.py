@@ -195,3 +195,17 @@ def test_a_traceback_is_rendered_as_text_and_passes_redaction(
     assert "Traceback (most recent call last)" in rendered
     assert "RuntimeError: refused [REDACTED]" in rendered
     assert provider_value not in json.dumps(line)
+
+
+def test_review_session_cookies_are_redacted() -> None:
+    event = redact_sensitive(
+        None,
+        "info",
+        {
+            "headers": {
+                "Cookie": "synthetic-private-session",
+                "Set-Cookie": "synthetic-private-session",
+            }
+        },
+    )
+    assert "synthetic-private-session" not in str(event)

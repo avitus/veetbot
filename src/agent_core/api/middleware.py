@@ -61,10 +61,12 @@ class RequestBoundaryMiddleware:
 
         method = str(scope.get("method", ""))
         path = str(scope.get("path", ""))
-        if path == "/v1/email" or path.startswith("/v1/email/"):
+        if path in {"/v1/email", "/v1/dreaming", "/v1/memory-reconsolidations"} or path.startswith(
+            ("/v1/email/", "/v1/dreaming/", "/v1/memory-reconsolidations/")
+        ):
             downstream_send = send
 
-            async def private_email_send(message: Message) -> None:
+            async def private_api_send(message: Message) -> None:
                 if message["type"] == "http.response.start":
                     response_headers = [
                         (key, value)
@@ -75,7 +77,7 @@ class RequestBoundaryMiddleware:
                     message["headers"] = response_headers
                 await downstream_send(message)
 
-            send = private_email_send
+            send = private_api_send
         has_body = method in {"POST", "PUT", "PATCH"}
         is_versioned_api = path.startswith("/v1/")
         is_upload = (

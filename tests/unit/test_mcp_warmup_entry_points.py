@@ -168,9 +168,9 @@ async def _served_api(
             super().__init__(config)
             servers.append(self)
 
-    def loopback_app(*arguments: Any) -> Any:
+    def loopback_app(*arguments: Any, **keywords: Any) -> Any:
         """Report the loopback peer DEV authentication admits; a Unix socket has none."""
-        api = create_app(*arguments)
+        api = create_app(*arguments, **keywords)
 
         async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
             await api({**scope, "client": ("127.0.0.1", 0)}, receive, send)

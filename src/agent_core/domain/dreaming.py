@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field, model_validator
 
 from agent_core.domain.reconsolidation import ReconValue
+from agent_core.domain.reconsolidation_inputs import InputDeferralReason
 
 
 class OwnerDreamingReview(ReconValue):
@@ -70,12 +71,14 @@ class DreamingRun(ReconValue):
         "execution_failed",
         "unreported",
     ] = "running"
+    deferrals: tuple[InputDeferralReason, ...] = Field(default=(), max_length=10)
     proposals: int = Field(default=0, ge=0, le=8)
     provider_calls: int = Field(default=0, ge=0, le=2)
     charged_usd: Decimal | None = Field(default=None, ge=0, le=1)
 
 
 class DreamingStatus(ReconValue):
+    blockers: tuple[Literal["legacy_attribution_unavailable"], ...] = ()
     schedule: DreamingSchedule
     runs: tuple[DreamingRun, ...]
 

@@ -19,7 +19,7 @@
         <div class="sidebar-note">
           A little space to see what your memories add up to.
           <div class="owner">Owner workspace · Private review</div>
-          <button class="btn" id="disconnect" hidden>Disconnect</button>
+          <button class="btn" id="disconnect" hidden>Sign out</button>
         </div>
       </aside>
       <main>
@@ -40,8 +40,9 @@
         <section id="connect" class="panel">
           <h2>Your private review space.</h2>
           <p>
-            Connect with your Veetbot access token. It stays in this tab’s
-            memory and is cleared when you disconnect or reload.
+            Connect once with your Veetbot access token. This browser stays signed
+            in for 30 days using a secure review-only cookie. Your access token
+            is not saved. Sign out on a shared device.
           </p>
           <label for="token">Access token</label
           ><input
@@ -57,6 +58,14 @@
           </p>
         </section>
         <div id="workspace" hidden>
+          <div id="blocker" class="notice" role="status" hidden>
+            <div><strong>Dreaming needs legacy deletion metadata.</strong>
+            <p>Some erased People records predate retained source attribution.
+            Veetbot cannot safely tell which memories depend on them, so proposal
+            generation is blocked before any model call. Retrying will not repair
+            this. An operator must recover the missing identifiers without restoring
+            erased text. Existing run history is preserved.</p></div>
+          </div>
           <div class="notice">
             <div>
               <strong>Dream daily. Apply only what you approve.</strong>

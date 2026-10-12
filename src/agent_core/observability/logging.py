@@ -14,7 +14,7 @@ from structlog.typing import EventDict, Processor, WrappedLogger
 
 from agent_core.config import DeploymentMode
 
-SENSITIVE_KEY = re.compile(r"secret|token|password|api_?key|authorization", re.IGNORECASE)
+SENSITIVE_KEY = re.compile(r"secret|token|password|api_?key|authorization|cookie", re.IGNORECASE)
 CONTENT_KEYS = frozenset({"prompt", "messages", "reasoning", "tool_result", "content"})
 DEFAULT_PROVIDER_PREFIXES = ("sk-", "sk-ant-")
 CONTENT_PREVIEW_CHARS = 200

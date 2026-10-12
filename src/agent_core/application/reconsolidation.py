@@ -89,6 +89,9 @@ class PublicReconsolidationService:
         require_scope(principal, "memory.read")
         async with self._uow_factory() as uow:
             return DreamingStatus(
+                blockers=()
+                if await uow.people.memory_attribution_complete(principal)
+                else ("legacy_attribution_unavailable",),
                 schedule=await uow.reconsolidation.dreaming_schedule(principal),
                 runs=await uow.reconsolidation.dreaming_runs(principal, self._clock.now()),
             )

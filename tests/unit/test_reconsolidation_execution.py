@@ -411,3 +411,30 @@ async def test_usage_over_admitted_token_ceiling_refuses_batch(field: str, value
     assert result.reason == "invalid_response" and result.review is None
     assert len(provider.requests) == 1
     assert result.calls[0].spend.state == "unknown"
+
+
+async def test_preparation_deferral_reaches_caller_without_private_content() -> None:
+    tracked, _, job, group, executor = await setup()
+    provider = ExecutionProvider(tracked)
+    selected = model()
+    selected.pricing = type(selected.pricing)()
+    result = await executor.run(
+        job, (group.id,), model=selected, provider=provider, batch_id=UUID(int=90)
+    )
+    assert result.model_dump().get("deferrals") == ("pricing_unavailable",)
+    assert not result.calls and not provider.requests
+
+
+async def test_legacy_attribution_refusal_is_reported_before_any_provider_call() -> None:
+    from agent_core.adapters.persistence.people import InMemoryPeopleStore
+
+    tracked, _, job, group, executor = await setup()
+    async with tracked() as uow:
+        people = cast(InMemoryPeopleStore, uow.people)
+        people._erased.add((principal().tenant_id, principal().principal_id, UUID(int=9876)))
+    provider = ExecutionProvider(tracked)
+    result = await executor.run(
+        job, (group.id,), model=model(), provider=provider, batch_id=UUID(int=90)
+    )
+    assert result.deferrals == ("legacy_attribution_unavailable",)
+    assert not result.calls and not provider.requests

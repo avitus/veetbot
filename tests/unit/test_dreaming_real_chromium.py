@@ -3,16 +3,19 @@
 from dataclasses import replace
 from typing import cast
 
+from httpx import ASGITransport, AsyncClient
 from playwright.async_api import Route, async_playwright, expect
+from pydantic import SecretStr
 
 from agent_core.adapters.determinism import FixedClock
+from agent_core.api.app import create_app
 from agent_core.bootstrap import build
+from agent_core.config import AuthMode
 from agent_core.memory.reconsolidation_apply import apply_review
 from tests.contract.reconsolidation_apply_cases import prepared_batch
 from tests.contract.reconsolidation_cases import Factory
 from tests.contract.reconsolidation_surface_cases import owner
 from tests.contract.support import NOW, session
-from tests.gates.test_memory_api_boundary_m17 import _client
 from tests.integration.m2_support import memory_settings
 from tests.real_browser_support import require_real_browser
 
@@ -40,7 +43,25 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
             admitted=lambda: True,
             owner_review=True,
         )
-        async with _client(app) as client, async_playwright() as playwright:
+        auth_settings = replace(
+            settings,
+            auth_mode=AuthMode.TOKEN,
+            auth_token=SecretStr("synthetic-browser-review-secret"),
+        )
+        api_app = create_app(
+            app.services,
+            auth_settings,
+            owner(),
+            app.new_request_id,
+            app.readiness_probe,
+            clock=app.clock,
+        )
+        async with (
+            AsyncClient(
+                transport=ASGITransport(app=api_app), base_url="https://agent.test"
+            ) as client,
+            async_playwright() as playwright,
+        ):
             browser = await playwright.chromium.launch()
             page = await browser.new_page(viewport={"width": 1440, "height": 1000})
             errors: list[str] = []
@@ -48,6 +69,7 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
 
             async def route(request: Route) -> None:
                 incoming = request.request
+                client.cookies.clear()
                 response = await client.request(
                     incoming.method,
                     incoming.url,
@@ -61,7 +83,8 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
                 )
 
             await page.route("**/*", route)
-            await page.goto("http://127.0.0.1/dreaming")
+            await page.goto("https://agent.test/dreaming")
+            await page.locator("#token").fill("synthetic-browser-review-secret")
             await page.get_by_role("button", name="Connect", exact=True).click()
             await expect(page.locator(".card")).to_have_count(2)
             await page.get_by_role("button", name="Approve and apply", exact=True).click()
@@ -82,8 +105,9 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
                 page.get_by_role("button", name="Resume previews", exact=True)
             ).to_be_visible()
             await page.reload()
-            await expect(page.locator("#connect")).to_be_visible()
-            await page.get_by_role("button", name="Connect", exact=True).click()
+            await expect(page.locator("#workspace")).to_be_visible()
+            await expect(page.locator("#connect")).to_be_hidden()
+            assert await page.evaluate("document.cookie === ''")
             await page.get_by_role("button", name="All history", exact=True).click()
             await expect(page.locator(".card")).to_have_count(2)
             await page.screenshot(path="/tmp/dreaming-desktop.png", full_page=True)
@@ -91,5 +115,10 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
             assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             await page.screenshot(path="/tmp/dreaming-mobile.png", full_page=True)
             assert await page.evaluate("localStorage.length === 0 && sessionStorage.length === 0")
+            await page.get_by_role("button", name="Sign out", exact=True).click()
+            await expect(page.locator("#connect")).to_be_visible()
+            await page.reload()
+            await expect(page.locator("#connect")).to_be_visible()
+            await expect(page.locator("#workspace")).to_be_hidden()
             assert not errors
             await browser.close()

@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Response
+from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import FileResponse
 
+from agent_core.api import dreaming_session
 from agent_core.application.services import ReconsolidationService
+from agent_core.config import AuthMode, Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import (
     DreamingDecisionRequest,
@@ -18,6 +20,7 @@ from agent_core.domain.dreaming import (
 )
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.reconsolidation_views import OperationView
+from agent_core.ports.determinism import Clock
 
 _ASSETS = Path(__file__).with_name("dreaming_web")
 _HEADERS = {
@@ -32,8 +35,42 @@ _HEADERS = {
 }
 
 
-def dreaming_router(service: ReconsolidationService, secured: Callable[..., object]) -> APIRouter:
+def dreaming_router(
+    service: ReconsolidationService,
+    secured: Callable[..., object],
+    settings: Settings,
+    clock: Clock | None,
+) -> APIRouter:
+    if settings.auth_mode is AuthMode.TOKEN and clock is None:
+        raise ValueError("review sessions require the composition clock")
     router = APIRouter()
+
+    @router.post("/v1/dreaming/session", openapi_extra={"required_scope": "memory.read"})
+    async def connect(
+        request: Request,
+        response: Response,
+        authenticated: Annotated[Principal, secured("memory.read")],
+    ) -> dict[str, bool]:
+        response.headers["Cache-Control"] = "private, no-store"
+        if settings.auth_mode is AuthMode.TOKEN:
+            dreaming_session.require_browser(request)
+            assert clock is not None
+            dreaming_session.issue(response, settings, authenticated, clock)
+        return {"connected": True}
+
+    @router.delete("/v1/dreaming/session", openapi_extra={"required_scope": "memory.read"})
+    async def disconnect(
+        request: Request,
+        response: Response,
+        authenticated: Annotated[Principal, secured("memory.read")],
+    ) -> dict[str, bool]:
+        if settings.auth_mode is AuthMode.TOKEN:
+            dreaming_session.require_browser(request)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.delete_cookie(
+            dreaming_session.COOKIE, secure=True, httponly=True, samesite="strict", path="/"
+        )
+        return {"connected": False}
 
     @router.get("/dreaming", include_in_schema=False)
     async def shell() -> FileResponse:

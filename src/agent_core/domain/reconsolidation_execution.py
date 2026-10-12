@@ -4,7 +4,10 @@ from typing import Literal
 from uuid import UUID
 
 from agent_core.domain.reconsolidation import ReconsolidationSpend, ReconValue
-from agent_core.domain.reconsolidation_inputs import PreparedVerificationRequest
+from agent_core.domain.reconsolidation_inputs import (
+    InputDeferralReason,
+    PreparedVerificationRequest,
+)
 from agent_core.domain.reconsolidation_provider import ProposalReview
 
 type ExecutionReason = Literal[
@@ -30,6 +33,7 @@ class ReconsolidationCall(ReconValue):
 class ReconsolidationExecution(ReconValue):
     reason: ExecutionReason
     calls: tuple[ReconsolidationCall, ...] = ()
+    deferrals: tuple[InputDeferralReason, ...] = ()
     # Transient, untrusted content. Do not persist this result as an audit record.
     prepared: PreparedVerificationRequest | None = None
     review: ProposalReview | None = None

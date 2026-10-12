@@ -77,7 +77,12 @@ title: Current Milestone
   upload passed. Daily proposals are enabled in all application roles and only
   individual owner approval applies them to memory. The first automatic batch
   deferred with no proposals or provider calls; its next claim is due October 12
-  at 01:30 UTC. Unattended processing stays disabled. The once/dry-run operator
+  at 01:30 UTC. The second run also deferred without provider calls. The October 11
+  diagnosis found legacy erased People heads with missing reverse attribution;
+  their existing source refusal remains intact. ADR-0186 implements persistent
+  review sign-in and explicit blocker/deferral reporting, pending delivery.
+  Metadata recovery requires a separate decision. Unattended processing stays disabled.
+  The once/dry-run operator
   controls, remaining complete runtime gates and fresh matching comparative
   release evidence remain required; no verified sequential ceiling advances.
 - **Active milestone:** Milestone 15 — operational hardening — is the next

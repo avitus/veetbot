@@ -208,3 +208,4 @@ implementation without one.
 - [ADR-0184 — Manually file email discussions from Chat (Proposed repair)](0184-email-discussion-folder-filing.md)
 
 - [ADR-0185 — General recall release admission (Accepted mechanism; activation gated)](0185-general-recall-release-admission.md)
+- [ADR-0186 — Persistent dreaming review sign-in (Proposed; implementation authorized)](0186-dreaming-review-session.md)

@@ -63,6 +63,7 @@ class ReconsolidationEgressDecision(ReconValue):
 
 
 InputDeferralReason = Literal[
+    "legacy_attribution_unavailable",
     "source_unavailable",
     "source_ineligible",
     "scope_mismatch",

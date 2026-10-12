@@ -2349,3 +2349,13 @@ or stale decisions return 409. Foreign IDs return 404. Responses use
 undo routes provide inspection, pagination and reversal. Disabling the review
 flag removes the new routes and reviewed recall; the existing inspection and
 undo API remains independently configurable.
+
+### Dreaming review cookie extension (ADR-0186)
+
+The owner-requested persistent review page may exchange bearer authentication at
+`POST /v1/dreaming/session` for a thirty-day Secure/HttpOnly/SameSite=Strict cookie.
+`DELETE /v1/dreaming/session` clears it. Both require `memory.read`. The purpose-bound
+cookie authenticates only the dreaming and reconsolidation review routes listed in
+ADR-0186, with the configured principal's memory scopes and exact same-origin write
+checks. No cookie authenticates general API access or renews its own lifetime.
+The original bearer flow and development loopback restrictions remain unchanged.

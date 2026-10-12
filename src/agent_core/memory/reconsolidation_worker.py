@@ -112,6 +112,7 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
                         "finished_at": self._clock.now(),
                         "outcome": outcome,
                         "reason": reason,
+                        "deferrals": () if result is None else result.deferrals,
                         "proposals": self._proposal_count,
                         "provider_calls": len(calls),
                         "charged_usd": charged,
