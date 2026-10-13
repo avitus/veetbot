@@ -1,10 +1,13 @@
 {
-  "state": "unreviewed",
+  "state": "accepted",
   "corpus_sha256": "69968f84f35159bc2c043ed34e50f9f185e2598b92e6528744d74f3b11435324",
   "scenario_count": 400,
   "development": 200,
   "holdout": 200,
   "holdout_model_execution": false,
-  "reviewer": null,
-  "independence_approved": false
+  "reviewer": "Repository owner, explicit approval in this Codex task",
+  "independence_approved": true,
+  "reviewed_at": "2026-10-13T17:19:07.384212Z",
+  "independence_review": "evals/observations/general-memory-recall/20261013-corpus-review/independence-review.json",
+  "scenario_manifest_sha256": "9d269e0b459dd70018b73c614812cdb59bf72672db2600b371d1dd1077279415"
 }

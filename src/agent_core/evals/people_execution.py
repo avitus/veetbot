@@ -81,6 +81,7 @@ class BudgetedProvider:
             ledger.calls = index
             ledger.held += reserve
         completed = False
+        error_class: str | None = None
         try:
             async for event in self.provider.stream(request, resolved, attempt):
                 if isinstance(event, ModelCompletedEvent):
@@ -106,14 +107,15 @@ class BudgetedProvider:
                 yield event
             if not completed:
                 raise ValueError("evaluation provider ended without final usage")
-        except BaseException:
+        except BaseException as error:
+            error_class = type(error).__name__
             ledger.failed = True
             raise
         finally:
             if not completed:
                 async with ledger.lock:
                     ledger.failed = True
-                    ledger.append({**record, "outcome": "uncertain"})
+                    ledger.append({**record, "outcome": "uncertain", "error_class": error_class})
 
 
 class BorrowedProvider:

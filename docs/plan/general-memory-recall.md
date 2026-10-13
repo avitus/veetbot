@@ -410,7 +410,10 @@ writing. It never authors reviews or enables deployment. The confirmatory runner
 now freezes deployment composition, verified model assets, actual schema, controls
 and runtime variants before held-out parsing. Production startup binds the same
 schema fingerprint. Its single USD 100 aggregate allowance was approved by the
-owner; corpus review and actual confirmatory execution remain open.
+owner. On 2026-10-13 the owner approved the exact 400-scenario corpus; its accepted
+independence receipt is retained under
+`evals/observations/general-memory-recall/20261013-corpus-review/`.
+Actual confirmatory execution remains open.
 The unit tests' fabricated metric matrices are not a release
 corpus, and the existing diagnostic remains ineligible. The shipped configuration
 still supplies no semantic channel and all twelve gates remain pending.

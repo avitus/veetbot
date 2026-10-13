@@ -214,8 +214,9 @@ numerical ceilings and measured runtime options. Intended deployment settings an
 the explicit local index overlay remain independently resolved inputs.
 
 These are mechanism checks, not quality measurements or human decisions. The
-400-scenario draft still has no independent acceptance receipt, no paid confirmation
-has run, and all twelve M33 gates remain pending. Completion of a raw collection
+400-scenario corpus received the owner's explicit approval on 2026-10-13; the
+accepted receipt binds its unchanged corpus and scenario-manifest digests.
+No paid confirmation has run, and all twelve M33 gates remain pending. Completion of a raw collection
 does not publish evidence or activate a channel; independent failure review,
 mechanical scoring, all gate reports, CodeRabbit, hosted CI and delivery remain required.
 
@@ -231,3 +232,13 @@ provider work or quality measurement is supplied by those tests. Historical
 diagnostic reproduction continues to select its explicit unpinned mode.
 Confirmation-manifest validation itself rejects that diagnostic mode, including
 when a collection is supplied directly to the offline publisher.
+
+Production configuration inspection on 2026-10-13 found Astra/high for chat and
+Sol for memory formation. The PostgreSQL evaluator now permits distinct model
+policies when both resolve through its one budgeted provider. It still refuses
+a formation provider that would escape that shared allowance. The integration
+regression first failed on the former same-policy restriction and now captures
+all twelve runtime variants without executing a model call.
+Unsettled provider calls also retain their exception class, without exception
+text or request contents. Their reservations remain held and the attempt remains
+ineligible for publication; diagnosis never turns uncertain usage into zero cost.

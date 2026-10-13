@@ -2572,7 +2572,7 @@ milestones:
     limitations:
       - Seeded retrieval is not formation, answer-use or held-out release evidence
       - PostgreSQL development comparisons retain 100 original observations and 120 task-context variants; reader-planned search answers 16 of 20 but predates the type-hint repair and cannot certify release
-      - The 400-scenario corpus authoring draft is unreviewed; no independence receipt exists
+      - The owner approved the exact 400-scenario corpus on 2026-10-13; its independence receipt is retained under evals/observations/general-memory-recall/20261013-corpus-review/
       - Semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
       - Historical semantic revisions, verified-input release binding and confirmatory dependency capture have mechanism checks; comparative People evidence, end-to-end load budgets and reviewed release observations/publication remain open
       - The owner approved one USD 100 aggregate cap for 4800 confirmatory observations; the runner retains failed attempts and no paid confirmation has run

@@ -1,0 +1,15 @@
+{
+  "approved_total_usd": "100",
+  "baseline_maximum_usd": "5",
+  "confirmation_maximum_usd": "92",
+  "ceiling_rule_before_baseline": "p95 elapsed reader/retrieval latency and maximum per-observation attributed cost, each multiplied by 1.25; no post-confirmation threshold changes",
+  "baseline_cases": "All 10 pre-existing pilot.task-context.v1 development cases, both paths",
+  "model_policy": "astra",
+  "reasoning_effort": "high",
+  "formation_policy": "balanced",
+  "corpus_owner_approval": "2026-10-13",
+  "baseline_first_attempt_reported_usd": "0.75479875",
+  "baseline_first_attempt_held_usd": "2.19152",
+  "baseline_retry_maximum_usd": "5",
+  "maximum_total_including_uncertainty_usd": "99.94631875"
+}

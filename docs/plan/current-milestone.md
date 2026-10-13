@@ -89,7 +89,9 @@ title: Current Milestone
   The owner authorized one USD 100
   aggregate cap for the 4,800-observation confirmation; one journal covers every
   variant and interrupted attempts retain their rows and uncertain reservations.
-  The corpus review, actual confirmation, end-to-end operational evidence and
+  The owner approved the exact 400-scenario corpus on 2026-10-13; its retained
+  independence receipt binds the original corpus and all scenario identities.
+  Actual confirmation, end-to-end operational evidence and
   reviewed release publication remain outstanding. No paid confirmation has run.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.

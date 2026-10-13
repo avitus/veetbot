@@ -206,6 +206,20 @@ class CompletingProvider:
         )
 
 
+async def test_uncertain_call_retains_safe_failure_class(tmp_path: Path) -> None:
+    request, resolved, attempt = request_model_attempt()
+    budget = EvaluationBudget(Decimal("1"), tmp_path / "costs.jsonl")
+    provider = BudgetedProvider(CompletingProvider(None), budget)
+    with pytest.raises(RuntimeError):
+        async for _ in provider.stream(request, resolved, attempt):
+            pass
+    rows = [json.loads(line) for line in budget.journal.read_text().splitlines()]
+    assert rows[-1]["outcome"] == "uncertain"
+    assert rows[-1].get("error_class") == "RuntimeError"
+    assert "synthetic interrupted transport" not in budget.journal.read_text()
+    assert budget.failed and budget.held > 0
+
+
 def request_model_attempt() -> tuple[ModelRequest, ResolvedModel, ModelAttempt]:
     return (
         ModelRequest(model_policy="test", conversation=[], tools=[], maximum_output_tokens=100),

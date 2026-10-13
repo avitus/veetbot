@@ -17,6 +17,56 @@ from tests.integration.disposable_database import clone_recall_database
 from tests.integration.m2_support import database_settings
 
 
+@pytest.mark.parametrize("model_policy", ["astra", "fable"])
+async def test_confirmation_captures_distinct_chat_and_formation_models(
+    tmp_path: Path, model_policy: str
+) -> None:
+    from decimal import Decimal
+
+    from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
+    from agent_core.config import PACKAGE_ROOT
+    from agent_core.evals.general_memory_recall_driver import OWNER
+    from agent_core.evals.general_recall_composition import system_clock
+    from agent_core.evals.general_recall_confirmation import capture_runtime_configurations
+    from agent_core.evals.general_recall_experiment import Experiment
+    from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+    from tests.contract.test_local_semantic_preparation import LOCAL
+
+    router = StaticModelRouter(
+        ProviderRegistry.load(PACKAGE_ROOT / "models", adapters=ADAPTER_DEFINITIONS), system_clock()
+    )
+    resolved = await router.resolve(model_policy, tenant_id=OWNER.tenant_id)
+    async with clone_recall_database() as database_url:
+        capture = capture_runtime_configurations(
+            Experiment(
+                corpus=tmp_path / "unopened.jsonl",
+                output=tmp_path / "unused",
+                storage="postgres",
+                disposable_database=True,
+                production_reader=True,
+                model_policy=model_policy,
+            ),
+            settings=replace(database_settings(), database_url=database_url),
+            principal=OWNER,
+            resolved=resolved,
+            local=LOCAL,
+            maximum_cost_usd=Decimal("100"),
+        )
+        if model_policy == "fable":
+            with pytest.raises(ValueError, match="share the budgeted reader provider"):
+                await capture
+            return
+        manifest = await capture
+    assert len(manifest.variants) == 12
+    for variant in manifest.variants:
+        assert variant.configuration["reader"]["model"] == "gpt-6-astra"
+        if variant.pipeline == "formation":
+            assert variant.configuration["composition"]["formation"]["default"] == {
+                "model_policy": "balanced",
+                "reasoning_effort": None,
+            }
+
+
 @pytest.mark.parametrize("path", ["automatic", "deliberate"])
 async def test_confirmatory_reader_preserves_real_postgres_pin(
     tmp_path: Path, path: PathKind

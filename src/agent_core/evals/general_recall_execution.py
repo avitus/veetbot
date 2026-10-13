@@ -436,17 +436,24 @@ async def evaluate_fixture(
             storage == "postgres" and pipeline == "formation" and formation_policy == "formation@11"
         )
         if normal_people:
+            from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
+            from agent_core.config import PACKAGE_ROOT
+            from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+
             formation_profile = MemoryProfiles.from_document(
                 load_config_document(effective, "memory/profiles.yaml")
             ).formation
-            if (
-                resolved.provider != "fake"
-                and resolved.policy_name != formation_profile.model_policy
-            ):
-                raise ValueError(
-                    "PostgreSQL formation must use the configured formation model policy "
-                    "so all provider calls share the measured budget"
-                )
+            if resolved.provider != "fake":
+                formation_model = await StaticModelRouter(
+                    ProviderRegistry.load(
+                        PACKAGE_ROOT / "models",
+                        adapters=ADAPTER_DEFINITIONS,
+                        overlay_root=effective.config_dir,
+                    ),
+                    fixed_clock(case.history[0].at),
+                ).resolve(formation_profile.model_policy, tenant_id=principal.tenant_id)
+                if formation_model.provider != resolved.provider:
+                    raise ValueError("PostgreSQL formation must share the budgeted reader provider")
             # Exercise the normal, explicitly pinned People composition. Its older
             # evaluation-only mode deliberately remains restricted to memory storage.
             effective = replace(
