@@ -54,3 +54,11 @@ restricted/unresolved links, and all disallowed query transformations. Runtime
 contracts must show actual People discovery reuses one prepared vector without a
 provider call inside retrieval, while expired and revoked parents remain unusable.
 These contracts are mechanism evidence, not a held-out answer-lift claim.
+
+The remainder's hosted integration run exposed a custom M32 PostgreSQL fixture
+that constructed both repositories but omitted `memories.bind_people(people)`.
+Production bootstrap already supplied that binding. The three existing People
+history/summary assertions failed in 10.18 seconds, then passed unchanged in
+6.98 seconds after the fixture adopted the same composition. The fail-closed
+unbound-store behavior remains intact. This test-input correction changes the
+ADR-0199 manifest and cannot be retroactively attached to an earlier confirmation.

@@ -28,10 +28,12 @@ def options(tmp_path: Path, **updates: Any) -> runner.ConfirmationOptions:
     )
 
 
-def test_approved_cap_is_one_hundred_total_and_cannot_be_silently_expanded(tmp_path: Path) -> None:
+def test_explicit_owner_approved_cap_does_not_raise_the_existing_default(tmp_path: Path) -> None:
     assert options(tmp_path).maximum_cost_usd == 100
+    assert options(tmp_path, maximum_cost_usd=290).maximum_cost_usd == 290
+    assert options(tmp_path, maximum_cost_usd=300).maximum_cost_usd == 300
     with pytest.raises(ValidationError):
-        options(tmp_path, maximum_cost_usd=101)
+        options(tmp_path, maximum_cost_usd=301)
 
 
 @pytest.mark.parametrize("changed", [False, True])

@@ -91,8 +91,19 @@ title: Current Milestone
   variant and interrupted attempts retain their rows and uncertain reservations.
   The owner approved the exact 400-scenario corpus on 2026-10-13; its retained
   independence receipt binds the original corpus and all scenario identities.
-  Actual confirmation, end-to-end operational evidence and
-  reviewed release publication remain outstanding. No paid confirmation has run.
+  The production-reader sparse baseline completed twenty development observations
+  with six correct answers; it does not certify quality. Native historical-index
+  load measurement completed 480 samples through 100,000 competing records, with
+  every target ranked first and rendered. The first confirmation stopped at 34 of
+  4,800 observations because a required test-fixture correction changes its bound
+  inputs. Original records and failed status are retained; aggregate reported and
+  held cost is USD 5.45365250. The owner subsequently approved a USD 300 aggregate
+  cap and one replacement
+  after final review and CI; its USD 290 allocation includes no forgiveness of
+  earlier charges. Foundation PR #159 deployed successfully as
+  `81062c5b`; PR #158 retains review, exact-head CI and deployment requirements.
+  Complete confirmation, independent failure review and release publication
+  remain outstanding.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
 

@@ -230,3 +230,5 @@ implementation without one.
 - [ADR-0199: Recall evidence release binding](0199-recall-evidence-release-binding.md)
 
 - [ADR-0200: Historical semantic revisions](0200-historical-semantic-revisions.md)
+
+- [ADR-0201: Foundation signing evidence](0201-foundation-signing-evidence.md)

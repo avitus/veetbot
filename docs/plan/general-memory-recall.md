@@ -409,11 +409,19 @@ row that differs from those original observations and rechecks source bytes befo
 writing. It never authors reviews or enables deployment. The confirmatory runner
 now freezes deployment composition, verified model assets, actual schema, controls
 and runtime variants before held-out parsing. Production startup binds the same
-schema fingerprint. Its single USD 100 aggregate allowance was approved by the
-owner. On 2026-10-13 the owner approved the exact 400-scenario corpus; its accepted
+schema fingerprint. Its initial USD 100 aggregate allowance was approved by the
+owner and explicitly raised to USD 300 on 2026-10-13, including earlier charges. On 2026-10-13 the owner approved the exact 400-scenario
+corpus; its accepted
 independence receipt is retained under
 `evals/observations/general-memory-recall/20261013-corpus-review/`.
-Actual confirmatory execution remains open.
+The first confirmation stopped after 34 observations because a necessary integration
+fixture correction changes the ADR-0199 input manifest. The original failed attempt,
+its complete input capture and settled cost journal remain under
+`evals/observations/general-memory-recall/20261013-confirmation-v1/`. The owner
+authorized one replacement with a USD 290 allocation after final review and CI. The native historical-index load measurement
+under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
+100,000 competing records. It measures one synthetic information need and cannot
+replace complete confirmatory execution, independent failure review or answer gates.
 The unit tests' fabricated metric matrices are not a release
 corpus, and the existing diagnostic remains ineligible. The shipped configuration
 still supplies no semantic channel and all twelve gates remain pending.

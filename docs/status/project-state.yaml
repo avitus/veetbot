@@ -2569,13 +2569,20 @@ milestones:
       - tests/contract/test_historical_semantic_recall.py
       - tests/integration/test_historical_semantic_postgres.py
     diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
+    retained_measurements:
+      - evals/observations/general-memory-recall/20261013-production-baseline-v2/
+      - evals/observations/general-memory-recall/20261013-native-postgres-load/
+      - evals/observations/general-memory-recall/20261013-confirmation-v1/
     limitations:
       - Seeded retrieval is not formation, answer-use or held-out release evidence
       - PostgreSQL development comparisons retain 100 original observations and 120 task-context variants; reader-planned search answers 16 of 20 but predates the type-hint repair and cannot certify release
       - The owner approved the exact 400-scenario corpus on 2026-10-13; its independence receipt is retained under evals/observations/general-memory-recall/20261013-corpus-review/
       - Semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
       - Historical semantic revisions, verified-input release binding and confirmatory dependency capture have mechanism checks; comparative People evidence, end-to-end load budgets and reviewed release observations/publication remain open
-      - The owner approved one USD 100 aggregate cap for 4800 confirmatory observations; the runner retains failed attempts and no paid confirmation has run
+      - The initial USD 100 cap governed the first confirmation, stopped at 34 of 4800 observations because the required M32 fixture correction changes the ADR-0199 input manifest
+      - The interrupted attempt retains all original records and failed status; prior reported and held cost is USD 5.45365250, included in the owner-approved USD 300 aggregate cap for one replacement after final review and CI; its run allocation is USD 290
+      - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
+      - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; remainder PR158 still requires final review, exact-head CI and production delivery
       - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder
     authorized_scope:
       - cross-category retrieval and implicit-use evaluation with frozen controls

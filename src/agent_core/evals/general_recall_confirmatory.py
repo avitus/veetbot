@@ -30,7 +30,7 @@ from agent_core.memory.semantic_deployment import IndexConfiguration, configurat
 class ConfirmationOptions(Experiment):
     production_reader: Literal[True] = True
     # This task's separately approved aggregate cap, never twelve arm allowances.
-    maximum_cost_usd: Decimal = Field(default=Decimal("100"), gt=0, le=100, allow_inf_nan=False)
+    maximum_cost_usd: Decimal = Field(default=Decimal("100"), gt=0, le=300, allow_inf_nan=False)
     deadline_seconds: int = Field(default=86400, ge=1, le=259200)
     independence_review: Path
     baseline_report: Path

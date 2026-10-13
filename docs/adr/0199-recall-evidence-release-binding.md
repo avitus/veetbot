@@ -204,8 +204,16 @@ An interruption retains the failed attempt; it cannot overwrite an earlier attem
 
 On 2026-10-12 the owner authorized a **USD 100 aggregate model-spend cap** for the
 4,800-observation confirmation. One budget and reservation journal cover the complete
-matrix; individual variants do not receive separate USD 100 allowances. The runner
-refuses a higher cap. Its CLI is
+matrix; individual variants do not receive separate allowances. On 2026-10-13,
+after the interrupted first confirmation and a measured USD 231 projection, the
+owner explicitly raised the aggregate authorization to **USD 300**, including all
+prior reported spending and uncertain reservations. The runner keeps its existing
+USD 100 default, accepts an explicitly configured allowance up to USD 300 and
+refuses higher values. The one authorized replacement is allocated USD 290; adding
+USD 5.45365250 from prior attempts leaves USD 4.54634750 unallocated. It may start
+only after the final evaluated inputs pass CodeRabbit review and exact-head CI.
+The stopped attempt remains immutable, and no quality gate or input-binding rule
+is relaxed. Its CLI is
 `uv run python -m agent_core.evals.general_recall_confirmatory --configuration PATH`.
 It requires `RUN_LIVE_MODEL_TESTS=1`, a separate `M33_SCRATCH_DATABASE_URL` named
 `veetbot_m33_eval_<name>`, and explicit scratch authorization in the configuration.
@@ -216,7 +224,12 @@ the explicit local index overlay remain independently resolved inputs.
 These are mechanism checks, not quality measurements or human decisions. The
 400-scenario corpus received the owner's explicit approval on 2026-10-13; the
 accepted receipt binds its unchanged corpus and scenario-manifest digests.
-No paid confirmation has run, and all twelve M33 gates remain pending. Completion of a raw collection
+The first paid confirmation was interrupted after 34 of 4,800 observations when a
+required integration-fixture correction changed the bound test inputs. Its original
+records and failed status are retained under
+`evals/observations/general-memory-recall/20261013-confirmation-v1/`. The separately
+authorized replacement has not started, and all twelve M33 gates remain pending.
+Completion of a raw collection
 does not publish evidence or activate a channel; independent failure review,
 mechanical scoring, all gate reports, CodeRabbit, hosted CI and delivery remain required.
 
@@ -242,3 +255,9 @@ all twelve runtime variants without executing a model call.
 Unsettled provider calls also retain their exception class, without exception
 text or request contents. Their reservations remain held and the attempt remains
 ineligible for publication; diagnosis never turns uncertain usage into zero cost.
+
+The explicit-cap regression first rejected the newly approved USD 290 allocation
+with a validation error under the old USD 100 maximum. The revised boundary permits
+explicit USD 290/300 allowances, retains the existing USD 100 default and refuses
+USD 301. The actual replacement allocation must still subtract all prior charges;
+a maximum accepted configuration is not authority to spend it again per attempt.
