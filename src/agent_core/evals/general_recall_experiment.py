@@ -144,10 +144,11 @@ async def run_experiment(
     }
     run_file = options.output / "run.json"
     run_file.write_text(json.dumps(metadata, indent=2) + "\n")
-    providers = provider_adapters(settings, registry)
+    providers = {}
     local = None
     embeddings = None
     try:
+        providers = provider_adapters(settings, registry)
         if options.channel != "sparse":
             assert options.local_configuration is not None and options.model_directory is not None
             local = LocalEmbeddingConfig.model_validate_json(

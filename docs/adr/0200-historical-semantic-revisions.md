@@ -82,3 +82,11 @@ version entries when filtering unrelated history. The focused erasure suite pass
 thirty-five checks, including the shared email-source contract and preservation of an
 unrelated session's historical semantic source. Neither erasure path discards retained
 source-version metadata.
+
+The strengthened dated People contract sets both temporal coordinates. It exposed
+an in-memory mismatch: attribution advances the source-version timeline without
+necessarily changing stored belief text. Historical dense search now selects from
+that complete timeline. Revision capture first requires an actual recorded source
+version, then reads its latest preceding text revision under the current fence.
+A shared regression retains an attribution-only revision after a later text update,
+refuses invented revisions and keeps that historical vector out of current recall.

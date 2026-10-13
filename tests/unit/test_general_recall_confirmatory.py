@@ -244,7 +244,7 @@ async def test_confirmation_refuses_before_holdout_or_provider_work(
         )
 
 
-@pytest.mark.parametrize("stop", ["none", "budget", "controls"])
+@pytest.mark.parametrize("stop", ["none", "budget", "controls", "registry"])
 async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: str
 ) -> None:
@@ -259,6 +259,7 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
         general_recall_execution,
     )
     from agent_core.memory import recall_release_binding
+    from agent_core.model.registry import ProviderRegistry
     from tests.contract.support import NOW
     from tests.contract.test_local_semantic_preparation import LOCAL
     from tests.unit.test_general_recall_confirmation import binding, capture
@@ -340,6 +341,12 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
         }
 
     monkeypatch.setattr(general_recall_execution, "evaluate_fixture", evaluate)
+    if stop == "registry":
+
+        def unavailable_registry(*_: Any, **__: Any) -> None:
+            raise ValueError("Synthetic registry setup failure")
+
+        monkeypatch.setattr(ProviderRegistry, "load", unavailable_registry)
     if stop != "none":
         with pytest.raises(BudgetExceededError if stop == "budget" else ValueError):
             await runner.run_confirmation(
@@ -351,6 +358,13 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
         )
     result = json.loads((selected.output / "run.json").read_text())
     assert result["state"] == ("failed" if stop != "none" else "completed")
+    if stop == "registry":
+        assert result["error_class"] == "ValueError" and result["finished_at"]
+        assert result["completed"] == result["provider_calls"] == 0
+        assert result["actual_cost_usd"] == result["held_cost_usd"] == "0"
+        assert not budgets and not closed
+        assert not (selected.output / "collection.json").exists()
+        return
     assert result["completed"] == (3 if stop == "budget" else 12)
     assert result["activation_evidence"] is False
     assert result["held_cost_usd"] == ("0.25" if stop == "budget" else "0")

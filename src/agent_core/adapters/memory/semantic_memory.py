@@ -47,15 +47,21 @@ class InMemorySemanticMemoryIndex:
             except NotFoundError:
                 return None
             fence = self._index.versions[current.id]
-            if source.creation_sequence != fence.creation_sequence:
+            if source.creation_sequence != fence.creation_sequence or not any(
+                version == source for _, version in self._index.version_history.get(current.id, [])
+            ):
                 return None
+            # Attribution changes advance the source revision without changing
+            # the stored text. Recover the last text version at that real source
+            # revision, never a later correction or an invented revision.
             original = next(
                 (
                     record
                     for _, record, version in reversed(self._memories._history.get(current.id, []))
-                    if version == source
+                    if version.creation_sequence == source.creation_sequence
+                    and version.content_revision <= source.content_revision
                 ),
-                current if source == fence else None,
+                None,
             )
             if original is None:
                 return None
@@ -158,14 +164,7 @@ class InMemorySemanticMemoryIndex:
                 version = self._index.versions[record.id]
                 historical = query.known_at is not None or query.as_of is not None
                 if query.known_at is not None:
-                    selected = next(
-                        (
-                            v
-                            for at, _, v in reversed(self._memories._history.get(record.id, []))
-                            if at <= query.known_at
-                        ),
-                        None,
-                    )
+                    selected = self._index.version_at(record.id, query.known_at)
                     if selected is None:
                         continue
                     version = selected

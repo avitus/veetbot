@@ -2,11 +2,62 @@
 
 from collections.abc import Callable
 from datetime import timedelta
+from typing import Any
+from uuid import UUID
 
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.memory_fixtures import memory, recall_query
 from tests.contract.semantic_memory_cases import SPACE, VECTOR
 from tests.contract.support import NOW, principal
+
+
+async def historical_attribution_revision_survives_later_text_change(
+    factory: UnitOfWorkFactory, advance: Callable[[timedelta], None]
+) -> None:
+    from agent_core.domain.people import Person, PersonMemoryLink
+
+    owner = principal()
+    common: dict[str, Any] = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    focal = UUID(int=9000)
+    async with factory() as uow:
+        original = await uow.memories.upsert_belief(memory(statement="Alex avoids dairy"))
+        await uow.people.put(Person(id=focal, display_name="Alex", **common), expected_revision=0)
+        await uow.people.put(
+            PersonMemoryLink(id=UUID(int=9100), person_id=focal, belief_id=original.id, **common),
+            expected_revision=0,
+        )
+        attributed = await uow.semantic_memory.capture(owner, original.id, SPACE)
+        assert attributed is not None
+    advance(timedelta(days=1))
+    async with factory() as uow:
+        await uow.memories.reinforce(
+            original.model_copy(update={"statement": "Alex now eats dairy", "store_position": 2})
+        )
+        historical = await uow.semantic_memory.capture_revision(owner, attributed.source, SPACE)
+        assert historical is not None, "Attribution-only revisions must retain their original text"
+        assert historical.record.statement == original.statement
+        assert historical.current_fence != attributed.source
+        assert await uow.semantic_memory.put(owner, historical, VECTOR)
+        query = recall_query(text="Alex breakfast").model_copy(
+            update={"as_of": NOW, "known_at": NOW, "people_scope": (focal,)}
+        )
+        hits = await uow.semantic_memory.search(query, SPACE, VECTOR, limit=1)
+        assert [hit.record.statement for hit in hits] == [original.statement]
+        assert (
+            await uow.semantic_memory.search(
+                query.model_copy(update={"as_of": None, "known_at": None}), SPACE, VECTOR, limit=1
+            )
+            == []
+        ), "A historical attribution revision must never become current evidence"
+        unknown = attributed.source.model_copy(
+            update={"content_revision": attributed.source.content_revision + 100}
+        )
+        assert await uow.semantic_memory.capture_revision(owner, unknown, SPACE) is None
 
 
 async def historical_revision_is_not_current_evidence(

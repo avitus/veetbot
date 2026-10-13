@@ -7,6 +7,7 @@ import pytest
 
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.historical_semantic_cases import (
+    historical_attribution_revision_survives_later_text_change,
     historical_revision_is_not_current_evidence,
     historical_revision_restrictions_precede_limit,
     historical_selection_precedes_similarity,
@@ -30,6 +31,7 @@ async def test_historical_people_identity_precedes_candidate_limits() -> None:
 @pytest.mark.parametrize(
     "scenario",
     [
+        historical_attribution_revision_survives_later_text_change,
         historical_visibility_and_stale_writes,
         historical_selection_precedes_similarity,
         historical_revision_restrictions_precede_limit,

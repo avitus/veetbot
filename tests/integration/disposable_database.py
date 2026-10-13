@@ -9,6 +9,7 @@ database only after marking it disposable with ``VEETBOT_TEST_DATABASE_DISPOSABL
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -69,10 +70,13 @@ async def clone_recall_database() -> AsyncIterator[str]:
 
     Only the database successfully created by this invocation is removed. The
     template URL and all cleanup remain behind the integration opt-in guard.
+    The creation epoch supports operator recovery after a killed process; age
+    alone never authorizes this helper to destroy another invocation's database.
     """
     database_url = disposable_database_url()
     source = make_url(database_url)
-    name = f"veetbot_m33_eval_{uuid4().hex}"
+    # Keep the suffix inside the evaluator's existing 32-character guard.
+    name = f"veetbot_m33_eval_{int(time.time())}_{uuid4().hex[:20]}"
     engine = create_engine(database_url)
     quoted_source = engine.dialect.identifier_preparer.quote_identifier(source.database or "")
     try:
@@ -82,6 +86,6 @@ async def clone_recall_database() -> AsyncIterator[str]:
             try:
                 yield source.set(database=name).render_as_string(hide_password=False)
             finally:
-                await connection.execute(text(f'DROP DATABASE "{name}"'))
+                await connection.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
     finally:
         await engine.dispose()

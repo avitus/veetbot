@@ -21,6 +21,96 @@ class LocalQuery:
 
 
 @pytest.mark.parametrize("path", ["automatic", "deliberate"])
+@pytest.mark.parametrize("channel", ["dense", "hybrid"])
+@pytest.mark.parametrize(
+    ("question", "search", "statement"),
+    [
+        (
+            "What octane gas should I use for my car?",
+            "user car vehicle make model engine gasoline octane",
+            "User has a 2026 Aster S8.",
+        ),
+        (
+            "Which charger should I get for my laptop?",
+            "user laptop computer model charger",
+            "User owns a Framework 13.",
+        ),
+    ],
+)
+async def test_general_semantic_recall_replaces_the_ownership_branch(
+    path: str, channel: str, question: str, search: str, statement: str
+) -> None:
+    from datetime import timedelta
+
+    from agent_core.domain.memory import BeliefType, MemoryAuthority, MemoryStatus
+
+    clock, factory, _, _ = await formation_stack()
+    target = memory(statement=statement).model_copy(
+        update={
+            "subject": "owned model",
+            "belief_type": BeliefType.USER_MODEL_ATTR,
+            "status": MemoryStatus.PROVISIONAL,
+            "authority": MemoryAuthority.INFERRED,
+            "confidence": 0.65,
+            "utility": -1.0,
+        }
+    )
+    async with factory() as uow:
+        for index in range(162):
+            record = (
+                target
+                if index == 0
+                else target.model_copy(
+                    update={
+                        "id": UUID(int=20000 + index),
+                        "subject": f"project {index}",
+                        "statement": f"User wants to improve project {index}.",
+                        "store_position": index + 1,
+                        "utility": 0.0,
+                    }
+                )
+            )
+            await uow.memories.upsert_belief(record)
+            source = await uow.semantic_memory.capture(principal(), record.id, SPACE)
+            assert source is not None
+            assert await uow.semantic_memory.put(
+                principal(), source, VECTOR if index == 0 else (0.1, 0.99, 0.0)
+            )
+    clock.advance(timedelta(days=14))
+    retriever = HybridMemoryRetriever(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=i) for i in range(8000, 8010)),
+        principal(),
+        profile=DEFAULT_RETRIEVAL_PROFILE.model_copy(
+            update={"semantic_enabled": True, "semantic_channel": channel}
+        ),
+        semantic_queries=LocalQuery(),
+    )
+    snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
+    assert snapshot.items == [], "Semantic recall must not promote this provisional fact"
+    if path == "automatic":
+        query = DeterministicQueryFormer(principal(), current_scope="project-a").from_text(
+            question
+        )[0]
+        result = await retriever.recall(query, session_id=SESSION_ID)
+        trace_id, rendered = result.trace_id, result.rendered
+    else:
+        tool_result = await MemorySearchTool(retriever).execute(
+            {"text": search, "scope": "project-a"}, tool_context()
+        )
+        assert tool_result.structured is not None
+        trace_id = UUID(tool_result.structured["trace_id"])
+        rendered = str(tool_result.content)
+    assert target.statement in rendered
+    async with factory() as uow:
+        trace = await uow.traces.get(trace_id, principal())
+    assert target.id in trace.returned
+    assert "owned-resources" not in trace.retrieval_policy_version
+    assert "semantic" in trace.retrieval_policy_version
+
+
+@pytest.mark.parametrize("path", ["automatic", "deliberate"])
 async def test_semantic_only_fact_reaches_both_recall_paths(path: str) -> None:
     clock, factory, _, _ = await formation_stack()
     original = memory(statement="Dairy causes the user digestive discomfort").model_copy(

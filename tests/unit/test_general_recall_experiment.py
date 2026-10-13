@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,6 +29,33 @@ def test_bounded_new_sparse_experiment_can_start(tmp_path: Path) -> None:
     validate_options(
         Experiment(corpus=tmp_path / "corpus", output=tmp_path / "output"), live_enabled=True
     )
+
+
+async def test_provider_setup_failure_is_retained_as_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_core import config
+    from agent_core.evals import general_recall_composition, general_recall_experiment
+    from tests.integration.m2_support import memory_settings
+    from tests.unit.test_general_recall_corpus import fixture
+
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text(fixture().model_dump_json() + "\n")
+    selected = Experiment(corpus=corpus, output=tmp_path / "run")
+    monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+    monkeypatch.setattr(config, "load_settings", lambda *_: memory_settings())
+
+    def setup_failure(*_: object) -> None:
+        raise ValueError("Synthetic provider setup failure")
+
+    monkeypatch.setattr(general_recall_composition, "provider_adapters", setup_failure)
+    with pytest.raises(ValueError, match="Synthetic provider setup failure"):
+        await general_recall_experiment.run_experiment(selected)
+    record = json.loads((selected.output / "run.json").read_bytes())
+    assert record["state"] == "failed"
+    assert record["error_class"] == "ValueError" and record["finished_at"]
+    assert record["completed"] == record["provider_calls"] == 0
+    assert record["actual_cost_usd"] == record["held_cost_usd"] == "0"
 
 
 async def test_paired_matrix_uses_one_nonrenewable_provider_ledger(

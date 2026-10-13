@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import pytest
+import yaml
 
 from agent_core.domain.general_recall_release import (
     RecallPreregistration,
@@ -18,11 +19,22 @@ from agent_core.domain.general_recall_release import (
 from agent_core.evals import general_recall_publication as publication
 from agent_core.evals.general_recall_collection import CollectedObservations
 from agent_core.memory.general_recall_evidence import score_release
+from tests.gates import general_memory_recall_m33 as release_gates
 from tests.unit.test_general_recall_source_scoring import recovered_bundle
 
 CollectionCompiler = Callable[
     [Path, RecallReleaseIdentity, RecallPreregistration], CollectedObservations
 ]
+
+
+def test_registered_m33_gates_require_reviewed_release_evidence() -> None:
+    root = Path(__file__).resolve().parents[2]
+    entries = yaml.safe_load((root / "evals/gates/memory.yaml").read_text())
+    checks = [entry["check"] for entry in entries if entry["milestone"] == 33]
+    assert checks == [
+        f"tests/gates/general_memory_recall_m33.py::test_reviewed_release[{gate}]"
+        for gate in range(1, 13)
+    ], "M33 release gates must execute the reviewed-evidence verifier, not pending placeholders"
 
 
 @pytest.fixture(autouse=True)
@@ -163,6 +175,54 @@ def test_publisher_writes_a_recomputed_bound_bundle_without_creating_reviews(
     assert result.read_bytes() == (tmp_path / "bundle.json").read_bytes()
     report = json.loads((result.parent / "report.json").read_text())
     assert report["activation_eligible"] and report["observations"] == 4800
+
+
+@pytest.mark.parametrize("mutation", [None, "missing_review", "failed_gate", "identity_change"])
+def test_release_gate_recompiles_evidence_and_refuses_invalid_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str | None
+) -> None:
+    # These fabricated observations exercise the gate adapter, not M33 quality.
+    arguments = inputs(tmp_path)
+    monkeypatch.setattr(publication, "require_committed_tree", lambda *_: None)
+    identity = tmp_path / "identity.json"
+    identity.write_text(arguments["expected"].model_dump_json())
+    manifest = tmp_path / "gate-inputs.json"
+    write_json(
+        manifest,
+        {
+            "version": "recall-gate-inputs@1",
+            "identity": identity.name,
+            "bundle": arguments["bundle_path"].name,
+            "independence_review": arguments["independence_review"].name,
+            "failure_review": arguments["failure_review"].name,
+            "collection_manifest": arguments["collection_manifest"].name,
+            "gate_reports": [path.name for path in arguments["gate_reports"]],
+        },
+    )
+    if mutation == "missing_review":
+        arguments["failure_review"].unlink()
+    elif mutation == "failed_gate":
+        report = arguments["gate_reports"][0]
+        raw = json.loads(report.read_bytes())
+        raw["checks"][0]["passed"] = False
+        write_json(report, raw)
+    elif mutation == "identity_change":
+        original = publication.publish_release
+
+        def change_identity(*args: object, **kwargs: object) -> Path:
+            result = original(**arguments)
+            identity.write_text("{}")
+            return result
+
+        monkeypatch.setattr(release_gates, "publish_release", change_identity)
+    if mutation is not None:
+        with pytest.raises((OSError, ValueError)):
+            release_gates.verify_release_inputs(manifest, arguments["output"])
+    else:
+        release_gates.verify_release_inputs(manifest, arguments["output"])
+        assert (arguments["output"] / "release.json").read_bytes() == arguments[
+            "bundle_path"
+        ].read_bytes()
 
 
 def test_publication_rejects_an_unverified_evaluated_input_commitment(

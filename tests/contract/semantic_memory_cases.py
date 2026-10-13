@@ -402,6 +402,7 @@ async def people_identity_precedes_dense_limit(
                 "people_scope": (focal,),
                 "sensitivity_ceiling": Sensitivity.SENSITIVE,
                 "as_of": NOW if historical else None,
+                "known_at": NOW if historical else None,
             }
         )
         assert await uow.semantic_memory.search(

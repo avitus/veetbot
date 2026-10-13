@@ -314,14 +314,14 @@ async def run_confirmation(
         "options": options.model_dump(mode="json"),
     }
     _write(output / "run.json", metadata)
-    registry = ProviderRegistry.load(
-        PACKAGE_ROOT / "models",
-        adapters=ADAPTER_DEFINITIONS,
-        overlay_root=prepared.settings.config_dir,
-    )
     providers = {}
     embeddings = None
     try:
+        registry = ProviderRegistry.load(
+            PACKAGE_ROOT / "models",
+            adapters=ADAPTER_DEFINITIONS,
+            overlay_root=prepared.settings.config_dir,
+        )
         await verify_external_inputs(root, options, settings, scratch, prepared)
         if (
             capture_inputs(root, identity.model_dump(mode="json")).digest

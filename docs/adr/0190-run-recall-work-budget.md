@@ -20,9 +20,10 @@ the same query as direct `memory.search`.
 Before provider work, save a typed checkpoint reservation for at most four queries
 and two preparation rounds, with one ten-second absolute deadline beginning at the
 first planning attempt that reserves work. A batch must fit the remaining allowance
-in full. The existing local encoder admits at most 512 tokens per query, hence at
-most 2,048 input tokens across these reservations; the selected model may impose a
-smaller per-query bound. Local inference has zero provider price. The existing
+in full. The measured local tuple admits at most 256 tokens per query, hence at
+most 1,024 input tokens across these reservations. `LocalEmbeddingConfig` permits
+a schema maximum of 512 tokens per query; the selected model's smaller bound
+still applies. Local inference has zero provider price. The existing
 owner/day ledger and uncertain-reservation handling still apply. This does not
 admit remote query egress or assisted model planning.
 

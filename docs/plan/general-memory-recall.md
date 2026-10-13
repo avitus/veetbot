@@ -92,6 +92,14 @@ frozen experiments. The effective selection mode and retrieval policy are record
 in the trace. Existing saved queries that lack a selector retain legacy candidate ordering.
 New live queries use relevance selection. Ordinary memory browsing is unchanged.
 
+The semantic relevance path clears the older possession-specific candidate and
+ranking flag before both query preparation and retrieval. Automatic and deliberate
+car/laptop regressions recover the older provisional model amid newer distractors
+without that branch or snapshot promotion. This tests retrieval with controlled
+vectors; the confirmatory corpus must still establish actual encoder and reader
+quality. Sparse compatibility and explicit legacy controls retain their historical
+policy, including when semantic recall is disabled.
+
 ## Query formation and search
 
 The planner receives the current task, unresolved references, active entities,
@@ -425,6 +433,35 @@ replace complete confirmatory execution, independent failure review or answer ga
 The unit tests' fabricated metric matrices are not a release
 corpus, and the existing diagnostic remains ineligible. The shipped configuration
 still supplies no semantic channel and all twelve gates remain pending.
+
+The registry binds all twelve gates to explicit checks in
+`tests/gates/general_memory_recall_m33.py`. These checks require the complete
+reviewed publication inputs and conservatively fail together if any release
+prerequisite is absent. They recompile the original collection through the same
+publisher, verifying the corpus, observations, reviews, all eleven supporting
+gate reports and exact committed inputs. They do not create supporting reports,
+human decisions or model observations, and do not activate a channel. Supporting
+report provenance remains the trusted operator's responsibility: mechanism tests,
+native load measurements and comparative observations must supply their actual
+recorded results rather than an invented passing receipt.
+
+The explicit command is
+`VEETBOT_M33_GATE_INPUTS=PATH uv run pytest tests/gates/general_memory_recall_m33.py`.
+The operator supplies a `recall-gate-inputs@1` JSON manifest containing `identity`,
+`bundle`, `independence_review`, `failure_review`, `collection_manifest` and eleven
+`gate_reports` paths. Relative paths resolve beside that manifest; `identity` is
+the independently captured identity. The verifier writes only a temporary
+recompilation and checks that its manifest and identity remain unchanged. The file
+does not match ordinary pytest discovery, so implementation CI can precede the
+paid measurement; selecting a release gate without evidence fails rather than
+skipping. Registry checks and their regressions are frozen before confirmation,
+because test and registry changes are evaluated inputs under ADR-0199.
+Both evaluation runners retain a terminal failed record, final timestamp and
+settled/held costs when provider or registry setup fails after registration.
+The integration clone helper force-closes leftover connections only in its own
+successfully created database. Its creation epoch supports explicit operator
+cleanup after a killed test; the opt-in for one scratch template does not authorize
+an automatic age-based sweep of other databases or retained evaluation evidence.
 
 ## First implementation and diagnostic status (2026-10-11)
 

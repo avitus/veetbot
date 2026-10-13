@@ -384,6 +384,11 @@ class HybridMemoryRetriever:
         }
         if moment == RecallMoment.SNAPSHOT.value:
             updates["include_provisional"] = False
+        if self._profile.semantic_enabled and query.candidate_selection == "relevance":
+            # The admitted general path must succeed without possession-specific
+            # candidate expansion or ranking. Frozen controls retain their policy.
+            # Normalize before both vector preparation and lookup so cache keys agree.
+            updates["include_owned_resources"] = False
         return query.model_copy(update=updates)
 
     async def recall(
