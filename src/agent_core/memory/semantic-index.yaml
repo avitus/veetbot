@@ -1,0 +1,4 @@
+# No implicit provider, model, dimensions, price, credential or residency permission.
+# An operator-reviewed overlay supplies exactly one complete configuration.
+schema_version: 1
+configurations: []

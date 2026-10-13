@@ -923,6 +923,12 @@ class RecallQuery(BaseModel):
     # belief_types (an AND filter), these can retrieve a paraphrased profile
     # detail when an explicit self-knowledge question shares no content words.
     structured_belief_types: list[BeliefType] = Field(default_factory=list)
+    # A bounded structured arm for personal possessions whose stored model
+    # name need not share words with a question about "my car" or "my laptop".
+    include_owned_resources: bool = False
+    # Older persisted queries keep their original selection semantics. New
+    # task queries explicitly select relevance (ADR-0178).
+    candidate_selection: Literal["recent", "relevance"] = "recent"
     as_of: datetime | None = None
     known_at: AwareDatetime | None = None
     include_superseded: bool = False
@@ -947,6 +953,28 @@ class RecallQuery(BaseModel):
     # Beliefs the persona row already carries at higher trust: a hard snapshot
     # exclusion, never a relevance signal (persona-surface.md).
     exclude_ids: tuple[UUID, ...] = ()
+
+
+OWNED_RESOURCE_PATTERN = (
+    r"^(the )?user (has|owns|drives|uses) "
+    r"(?!no |not |never |to |been |had |previously |formerly )"
+)
+
+
+def is_owned_resource(record: MemoryRecord) -> bool:
+    """Recognize direct possession facts, not goals or third-party reports.
+
+    This expression is shared with PostgreSQL's case-insensitive regex arm.
+    It discovers candidate facts; it does not infer the kind of object owned.
+    """
+
+    return (
+        record.belief_type is BeliefType.USER_MODEL_ATTR
+        and record.claim_kind in {MemoryClaimKind.PROJECT_FACT, MemoryClaimKind.RESOURCE}
+        and record.derivation is MemoryDerivation.DIRECT
+        and record.polarity is Polarity.ASSERT
+        and re.search(OWNED_RESOURCE_PATTERN, record.statement, re.I) is not None
+    )
 
 
 class RecalledBelief(BaseModel):

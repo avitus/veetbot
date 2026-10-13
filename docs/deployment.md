@@ -51,6 +51,16 @@ identity. The Nginx deployment validates and atomically promotes the website at
 failure restores both static-site pointers and the prior configuration. ADR-0084
 records the boundary and rationale.
 
+## Semantic-index database prerequisite
+
+ADR-0179 adds the rebuildable `memory_vectors` table and pgvector 0.8.7. The release
+builds `veetbot-postgres:16-alpine-vector0.8.7` from `deploy/postgres.Dockerfile`
+before restarting PostgreSQL or migrating. It retains the existing PostgreSQL 16
+Alpine locale environment and volume path; it does not switch an existing volume
+to the hosted CI image. Follow the existing backup and migration rehearsal before
+production delivery. Semantic retrieval remains disabled: this schema and image
+change does not activate a provider, backfill private memory or enable recall.
+
 ## Release flow
 
 ```text

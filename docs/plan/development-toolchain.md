@@ -397,7 +397,7 @@ One service at Milestone 0.
 
 ```text
 service     postgres
-image       postgres:16-alpine
+image       veetbot-postgres:16-alpine-vector0.8.7
 port        5432 published on 5432
 database    agent
 user        agent
@@ -413,6 +413,12 @@ versions is exactly the kind of thing that turns a green suite red on
 an unrelated Tuesday. The version is a versioned asset in the sense
 ADR-0024 uses the term: it is pinned, it is committed, and changing it
 is a reviewed change.
+
+ADR-0179 adds pgvector 0.8.7 for the default-off semantic index. Compose builds
+`deploy/postgres.Dockerfile`, retaining the PostgreSQL 16 Alpine base and data
+volume; its separate build stage verifies the extension archive checksum.
+Production builds this versioned image before touching the database service.
+The migration requires the extension files even while semantic recall is disabled.
 
 The credentials are `agent/agent` and they are in `.env.example`,
 which the secret scanner scans rather than exempts. A scanner that
@@ -588,7 +594,7 @@ work that claims a narrower lane. It is not a `make` target because it reads
 git range state that `make check` does not assume; run the same module
 locally to preview the verdict before pushing.
 
-Job 3 uses `postgres:16-alpine` as a secondary CircleCI Docker image rather
+Job 3 uses `pgvector/pgvector:0.8.7-pg16-bookworm` as a secondary CircleCI Docker image rather
 than the compose file, because the compose file publishes a port on the
 developer's host and a secondary container does not need to. The database
 name, user, and password are the same three values, which keeps `DATABASE_URL`
@@ -973,7 +979,8 @@ done badly.
     selection. Defining it at Milestone 0 keeps the workflow file
     complete and costs one skipped job per night; deferring it means
     editing the workflow later. Chosen: define it, skipped.
-4.  **Is `postgres:16-alpine` the right pin?** Alpine images are
+4.  **Is `postgres:16-alpine` the right pin?** ADR-0179 retains this
+    base for the local/production vector image. Alpine images are
     smaller and occasionally differ in locale and collation
     behaviour, which is exactly the surface a sort-order-dependent
     query would hit. The non-Alpine tag is larger and closer to what a
@@ -1000,3 +1007,6 @@ remain independent. The deployment's authenticated model-settings read must
 return HTTP 200 before the release succeeds. See
 [ADR-0149](../adr/0149-release-managed-owner-permissions.md) and the
 [deployment runbook](../deployment.md) for the mechanism and operator boundary.
+
+ADR-0186 additionally redacts all Cookie and Set-Cookie fields, including nested
+headers, because the dreaming review cookie is an authentication credential.

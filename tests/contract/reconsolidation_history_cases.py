@@ -126,6 +126,7 @@ async def historical_scope_and_lookup_bound(factory: UnitOfWorkFactory, clock: F
         query.model_copy(update={"exclude_ids": (plan.canonical_id,)}), session_id=SESSION_ID
     )
     assert len(fallback.items) == 1 and fallback.items[0].merge_id == operation.id
+    assert fallback.items[0].belief_id != plan.canonical_id
     disabled = HybridMemoryRetriever(factory, clock, RandomIdFactory(), principal())
     assert (await disabled.recall(query, session_id=SESSION_ID)).items[0].merge_id is None
     clock.advance(timedelta(seconds=10))

@@ -307,6 +307,27 @@ requires no further blinded packet and does not satisfy unattended quality gates
 - [ ] Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
 - [ ] Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
 
+### Milestone 33 — General memory search and recall
+
+ADR-0179 adds a version-bound local semantic index and experimental shared recall,
+with correction/erasure fences and exact pgvector search. ADR-0180 adds bounded
+provider admission, durable spending and resumable indexing slices. ADR-0181 adds
+explicit query preparation and a bounded local cache sharing the indexing budget.
+ADR-0182 binds shared preparation and recall to saved run/checkpoint state and
+current query policy. ADR-0183 refreshes current evidence on every production
+context assembly. ADR-0185 adds exact-version release-bundle validation and
+recomputes quality/budget admission. Source indexing has default-off maintenance
+composition and configuration bound to reviewed release dependencies (ADR-0187).
+Trusted query authority, semantic recall composition, query scheduling,
+historical/People semantic parity and comparative activation evidence remain open.
+
+Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
+with twelve gates in the [design](../plan/general-memory-recall.md).
+The staged implementation is in progress; optional channels remain evidence-gated.
+
+- [ ] complete the staged implementation and comparative activation evidence
+- [ ] authorized PR review, hosted CI and separately authorized production delivery
+
 ## Outside a milestone
 
 Open work that no active milestone owns: owner-only steps of non-milestone
@@ -351,8 +372,8 @@ for it. That roadmap holds, among its items: tenant activation of
 self-authored skills (B1), dynamic model routing and a second provider
 adapter (B2), Slack and email inbound surfaces (B3), email and webhook
 notification transports (B4), scheduling residue such as cron, interval
-multipliers, and dependency graphs (B5), the memory residue after Milestone 22 — the semantic arm,
-`pgvector`, an external memory provider, and a learned memory policy (B6) — presence routing and
+multipliers, and dependency graphs (B5), the memory residue after Milestone 33 — an external memory provider
+and a learned memory policy (B6) — presence routing and
 hand-off (the B7 residue after Milestone 24), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and

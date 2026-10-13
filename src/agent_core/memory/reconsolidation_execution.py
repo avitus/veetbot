@@ -341,7 +341,9 @@ class ReconsolidationBatchExecutor:
             lease.lease_token, group_ids, model=model, batch_id=batch_id
         )
         if first.prepared is None or spend is None:
-            return ReconsolidationExecution(reason="deferred")
+            return ReconsolidationExecution(
+                reason="deferred", deferrals=tuple(sorted({d.reason for d in first.deferred}))
+            )
         proposal_json = await self._call(
             first.prepared, spend, model, provider, "proposal", lease, calls
         )
@@ -369,7 +371,11 @@ class ReconsolidationBatchExecutor:
             ),
         )
         if second.prepared is None or verification_spend is None:
-            return ReconsolidationExecution(reason="deferred", calls=tuple(calls))
+            return ReconsolidationExecution(
+                reason="deferred",
+                calls=tuple(calls),
+                deferrals=tuple(sorted({d.reason for d in (*first.deferred, *second.deferred)})),
+            )
         verification_json = await self._call(
             second.prepared, verification_spend, model, provider, "verification", lease, calls
         )

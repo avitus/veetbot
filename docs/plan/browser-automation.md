@@ -1222,6 +1222,19 @@ describe the element, the view says so and makes no offer.
 
 ## Reliability and retries
 
+Hosted composition applies an application-owned acquisition policy (ADR-0177):
+at most three attempts inside one tool invocation, only for retryable
+`tool.browser.provider_unavailable`. Every request retains the same principal,
+profile, provider reference, run, attempt and requested lease expiry; a lost
+response reattaches to the existing lease. Exponential backoff with jitter waits
+0.25–0.5 seconds, then 0.5–1 second. All attempts and sleeps share the original
+tool/run deadlines and cancellation; no exhausted deadline permits another
+attempt. Authentication, profile contention/revocation, invalid responses and
+permanent failures stop immediately. Content-free acquisition diagnostics retain
+each attempt. This policy wraps only acquisition and never replays navigation,
+observation, actions, uploads, renewal or closure. Existing invocation accounting
+and worker crash-recovery bounds remain in force.
+
 Browser mutation uses the existing effect-sent boundary. Once an action may
 have reached the site, transport loss produces `UNCERTAIN`; the runtime does
 not replay it blindly. Recovery first observes the site and applies a

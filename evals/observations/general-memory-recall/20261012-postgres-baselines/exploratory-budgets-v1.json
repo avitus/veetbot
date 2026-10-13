@@ -1,0 +1,32 @@
+{
+  "version": "m33-exploratory-budgets@1",
+  "registered_at": "2026-10-12T18:44:29.581885+00:00",
+  "activation_evidence": false,
+  "purpose": "Bound the paired development ablations before their first observation; not confirmatory release preregistration.",
+  "context_tokens": 2000,
+  "p95_latency_ms": 5000,
+  "maximum_case_usd": 0.12,
+  "derivation": "Latency: 1.5 times the slower baseline p95, rounded up to a second. Per-case cost: twice the largest measured baseline cost, rounded up to a cent.",
+  "baselines": {
+    "v2-seeded": {
+      "observations_sha256": "5f945863900de16cdc24dced844aeb536263771e21e9c9759fa8a6174584828d",
+      "count": 20,
+      "success": 12,
+      "p95_elapsed_ms": 2932.164018002368,
+      "p95_retrieval_ms": 458.86281600178336,
+      "maximum_case_usd": 0.0091975
+    },
+    "v3-formation": {
+      "observations_sha256": "62dd056608d138772df41f1c1a64d05d3a692011cd2c46891bd2970b09ddce3b",
+      "count": 20,
+      "success": 5,
+      "p95_elapsed_ms": 2724.6920689976832,
+      "p95_retrieval_ms": 280.1284229972225,
+      "maximum_case_usd": 0.05967375
+    }
+  },
+  "limitations": [
+    "Ten development cases, unpaired formation in the source baselines.",
+    "Corpus review and confirmatory release preregistration remain pending."
+  ]
+}

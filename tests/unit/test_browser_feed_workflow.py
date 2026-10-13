@@ -12,6 +12,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserDispatchConstraint,
     BrowserElement,
+    BrowserLease,
     BrowserObservation,
     BrowserProfile,
     BrowserProfileStatus,
@@ -456,7 +457,10 @@ async def test_final_report_has_no_tools_and_only_current_feed_evidence(
     assert results and all(item.trust is TrustLevel.EXTERNAL_UNTRUSTED for item in results)
 
 
-async def test_materialized_morning_schedule_finishes_with_its_read_scope_and_budget() -> None:
+@pytest.mark.parametrize("startup_failures", [0, 1, 2, 3])
+async def test_materialized_morning_schedule_finishes_with_its_read_scope_and_budget(
+    startup_failures: int,
+) -> None:
     from dataclasses import replace
     from typing import cast
 
@@ -481,6 +485,14 @@ async def test_materialized_morning_schedule_finishes_with_its_read_scope_and_bu
         await seed_feed_profile(app)
 
         class Sessions(FakeSessions):
+            acquire_attempts = 0
+
+            async def acquire(self, *args: Any, **kwargs: Any) -> BrowserLease:
+                self.acquire_attempts += 1
+                if self.acquire_attempts <= startup_failures:
+                    raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
+                return await super().acquire(*args, **kwargs)
+
             async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
                 return await provider.navigate(url)
 
@@ -546,8 +558,15 @@ async def test_materialized_morning_schedule_finishes_with_its_read_scope_and_bu
         run = await app.runs.get(occurrence.run_id)
         assert run.status is RunStatus.COMPLETED, run.failure
         assert run.principal_scopes == {"browser.profile.read"}
+        async with app.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run.id)
+        assert checkpoint is not None
+        assert checkpoint.working_state["browser_workflow"]["status"] == (
+            "verified" if startup_failures < 3 else "unverified"
+        )
+        assert sessions.acquire_attempts == min(startup_failures + 1, 3)
         assert run.tool_call_count < 32 and run.model_call_count == 1
-        assert len(provider.actions) == 1
+        assert len(provider.actions) == (1 if startup_failures < 3 else 0)
         assert not await app.approvals.list_pending(run_id=run.id)
 
 

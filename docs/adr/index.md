@@ -193,3 +193,21 @@ implementation without one.
 
 - [ADR-0175 — Private account-control verification (Accepted; amends ADR-0164)](0175-private-account-control-verification.md)
 - [ADR-0176 — Reviewed X feed briefing (Accepted; amends ADR-0164)](0176-reviewed-x-feed-briefing.md)
+- [ADR-0177 — Bounded browser startup recovery (Accepted)](0177-bounded-browser-startup-recovery.md)
+
+- [ADR-0178 — General memory search and recall (Accepted scope; Milestone 33)](0178-general-memory-recall.md)
+- [ADR-0179 — Version-bound semantic memory index (Accepted mechanism; activation gated)](0179-versioned-semantic-index.md)
+
+- [ADR-0180 — Bounded semantic indexing and provider admission (Accepted mechanism; activation gated)](0180-bounded-semantic-indexing.md)
+
+- [ADR-0181 — Bounded semantic query preparation (Accepted mechanism; activation gated)](0181-bounded-semantic-query-preparation.md)
+
+- [ADR-0182 — Run-bound semantic recall (Accepted mechanism; activation gated)](0182-run-bound-semantic-recall.md)
+
+- [ADR-0183 — Fresh evidence on context assembly (Accepted mechanism; activation gated)](0183-fresh-context-recall.md)
+- [ADR-0184 — Manually file email discussions from Chat (Proposed repair)](0184-email-discussion-folder-filing.md)
+
+- [ADR-0185 — General recall release admission (Accepted mechanism; activation gated)](0185-general-recall-release-admission.md)
+- [ADR-0186 — Persistent dreaming review sign-in (Proposed; implementation authorized)](0186-dreaming-review-session.md)
+
+- [ADR-0187 — Semantic index production composition (Accepted mechanism; activation gated)](0187-semantic-index-production-composition.md)

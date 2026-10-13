@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import (
     DateTime,
     Integer,
+    SQLColumnExpression,
     Text,
     and_,
     any_,
@@ -33,6 +34,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
+from agent_core.adapters.persistence.memory_candidates import ranked_candidates
 from agent_core.adapters.persistence.people_erasure import lock_run_erasure
 from agent_core.adapters.persistence.reconsolidation_sources import (
     append_change,
@@ -69,6 +71,7 @@ from agent_core.domain.knowledge import (
 )
 from agent_core.domain.memory import (
     LIFECYCLE_POLICY_VERSION,
+    OWNED_RESOURCE_PATTERN,
     SENSITIVITY_ORDER,
     BeliefRejection,
     BeliefType,
@@ -101,6 +104,24 @@ from agent_core.ports.people import PeopleStore
 from agent_core.ports.reconsolidation import ReconsolidationStore
 
 _LIVE = (MemoryStatus.ACTIVE.value, MemoryStatus.PROVISIONAL.value)
+
+
+def _owned_resource_sql(
+    belief_type: SQLColumnExpression[str],
+    claim_kind: SQLColumnExpression[str],
+    derivation: SQLColumnExpression[str],
+    polarity: SQLColumnExpression[str],
+    statement: SQLColumnExpression[str],
+) -> ColumnElement[bool]:
+    """Keep the structured possession arm equivalent to is_owned_resource."""
+
+    return and_(
+        belief_type == BeliefType.USER_MODEL_ATTR.value,
+        claim_kind.in_((MemoryClaimKind.PROJECT_FACT.value, MemoryClaimKind.RESOURCE.value)),
+        derivation == MemoryDerivation.DIRECT.value,
+        polarity == Polarity.ASSERT.value,
+        statement.op("~*")(OWNED_RESOURCE_PATTERN),
+    )
 
 
 def _rowcount(result: Any) -> int:
@@ -519,9 +540,8 @@ class PostgresMemoryStore:
             raise NotFoundError("memory not found")
         return _memory(row)
 
-    async def query(self, query: RecallQuery) -> list[MemoryRecord]:
-        if query.known_at is not None:
-            return await self._query_at(query)
+    def current_predicates(self, query: RecallQuery) -> list[Any]:
+        """One hard-filter set for sparse and exact semantic current-source reads."""
         as_of = query.as_of or self._clock.now()
         predicates: list[Any] = [
             MemoryRow.tenant_id == query.tenant_id,
@@ -534,6 +554,8 @@ class PostgresMemoryStore:
         ]
         if query.include_ids is not None:
             predicates.append(MemoryRow.id.in_(query.include_ids))
+        if query.exclude_ids:
+            predicates.append(MemoryRow.id.not_in(query.exclude_ids))
         if query.min_store_position:
             changed = MemoryRow.store_position > query.min_store_position
             if query.include_merge_changes and query.as_of is None:
@@ -600,15 +622,36 @@ class PostgresMemoryStore:
                 ),
             )
         )
+        return predicates
+
+    async def query(self, query: RecallQuery) -> list[MemoryRecord]:
+        if query.known_at is not None:
+            return await self._query_at(query)
+        predicates = self.current_predicates(query)
         terms = recall_query_terms(query.text)
+        owned_resource = (
+            _owned_resource_sql(
+                MemoryRow.belief_type,
+                MemoryRow.claim_kind,
+                MemoryRow.derivation,
+                MemoryRow.polarity,
+                MemoryRow.statement,
+            )
+            if query.include_owned_resources
+            else false()
+        )
         if query.include_ids is None and (
-            query.text is not None or query.subjects or query.structured_belief_types
+            query.text is not None
+            or query.subjects
+            or query.structured_belief_types
+            or query.include_owned_resources
         ):
             # Any-term semantics: lexical recall is a ranking arm, so one term
             # matching is enough to make a record a candidate for the ranker.
             vector = func.to_tsvector("simple", MemoryRow.subject + " " + MemoryRow.statement)
             text_match: ColumnElement[bool] = or_(
-                false(), *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms]
+                owned_resource,
+                *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms],
             )
             if query.subjects:
                 text_match = or_(
@@ -632,10 +675,16 @@ class PostgresMemoryStore:
         rows = list(
             (
                 await self._session.scalars(
-                    select(MemoryRow)
-                    .where(*predicates)
-                    .order_by(MemoryRow.store_position.desc(), MemoryRow.id)
-                    .limit(max(query.max_items * 8, 64))
+                    ranked_candidates(
+                        select(MemoryRow).where(*predicates),
+                        query,
+                        identifier=MemoryRow.id,
+                        subject=MemoryRow.subject,
+                        statement=MemoryRow.statement,
+                        belief_type=MemoryRow.belief_type,
+                        position=MemoryRow.store_position,
+                        owned_resource=owned_resource,
+                    )
                 )
             ).all()
         )
@@ -691,6 +740,8 @@ class PostgresMemoryStore:
         ]
         if query.include_ids is not None:
             predicates.append(latest.c.belief_id.in_(query.include_ids))
+        if query.exclude_ids:
+            predicates.append(latest.c.belief_id.not_in(query.exclude_ids))
         if not query.include_superseded and query.as_of is None:
             predicates.append(payload["status"].astext.in_(_LIVE))
         if query.belief_types:
@@ -700,15 +751,29 @@ class PostgresMemoryStore:
         if not query.include_provisional:
             predicates.append(payload["status"].astext != MemoryStatus.PROVISIONAL.value)
         terms = recall_query_terms(query.text)
+        owned_resource = (
+            _owned_resource_sql(
+                payload["belief_type"].astext,
+                payload["claim_kind"].astext,
+                payload["derivation"].astext,
+                payload["polarity"].astext,
+                payload["statement"].astext,
+            )
+            if query.include_owned_resources
+            else false()
+        )
         if query.include_ids is None and (
-            query.text is not None or query.subjects or query.structured_belief_types
+            query.text is not None
+            or query.subjects
+            or query.structured_belief_types
+            or query.include_owned_resources
         ):
             vector = func.to_tsvector(
                 "simple", payload["subject"].astext + " " + payload["statement"].astext
             )
             predicates.append(
                 or_(
-                    false(),
+                    owned_resource,
                     *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms],
                     payload["belief_type"].astext.in_(
                         tuple(kind.value for kind in query.structured_belief_types)
@@ -717,7 +782,7 @@ class PostgresMemoryStore:
                     latest.c.belief_id.in_(query.expand_ids),
                 )
             )
-        rows = await self._session.execute(
+        base = (
             select(payload, MemoryRow.sensitivity)
             .join(
                 MemoryRow,
@@ -728,10 +793,18 @@ class PostgresMemoryStore:
                 ),
             )
             .where(*predicates)
-            .order_by(
-                sql_cast(payload["store_position"].astext, Integer).desc(), latest.c.belief_id
+        )
+        rows = await self._session.execute(
+            ranked_candidates(
+                base,
+                query,
+                identifier=latest.c.belief_id,
+                subject=payload["subject"].astext,
+                statement=payload["statement"].astext,
+                belief_type=payload["belief_type"].astext,
+                position=sql_cast(payload["store_position"].astext, Integer),
+                owned_resource=owned_resource,
             )
-            .limit(max(query.max_items * 8, 64))
         )
         result = []
         for data, sensitivity in rows:

@@ -12,6 +12,8 @@ project:
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   current_milestone: 14
   active_milestone: 15
+  # ADR-0178 authorizes parallel Milestone 33 on 2026-10-11: general recall,
+  # measured semantic search and bounded source recovery; activation needs evidence.
   # ADR-0172 records the owner-approved same-chat website continuation repair,
   # interactive authority for owner replies, and specific single-action X follow
   # consent. No milestone or gate moves; production acceptance awaits delivery.
@@ -268,6 +270,22 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Dreaming deferral diagnosis and persistent review access (2026-10-11 Pacific)
+      outcome: implemented_pending_delivery
+      detail: >-
+        Both retained daily runs blocked/deferred with zero proposals, provider
+        calls and cost. A content-free read-only production query found 469 erased
+        legacy People heads with unknown reverse attribution, which independently
+        forces source admission to refuse every group for that owner. No erased
+        text was restored and no history, schedule or provider budget was changed.
+        ADR-0186 implements thirty-day HTTPS review-only sign-in, explicit sign-out,
+        a current legacy-attribution blocker and finite new-run deferral reasons.
+        Fabricated regressions first failed on the absent session route, lost
+        preparation reasons, missing status blocker, cookie log redaction and
+        cacheable authentication failures. The focused 94-case partition passes;
+        real Chromium verifies approval, undo, rejection, pause, reload without
+        another token and sign-out. Metadata recovery remains a separate decision;
+        this change preserves source refusal and unattended activation boundaries.
     - check: Owner-reviewed production delivery (2026-10-11 UTC, ADR-0174)
       outcome: deployed_reviewed_mode
       detail: >-
@@ -2500,6 +2518,40 @@ milestones:
         and live evidence above will change the milestone's head. Verified
         from GitHub on 2026-09-28.
 
+  "33":
+    title: General memory search and recall
+    status: in_progress
+    authorized_on: 2026-10-11
+    design: docs/plan/general-memory-recall.md
+    adr: docs/adr/0178-general-memory-recall.md
+    gates_registered: 12
+    implementation_status: source_index_maintenance_composed
+    implementation_evidence:
+      - tests/contract/test_runtime_semantic_queries_contract.py
+      - tests/contract/test_context_recall_freshness.py
+      - tests/unit/test_context_recall_cache.py
+      - tests/unit/test_general_recall_release.py
+      - tests/unit/test_semantic_index_composition.py
+      - tests/integration/test_semantic_index_composition_postgres.py
+      - tests/integration/test_semantic_runtime_postgres.py
+    diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
+    limitations:
+      - seeded retrieval is not formation, answer-use or held-out release evidence
+      - semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
+      - trusted query authority, semantic recall composition, query scheduling, historical/People parity and real release observations/publication remain open
+    authorized_scope:
+      - cross-category retrieval and implicit-use evaluation with frozen controls
+      - relevance before candidate limits with persistence parity
+      - measured semantic retrieval and optional pgvector after material lift
+      - bounded task-aware query formation, reranking and source recovery
+      - versioned derived indexes, invalidation and evidence-gated activation
+    deferred_scope:
+      - external memory services, arbitrary graph inference, training and RL
+      - automatic historical re-extraction and unattended dreaming activation
+    open_items:
+      - complete the staged implementation and comparative activation evidence
+      - authorized PR review, hosted CI and separately authorized production delivery
+
 # Open work that no active milestone owns: owner-only steps of non-milestone
 # ADRs, and specification-versus-code gaps found in completed milestones.
 # docs/status/milestones.md lists the same items, in the same order, under
@@ -2521,6 +2573,40 @@ open_items_outside_milestones:
 # Evidence behind changes to the list above: a closed item, or the check that
 # confirmed a newly recorded gap.
 outside_milestone_evidence:
+- check: production account verification and scheduled X feed briefing (ADR-0175 and ADR-0176)
+  outcome: passed
+  detail: >-
+    The owner authorized release, activation and a real scheduled briefing.
+    Pull request 155 delivered the reviewed feed workflow; two initial
+    one-time runs stopped before browser lease publication because the
+    account check had an internal 10-second cap. A read-only diagnostic
+    confirmed the configured account after approximately 14 seconds.
+    Pull request 157 repaired that cap while retaining the configured
+    verification budget, remaining lease lifetime and enclosing deadlines.
+    Final head 8c13470d received substantive CodeRabbit review, all review
+    conversations were resolved, GitGuardian passed, and all eleven
+    requested hosted checks passed in CircleCI pipeline 1071. The final
+    sidecar check passed 6136 static, 1504 contract and 331 Chromium tests.
+    Pull request 157 merged as fb61b578 on 2026-10-11 UTC; pipeline 1072
+    deploy-app 5393, deploy-nginx 5398 and apple-testflight 5395 succeeded.
+    API readiness, docs and website independently reported HTTP 200 and
+    release 20261011-025310-fb61b57. The running browser image was healthy
+    and matched that release; API, worker, asynchronous worker and
+    maintenance processes had the feed workflow enabled. The qualified
+    private account catalog matched the installed file, with mode 0600
+    and a read-only mount into the browser service.
+    A one-time schedule copied the existing morning task's agent version,
+    reviewed instruction, profile, scopes and budgets. The scheduler
+    materialized it, and x-home-briefing reached verified before the run
+    completed in 101 seconds. It collected seven distinct linked posts
+    across four extraction windows and three scrolls, with no retries,
+    uncertain scrolls or approval prompts. All twelve tool calls succeeded;
+    the only interactions were scrolls. The final briefing cited two posts,
+    both present in observed evidence. The recurring source remained active
+    at revision 3, with its next occurrence at 2026-10-11T16:27:00Z, and the
+    saved profile remained ready. This records production acceptance of the
+    qualified workflow without changing a milestone gate. TestFlight upload
+    success does not establish Apple processing or installation on a device.
 - check: first hosted run of the ADR-0152 browser image check
   outcome: passed
   detail: >-

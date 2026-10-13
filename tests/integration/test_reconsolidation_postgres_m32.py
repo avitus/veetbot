@@ -933,3 +933,36 @@ async def test_reviewed_dreaming_downgrade_preserves_owner_work(
         with pytest.raises(RuntimeError, match="Preserve dreaming review and scheduling history"):
             await (await connection.connection()).run_sync(downgrade)
         assert await connection.scalar(text("SELECT to_regclass('dreaming_runs')")) is not None
+
+
+async def test_legacy_attribution_blocker_is_owner_bound(postgres_stores: Factory) -> None:
+    from sqlalchemy import null
+
+    from agent_core.adapters.persistence.sqlalchemy_models import PeopleHeadRow
+
+    async with postgres_stores() as uow:
+        people = cast(PostgresPeopleStore, uow.people)
+        assert await people.memory_attribution_complete(principal())
+        people._session.add(
+            PeopleHeadRow(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                id=UUID(int=9876),
+                kind="memory_link",
+                revision=1,
+                sensitivity=1,
+                erased=True,
+                excluded=False,
+                memory_attribution=null(),
+            )
+        )
+        await people._session.flush()
+    async with postgres_stores() as uow:
+        assert not await uow.people.memory_attribution_complete(principal())
+        assert await uow.people.memory_attribution_complete(
+            principal().model_copy(update={"principal_id": "foreign"})
+        )
+        assert (
+            await uow.people.memory_attribution_records(principal(), UUID(int=501), (UUID(int=1),))
+            is None
+        )

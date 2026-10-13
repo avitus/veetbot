@@ -28,9 +28,35 @@ from agent_core.domain.folders import (
     is_chat_session,
     normalize_folder_name,
 )
+from agent_core.domain.sessions import SESSION_EMAIL_THREAD_ID_METADATA_KEY, Session
 from agent_core.domain.views import FolderProposalView, FolderView, Page, SessionView
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
+
+
+async def _can_file_session(
+    uow: RepositoryUnitOfWork, principal: Principal, session: Session
+) -> bool:
+    """Allow manual filing of email discussions without admitting background work."""
+
+    if is_chat_session(session.metadata):
+        return True
+    if SESSION_EMAIL_THREAD_ID_METADATA_KEY not in session.metadata:
+        return False
+    other_metadata = {
+        key: value
+        for key, value in session.metadata.items()
+        if key != SESSION_EMAIL_THREAD_ID_METADATA_KEY
+    }
+    if not is_chat_session(other_metadata):
+        return False
+    for event_type in ("email.discussion.opened", "user.message.created"):
+        before = (1 << 63) - 1
+        while event := await uow.events.latest_before(session.id, before, event_type, principal):
+            if event.actor_type == "principal" and event.actor_id == session.principal_id:
+                return True
+            before = event.sequence
+    return False
 
 
 async def record_folder_event(
@@ -237,9 +263,9 @@ class PublicFolderService:
         now = self._clock.now()
         async with self._uow_factory() as uow:
             session = await uow.sessions.get(session_id, principal)
-            if not is_chat_session(session.metadata):
+            if not await _can_file_session(uow, principal, session):
                 raise ConflictError(
-                    "only chat conversations can be filed in a folder",
+                    "Only chat conversations can be filed in a folder.",
                     reason="session_not_chat",
                 )
             if folder_id is not None:

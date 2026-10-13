@@ -126,6 +126,7 @@ class _QueryFormer:
                 text="concise answers",
                 subjects=["answer style"],
                 structured_belief_types=[BeliefType.PREFERENCE],
+                include_owned_resources=True,
                 as_of=self._as_of,
                 budget_tokens=self._budget_tokens,
                 max_items=5,
@@ -314,8 +315,10 @@ async def test_builder_injects_delta_and_correction_lines_without_yielding_them(
     assert (base_query.text, base_query.subjects) == ("concise answers", ["answer style"])
     assert base_query.min_store_position == 0
     assert base_query.structured_belief_types == [BeliefType.PREFERENCE]
+    assert base_query.include_owned_resources is True
     assert (delta_query.text, delta_query.subjects) == (None, [])
     assert delta_query.structured_belief_types == []
+    assert delta_query.include_owned_resources is False
     assert delta_query.profile is RecallProfile.CORE
     assert delta_query.min_store_position == 7
     assert retriever.correction_calls == [(SNAPSHOT_TRACE, 7)]

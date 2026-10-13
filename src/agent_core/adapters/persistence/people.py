@@ -237,13 +237,17 @@ class InMemoryPeopleStore:
             pending.extend(dependencies(target))
         return current.model_copy(deep=True)
 
+    async def memory_attribution_complete(self, principal: Principal) -> bool:
+        owner = (principal.tenant_id, principal.principal_id)
+        return not any(key[:2] == owner and key not in self._attributions for key in self._erased)
+
     async def memory_attribution_records(
         self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
     ) -> tuple[PeopleRecord, ...] | None:
         if not 1 <= len(source_ids) <= 256:
             raise ValueError("attribution needs bounded original source identities")
         owner = (principal.tenant_id, principal.principal_id)
-        if any(key[:2] == owner and key not in self._attributions for key in self._erased):
+        if not await self.memory_attribution_complete(principal):
             return None
         result: list[PeopleRecord] = []
         for key, footprint in self._attributions.items():
@@ -1027,12 +1031,8 @@ class PostgresPeopleStore:
         ).scalar_one_or_none()
         return None if row is None else PEOPLE_RECORD.validate_python(row.payload)
 
-    async def memory_attribution_records(
-        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
-    ) -> tuple[PeopleRecord, ...] | None:
-        if not 1 <= len(source_ids) <= 256:
-            raise ValueError("attribution needs bounded original source identities")
-        if (
+    async def memory_attribution_complete(self, principal: Principal) -> bool:
+        return (
             await self._session.scalar(
                 select(PeopleHeadRow.id)
                 .where(
@@ -1042,8 +1042,15 @@ class PostgresPeopleStore:
                 )
                 .limit(1)
             )
-            is not None
-        ):
+            is None
+        )
+
+    async def memory_attribution_records(
+        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
+    ) -> tuple[PeopleRecord, ...] | None:
+        if not 1 <= len(source_ids) <= 256:
+            raise ValueError("attribution needs bounded original source identities")
+        if not await self.memory_attribution_complete(principal):
             return None
         keys = (
             await self._session.scalars(

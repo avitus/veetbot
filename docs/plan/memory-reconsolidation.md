@@ -1674,3 +1674,20 @@ spend is reported as unknown. Only settled provider charges appear as exact cost
 The dashboard uses
 current owner-filtered source views and never persists private browser content.
 ADR-0174 defines the authorized boundary and required regression coverage.
+
+### Persistent review sign-in and actionable deferrals (ADR-0186)
+
+The owner requested persistent access on 2026-10-11. The dashboard now exchanges
+one bearer authentication for a thirty-day, secure, HttpOnly, same-origin review
+cookie. It survives reload and ordinary releases; sign-out clears it, and expiry
+or owner-token/authority changes require a new connection. The cookie admits only
+the review routes and existing memory scopes. The bearer and private content are
+never saved in web storage. ADR-0186 records the stateless revocation limit.
+
+Status reports a current `legacy_attribution_unavailable` blocker when any People
+head has unknown retained attribution. It contains no record identities or content.
+Preparation retains the same refusal and new daily receipts carry bounded finite
+`deferrals` for source, scope, egress, model, input and cost failures. Old receipts
+default to an empty reason list; they are never rewritten. A legacy blocker needs
+metadata recovery, not repeated provider attempts. This change supplies diagnosis,
+not permission to reconstruct erased sources or relax admission.

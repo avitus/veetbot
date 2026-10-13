@@ -228,6 +228,7 @@ class MaintenanceWorker:
         sweep_memory_consolidation: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_decay: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_reconsolidation: Callable[[], Awaitable[int]] | None = None,
+        sweep_memory_semantic_index: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
         sweep_people_erasures: Callable[[], Awaitable[int]] | None = None,
         sweep_device_invocations: Callable[[], Awaitable[int]] | None = None,
@@ -302,14 +303,20 @@ class MaintenanceWorker:
         # Duplicate People are merged or suggested on their own slow timer (ADR-0125).
         self._people_duplicate_interval = timedelta(seconds=people_duplicate_interval_seconds)
         self._last_people_duplicate_sweep_at: datetime | None = None
+        self._sweep_memory_semantic_index = sweep_memory_semantic_index
+        self._semantic_index_task: asyncio.Task[None] | None = None
         self._sweep_memory_reconsolidation = sweep_memory_reconsolidation
         self._reconsolidation_task: asyncio.Task[None] | None = None
         self._stopping = False
 
     def stop(self) -> None:
+        if self._stopping:
+            return
         self._stopping = True
         if self._reconsolidation_task is not None:
             self._reconsolidation_task.cancel()
+        if self._semantic_index_task is not None:
+            self._semantic_index_task.cancel()
 
     async def _run_reconsolidation(self, sweep: Callable[[], Awaitable[int]]) -> None:
         try:
@@ -317,6 +324,14 @@ class MaintenanceWorker:
                 await sweep()
         except Exception as exc:
             logger.warning("reconsolidation slice ended (%s)", type(exc).__name__)
+
+    async def _run_semantic_index(self, sweep: Callable[[], Awaitable[int]]) -> None:
+        try:
+            # The slice has a 60-second work deadline and 5-second cleanup limit.
+            async with asyncio.timeout(70):
+                await sweep()
+        except Exception as exc:
+            logger.warning("Semantic index slice ended (%s)", type(exc).__name__)
 
     async def run_once(self) -> int:
         async with self._uow_factory() as uow:
@@ -496,6 +511,15 @@ class MaintenanceWorker:
             self._reconsolidation_task = asyncio.create_task(
                 self._run_reconsolidation(self._sweep_memory_reconsolidation)
             )
+        if (
+            not self._stopping
+            and not live_run_leases
+            and self._sweep_memory_semantic_index is not None
+            and (self._semantic_index_task is None or self._semantic_index_task.done())
+        ):
+            self._semantic_index_task = asyncio.create_task(
+                self._run_semantic_index(self._sweep_memory_semantic_index)
+            )
         return reclaimed
 
     async def run_forever(self) -> None:
@@ -512,3 +536,5 @@ class MaintenanceWorker:
             self.stop()
             if self._reconsolidation_task is not None:
                 await asyncio.gather(self._reconsolidation_task, return_exceptions=True)
+            if self._semantic_index_task is not None:
+                await asyncio.gather(self._semantic_index_task, return_exceptions=True)

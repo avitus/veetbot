@@ -62,6 +62,8 @@ from agent_core.ports.schedules import (
     ScheduleOccurrenceRepository,
     ScheduleRepository,
 )
+from agent_core.ports.semantic_memory import SemanticMemoryIndex
+from agent_core.ports.semantic_work import SemanticWorkStore
 from agent_core.ports.skills import SkillRepository
 from agent_core.ports.surfaces import SurfaceRepositories
 
@@ -108,6 +110,8 @@ class UnitOfWorkRepositories:
     skills: SkillRepository
     mcp_servers: MCPServerRepository
     memories: MemoryStore
+    semantic_memory: SemanticMemoryIndex
+    semantic_work: SemanticWorkStore
     reconsolidation: ReconsolidationStore
     episodes: IntegratedEpisodeStore
     traces: TraceStore
@@ -177,6 +181,8 @@ class MemoryUnitOfWork:
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
         self.memories = repositories.memories
+        self.semantic_memory = repositories.semantic_memory
+        self.semantic_work = repositories.semantic_work
         self.reconsolidation = repositories.reconsolidation
         self.episodes = repositories.episodes
         self.traces = repositories.traces
@@ -312,6 +318,8 @@ class PostgresUnitOfWork:
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
         self.memories = repositories.memories
+        self.semantic_memory = repositories.semantic_memory
+        self.semantic_work = repositories.semantic_work
         self.reconsolidation = repositories.reconsolidation
         self.episodes = repositories.episodes
         self.traces = repositories.traces

@@ -136,6 +136,9 @@ class Settings:
     memory_api_enabled: bool = False
     memory_reconsolidation_api_enabled: bool = False
     memory_dreaming_review_enabled: bool = False
+    memory_semantic_index_enabled: bool = False
+    memory_semantic_index_evidence: Path | None = None
+    memory_semantic_index_manifest: Path | None = None
     memory_reconsolidation_enabled: bool = False
     memory_reconsolidation_evidence: Path | None = None
     memory_reconsolidation_residency_provider: str | None = None
@@ -244,6 +247,7 @@ SHIPPED_CONFIGS = (
     "runtime/browser-workflows.yaml",
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
+    "memory/semantic-index.yaml",
     "folders/profiles.yaml",
     "titles/profiles.yaml",
 )
@@ -410,6 +414,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "device.invocation_poll_seconds",
         ),
         "memory/profiles.yaml": (
+            "retrieval.candidate_selection",
             "formation.model_policy",
             "formation.session_boundary_enabled",
             "formation.scheduled_enabled",
@@ -1982,6 +1987,17 @@ def _load_settings(
             values, "AGENT_MEMORY_RECONSOLIDATION_API_ENABLED"
         ),
         memory_dreaming_review_enabled=_parse_flag(values, "AGENT_MEMORY_DREAMING_REVIEW_ENABLED"),
+        memory_semantic_index_enabled=_parse_flag(values, "AGENT_MEMORY_SEMANTIC_INDEX_ENABLED"),
+        memory_semantic_index_evidence=(
+            Path(values["AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE"]).expanduser()
+            if values.get("AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE", "").strip()
+            else None
+        ),
+        memory_semantic_index_manifest=(
+            Path(values["AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST"]).expanduser()
+            if values.get("AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST", "").strip()
+            else None
+        ),
         memory_reconsolidation_enabled=_parse_flag(values, "AGENT_MEMORY_RECONSOLIDATION_ENABLED"),
         memory_reconsolidation_evidence=(
             Path(values["AGENT_MEMORY_RECONSOLIDATION_EVIDENCE"]).expanduser()

@@ -30,6 +30,7 @@ from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
     MemoryBrowseQuery,
+    MemoryClaimKind,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -40,6 +41,70 @@ from agent_core.domain.memory import (
     Sensitivity,
 )
 from tests.integration.m2_support import database_settings
+
+
+@pytest.mark.parametrize("historical", [False, True])
+async def test_postgres_owned_resource_recall_precedes_generic_candidate_flood(
+    tmp_path: Path, historical: bool
+) -> None:
+    async with build(settings=_settings(tmp_path), storage="postgres") as app:
+        session_id = await app.sessions.create()
+        target = await _remember(
+            app,
+            session_id,
+            "User has a 2026 Aster S8.",
+            subject="Aster S8",
+            belief_type=BeliefType.USER_MODEL_ATTR,
+            portability=Portability.PORTABLE,
+        )
+        target = target.model_copy(
+            update={"claim_kind": MemoryClaimKind.PROJECT_FACT, "status": MemoryStatus.PROVISIONAL}
+        )
+        noise = [
+            target.model_copy(
+                update={
+                    "id": uuid4(),
+                    "subject": f"goal {index}",
+                    "statement": f"User wants to improve project {index}.",
+                    "store_position": target.store_position + index + 1,
+                }
+            )
+            for index in range(161)
+        ]
+        mirror = InMemoryMemoryStore(app.clock, ReconsolidationIndex(MemoryTransaction()))
+        async with app.uow_factory() as uow:
+            await uow.memories.reinforce(target)
+            for record in noise:
+                await uow.memories.upsert_belief(record)
+        for record in [target, *noise]:
+            await mirror.upsert_belief(record)
+        query = _query(app, text="user car vehicle make model year engine gasoline octane")
+        query = query.model_copy(
+            update={
+                "include_owned_resources": True,
+                "known_at": app.clock.now() if historical else None,
+            }
+        )
+        async with app.uow_factory() as uow:
+            records = await uow.memories.query(query)
+        assert [record.id for record in records] == [
+            record.id for record in await mirror.query(query)
+        ]
+        assert records[0].id == target.id
+        assert len(records) == query.max_items * 8
+        # The anchor bypasses neither explicit filters nor owner isolation.
+        restrictions: list[dict[str, object]] = [
+            {"principal_id": "another-owner"},
+            {"tenant_id": "another-tenant"},
+            {"include_provisional": False},
+            {"sensitivity_ceiling": Sensitivity.PUBLIC},
+            {"belief_types": [BeliefType.PREFERENCE]},
+        ]
+        for changes in restrictions:
+            restricted = query.model_copy(update=changes)
+            async with app.uow_factory() as uow:
+                assert await uow.memories.query(restricted) == []
+            assert await mirror.query(restricted) == []
 
 
 @pytest.mark.parametrize("profile_text", ["unmatched paraphrase", None])

@@ -10,14 +10,19 @@ from fastapi import Request
 from starlette.datastructures import Headers
 from starlette.types import Scope
 
+from agent_core.api import dreaming_session
 from agent_core.application.authorization import require_scope
 from agent_core.config import AuthMode, Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import AuthenticationError
+from agent_core.ports.determinism import Clock
 
 
 class Authenticator:
-    def __init__(self, settings: Settings, principal: Principal) -> None:
+    def __init__(
+        self, settings: Settings, principal: Principal, clock: Clock | None = None
+    ) -> None:
+        self._clock = clock
         self._settings = settings
         self._principal = principal
 
@@ -46,6 +51,12 @@ class Authenticator:
             return self._principal.model_copy(deep=True)
 
         authorization = headers.get("authorization", "")
+        if not authorization:
+            if self._clock is None:
+                raise AuthenticationError("authentication failed")
+            return dreaming_session.authenticate(
+                scope, self._settings, self._principal, self._clock
+            )
         scheme, separator, supplied = authorization.partition(" ")
         expected = self._settings.auth_token
         matches = (

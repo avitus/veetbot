@@ -150,6 +150,7 @@ def _scores(root: Path, rows: tuple[ControlCaseResult, ...]) -> tuple[SplitScore
                 budget_tokens=budget.tokens,
                 max_items=budget.items,
                 min_score=budget.min_score,
+                candidate_selection="recent",
             )
             .from_text(probe.question)[0]
             .model_copy(update={"as_of": CONTROL_AT})

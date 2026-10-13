@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -1024,6 +1025,28 @@ class MCPToolCatalogRow(Base):
     input_schema: Mapped[dict[str, Any]] = mapped_column(JSONB)
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryVectorRow(Base):
+    __tablename__ = "memory_vectors"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "belief_id"],
+            ["memories.tenant_id", "memories.principal_id", "memories.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("content_revision > 0 AND creation_sequence > 0", name="source_version"),
+        CheckConstraint("vector_dims(embedding) = (space->>'dimensions')::int", name="dimensions"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    belief_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    space_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    space: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    content_revision: Mapped[int] = mapped_column(BigInteger)
+    creation_sequence: Mapped[int] = mapped_column(BigInteger)
+    content_digest: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(VECTOR())
 
 
 class MemoryRow(Base):
@@ -2710,3 +2733,32 @@ class DreamingRunRow(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class SemanticJobRow(Base):
+    __tablename__ = "semantic_index_jobs"
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class SemanticSpendRow(Base):
+    __tablename__ = "semantic_index_spend"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text, nullable=False)
+    principal_id: Mapped[str] = mapped_column(Text, nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    charge: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    __table_args__ = (
+        Index("ix_semantic_spend_owner_day", "tenant_id", "principal_id", "day"),
+        Index(
+            "uq_semantic_pending_query",
+            "tenant_id",
+            "principal_id",
+            unique=True,
+            postgresql_where=(payload["kind"].astext == "query")
+            & (payload["state"].astext == "reserved"),
+        ),
+        CheckConstraint("charge >= 0", name="semantic_spend_nonnegative"),
+    )

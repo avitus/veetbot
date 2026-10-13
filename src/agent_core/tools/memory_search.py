@@ -14,7 +14,7 @@ from agent_core.domain.memory import (
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
-from agent_core.memory.retrieval import HybridMemoryRetriever
+from agent_core.memory.retrieval import HybridMemoryRetriever, recalls_owned_resources
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -47,7 +47,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 class MemorySearchTool:
     spec = ToolSpec(
         name="memory.search",
-        version="1.0.1",
+        version="1.1.0",
         description=(
             "Search governed beliefs before asking the user to repeat personal context "
             "(home location, preferences, standing constraints). A missing snapshot or automatic "
@@ -78,7 +78,11 @@ class MemorySearchTool:
                 "principal_id": context.principal.principal_id,
                 "current_scope": arguments["scope"],
                 "text": arguments["text"],
+                "candidate_selection": self._retriever.retrieval_profile.candidate_selection,
                 "subjects": arguments.get("subjects", []),
+                "include_owned_resources": recalls_owned_resources(
+                    arguments["text"], deliberate=True
+                ),
                 "belief_types": arguments.get("belief_types", []),
                 "as_of": arguments.get("as_of"),
                 "profile": RecallProfile.DEEP,

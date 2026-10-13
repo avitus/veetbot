@@ -113,3 +113,91 @@ async def test_review_api_auth_validation_and_disabled_flag() -> None:
     ):
         assert (await client.get("/v1/dreaming")).status_code == 404
         assert (await client.get("/dreaming")).status_code == 404
+
+
+async def test_dreaming_session_survives_reconnect_and_is_narrowly_scoped() -> None:
+    from httpx import ASGITransport, AsyncClient
+    from pydantic import SecretStr
+
+    from agent_core.api.app import create_app
+    from agent_core.config import AuthMode
+
+    settings = replace(
+        memory_settings(),
+        auth_mode=AuthMode.TOKEN,
+        auth_token=SecretStr("test-dreaming-owner-secret"),
+        memory_api_enabled=True,
+        memory_reconsolidation_api_enabled=True,
+        memory_dreaming_review_enabled=True,
+    )
+    async with build(
+        settings=replace(settings, auth_mode=AuthMode.DEV), storage="memory", principal=owner()
+    ) as app:
+        api_app = create_app(
+            app.services,
+            settings,
+            owner(),
+            app.new_request_id,
+            app.readiness_probe,
+            clock=app.clock,
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=api_app), base_url="https://testserver"
+        ) as client:
+            headers = {"Origin": "https://testserver", "X-Dreaming-Session": "1"}
+            login = await client.post(
+                "/v1/dreaming/session",
+                headers={**headers, "Authorization": "Bearer test-dreaming-owner-secret"},
+            )
+            assert login.status_code == 200, "connecting must issue a persistent review session"
+            cookie = login.headers["set-cookie"]
+            assert all(
+                flag in cookie
+                for flag in ("HttpOnly", "Secure", "SameSite=strict", "Max-Age=2592000")
+            )
+            assert "test-dreaming-owner-secret" not in cookie
+            assert (await client.get("/v1/dreaming", headers=headers)).status_code == 200
+            assert (
+                await client.get("/v1/memory-reconsolidations?ceiling=restricted", headers=headers)
+            ).status_code == 200
+            assert (await client.get("/v1/sessions", headers=headers)).status_code == 401
+            denied = await client.get("/v1/dreaming")
+            assert denied.status_code == 401
+            assert denied.headers.get("cache-control") == "private, no-store"
+            assert (
+                await client.post(
+                    "/v1/dreaming/schedule",
+                    headers={**headers, "Origin": "https://attacker.invalid"},
+                    json={"paused": True, "expected_revision": 1},
+                )
+            ).status_code == 401
+            assert (
+                await client.post(
+                    "/v1/dreaming/schedule",
+                    headers=headers,
+                    json={"paused": True, "expected_revision": 1},
+                )
+            ).status_code == 200
+            assert (await client.delete("/v1/dreaming/session", headers=headers)).status_code == 200
+            assert (await client.get("/v1/dreaming", headers=headers)).status_code == 401
+
+
+async def test_status_explains_legacy_erasure_block_without_exposing_records() -> None:
+    from uuid import UUID
+
+    from agent_core.adapters.persistence.people import InMemoryPeopleStore
+
+    settings = replace(
+        memory_settings(),
+        memory_api_enabled=True,
+        memory_reconsolidation_api_enabled=True,
+        memory_dreaming_review_enabled=True,
+    )
+    async with build(settings=settings, storage="memory", principal=owner()) as app:
+        async with app.uow_factory() as uow:
+            people = cast(InMemoryPeopleStore, uow.people)
+            people._erased.add((owner().tenant_id, owner().principal_id, UUID(int=9876)))
+        async with _client(app) as client:
+            result = await client.get("/v1/dreaming")
+            assert result.json().get("blockers") == ["legacy_attribution_unavailable"]
+            assert str(UUID(int=9876)) not in result.text

@@ -1,7 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-let token = "",
-  rows = [],
+let rows = [],
   selected = null,
   state = "proposed",
   cursor = null,
@@ -14,6 +13,18 @@ const labels = {
   summary: "Related summary",
   hypothesis: "Tentative connection",
   conflict: "Conflict flag",
+};
+const deferralLabels = {
+  legacy_attribution_unavailable: "Legacy deletion metadata needs recovery",
+  source_unavailable: "Complete original evidence unavailable",
+  source_ineligible: "Sources do not meet admission rules",
+  scope_mismatch: "Sources have incompatible visibility",
+  egress_unavailable: "Provider privacy check unavailable",
+  egress_denied: "Provider privacy check refused export",
+  input_budget: "Evidence exceeds the input limit",
+  model_unavailable: "Configured model unavailable",
+  pricing_unavailable: "Model pricing unavailable",
+  cost_budget: "Request exceeds the cost limit",
 };
 const effects = {
   merge:
@@ -47,25 +58,26 @@ function lock(value) {
   busy = value;
   for (const b of document.querySelectorAll("button")) b.disabled = value;
 }
-async function api(path, body, key) {
-  const headers = { Accept: "application/json" };
-  if (token) headers.Authorization = "Bearer " + token;
+async function api(path, body, key, method, bearer) {
+  const headers = { Accept: "application/json", "X-Dreaming-Session": "1" };
+  if (bearer) headers.Authorization = "Bearer " + bearer;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (key) headers["Idempotency-Key"] = key;
   const response = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
+    method: method || (body === undefined ? "GET" : "POST"),
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
-    credentials: "omit",
+    credentials: "same-origin",
     redirect: "error",
   });
   if (!response.ok) {
+    if (response.status === 401) clearPrivate();
     const e = new Error(
       response.status === 409
         ? "This proposal or schedule changed. Refresh before deciding."
         : response.status === 401
-          ? "Your access token was not accepted. Disconnect and connect again."
+          ? "Please connect again. Your sign-in may have expired."
           : response.status === 404
             ? "This item is no longer available."
             : "Request failed (" +
@@ -79,7 +91,6 @@ async function api(path, body, key) {
 }
 function clearPrivate() {
   generation++;
-  token = "";
   rows = [];
   selected = null;
   pending = null;
@@ -223,6 +234,7 @@ async function load(append = false) {
     ),
   ]);
   if (ticket !== generation) return;
+  $("blocker").hidden = !status.blockers?.includes("legacy_attribution_unavailable");
   schedule = status.schedule;
   cursor = page.next_cursor;
   rows = append ? [...rows, ...page.items] : page.items;
@@ -250,7 +262,7 @@ async function load(append = false) {
     const line = node("div", undefined, "history-row");
     line.append(
       node("span", date(r.started_at)),
-      node("span", r.outcome + " · " + r.reason.replaceAll("_", " ")),
+      node("span", r.outcome + " · " + (r.deferrals?.length ? r.deferrals.map((reason) => deferralLabels[reason] || reason.replaceAll("_", " ")).join("; ") : r.reason.replaceAll("_", " "))),
       node(
         "span",
         r.proposals +
@@ -340,18 +352,19 @@ $("connect-button").onclick = () =>
       throw new Error(
         "Use HTTPS before entering an access token on a remote server.",
       );
-    token = $("token").value.trim();
+    const bearer = $("token").value.trim();
     $("token").value = "";
+    await api("/v1/dreaming/session", undefined, undefined, "POST", bearer);
     await load();
-    $("connect").hidden = true;
-    $("workspace").hidden = false;
-    $("disconnect").hidden = false;
-    $("refresh").hidden = false;
+    showWorkspace();
   });
 $("token").onkeydown = (e) => {
   if (e.key === "Enter") $("connect-button").click();
 };
-$("disconnect").onclick = clearPrivate;
+$("disconnect").onclick = () => run(async () => {
+  await api("/v1/dreaming/session", undefined, undefined, "DELETE");
+  clearPrivate();
+});
 $("refresh").onclick = () => run(() => load());
 $("load-more").onclick = () => run(() => load(true));
 $("pause").onclick = () =>
@@ -381,3 +394,22 @@ for (const b of document.querySelectorAll("[data-view]"))
       $(id).hidden = id !== b.dataset.view;
   };
 window.addEventListener("pagehide", clearPrivate);
+
+function showWorkspace() {
+  $("connect").hidden = true;
+  $("workspace").hidden = false;
+  $("disconnect").hidden = false;
+  $("refresh").hidden = false;
+}
+// Restore only the server cookie; private content is fetched anew on every visit.
+run(async () => {
+  try {
+    await load();
+    showWorkspace();
+  } catch (e) {
+    if (e.status !== 401) throw e;
+  }
+});
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) location.reload();
+});

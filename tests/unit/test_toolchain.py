@@ -917,7 +917,8 @@ def test_compose_has_one_healthy_postgres_service() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     assert set(compose["services"]) == {"postgres"}
     postgres = compose["services"]["postgres"]
-    assert postgres["image"] == "postgres:16-alpine"
+    assert postgres["image"] == "veetbot-postgres:16-alpine-vector0.8.7"
+    assert postgres["build"] == {"context": ".", "dockerfile": "deploy/postgres.Dockerfile"}
     assert postgres["environment"] == {
         "POSTGRES_DB": "${POSTGRES_DB:-agent}",
         "POSTGRES_USER": "${POSTGRES_USER:-agent}",
@@ -1001,7 +1002,7 @@ def test_ci_has_the_required_partitions() -> None:
 
     postgres = jobs["integration"]["docker"][1]
     assert postgres == {
-        "image": "postgres:16-alpine",
+        "image": "pgvector/pgvector:0.8.7-pg16-bookworm",
         "environment": {
             "POSTGRES_DB": "agent",
             "POSTGRES_USER": "agent",
@@ -2100,13 +2101,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 32 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 33 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(33)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(34)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -2129,7 +2130,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 33):
+    for milestone in range(12, 34):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 

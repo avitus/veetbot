@@ -248,7 +248,12 @@ async def concurrent_daily_claim_pause_restart_and_history(factory: Factory) -> 
             is None
         )
         complete = run.model_copy(
-            update={"outcome": "failed", "reason": "execution_failed", "finished_at": NOW}
+            update={
+                "outcome": "blocked",
+                "reason": "deferred",
+                "finished_at": NOW,
+                "deferrals": ("legacy_attribution_unavailable",),
+            }
         )
         await uow.reconsolidation.finish_dreaming_run(principal(), complete)
     async with factory() as uow:

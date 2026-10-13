@@ -41,6 +41,7 @@ from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.tools import ToolExecutionContext
 from agent_core.ports.browser import GRANT_NOT_APPLICABLE
 from agent_core.ports.browser_sessions import (
+    BrowserSessionAcquirer,
     BrowserSessionControlPlane,
     BrowserSessionPage,
     expand_browser_session,
@@ -113,6 +114,7 @@ class HostedBrowserProvider:
         sessions: BrowserSessionControlPlane,
         now: Callable[[], datetime],
         run_state: RunStateReader | None = None,
+        acquire_session: BrowserSessionAcquirer | None = None,
     ) -> None:
         normalized = tuple(normalize_browser_origin(origin) for origin in allowed_origins)
         if not normalized or len(set(normalized)) != len(normalized):
@@ -124,6 +126,7 @@ class HostedBrowserProvider:
         self._sessions = sessions
         self._now = now
         self._run_state = run_state
+        self._acquire_session = acquire_session
         self._lease: BrowserLease | None = None
         self._lease_scope: tuple[UUID, int] | None = None
         self._lease_acquired_at: datetime | None = None
@@ -182,15 +185,25 @@ class HostedBrowserProvider:
             # Close the previous lease, and any given up earlier, before a new
             # acquisition, so the next call starts from a fresh page.
             await self._close_locked()
-            assert profile.provider_ref is not None
+            provider_ref = profile.provider_ref
+            assert provider_ref is not None
             now = self._now()
-            self._lease = await self._sessions.acquire(
-                profile.id,
-                self._principal,
-                profile.provider_ref,
-                run_id=context.run_id,
-                attempt_number=context.attempt_number,
-                deadline_at=_run_attempt_horizon(context, now),
+            deadline_at = _run_attempt_horizon(context, now)
+
+            async def acquire() -> BrowserLease:
+                return await self._sessions.acquire(
+                    profile.id,
+                    self._principal,
+                    provider_ref,
+                    run_id=context.run_id,
+                    attempt_number=context.attempt_number,
+                    deadline_at=deadline_at,
+                )
+
+            self._lease = (
+                await acquire()
+                if self._acquire_session is None
+                else await self._acquire_session(acquire, context)
             )
             self._lease_scope = scope
             self._lease_acquired_at = now
@@ -552,6 +565,7 @@ class SessionBoundHostedBrowserProvider:
         sessions: BrowserSessionControlPlane,
         now: Callable[[], datetime],
         run_state: RunStateReader | None = None,
+        acquire_session: BrowserSessionAcquirer | None = None,
     ) -> None:
         self._principal = principal.model_copy(deep=True)
         self._profiles = profiles
@@ -559,6 +573,7 @@ class SessionBoundHostedBrowserProvider:
         self._sessions = sessions
         self._now = now
         self._run_state = run_state
+        self._acquire_session = acquire_session
         self._bindings: dict[UUID, _SessionBinding] = {}
         self._current: ContextVar[HostedBrowserProvider | None] = ContextVar(
             "session_bound_hosted_browser_provider",
@@ -609,6 +624,7 @@ class SessionBoundHostedBrowserProvider:
                         sessions=self._sessions,
                         now=self._now,
                         run_state=self._run_state,
+                        acquire_session=self._acquire_session,
                     ),
                     deadline_at=_run_attempt_horizon(context, now),
                 )

@@ -208,7 +208,7 @@ jobs:
   integration:
     docker:
       - image: cimg/python:3.12
-      - image: postgres:16-alpine
+      - image: pgvector/pgvector:0.8.7-pg16-bookworm
         environment:
           POSTGRES_DB: agent
           POSTGRES_USER: agent

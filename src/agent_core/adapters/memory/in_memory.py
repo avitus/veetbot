@@ -41,11 +41,13 @@ from agent_core.domain.memory import (
     TracedBelief,
     TracedPassage,
     TracedPersonContext,
+    is_owned_resource,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
     recall_query_terms,
 )
+from agent_core.domain.memory_candidates import select_candidates
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
 from agent_core.ports.people import PeopleStore
@@ -264,6 +266,11 @@ class InMemoryMemoryStore:
             return record.model_copy(deep=True)
 
     async def query(self, query: RecallQuery) -> list[MemoryRecord]:
+        return select_candidates(await self._eligible_records(query), query)
+
+    async def _eligible_records(
+        self, query: RecallQuery, *, lexical: bool = True
+    ) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
         term_lexemes = lexical_term_lexemes(recall_query_terms(query.text))
         subjects = {subject.casefold() for subject in query.subjects}
@@ -294,6 +301,8 @@ class InMemoryMemoryStore:
             result = []
             for record in self._records.values():
                 if record.id in self._erasure_pending:
+                    continue
+                if record.id in query.exclude_ids:
                     continue
                 if record.tenant_id != query.tenant_id or record.principal_id != query.principal_id:
                     continue
@@ -362,18 +371,24 @@ class InMemoryMemoryStore:
                 ):
                     continue
                 if (
-                    (query.text is not None or subjects or query.structured_belief_types)
+                    lexical
+                    and (
+                        query.text is not None
+                        or subjects
+                        or query.structured_belief_types
+                        or query.include_owned_resources
+                    )
                     and query.include_ids is None
                     and record.id not in query.expand_ids
                     and record.subject.casefold() not in subjects
                     and record.belief_type not in query.structured_belief_types
+                    and not (query.include_owned_resources and is_owned_resource(record))
                 ):
                     text = f"{record.subject} {record.statement}"
                     if not lexical_text_matches(term_lexemes, text):
                         continue
                 result.append(record.model_copy(deep=True))
-            result.sort(key=lambda record: (-record.store_position, str(record.id)))
-            return result[: max(query.max_items * 8, 64)]
+            return result
 
     async def related(
         self,

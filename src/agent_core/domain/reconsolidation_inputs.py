@@ -39,7 +39,7 @@ class ReconsolidationInput(ReconValue):
 
 
 class EgressSubject(ReconValue):
-    kind: Literal["memory", "excerpt", "proposal"]
+    kind: Literal["memory", "excerpt", "proposal", "query"]
     id: UUID
     text: str
     sensitivity_floor: Sensitivity | None
@@ -63,6 +63,7 @@ class ReconsolidationEgressDecision(ReconValue):
 
 
 InputDeferralReason = Literal[
+    "legacy_attribution_unavailable",
     "source_unavailable",
     "source_ineligible",
     "scope_mismatch",

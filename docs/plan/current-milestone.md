@@ -4,6 +4,29 @@ title: Current Milestone
 
 # Current milestone
 
+- **Milestone 33 — General memory search and recall:** the owner authorized
+  the six-stage plan on 2026-10-11 under ADR-0178.
+  [General memory recall](general-memory-recall.md) registers twelve gates for
+  cross-category evaluation, relevance before candidate limits, measured semantic
+  retrieval, task-aware queries, governed source recovery and release evidence.
+  The category-independent candidate repair is implemented; the 400-seed diagnostic
+  improves recall from 67% to 68.75%, leaving semantic/implicit-use work open.
+  The synthetic semantic comparison reaches 97% top-20 candidate recall;
+  the local pgvector index and shared experimental recall path are implemented
+  with source-version fences (ADR-0179). Bounded provider admission and persistent
+  indexing slices are implemented (ADR-0180). Explicit query preparation now feeds
+  the local cache under the same durable budget (ADR-0181). Run-bound shared recall
+  now binds saved task state and effective query policy (ADR-0182). Context assembly
+  now re-reads current evidence instead of retaining completed recall (ADR-0183).
+  Release-bundle validation now recomputes cross-category recall and implicit
+  answer lift with exact-version admission and revocation (ADR-0185).
+  Source indexing now has default-off configuration and maintenance composition,
+  bound to independently reviewed release dependencies (ADR-0187). Query authority,
+  semantic recall composition, explicit preparation scheduling, historical/People
+  parity and answer-use evidence remain open.
+  Optional-channel activation remains evidence-gated.
+  M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
+
 - **Milestone 32 — Memory reconsolidation (dreaming):** authorized on
   2026-10-02 as a parallel workstream. [memory-reconsolidation.md](memory-reconsolidation.md)
   and ADR-0169 define twenty-four registered gates. The owner authorized ADR-0174
@@ -56,7 +79,12 @@ title: Current Milestone
   upload passed. Daily proposals are enabled in all application roles and only
   individual owner approval applies them to memory. The first automatic batch
   deferred with no proposals or provider calls; its next claim is due October 12
-  at 01:30 UTC. Unattended processing stays disabled. The once/dry-run operator
+  at 01:30 UTC. The second run also deferred without provider calls. The October 11
+  diagnosis found legacy erased People heads with missing reverse attribution;
+  their existing source refusal remains intact. ADR-0186 implements persistent
+  review sign-in and explicit blocker/deferral reporting, pending delivery.
+  Metadata recovery requires a separate decision. Unattended processing stays disabled.
+  The once/dry-run operator
   controls, remaining complete runtime gates and fresh matching comparative
   release evidence remain required; no verified sequential ceiling advances.
 - **Active milestone:** Milestone 15 — operational hardening — is the next

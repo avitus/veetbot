@@ -129,6 +129,7 @@ from agent_core.domain.views import (
     SurfacePairingView,
     TestNotificationResult,
 )
+from agent_core.ports.determinism import Clock
 
 logger = logging.getLogger(__name__)
 IDEMPOTENCY_KEY_MAX_LENGTH = 255
@@ -537,7 +538,9 @@ def _error_response(
     details: dict[str, object] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
-    if request.url.path.startswith(("/v1/email/", "/v1/calls")):
+    if request.url.path.startswith(
+        ("/v1/email/", "/v1/calls", "/v1/dreaming", "/v1/memory-reconsolidations")
+    ):
         # Unhandled errors are rendered outside the ordinary request middleware.
         headers = {**(headers or {}), "Cache-Control": PRIVATE_NO_STORE}
     return JSONResponse(
@@ -560,6 +563,8 @@ def create_app(
     principal: Principal,
     new_request_id: Callable[[], str],
     readiness_probe: Callable[[], Awaitable[bool]],
+    *,
+    clock: Clock | None = None,
 ) -> FastAPI:
     """Compose authenticated API routes, request boundaries, and public error handlers."""
     app = FastAPI(
@@ -569,7 +574,7 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
     )
-    auth = Authenticator(settings, principal)
+    auth = Authenticator(settings, principal, clock)
     app.add_middleware(
         RequestBoundaryMiddleware,
         new_request_id=new_request_id,
@@ -1763,7 +1768,9 @@ def create_app(
         if settings.memory_reconsolidation_api_enabled and services.reconsolidation is not None:
             app.include_router(reconsolidation_router(services.reconsolidation, secured))
             if settings.memory_dreaming_review_enabled:
-                app.include_router(dreaming_router(services.reconsolidation, secured))
+                app.include_router(
+                    dreaming_router(services.reconsolidation, secured, settings, clock)
+                )
 
     persona_router = APIRouter()
 

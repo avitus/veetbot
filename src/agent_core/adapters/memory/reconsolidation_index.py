@@ -1,6 +1,6 @@
 """Insertion and change journals, updated under the original memory lock."""
 
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from datetime import datetime
 from uuid import UUID
 
@@ -11,6 +11,7 @@ from agent_core.domain.reconsolidation import SourceChange, SourceVersion, conte
 from agent_core.domain.reconsolidation_merge import MergeUndoReceipt
 from agent_core.domain.reconsolidation_operations import StoredOperation
 from agent_core.domain.reconsolidation_summary import SummaryMemory
+from agent_core.domain.semantic_memory import SemanticSource
 from agent_core.ports.determinism import Clock
 
 
@@ -36,6 +37,9 @@ class ReconsolidationIndex:
         self.historical_members: MutableMapping[tuple[str, str, UUID], frozenset[UUID]] = (
             transaction.mapping()
         )
+        self.semantic_vectors: MutableMapping[
+            tuple[str, str, UUID], Mapping[str, tuple[SemanticSource, tuple[float, ...]]]
+        ] = transaction.mapping()
         self.versions: MutableMapping[UUID, SourceVersion] = transaction.mapping()
         self.version_history: MutableMapping[UUID, list[tuple[datetime, SourceVersion]]] = (
             transaction.mapping()
@@ -166,6 +170,7 @@ class ReconsolidationIndex:
                 del self.members[*owner, member]
 
     def invalidate(self, owner: tuple[str, str], belief_id: UUID) -> None:
+        self.semantic_vectors.pop((*owner, belief_id), None)
         for operation_id in sorted(self.dependencies.get((*owner, belief_id), frozenset())):
             assert self._clock is not None and self._position is not None
             operation = self.operations[operation_id]

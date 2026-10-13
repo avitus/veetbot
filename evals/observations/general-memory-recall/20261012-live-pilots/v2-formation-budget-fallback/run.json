@@ -1,0 +1,87 @@
+{
+  "version": "general-recall-development@1",
+  "activation_evidence": false,
+  "state": "completed",
+  "registered_at": "2026-10-12T16:41:00.783533+00:00",
+  "corpus_sha256": "af868ecddb9013e72a5ffadc808c217c40ec22a3c7a53f326687bed1dc642721",
+  "implementation_sha256": "9a22e8100ac7c6f2f12395d9af71e7a7341ea424e95e3aeff5852838e6ca83c0",
+  "options": {
+    "corpus": "/Users/avitus/.codex/worktrees/ee89/veetbot/evals/capability/general-recall/pilot.v1.jsonl",
+    "output": "/tmp/veetbot-m33-pilot-v2-recovery-formation",
+    "model_policy": "balanced",
+    "maximum_cost_usd": "2",
+    "noise": 1000,
+    "deadline_seconds": 900,
+    "pipeline": "formation",
+    "channel": "hybrid",
+    "paths": [
+      "automatic",
+      "deliberate"
+    ],
+    "local_configuration": "/Users/avitus/.codex/worktrees/ee89/veetbot/evals/observations/general-memory-recall/20261012-local-encoding/configuration.json",
+    "model_directory": "/tmp/veetbot-verified-local-model",
+    "source_recovery": true
+  },
+  "model": {
+    "provider": "openai",
+    "model": "gpt-5.6-sol",
+    "capabilities": {
+      "native_tool_calling": true,
+      "parallel_tool_calls": true,
+      "images": true,
+      "audio": false,
+      "files": true,
+      "reasoning": "native",
+      "provider_managed_state": true,
+      "explicit_cache_control": true,
+      "structured_output": true,
+      "streaming": true
+    },
+    "limits": {
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "default_output_reserve": 8192,
+      "max_cache_breakpoints": 3,
+      "max_tool_count": 128
+    },
+    "pricing": {
+      "input_per_mtok": "5.00",
+      "cached_input_per_mtok": "0.50",
+      "cache_write_per_mtok": "6.25",
+      "cache_write_1h_per_mtok": null,
+      "output_per_mtok": "30.00",
+      "reasoning_per_mtok": null,
+      "reasoning_priced_separately": false,
+      "source": "docs_snapshot",
+      "effective_at": "2026-08-03T00:00:00Z"
+    },
+    "policy_name": "balanced",
+    "resolved_at": "2026-10-12T16:41:00.739598Z",
+    "display_name": "GPT-5.6 Sol",
+    "reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ]
+  },
+  "setting": "Synthetic isolated histories; in-memory, not production latency or release evidence",
+  "cases": [
+    "vehicle-fuel-context",
+    "digestive-breakfast",
+    "inlaw-invitation",
+    "language-study-priority",
+    "pier-material-rationale",
+    "coach-review-cadence",
+    "meeting-time-correction",
+    "rail-arrival-choice",
+    "unknown-seat-preference",
+    "source-door-detail"
+  ],
+  "completed": 20,
+  "actual_cost_usd": "0.09833550",
+  "held_cost_usd": "0.00000",
+  "provider_calls": 20,
+  "finished_at": "2026-10-12T16:42:16.070481+00:00"
+}

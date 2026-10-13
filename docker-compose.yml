@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: veetbot-postgres:16-alpine-vector0.8.7
+    build:
+      context: .
+      dockerfile: deploy/postgres.Dockerfile
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-agent}
       POSTGRES_USER: ${POSTGRES_USER:-agent}

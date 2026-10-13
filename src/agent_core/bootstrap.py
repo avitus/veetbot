@@ -57,6 +57,7 @@ from agent_core.adapters.determinism import (
 from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
+from agent_core.adapters.embeddings.openai import OpenAIEmbeddingProvider
 from agent_core.adapters.execution.docker import (
     DockerExecutionEnvironment,
     resolve_local_image_digest,
@@ -88,6 +89,8 @@ from agent_core.adapters.memory.in_memory import (
 from agent_core.adapters.memory.reconsolidation import InMemoryReconsolidationStore
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
+from agent_core.adapters.memory.semantic_memory import InMemorySemanticMemoryIndex
+from agent_core.adapters.memory.semantic_work import InMemorySemanticWorkStore
 from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -192,6 +195,8 @@ from agent_core.adapters.persistence.schedules import (
     PostgresScheduleOccurrenceRepository,
     PostgresScheduleRepository,
 )
+from agent_core.adapters.persistence.semantic_memory import PostgresSemanticMemoryIndex
+from agent_core.adapters.persistence.semantic_work import PostgresSemanticWorkStore
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
     PostgresSessionDeletionRepository,
@@ -264,6 +269,7 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.browser_startup import BrowserStartupRecovery
 from agent_core.application.browser_task_grants import (
     BrowserTaskGrantAuthorizer,
     CompositeStandingAuthorizer,
@@ -545,6 +551,7 @@ from agent_core.memory.retrieval import (
     EventEpisodeSearch,
     HybridMemoryRetriever,
 )
+from agent_core.memory.semantic_deployment import compose_indexing
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
@@ -1202,6 +1209,8 @@ def _memory_uow_repositories(
         episodes=episodes,
         traces=traces,
         personas=InMemoryPersonaStore(),
+        semantic_memory=InMemorySemanticMemoryIndex(memories),
+        semantic_work=InMemorySemanticWorkStore(memories._transaction, RandomIdFactory()),
         reconsolidation=reconsolidation,
         memory_transaction=memories._transaction.transaction,
         model_settings=InMemoryModelSettingsStore(),
@@ -1300,6 +1309,8 @@ def _postgres_repository_factory(
             episodes=episodes,
             traces=traces,
             personas=PostgresPersonaStore(session),
+            semantic_memory=PostgresSemanticMemoryIndex(session, memories, clock),
+            semantic_work=PostgresSemanticWorkStore(session, RandomIdFactory()),
             reconsolidation=reconsolidation,
             model_settings=PostgresModelSettingsStore(session),
             folders=PostgresFolderStore(session),
@@ -2609,7 +2620,9 @@ async def _compose(
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
-    query_former = DeterministicQueryFormer(principal)
+    query_former = DeterministicQueryFormer(
+        principal, candidate_selection=memory_profiles.retrieval.candidate_selection
+    )
     schedule_service = ScheduleService(
         uow_factory=uow_factory,
         clock=clock,
@@ -3320,6 +3333,75 @@ async def _compose(
             egress_policy=local_egress_policy(settings.memory_reconsolidation_residency_provider),
             owner_review=True,
         )
+    semantic_index_pass = None
+    if settings.memory_semantic_index_enabled:
+        registry_identity = {
+            "policies": model_router.registry.policies.model_dump(mode="json"),
+            "profiles": {
+                name: {
+                    "profile_hash": profile.profile_hash,
+                    "registry_version": profile.registry_version,
+                    "models": [
+                        {
+                            "id": model.model_id,
+                            "aliases": model.aliases,
+                            "limits": model.limits.model_dump(mode="json"),
+                            "pricing": model.pricing.model_dump(mode="json"),
+                            "reasoning_efforts": list(model.reasoning_efforts),
+                        }
+                        for model in profile.models
+                    ],
+                }
+                for name, profile in model_router.registry.profiles.items()
+            },
+        }
+        semantic_index_pass = await compose_indexing(
+            root=REPOSITORY_ROOT,
+            settings=settings,
+            principal=principal,
+            factory=uow_factory,
+            clock=clock,
+            credentials=credential_resolver,
+            configuration={
+                "policy_version": ruleset.policy_version,
+                "agent": agent.model_dump(mode="json"),
+                "principal": {
+                    "tenant": principal.tenant_id,
+                    "owner": principal.principal_id,
+                    "scopes": sorted(principal.scopes),
+                    "roles": sorted(principal.roles),
+                },
+                "context": dict(context_config),
+                "memory": memory_profiles.model_dump(mode="json"),
+                "storage": storage,
+                "people_enabled": settings.people_enabled,
+                "reviewed_dreaming": settings.memory_dreaming_review_enabled,
+                "unattended_dreaming": settings.memory_reconsolidation_enabled,
+                "query_authority": "withheld",
+                "query_preparation": "disabled",
+            },
+            formation={
+                "policy": memory_policy_version,
+                "profiles": memory_profiles.formation.model_dump(mode="json"),
+                "registry": registry_identity,
+                "default": memory_default_choice.model_dump(mode="json"),
+                "alternatives": [
+                    option.model_dump(mode="json") for option in memory_alternative_options
+                ],
+                "upstream_build": evidence_build_ref,
+                "upstream_corpus": evidence_corpus_sha256,
+            },
+            reader={
+                "registry": registry_identity,
+                "catalog": model_settings_catalog.model_dump(mode="json"),
+            },
+            provider_factory=OpenAIEmbeddingProvider,
+        )
+
+    async def sweep_semantic_index() -> int:
+        assert semantic_index_pass is not None
+        return (await semantic_index_pass.run_slice()).indexed
+
     memory_retriever = HybridMemoryRetriever(
         uow_factory,
         clock,
@@ -3567,7 +3649,8 @@ async def _compose(
             people_retriever or memory_retriever,
             query_former,
             session_project_scope,
-            recall_revision=None if people_retriever is None else people_retriever.revision,
+            # Memory/People watermarks do not cover elapsed expiry, semantic
+            # cache availability or admission. Read current evidence per assembly.
             inline_output_bytes=inline_output_bytes,
         )
         compactor = StructuredCompactor(
@@ -4643,6 +4726,9 @@ async def _compose(
                     sweep_memory=sweep_memory,
                     sweep_traces=sweep_traces,
                     sweep_memory_consolidation=sweep_memory_consolidation,
+                    sweep_memory_semantic_index=sweep_semantic_index
+                    if semantic_index_pass is not None
+                    else None,
                     sweep_memory_reconsolidation=recon_pass.run_once
                     if recon_pass is not None
                     else None,
@@ -4837,8 +4923,9 @@ def _browser_provider(
     profile_id: UUID | None,
     profiles: UnitOfWorkFactory,
     sessions: BrowserSessionControlPlane | None,
-    now: Callable[[], datetime],
+    clock: Clock,
 ) -> BrowserProvider | None:
+    now = clock.now
     if kind is BrowserProviderKind.DISABLED:
         return None
     if kind is BrowserProviderKind.PLAYWRIGHT:
@@ -4871,6 +4958,7 @@ def _browser_provider(
                 sessions=sessions,
                 now=now,
                 run_state=read_run_state,
+                acquire_session=BrowserStartupRecovery(clock),
             )
 
         async def select_session_profile(context: ToolExecutionContext) -> UUID:
@@ -4888,6 +4976,7 @@ def _browser_provider(
             sessions=sessions,
             now=now,
             run_state=read_run_state,
+            acquire_session=BrowserStartupRecovery(clock),
         )
     raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
 
@@ -5075,6 +5164,7 @@ async def build(
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
     memory_distillation_evaluation_mode: bool = False,
     memory_people_evaluation_mode: bool = False,
+    memory_legacy_retrieval_control: bool = False,
     memory_reasoning_effort: ReasoningEffort | None = None,
     service_logging: bool = False,
 ) -> AsyncIterator[Composition]:
@@ -5256,6 +5346,14 @@ async def build(
     memory_profiles = MemoryProfiles.from_document(
         load_config_document(effective_settings, "memory/profiles.yaml")
     )
+    if memory_legacy_retrieval_control:
+        memory_profiles = memory_profiles.model_copy(
+            update={
+                "retrieval": memory_profiles.retrieval.model_copy(
+                    update={"candidate_selection": "recent"}
+                )
+            }
+        )
     folder_profiles = FolderProfiles.from_document(
         load_config_document(effective_settings, "folders/profiles.yaml")
     )
@@ -5652,7 +5750,7 @@ async def build(
                 profile_id=effective_settings.browser_profile_id,
                 profiles=uow_factory,
                 sessions=browser_sessions,
-                now=effective_clock.now,
+                clock=effective_clock,
             )
         )
         for package, source in skill_packages:

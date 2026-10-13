@@ -269,6 +269,10 @@ promotion candidate.
 An explicit per-project override always outranks a carried belief. Learning globally
 does not mean ignoring local instruction.
 
+Milestone 33's [general recall design](general-memory-recall.md) supersedes the
+newest-first candidate selection and governs the measured extension of this
+pipeline under ADR-0178. Optional channels require comparative evidence.
+
 ## The pipeline
 
 Given a goal and the current working state:
@@ -317,6 +321,33 @@ also do not activate it; "how" questions require an explicit profile predicate,
 such as "How do I like my coffee?". It uses the existing item/token caps, lifecycle weights,
 scope rules, and hard isolation predicates, and never upgrades provisional facts
 to active or puts them into the frozen snapshot.
+
+Personal context also needs an ownership lookup: "What fuel should I use for
+my car?" need not share a word with "User has a 2026 Aster S8." A possessive
+`my` reference anchors direct affirmative ownership/use statements in
+`user_model_attr`, limited to `project_fact` and `resource` claims. Deliberate
+`memory.search` also recognizes keyword queries naming the `user` or `owner`.
+The canonical statement starts with "User" (optionally "The user") and
+"has", "owns", "drives", or "uses"; negated or past-use prefixes do not
+anchor. This discovers candidate possessions without assuming that a model
+name denotes a particular object category. It does not browse every personal
+attribute or require a brand dictionary.
+
+Explicit relationship and preference clauses keep their existing type anchors.
+The query records `include_owned_resources`, false for older saved queries.
+Both stores prioritize matching ownership candidates before the existing
+candidate cap, including historical revisions. Otherwise a generic word such
+as "user" can fill that cap with newer unrelated beliefs before ranking sees
+the needed fact. The ownership match weight is 0.5, below an exact subject's
+1.0 and above a type-only match's 0.25. All ordinary hard filters, lifecycle
+weights and item/token limits still apply. Snapshots still exclude provisional
+beliefs; delta recall clears the ownership anchor along with the text and
+type anchors. Queries using this lookup append `+owned-resources@1` to their
+retrieval policy and rendered memory header; other queries retain their existing
+policy. The frozen deterministic benchmark remains unchanged, with identical
+metrics and probe rows. Regression coverage includes older possessions,
+candidate floods, model request assembly and PostgreSQL parity. This adds no
+semantic retrieval arm.
 
 ### 2. Hard filter
 
@@ -521,6 +552,7 @@ class RecallQuery(BaseModel):
     subjects: list[str] = []           # structured anchors, aliased
     belief_types: list[str] = []
     structured_belief_types: list[str] = []  # OR anchors; belief_types is an AND filter
+    include_owned_resources: bool = False  # bounded direct ownership/use anchor
     as_of: datetime | None = None      # bi-temporal; None means now
     include_superseded: bool = False   # historical queries only
     include_provisional: bool = True   # forced false for snapshot recall
