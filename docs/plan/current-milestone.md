@@ -36,8 +36,8 @@ title: Current Milestone
   and verified paired formation-response banks under one experiment budget
   (ADR-0194). Sparse development controls complete twenty seeded and twenty
   formation observations; they expose retrieval and labeling failures and do not
-  pass the release gates. A 400-scenario corpus
-  draft is authored but awaits independent review; explicit factual questions are
+  pass the release gates. The owner approved the 400-scenario corpus on
+  2026-10-13; explicit factual questions are
   separated from implicit tasks, with incident and per-family/split coverage checked.
   The paired pilot exposed a formation@11 defect: named-person statements were
   rejected by the older owner-subject rule, and separate People claims could merge

@@ -323,7 +323,8 @@ are implemented (ADR-0188), alongside governed source recovery (ADR-0189), durab
 preparation budgets (ADR-0190) and a separately admitted relevance reranker (ADR-0191).
 The runtime evaluator separates stored atoms from recovered source evidence
 (ADR-0192), and its PostgreSQL mode exercises actual workers and reader authority.
-The 400-case draft awaits independent review. Current People narrowing has shared
+The owner approved the 400-scenario corpus on 2026-10-13; difficult-failure review
+remains required. Current People narrowing has shared
 PostgreSQL coverage; a six-arm task-context comparison retains all 120 development
 observations. Reader-planned search answers 16/20, with four failures caused by
 guessed hard type filters. ADR-0198 replaces that model-facing argument with soft

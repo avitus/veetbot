@@ -239,8 +239,9 @@ indistinguishable from absence, the rule every principal-scoped route in
 
 **Eligibility is closed.** Only the maintenance pass proposes; no route, tool
 call, or model output creates a proposal. A session is a candidate only when
-all of the following hold: it is a chat session under the predicate above; it
-is listed by the ordinary session index with operational sessions excluded;
+all of the following hold: its metadata carries none of `email_thread_id`,
+`email_operational`, `schedule_id`, or `run_kind`, even after an owner opens an
+email discussion (ADR-0184); it is listed by the ordinary session index;
 it has a title; it is unfiled; and it is not already named by an open
 proposal. A new-folder proposal requires at least `threshold` members
 (shipped: 4) and at most `max_members` (shipped: 12); an add-to-folder

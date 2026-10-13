@@ -1,6 +1,7 @@
-# General recall corpus authoring draft
+# Approved general recall corpus
 
-This folder is an authoring workspace, not a release corpus or activation evidence.
+The owner approved this 400-scenario corpus for evaluation on 2026-10-13.
+The retained authoring folder is not, by itself, measured activation evidence.
 `development.jsonl` contains 200 isolated development scenarios, twenty-five per
 family, adapted from the first twenty-five information needs in each family of
 `general-memory-recall-seeds.v1.tsv`. That diagnostic has already informed tuning;
@@ -18,20 +19,21 @@ their existing histories; preference configuration fields are proposed task/tool
 arguments, not complete dinner suggestions or document drafts. Each family/split
 contains at least two implicit tasks, enforced before release scoring. The vehicle
 fuel case is marked as a synthetic analogue of the original owner incident. These
-labels and all proposed task arguments still require independent review.
+labels and proposed task arguments are included in the approved corpus.
 
-The draft has passed structural/provenance validation only. It includes 200 newly
-authored holdout candidates across all eight families, explicit two-session temporal
+The corpus passed structural/provenance validation and the owner's independent
+review. It includes 200 newly authored holdout scenarios across all eight families,
+explicit two-session temporal
 corrections, independently sourced atoms for development multi-fact cases, and
 holdout ambiguity/unknown cases. None of the holdout cases has been run against a
-model. Scenario and query-lineage labels are proposals, not an independence certificate.
+model. The accepted independence receipt binds the exact scenarios and corpus digest.
 
 `review.html` is a read-only, searchable review packet containing all 400 cases.
-`review-manifest.json` records its corpus digest and explicit unreviewed state.
-The reviewer must check distinct information needs, cross-split template lineage,
-source and answer correctness, lifecycle labels and acceptable exact-value aliases.
-Independent human review and a separate review of difficult pilot failures remain
-required. Do not publish release receipts or use this draft to satisfy M33 gates.
+`review-manifest.json` records its corpus digest and approved state. The accepted
+receipt is retained in `evals/observations/general-memory-recall/20261013-corpus-review/`.
+Separate human review of difficult failures remains required, alongside complete
+comparative measurements and release verification. Corpus approval alone does not
+satisfy the M33 quality or activation gates.
 
 The original diagnostic and all earlier pilot snapshots remain unchanged. The draft
 is not a replacement for a separately measured hard-boundary and load matrix.
