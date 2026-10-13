@@ -10,10 +10,24 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
+from agent_core.domain.memory import Sensitivity
+from agent_core.domain.memory_sources import OwnerSourceExcerpt
 from agent_core.domain.persistence import ProjectionCursor, WorkerLease
 
 
 class EventRepository(Protocol):
+    async def memory_source(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        surface_id: str,
+        ceiling: Sensitivity,
+    ) -> OwnerSourceExcerpt | None:
+        """Read one ingestion-admitted source; missing authority or a fence withholds it."""
+        ...
+
     async def list_window(
         self,
         principal: Principal,

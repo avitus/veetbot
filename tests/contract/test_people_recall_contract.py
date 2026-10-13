@@ -39,3 +39,10 @@ async def test_people_context_selects_only_linked_facts_and_records_identity() -
     assert [item.belief_id for item in result.items] == [beliefs[0].id]
     assert result.people[0].record_id == people[0].id
     assert result.tokens <= 500
+    restricted = await service.recall(
+        owner,
+        [people[0].id],
+        recall_query(text="Alex").model_copy(update={"include_ids": (beliefs[1].id,)}),
+        session_id=SESSION_ID,
+    )
+    assert restricted.items == [], "People discovery must preserve the caller's included-ID bound"

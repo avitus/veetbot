@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:841), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:848), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:779-781).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:299-301), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:883-886),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:890-893),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:878), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:885), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:806) are
 all written down, and none of them runs.
 
@@ -823,7 +823,7 @@ moves to now; `last_evidence_at` and the compatibility-only
 `last_reinforced_at` do not move. A returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:883-886): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:890-893): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -863,8 +863,9 @@ the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
 context engine caps (context-engine.md:360): the delta is issued for what the
-base block left of that budget and is not issued at all when the base block
-spent it, so a session with a frozen snapshot cannot carry twice the recall a
+base block left of both the token and item budgets, excluding its already
+returned belief identifiers before candidate limits. It is not issued when either
+allowance is exhausted, so a session with a frozen snapshot cannot carry twice the recall a
 session without one may. Only the base and delta blocks are droppable under
 budget pressure; correction lines stay in the fixed body and are never offered
 for yielding, so a correction cannot be squeezed out by a long conversation, and if

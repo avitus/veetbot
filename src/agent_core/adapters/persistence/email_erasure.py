@@ -718,8 +718,8 @@ def erase_memory_source_locked(
     }
     for belief_id, revisions in list(repository._memories._history.items()):
         retained = [
-            (at, record)
-            for at, record in revisions
+            (at, record, version)
+            for at, record, version in revisions
             if not (
                 record.tenant_id == principal.tenant_id
                 and record.principal_id == principal.principal_id

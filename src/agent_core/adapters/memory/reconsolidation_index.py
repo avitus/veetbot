@@ -6,7 +6,7 @@ from uuid import UUID
 
 from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.domain.derived_memory import SummaryWriteReceipt
-from agent_core.domain.memory import MemoryRecord
+from agent_core.domain.memory import LIVE_MEMORY_STATUSES, MemoryRecord
 from agent_core.domain.reconsolidation import SourceChange, SourceVersion, content_signature
 from agent_core.domain.reconsolidation_merge import MergeUndoReceipt
 from agent_core.domain.reconsolidation_operations import StoredOperation
@@ -49,6 +49,11 @@ class ReconsolidationIndex:
         self.source_keys: MutableMapping[UUID, frozenset[tuple[str, str, UUID, int]]] = (
             transaction.mapping()
         )
+        self.source_permits: MutableMapping[tuple[str, str, UUID, int], str] = transaction.mapping()
+        self.source_fences: MutableMapping[tuple[str, str, UUID, int], bool] = transaction.mapping()
+        self.source_deadlines: MutableMapping[tuple[str, str, UUID, int], datetime] = (
+            transaction.mapping()
+        )
         self.signatures: MutableMapping[UUID, str] = transaction.mapping()
         self.creations: MutableMapping[tuple[str, str], list[UUID]] = transaction.mapping()
         self.changes: MutableMapping[tuple[str, str], list[SourceChange]] = transaction.mapping()
@@ -66,6 +71,19 @@ class ReconsolidationIndex:
             else frozenset((*owner, record.source_session_id, n) for n in record.source_event_ids)
         )
         old_keys = self.source_keys.get(record.id, frozenset())
+        for key in keys:
+            if record.status not in LIVE_MEMORY_STATUSES:
+                self.source_fences[key] = True
+            deadlines = [
+                value for value in (record.expires_at, record.valid_to) if value is not None
+            ]
+            if deadlines:
+                self.source_deadlines[key] = min(
+                    *deadlines, self.source_deadlines.get(key, min(deadlines))
+                )
+        if previous is not None or erased:
+            for key in old_keys:
+                self.source_fences[key] = True
         for key in old_keys - keys:
             self.transaction.discard(self.events[key], record.id)
         for key in keys - old_keys:
@@ -99,10 +117,13 @@ class ReconsolidationIndex:
     ) -> None:
         affected = set(belief_ids)
         for session_id, sequence in events:
+            self.source_fences[*owner, session_id, sequence] = True
             affected.update(self.events.get((*owner, session_id, sequence), set()))
         for key in sorted(affected):
             if self.owners.get(key) != owner or self.signatures.get(key) == "erased":
                 continue
+            for source_key in self.source_keys.get(key, frozenset()):
+                self.source_fences[source_key] = True
             self.invalidate(owner, key)
             previous = self.versions[key]
             version = previous.model_copy(

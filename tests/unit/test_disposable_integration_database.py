@@ -119,3 +119,14 @@ def test_integration_directory_resets_only_through_the_guard() -> None:
                 f"{name}: replaces isolate_postgres_case but runs {match.group(0).strip()!r}"
             )
     assert violations == []
+
+
+async def test_recall_clone_refuses_before_connecting_without_the_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.delenv(disposable.DISPOSABLE_FLAG, raising=False)
+    monkeypatch.setattr(disposable, "create_engine", _refuse_connection)
+    with pytest.raises(pytest.skip.Exception, match="VEETBOT_TEST_DATABASE_DISPOSABLE=1"):
+        async with disposable.clone_recall_database():
+            pytest.fail("An unmarked database must never be cloned")

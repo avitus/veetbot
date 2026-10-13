@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
+from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
 from agent_core.adapters.persistence.conversation import conversation_items
 from agent_core.adapters.persistence.people_erasure import ORIGINAL_EVENTS, redact
 from agent_core.domain.agents import AgentSpec, Principal
@@ -45,6 +46,12 @@ from agent_core.domain.folders import (
     ThreadFolder,
     folder_name_key,
     normalize_folder_name,
+)
+from agent_core.domain.memory import Sensitivity
+from agent_core.domain.memory_sources import (
+    OwnerSourceExcerpt,
+    admitted_excerpt,
+    source_admission_digest,
 )
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.model_settings import ModelSettings
@@ -635,6 +642,50 @@ class InMemoryRunRepository:
 
 
 class InMemoryEventRepository:
+    _memory_source_index: ReconsolidationIndex | None
+
+    async def memory_source(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        surface_id: str,
+        ceiling: Sensitivity,
+    ) -> OwnerSourceExcerpt | None:
+        index = self._memory_source_index
+        if index is None or surface_id != "private" or ceiling is not Sensitivity.RESTRICTED:
+            return None
+        owner = (principal.tenant_id, principal.principal_id)
+        key = (*owner, session_id, sequence)
+        async with index.transaction.owner(owner):
+            digest = index.source_permits.get(key)
+            deadline = index.source_deadlines.get(key)
+            if (
+                digest is None
+                or index.source_fences.get(key)
+                or (deadline is not None and deadline <= self._clock.now())
+            ):
+                return None
+            try:
+                await self._sessions.get(session_id, principal)
+            except NotFoundError:
+                return None
+            async with self._lock:
+                event = next(
+                    (e for e in self._events.get(session_id, ()) if e.sequence == sequence), None
+                )
+                return (
+                    None
+                    if event is None
+                    else admitted_excerpt(event, principal.principal_id, digest)
+                )
+
+    def bind_memory_sources(self, index: ReconsolidationIndex) -> None:
+        if self._memory_source_index is not None and self._memory_source_index is not index:
+            raise ValueError("Memory source admission is already bound")
+        self._memory_source_index = index
+
     def __init__(self, sessions: InMemorySessionRepository, clock: Clock) -> None:
         self._sessions = sessions
         self._clock = clock
@@ -643,6 +694,7 @@ class InMemoryEventRepository:
         self._people_erased_runs: dict[UUID, datetime] = {}
         self._next_id = 1
         self._lock = asyncio.Lock()
+        self._memory_source_index = None
 
     async def append(self, event: NewEvent, *, lease: WorkerLease | None = None) -> EventEnvelope:
         if lease is not None:
@@ -666,6 +718,12 @@ class InMemoryEventRepository:
             )
             self._next_id += 1
             stream.append(envelope)
+            owner = self._sessions._sessions[event.session_id]
+            digest = source_admission_digest(event, owner.principal_id)
+            if digest is not None and self._memory_source_index is not None:
+                self._memory_source_index.source_permits[
+                    owner.tenant_id, owner.principal_id, event.session_id, envelope.sequence
+                ] = digest
             if event.derivation_key is not None:
                 self._derived[event.derivation_key] = envelope
         if event.actor_type == "principal" and event.event_type in {

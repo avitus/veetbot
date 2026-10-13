@@ -25,6 +25,7 @@ class EmbeddingConfig(SemanticValue):
     residency_provider: str = Field(min_length=1, max_length=128)
     request_usd: Decimal = Field(gt=0, le=Decimal("0.25"), allow_inf_nan=False)
     daily_usd: Decimal = Field(gt=0, le=Decimal("2"), allow_inf_nan=False)
+    historical_indexing: bool = False
 
     @property
     def key(self) -> str:

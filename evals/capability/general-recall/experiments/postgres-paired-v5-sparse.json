@@ -1,0 +1,18 @@
+{
+  "corpus": "evals/capability/general-recall/pilot.v2.jsonl",
+  "output": "/tmp/veetbot-m33-paired-v5-sparse",
+  "maximum_cost_usd": "5",
+  "noise": 1000,
+  "deadline_seconds": 3600,
+  "execution": "runtime",
+  "storage": "postgres",
+  "disposable_database": true,
+  "pipeline": "formation",
+  "formation_policy": "formation@11",
+  "channel": "sparse",
+  "source_recovery": false,
+  "reranking": "baseline",
+  "query_planning": "baseline",
+  "search_planning": "scripted",
+  "formation_bank_directory": "/tmp/veetbot-m33-paired-v5-banks"
+}

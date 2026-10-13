@@ -1,0 +1,10 @@
+{
+  "state": "unreviewed",
+  "corpus_sha256": "69968f84f35159bc2c043ed34e50f9f185e2598b92e6528744d74f3b11435324",
+  "scenario_count": 400,
+  "development": 200,
+  "holdout": 200,
+  "holdout_model_execution": false,
+  "reviewer": null,
+  "independence_approved": false
+}

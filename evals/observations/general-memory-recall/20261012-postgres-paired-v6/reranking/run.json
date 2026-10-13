@@ -1,0 +1,97 @@
+{
+  "version": "general-recall-development@5",
+  "activation_evidence": false,
+  "state": "completed",
+  "registered_at": "2026-10-12T20:43:48.739066+00:00",
+  "corpus_sha256": "a4162f5dd69914e9bcab5ea71e0f7ec39401b5962a380fc577f57aeecab29699",
+  "implementation_sha256": "9f351b6dcef2ce197f5457889265d5b865afbebf980de511f81bd94312b6031c",
+  "options": {
+    "corpus": "evals/capability/general-recall/pilot.task-context.v1.jsonl",
+    "output": "/tmp/veetbot-m33-paired-v6-reranking",
+    "model_policy": "balanced",
+    "maximum_cost_usd": "5",
+    "noise": 1000,
+    "deadline_seconds": 3600,
+    "execution": "runtime",
+    "storage": "postgres",
+    "disposable_database": true,
+    "pipeline": "formation",
+    "formation_policy": "formation@11",
+    "channel": "hybrid",
+    "paths": [
+      "automatic",
+      "deliberate"
+    ],
+    "local_configuration": "evals/observations/general-memory-recall/20261012-local-encoding/configuration.json",
+    "model_directory": "/tmp/veetbot-verified-local-model",
+    "source_recovery": false,
+    "reranking": "relevance",
+    "query_planning": "baseline",
+    "search_planning": "scripted",
+    "formation_bank_directory": "/tmp/veetbot-m33-paired-v6-banks",
+    "semantic_fusion_weight": 0.2
+  },
+  "model": {
+    "provider": "openai",
+    "model": "gpt-5.6-sol",
+    "capabilities": {
+      "native_tool_calling": true,
+      "parallel_tool_calls": true,
+      "images": true,
+      "audio": false,
+      "files": true,
+      "reasoning": "native",
+      "provider_managed_state": true,
+      "explicit_cache_control": true,
+      "structured_output": true,
+      "streaming": true
+    },
+    "limits": {
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "default_output_reserve": 8192,
+      "max_cache_breakpoints": 3,
+      "max_tool_count": 128
+    },
+    "pricing": {
+      "input_per_mtok": "5.00",
+      "cached_input_per_mtok": "0.50",
+      "cache_write_per_mtok": "6.25",
+      "cache_write_1h_per_mtok": null,
+      "output_per_mtok": "30.00",
+      "reasoning_per_mtok": null,
+      "reasoning_priced_separately": false,
+      "source": "docs_snapshot",
+      "effective_at": "2026-08-03T00:00:00Z"
+    },
+    "policy_name": "balanced",
+    "resolved_at": "2026-10-12T20:43:48.677923Z",
+    "display_name": "GPT-5.6 Sol",
+    "reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ]
+  },
+  "setting": "Synthetic scratch PostgreSQL histories with actual worker timing",
+  "cases": [
+    "vehicle-fuel-context",
+    "digestive-breakfast",
+    "inlaw-invitation",
+    "language-study-priority",
+    "pier-material-rationale",
+    "coach-review-cadence",
+    "meeting-time-correction",
+    "rail-arrival-choice",
+    "unknown-seat-preference",
+    "source-door-detail"
+  ],
+  "completed": 20,
+  "shared_budget_journal": "/tmp/veetbot-m33-paired-v6-matrix/provider-costs.jsonl",
+  "actual_cost_usd": "0.21151750",
+  "held_cost_usd": "0.00000",
+  "provider_calls": 20,
+  "finished_at": "2026-10-12T20:57:37.082064+00:00"
+}

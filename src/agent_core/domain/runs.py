@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, PositiveInt, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
 from agent_core.domain.policies import TrustLevel
@@ -142,6 +142,15 @@ class ProviderContinuation(BaseModel):
     valid_for_provider_only: bool = True
 
 
+class RecallWorkBudget(BaseModel):
+    """Content-free, nonrefundable optional preparation allowance for one run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    searches: int = Field(ge=1, le=4)
+    rounds: int = Field(ge=1, le=2)
+    deadline_at: AwareDatetime
+
+
 class RunCheckpoint(BaseModel):
     run_id: UUID
     version: int
@@ -162,6 +171,7 @@ class RunCheckpoint(BaseModel):
     summary_depth: int = Field(default=0, ge=0, le=2)
     compactor_version: str | None = None
     budget_state: dict[str, Any] = Field(default_factory=dict)
+    recall_work: RecallWorkBudget | None = None
     last_event_sequence: int = 0
     provider_continuation: ProviderContinuation | None = None
     provider_pin: ProviderPin | None = None

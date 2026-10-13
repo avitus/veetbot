@@ -447,6 +447,15 @@ Provider work stays outside database transactions. Invalid candidates fail
 individually; source-wide structural failures take the existing audited fallback
 and bounded retry path. Corrections win races with imports and background work.
 
+Formation@11 accepts a named statement subject from an exact source-backed subject
+mention and the candidate's own evidence quote. It preserves that name in the fact;
+it does not rewrite another person's claim as an owner claim. The existing hazard,
+hedging, vacuity and transient-event checks still apply. A shared person subject
+does not make two relationship or preference claims equivalent: People candidates
+use whole-statement comparison before deduplication. Formation@9 keeps its existing
+owner-subject rule. This repairs dropped named facts under the existing formation
+contract; it neither admits new identities nor re-extracts old sources.
+
 ### Versioning, cost, and capacity
 
 Do not modify evaluated `formation@9`, `formation@10`, or `email-semantic@1`

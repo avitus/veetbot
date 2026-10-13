@@ -21,9 +21,76 @@ title: Current Milestone
   Release-bundle validation now recomputes cross-category recall and implicit
   answer lift with exact-version admission and revocation (ADR-0185).
   Source indexing now has default-off configuration and maintenance composition,
-  bound to independently reviewed release dependencies (ADR-0187). Query authority,
-  semantic recall composition, explicit preparation scheduling, historical/People
-  parity and answer-use evidence remain open.
+  bound to independently reviewed release dependencies (ADR-0187). A verified offline
+  CPU adapter now supports restricted inputs without remote disclosure, and local
+  run authority plus explicit preparation are composed on both recall paths
+  (ADR-0188). Governed source recovery now has shared correction fences, source-copy
+  erasure, bounded rendering and default-off composition (ADR-0189). Optional query
+  preparation now reserves a durable run budget before provider work (ADR-0190).
+  A separately admitted relevance reranker has semantic, lexical and linked-record
+  regressions (ADR-0191). The development harness now exercises actual runtime
+  context and tool results with gold-blind inputs and exact-value scoring; source
+  recovery remains distinct from atomic formation (ADR-0192). Bounded deterministic
+  task-context composition is implemented as a default-off ablation (ADR-0193).
+  The PostgreSQL harness now uses actual elapsed worker time, normal People formation
+  and verified paired formation-response banks under one experiment budget
+  (ADR-0194). Sparse development controls complete twenty seeded and twenty
+  formation observations; they expose retrieval and labeling failures and do not
+  pass the release gates. A 400-scenario corpus
+  draft is authored but awaits independent review; explicit factual questions are
+  separated from implicit tasks, with incident and per-family/split coverage checked.
+  The paired pilot exposed a formation@11 defect: named-person statements were
+  rejected by the older owner-subject rule, and separate People claims could merge
+  under one subject. Source-validated named subjects and whole-statement comparison
+  now have regressions without changing formation@9 or People identity admission.
+  Shared rendered recall now caps retained deliberate results plus automatic
+  base/delta recall at twenty items and two thousand tokens per request, with
+  current-source validation and mandatory corrections (ADR-0195).
+  Actual M33 searches now consume the durable run allowance, including sparse
+  fallback, automatic deltas and People discovery (ADR-0196). Exhaustion returns
+  a limitation rather than a false empty search. The paired PostgreSQL pilot
+  completes all five arms: sparse 8/20, hybrid 6/20, reranking 18/20, source recovery
+  6/20 and combined 18/20 correct answers. This development comparison predates
+  the named-People repair and final budget enforcement; it is not activation evidence.
+  Offline publication now requires complete original runtime measurements, settled
+  provider journals, matching formation banks and independently supplied reviews.
+  It recomputes the canonical observations and refuses source or cost discrepancies;
+  actual confirmatory dependency binding and reviewed release inputs remain open.
+  Current People query narrowing now preserves prepared encoder input and all hard
+  restrictions, with identity filtering before sparse and dense limits (ADR-0197).
+  Its shared contracts and PostgreSQL checks pass; comparative release evidence
+  remains pending.
+  Live development failures remain
+  retained, including People-path ranking and incomplete formation. Historical
+  semantic revisions now have shared visibility, invalidation and dated People
+  contracts plus an actual PostgreSQL tool/reader-context regression (ADR-0200).
+  Reviewed held-out formation-to-answer evidence remains open. Runtime assembly now records one bounded combined ordering for
+  scoring, with unknown or truncated evidence refusing certification. The six-arm
+  task-context pilot completes 120 observations: reader-planned search answers
+  16/20 versus reranking with a scripted query at 10/20. All four remaining
+  reader-planned failures exclude correctly formed claims through guessed hard
+  type filters. The model-facing tool now uses soft type hints (ADR-0198), with
+  legacy explicit filters preserved. The frozen pilot predates that repair and
+  exceeds the exploratory reader-latency ceiling in two arms.
+  A separate PostgreSQL load measurement retains 240 retrieval samples across
+  100, 1,000, 10,000 and 100,000 synthetic distractors. Every sample ranks and
+  renders the older stronger match; fixed vectors exclude encoder/model costs.
+  This measures database/retriever load, not end-to-end release latency.
+  The owner approved verified-input release binding (ADR-0199). Its implementation
+  preserves original observations and rejects changed evaluated inputs across a
+  merge. The confirmatory runner now captures deployment composition, verified
+  model assets, actual PostgreSQL schema and frozen controls before held-out task
+  parsing. Production startup binds the same schema fingerprint.
+  Per-observation confirmation now binds all twelve captured runtime variants and
+  independent principal attribution before model work. Confirmation preserves the production
+  model pin and chat reasoning settings and verifies the actual checkpoint's reader
+  digest; the earlier diagnostic reader mode cannot supply confirmation.
+  Collection and publication reject unbound or retagged development rows.
+  The owner authorized one USD 100
+  aggregate cap for the 4,800-observation confirmation; one journal covers every
+  variant and interrupted attempts retain their rows and uncertain reservations.
+  The corpus review, actual confirmation, end-to-end operational evidence and
+  reviewed release publication remain outstanding. No paid confirmation has run.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
 

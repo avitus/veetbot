@@ -211,3 +211,22 @@ implementation without one.
 - [ADR-0186 — Persistent dreaming review sign-in (Proposed; implementation authorized)](0186-dreaming-review-session.md)
 
 - [ADR-0187 — Semantic index production composition (Accepted mechanism; activation gated)](0187-semantic-index-production-composition.md)
+
+- [ADR-0188 — Local semantic embeddings (Accepted mechanism; activation gated)](0188-local-semantic-embeddings.md)
+- [ADR-0189 — Governed memory source recovery (Implementation in progress; activation gated)](0189-governed-memory-source-recovery.md)
+
+- [ADR-0190 — Durable run recall preparation budget (Implementation in progress; activation gated)](0190-run-recall-work-budget.md)
+
+- [ADR-0191: Separately admitted relevance reranking](0191-experimental-relevance-reranking.md)
+
+- [ADR-0192: Distinguish recovered source evidence from formed facts](0192-recovered-source-evaluation.md)
+
+- [ADR-0193: Bounded task-context query planning](0193-bounded-task-context-query.md)
+- [ADR-0194: Paired formation response banks](0194-paired-formation-response-banks.md)
+- [ADR-0195: Shared recall context budget](0195-shared-recall-context-budget.md)
+- [ADR-0196: Run recall execution budget](0196-run-recall-execution-budget.md)
+- [ADR-0197: People semantic query narrowing](0197-people-semantic-query-narrowing.md)
+- [ADR-0198: Planned recall type hints](0198-planned-recall-type-hints.md)
+- [ADR-0199: Recall evidence release binding](0199-recall-evidence-release-binding.md)
+
+- [ADR-0200: Historical semantic revisions](0200-historical-semantic-revisions.md)

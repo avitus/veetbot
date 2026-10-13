@@ -25,14 +25,24 @@ from typer.core import TyperGroup
 
 from agent_core import __version__
 from agent_core.api import create_app
+from agent_core.bootstrap import _provider_adapters as _provider_adapters
+
+# Offline evaluators use the existing CLI entry's bootstrap-owned factories.
 from agent_core.bootstrap import (
-    build,
+    build as build,
+)
+from agent_core.bootstrap import (
     build_call_worker,
     build_notification_worker,
     build_schedule_worker,
     build_surface_worker,
     serve_execution_service,
 )
+from agent_core.bootstrap import fixed_clock as fixed_clock
+from agent_core.bootstrap import local_embedding_provider as local_embedding_provider
+from agent_core.bootstrap import scripted_provider as scripted_provider
+from agent_core.bootstrap import sequence_ids as sequence_ids
+from agent_core.bootstrap import system_clock as system_clock
 from agent_core.cli.people import app as people_app
 from agent_core.cli.people import configure as configure_people
 from agent_core.config import ConfigurationError

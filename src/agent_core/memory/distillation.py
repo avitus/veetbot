@@ -47,6 +47,7 @@ from agent_core.domain.messages import (
     TextPart,
     UserMessage,
 )
+from agent_core.domain.people import is_group_or_service_name, is_non_person_reference
 from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.equivalence import (
@@ -626,6 +627,8 @@ _SCHEDULED_OCCASION = re.compile(
 def _canonical_provider_statement(
     statement: str,
     derivation: MemoryDerivation,
+    *,
+    named_subjects: Sequence[str] = (),
 ) -> str:
     """Accept a canonical third-person statement whose hedging matches its derivation.
 
@@ -640,16 +643,28 @@ def _canonical_provider_statement(
     compact = re.sub(r"^the\s+user(?=\s)", "User", compact, flags=re.IGNORECASE)
     compact = re.sub(r"^the\s+user's(?=\s)", "The user's", compact, flags=re.IGNORECASE)
     compact = re.sub(r"^user(?=['\s])", "User", compact, flags=re.IGNORECASE)
+    checked = compact
     if _CANONICAL_USER_STATEMENT.match(compact) is None:
-        raise ValueError("provider statement has no canonical user subject")
+        # Formation@11 may name the person the source actually describes. Use
+        # the legacy subject only to apply the same content/hedging rules; the
+        # stored statement must keep the named subject, never become an owner fact.
+        for name in sorted(named_subjects, key=len, reverse=True):
+            if compact.startswith(name + " "):
+                checked = "User" + compact[len(name) :]
+                break
+            if compact.startswith((name + "'s ", name + "\u2019s ")):
+                checked = "User's " + compact[len(name) + 3 :]
+                break
+        else:
+            raise ValueError("provider statement has no canonical user subject")
     # A statement with no object ("an unspecified activity") or a completed
     # one-off event ("did the dishes for an hour") says nothing recallable
     # about the user; both are counted as rejections, never stored.
-    if _VACUOUS_STATEMENT.search(compact) is not None:
+    if _VACUOUS_STATEMENT.search(checked) is not None:
         raise ValueError("provider statement has no recallable content")
     if derivation is MemoryDerivation.DIRECT and (
-        _TRANSIENT_EVENT.match(compact) is not None
-        or _SCHEDULED_OCCASION.match(compact) is not None
+        _TRANSIENT_EVENT.match(checked) is not None
+        or _SCHEDULED_OCCASION.match(checked) is not None
     ):
         raise ValueError("provider statement records a transient event")
     hedged = _UNCERTAINTY_LANGUAGE.search(compact) is not None
@@ -665,6 +680,7 @@ def _normalize_provider_candidate(
     *,
     by_sequence: dict[int, EventEnvelope],
     scope: str,
+    named_subjects: Sequence[str] = (),
 ) -> MemoryCandidate:
     """Apply formation policy locally to one grounded semantic proposal.
 
@@ -699,7 +715,9 @@ def _normalize_provider_candidate(
         # would still say "User drives their BMW".
         raise ValueError("distilled candidate failed local validation")
 
-    statement = _canonical_provider_statement(candidate.statement, candidate.derivation)
+    statement = _canonical_provider_statement(
+        candidate.statement, candidate.derivation, named_subjects=named_subjects
+    )
     if (
         candidate.derivation is MemoryDerivation.DIRECT
         and candidate.claim_kind is MemoryClaimKind.HABIT
@@ -747,6 +765,7 @@ def _normalize_distilled_candidate(
     *,
     by_sequence: dict[int, EventEnvelope],
     scope: str,
+    named_subjects: Sequence[str] = (),
 ) -> MemoryCandidate:
     belief_type = _BELIEF_TYPE_BY_CLAIM_KIND[candidate.claim_kind]
     return _normalize_provider_candidate(
@@ -767,6 +786,7 @@ def _normalize_distilled_candidate(
         ),
         by_sequence=by_sequence,
         scope=scope,
+        named_subjects=named_subjects,
     )
 
 
@@ -1072,6 +1092,12 @@ def _candidates_semantically_duplicate(
         return True
     if not statements_compatible(left.statement, right.statement):
         return False
+    if left.people is not None or right.people is not None:
+        # A person is the subject of many independent claims. The older
+        # owner-only shortcut treats a relationship/preference key as the claim
+        # itself, which would discard a spouse after retaining a sibling fact.
+        # People proposals must satisfy the existing whole-statement comparison.
+        return _statements_agree_across_kinds(left.statement, right.statement)
     normalized_left_subject = re.sub(
         r"^(?:the\s+)?users?['\u2019]s?\s+",
         "",
@@ -1938,7 +1964,30 @@ class PeopleAssistedCandidateExtractor(NemoriAssistedCandidateExtractor):
     def _normalize_candidate(
         candidate: _DistilledCandidate, *, by_sequence: dict[int, EventEnvelope], scope: str
     ) -> MemoryCandidate:
-        result = _normalize_distilled_candidate(candidate, by_sequence=by_sequence, scope=scope)
+        names = []
+        if isinstance(candidate, _PeopleDistilledCandidate) and candidate.people is not None:
+            for mention in candidate.people.mentions:
+                source = by_sequence.get(mention.source_event_id)
+                if (
+                    source is not None
+                    and mention.source_event_id in candidate.source_event_ids
+                    and mention.role == "subject"
+                    and mention.identifier_kind == "name"
+                    and mention.identifier_value == mention.display_name
+                    and _event_text(source)[mention.start : mention.end] == mention.text
+                    and re.search(rf"(?<!\w){re.escape(mention.display_name)}(?!\w)", mention.text)
+                    and any(
+                        span.source_event_id == mention.source_event_id
+                        and re.search(rf"(?<!\w){re.escape(mention.display_name)}(?!\w)", span.text)
+                        for span in candidate.evidence_spans
+                    )
+                    and not is_non_person_reference(mention.display_name)
+                    and not is_group_or_service_name(mention.display_name)
+                ):
+                    names.append(mention.display_name)
+        result = _normalize_distilled_candidate(
+            candidate, by_sequence=by_sequence, scope=scope, named_subjects=names
+        )
         if isinstance(candidate, _PeopleDistilledCandidate):
             result = result.model_copy(update={"people": candidate.people})
         return result
@@ -1951,6 +2000,9 @@ class PeopleAssistedCandidateExtractor(NemoriAssistedCandidateExtractor):
         return instructions + (
             " For formation@11, preserve useful facts about named people, their "
             "relationships, and past interactions. "
+            "A statement about a named person may begin with that exact source name "
+            "or its possessive when its People mention has role subject. Keep that "
+            "person as the subject; never reassign their claim to the user. "
             "Attach source-local people evidence to those atomic candidates, and null "
             "to other candidates. "
             "Use only exact source spans with zero-based Unicode character start/end "

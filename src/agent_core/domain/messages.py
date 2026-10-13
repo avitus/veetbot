@@ -92,6 +92,55 @@ class ToolCallItem(BaseModel):
     source_event_sequence: int | None = Field(default=None, ge=1)
 
 
+class MemoryRecallUsage(BaseModel):
+    """Builtin-produced counts bound to one exact memory presentation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    trace_id: UUID | None = None
+    tokens: int = Field(ge=0, le=2000)
+    items: int = Field(ge=0, le=20)
+    content_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    ranked_ids: tuple[UUID, ...] | None = Field(default=None, max_length=20)
+
+    @field_validator("ranked_ids")
+    @classmethod
+    def distinct_ranks(cls, value: tuple[UUID, ...] | None) -> tuple[UUID, ...] | None:
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("Recall ranking repeats an original")
+        return value
+
+
+class RecallRankingBlock(BaseModel):
+    """One admitted whole block's observed pre-render ranking prefix."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    trace_id: UUID
+    content_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    ranked_ids: tuple[UUID, ...] = Field(max_length=20)
+
+
+class ContextRecallRanking(BaseModel):
+    """Content-free assembly observation, never evidence or a visibility grant."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    policy: Literal["assembly-priority@1"] = "assembly-priority@1"
+    blocks: tuple[RecallRankingBlock, ...] = Field(max_length=4)
+    ranked_ids: tuple[UUID, ...] = Field(max_length=20)
+
+    @model_validator(mode="after")
+    def observed_order(self) -> ContextRecallRanking:
+        expected = tuple(dict.fromkeys(key for block in self.blocks for key in block.ranked_ids))[
+            :20
+        ]
+        if (
+            self.ranked_ids != expected
+            or len({block.trace_id for block in self.blocks}) != len(self.blocks)
+            or any(len(set(block.ranked_ids)) != len(block.ranked_ids) for block in self.blocks)
+        ):
+            raise ValueError("Recall assembly ordering is inconsistent")
+        return self
+
+
 class ToolResultItem(BaseModel):
     kind: Literal["tool_result"] = "tool_result"
     call_id: str
@@ -99,6 +148,7 @@ class ToolResultItem(BaseModel):
     # Canonical content remains available to source receipts and machine callers.
     # Context assembly selects this persisted, same-trust presentation when set.
     context_content: list[ContentPart] | None = None
+    memory_recall: MemoryRecallUsage | None = None
     is_error: bool = False
     trust: TrustLevel = TrustLevel.INTERNAL_TOOL
     source_event_sequence: int | None = Field(default=None, ge=1)
@@ -301,6 +351,7 @@ class ModelRequest(BaseModel):
     temperature: float | None = None
     maximum_output_tokens: int | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
+    recall_ranking: ContextRecallRanking | None = Field(default=None, exclude=True)
     cache_hints: CacheHints | None = None
     timeout_seconds: float = 600.0
     stream_idle_seconds: float = 60.0

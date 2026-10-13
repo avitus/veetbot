@@ -2525,20 +2525,58 @@ milestones:
     design: docs/plan/general-memory-recall.md
     adr: docs/adr/0178-general-memory-recall.md
     gates_registered: 12
-    implementation_status: source_index_maintenance_composed
+    implementation_status: runtime_evaluation_and_reviewed_release_evidence_in_progress
     implementation_evidence:
       - tests/contract/test_runtime_semantic_queries_contract.py
       - tests/contract/test_context_recall_freshness.py
       - tests/unit/test_context_recall_cache.py
       - tests/unit/test_general_recall_release.py
       - tests/unit/test_semantic_index_composition.py
+      - tests/unit/test_local_semantic_composition.py
+      - tests/contract/test_local_query_authority.py
+      - tests/integration/test_local_semantic_composition_postgres.py
       - tests/integration/test_semantic_index_composition_postgres.py
       - tests/integration/test_semantic_runtime_postgres.py
+      - tests/contract/test_bounded_source_recovery.py
+      - tests/contract/test_memory_source_recovery.py
+      - tests/integration/test_memory_source_recovery_postgres.py
+      - tests/unit/test_general_recall_corpus.py
+      - tests/unit/test_general_recall_execution.py
+      - tests/unit/test_runtime_recall_preparation.py
+      - tests/contract/test_semantic_recall.py
+      - tests/unit/test_general_recall_stages.py
+      - tests/unit/test_general_recall_source_scoring.py
+      - tests/contract/test_recall_stage_observation.py
+      - tests/integration/test_general_recall_runtime_postgres.py
+      - tests/unit/test_general_recall_database.py
+      - tests/unit/test_task_context_query.py
+      - tests/unit/test_general_recall_formation_bank.py
+      - tests/unit/test_general_recall_experiment.py
+      - tests/unit/test_people_named_distillation.py
+      - tests/unit/test_context_memory_budget.py
+      - tests/contract/test_retained_recall.py
+      - tests/unit/test_run_recall_execution_budget.py
+      - tests/unit/test_general_recall_publication.py
+      - tests/unit/test_general_recall_collection.py
+      - tests/unit/test_general_recall_confirmation.py
+      - tests/unit/test_general_recall_preflight.py
+      - tests/unit/test_general_recall_capture.py
+      - tests/unit/test_general_recall_confirmatory.py
+      - tests/integration/test_general_recall_capture_postgres.py
+      - tests/unit/test_general_recall_journal.py
+      - tests/contract/test_people_semantic_queries.py
+      - tests/unit/test_recall_release_binding.py
+      - tests/contract/test_historical_semantic_recall.py
+      - tests/integration/test_historical_semantic_postgres.py
     diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
     limitations:
-      - seeded retrieval is not formation, answer-use or held-out release evidence
-      - semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
-      - trusted query authority, semantic recall composition, query scheduling, historical/People parity and real release observations/publication remain open
+      - Seeded retrieval is not formation, answer-use or held-out release evidence
+      - PostgreSQL development comparisons retain 100 original observations and 120 task-context variants; reader-planned search answers 16 of 20 but predates the type-hint repair and cannot certify release
+      - The 400-scenario corpus authoring draft is unreviewed; no independence receipt exists
+      - Semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
+      - Historical semantic revisions, verified-input release binding and confirmatory dependency capture have mechanism checks; comparative People evidence, end-to-end load budgets and reviewed release observations/publication remain open
+      - The owner approved one USD 100 aggregate cap for 4800 confirmatory observations; the runner retains failed attempts and no paid confirmation has run
+      - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder
     authorized_scope:
       - cross-category retrieval and implicit-use evaluation with frozen controls
       - relevance before candidate limits with persistence parity
@@ -2549,8 +2587,8 @@ milestones:
       - external memory services, arbitrary graph inference, training and RL
       - automatic historical re-extraction and unattended dreaming activation
     open_items:
-      - complete the staged implementation and comparative activation evidence
-      - authorized PR review, hosted CI and separately authorized production delivery
+      - Complete the staged implementation and comparative activation evidence
+      - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 # Open work that no active milestone owns: owner-only steps of non-milestone
 # ADRs, and specification-versus-code gaps found in completed milestones.

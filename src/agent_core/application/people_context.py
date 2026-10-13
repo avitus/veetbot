@@ -20,6 +20,7 @@ from agent_core.domain.memory import (
     Sensitivity,
     TracedPersonContext,
 )
+from agent_core.domain.messages import MemoryRecallUsage
 from agent_core.domain.people import (
     OrganizationReference,
     PeopleCommitment,
@@ -33,6 +34,7 @@ from agent_core.domain.people import (
     is_non_person_reference,
     referenced_people,
 )
+from agent_core.domain.recall_execution import recall_search
 from agent_core.ports.people_runtime import PeopleRecall
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
@@ -164,7 +166,13 @@ class PeopleContextService:
                 update={
                     "include_ids": query.include_ids
                     if include_ordinary
-                    else tuple(sorted(belief_ids)[:1000]),
+                    else tuple(
+                        sorted(
+                            belief_ids
+                            if query.include_ids is None
+                            else belief_ids & set(query.include_ids)
+                        )[:1000]
+                    ),
                     "expand_ids": tuple(sorted(belief_ids)[:1000]) if include_ordinary else (),
                     "subjects": [],
                     "people_scope": tuple(person_ids),
@@ -403,6 +411,14 @@ class PeopleContextService:
             measure_rendered_tokens=measure_rendered_tokens,
         )
 
+    async def validate_retained(
+        self, usage: MemoryRecallUsage, *, session_id: UUID, run_id: UUID
+    ) -> bool:
+        validator = getattr(self._retriever, "validate_retained", None)
+        return bool(
+            callable(validator) and await validator(usage, session_id=session_id, run_id=run_id)
+        )
+
     async def corrections(
         self, *, snapshot_id: UUID, watermark: int, as_of: datetime | None = None
     ) -> list[MemoryCorrection]:
@@ -432,16 +448,22 @@ class PeopleAwareMemoryRetriever:
         surface_id: str = "private",
         measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult:
-        return await self._service.automatic_recall(
-            self._principal,
-            query,
-            session_id=session_id,
-            run_id=run_id,
-            turn_id=turn_id,
-            moment=moment,
-            surface_id=surface_id,
-            measure_rendered_tokens=measure_rendered_tokens,
-        )
+        async with recall_search(query, session_id=session_id, run_id=run_id):
+            return await self._service.automatic_recall(
+                self._principal,
+                query,
+                session_id=session_id,
+                run_id=run_id,
+                turn_id=turn_id,
+                moment=moment,
+                surface_id=surface_id,
+                measure_rendered_tokens=measure_rendered_tokens,
+            )
+
+    async def validate_retained(
+        self, usage: MemoryRecallUsage, *, session_id: UUID, run_id: UUID
+    ) -> bool:
+        return await self._service.validate_retained(usage, session_id=session_id, run_id=run_id)
 
     async def corrections(
         self, *, snapshot_id: UUID, watermark: int, as_of: datetime | None = None

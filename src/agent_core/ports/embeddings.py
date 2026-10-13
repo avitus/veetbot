@@ -7,3 +7,7 @@ from agent_core.domain.embeddings import EmbeddingRequest, EmbeddingResponse
 
 class EmbeddingProvider(Protocol):
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse: ...
+
+
+class LocalEmbeddingProvider(EmbeddingProvider, Protocol):
+    async def close(self) -> None: ...

@@ -7,7 +7,7 @@ import logging
 import os
 import signal
 import socket
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -53,6 +53,7 @@ from agent_core.adapters.determinism import (
     SequenceIdFactory,
     SystemClock,
     UUID7RequestIdFactory,
+    elapsed_time,
 )
 from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
@@ -442,12 +443,15 @@ from agent_core.domain.execution import (
     EgressPolicy,
     ResourceLimits,
 )
+from agent_core.domain.local_embeddings import LocalEmbeddingConfig
 from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
     Capability,
     FakeModelScript,
+    ModelAttempt,
     ModelEvent,
+    ModelRequest,
     ReasoningDeltaEvent,
     ReasoningEffort,
     ResolvedModel,
@@ -543,6 +547,7 @@ from agent_core.memory.provider_extraction import (
     ProviderAssistedCandidateExtractor,
     provider_extraction_evidence_matches,
 )
+from agent_core.memory.recall_preparation import SemanticRecallPreparation
 from agent_core.memory.reconsolidation_evidence import bind_evidence
 from agent_core.memory.reconsolidation_policy import local_egress_policy
 from agent_core.memory.reconsolidation_worker import ReconsolidationPass
@@ -551,7 +556,12 @@ from agent_core.memory.retrieval import (
     EventEpisodeSearch,
     HybridMemoryRetriever,
 )
-from agent_core.memory.semantic_deployment import compose_indexing
+from agent_core.memory.semantic_deployment import (
+    SemanticCompositionInputs,
+    SemanticServices,
+    compose_indexing,
+    configuration_digest,
+)
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
@@ -577,6 +587,7 @@ from agent_core.ports.browser_upload import BrowserImageUploader
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
+from agent_core.ports.embeddings import LocalEmbeddingProvider as LocalEmbeddingPort
 from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
@@ -797,9 +808,11 @@ class Composition:
     people_erasure: PeopleErasureService
     memory_retriever: HybridMemoryRetriever
     memory_profiles: MemoryProfiles
+    recall_composition: SemanticCompositionInputs
     folder_profiles: FolderProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
+    semantic_services: SemanticServices | None = None
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
     judgment_provider: JudgmentProvider | None = None
@@ -1081,6 +1094,25 @@ def random_ids() -> IdFactory:
     return RandomIdFactory()
 
 
+def fixed_clock(at: datetime) -> FixedClock:
+    return FixedClock(at)
+
+
+def sequence_ids(values: Iterable[UUID]) -> SequenceIdFactory:
+    return SequenceIdFactory(values)
+
+
+def scripted_provider(script: FakeModelScript, clock: Clock) -> ModelProvider:
+    return FakeModelProvider(script, clock)
+
+
+def local_embedding_provider(path: Path, config: LocalEmbeddingConfig) -> LocalEmbeddingPort:
+    # Disabled deployments never import or initialize the native runtime.
+    from agent_core.adapters.models.local_embeddings import LocalEmbeddingProvider
+
+    return LocalEmbeddingProvider(path, config)
+
+
 def default_fake_script() -> FakeModelScript:
     return FakeModelScript(
         turns=[
@@ -1124,6 +1156,7 @@ def _memory_uow_repositories(
     )
     mcp_servers = mcp_servers or InMemoryMCPServerRepository()
     memories = memories or InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction()))
+    events.bind_memory_sources(memories._reconsolidation_index)
     episodes = episodes or InMemoryIntegratedEpisodeStore()
     people = InMemoryPeopleStore(
         clock,
@@ -1131,6 +1164,7 @@ def _memory_uow_repositories(
         memory_guard=memories._transaction.owner,
         memory_index=memories._reconsolidation_index,
     )
+    memories.bind_people(people)
     reconsolidation = InMemoryReconsolidationStore(
         memories,
         RandomIdFactory(),
@@ -1263,6 +1297,7 @@ def _postgres_repository_factory(
         memories = PostgresMemoryStore(session, clock)
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
+        memories.bind_people(people)
         reconsolidation = PostgresReconsolidationStore(
             session,
             ids,
@@ -2419,6 +2454,7 @@ async def build_surface_worker(
 async def _compose(
     *,
     storage: Literal["memory", "postgres"],
+    recall_schema_sha256: str | None,
     settings: Settings,
     agent: AgentSpec,
     email_budget_limits: EmailBudgetLimits,
@@ -2487,6 +2523,7 @@ async def _compose(
     device_invocation_poll_seconds: float,
     device_ingest_daily_cap: int,
     surface_limits: SurfaceLimits,
+    recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -2620,9 +2657,6 @@ async def _compose(
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
-    query_former = DeterministicQueryFormer(
-        principal, candidate_selection=memory_profiles.retrieval.candidate_selection
-    )
     schedule_service = ScheduleService(
         uow_factory=uow_factory,
         clock=clock,
@@ -3333,28 +3367,76 @@ async def _compose(
             egress_policy=local_egress_policy(settings.memory_reconsolidation_residency_provider),
             owner_review=True,
         )
+
+    registry_identity = {
+        "policies": model_router.registry.policies.model_dump(mode="json"),
+        "profiles": {
+            name: {
+                "profile_hash": profile.profile_hash,
+                "registry_version": profile.registry_version,
+                "models": [
+                    {
+                        "id": model.model_id,
+                        "aliases": model.aliases,
+                        "limits": model.limits.model_dump(mode="json"),
+                        "pricing": model.pricing.model_dump(mode="json"),
+                        "reasoning_efforts": list(model.reasoning_efforts),
+                    }
+                    for model in profile.models
+                ],
+            }
+            for name, profile in model_router.registry.profiles.items()
+        },
+    }
+    recall_composition = SemanticCompositionInputs(
+        configuration={
+            "policy_version": ruleset.policy_version,
+            "agent": agent.model_dump(mode="json"),
+            "principal": {
+                "tenant": principal.tenant_id,
+                "owner": principal.principal_id,
+                "scopes": sorted(principal.scopes),
+                "roles": sorted(principal.roles),
+            },
+            "context": dict(context_config),
+            "memory": memory_profiles.model_dump(mode="json"),
+            "storage": storage,
+            "schema_sha256": recall_schema_sha256,
+            "people_enabled": settings.people_enabled,
+            "reviewed_dreaming": settings.memory_dreaming_review_enabled,
+            "unattended_dreaming": settings.memory_reconsolidation_enabled,
+            "query_authority": "local-reviewed-reader@1;remote-withheld",
+            "query_preparation": "explicit-runtime@1",
+        },
+        formation={
+            "policy": memory_policy_version,
+            "profiles": memory_profiles.formation.model_dump(mode="json"),
+            "registry": registry_identity,
+            "default": memory_default_choice.model_dump(mode="json"),
+            "alternatives": [
+                option.model_dump(mode="json") for option in memory_alternative_options
+            ],
+            "upstream_build": evidence_build_ref,
+            "upstream_corpus": evidence_corpus_sha256,
+        },
+        reader={
+            "registry": registry_identity,
+            "catalog": model_settings_catalog.model_dump(mode="json"),
+        },
+    )
+    if recall_capture is not None:
+        try:
+            recall_capture(recall_composition)
+            raise ConfigurationError("Recall capture callback must stop composition")
+        finally:
+            # The complete-graph cleanup below has not been entered yet.
+            with suppress(BaseException):
+                await sandbox_manager.close()
+            for provider in effective_providers.values():
+                with suppress(BaseException):
+                    await provider.close()
     semantic_index_pass = None
     if settings.memory_semantic_index_enabled:
-        registry_identity = {
-            "policies": model_router.registry.policies.model_dump(mode="json"),
-            "profiles": {
-                name: {
-                    "profile_hash": profile.profile_hash,
-                    "registry_version": profile.registry_version,
-                    "models": [
-                        {
-                            "id": model.model_id,
-                            "aliases": model.aliases,
-                            "limits": model.limits.model_dump(mode="json"),
-                            "pricing": model.pricing.model_dump(mode="json"),
-                            "reasoning_efforts": list(model.reasoning_efforts),
-                        }
-                        for model in profile.models
-                    ],
-                }
-                for name, profile in model_router.registry.profiles.items()
-            },
-        }
         semantic_index_pass = await compose_indexing(
             root=REPOSITORY_ROOT,
             settings=settings,
@@ -3362,46 +3444,23 @@ async def _compose(
             factory=uow_factory,
             clock=clock,
             credentials=credential_resolver,
-            configuration={
-                "policy_version": ruleset.policy_version,
-                "agent": agent.model_dump(mode="json"),
-                "principal": {
-                    "tenant": principal.tenant_id,
-                    "owner": principal.principal_id,
-                    "scopes": sorted(principal.scopes),
-                    "roles": sorted(principal.roles),
-                },
-                "context": dict(context_config),
-                "memory": memory_profiles.model_dump(mode="json"),
-                "storage": storage,
-                "people_enabled": settings.people_enabled,
-                "reviewed_dreaming": settings.memory_dreaming_review_enabled,
-                "unattended_dreaming": settings.memory_reconsolidation_enabled,
-                "query_authority": "withheld",
-                "query_preparation": "disabled",
-            },
-            formation={
-                "policy": memory_policy_version,
-                "profiles": memory_profiles.formation.model_dump(mode="json"),
-                "registry": registry_identity,
-                "default": memory_default_choice.model_dump(mode="json"),
-                "alternatives": [
-                    option.model_dump(mode="json") for option in memory_alternative_options
-                ],
-                "upstream_build": evidence_build_ref,
-                "upstream_corpus": evidence_corpus_sha256,
-            },
-            reader={
-                "registry": registry_identity,
-                "catalog": model_settings_catalog.model_dump(mode="json"),
-            },
+            configuration=recall_composition.configuration,
+            formation=recall_composition.formation,
+            reader=recall_composition.reader,
             provider_factory=OpenAIEmbeddingProvider,
+            local_provider_factory=local_embedding_provider,
         )
 
     async def sweep_semantic_index() -> int:
         assert semantic_index_pass is not None
-        return (await semantic_index_pass.run_slice()).indexed
+        return (await semantic_index_pass.index.run_slice()).indexed
 
+    query_former = DeterministicQueryFormer(
+        principal,
+        candidate_selection=memory_profiles.retrieval.candidate_selection,
+        planning=memory_profiles.retrieval.query_planning,
+        admitted=None if semantic_index_pass is None else semantic_index_pass.admitted,
+    )
     memory_retriever = HybridMemoryRetriever(
         uow_factory,
         clock,
@@ -3411,8 +3470,15 @@ async def _compose(
         trace_retention=memory_profiles.traces,
         reconsolidation_enabled=True if settings.memory_dreaming_review_enabled else recon_admitted,
         reconsolidation_owner_approved_only=settings.memory_dreaming_review_enabled,
+        runtime_semantic_queries=None
+        if semantic_index_pass is None
+        else semantic_index_pass.queries,
+        source_recovery=None
+        if semantic_index_pass is None
+        else semantic_index_pass.source_recovery,
+        reranking_admitted=None if semantic_index_pass is None else semantic_index_pass.admitted,
     )
-    registry.register(MemorySearchTool(memory_retriever))
+    registry.register(MemorySearchTool(memory_retriever, model_planning=True))
     people_erasure = PeopleErasureService(uow_factory, clock)
     people_identity = PeopleIdentityService(uow_factory, clock, ids)
     people_duplicates = (
@@ -4134,6 +4200,7 @@ async def _compose(
             model_providers=effective_providers,
             budget_factory=lambda lease: UnitOfWorkBudgetLedger(uow_factory, clock, lease),
             clock=clock,
+            recall_elapsed_time=elapsed_time,
             ids=ids,
             dispatch_tools=pipeline.dispatch,
             add_open_question=working_state.add_question,
@@ -4154,6 +4221,11 @@ async def _compose(
             typed_task=is_email_task,
             validate_browser_binding=_scheduled_browser_binding_validator(browser_provider),
             model_settings=model_settings_catalog,
+            prepare_recall=(
+                SemanticRecallPreparation(uow_factory, principal, memory_retriever, query_former)
+                if semantic_index_pass is not None and semantic_index_pass.queries is not None
+                else None
+            ),
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -4778,6 +4850,8 @@ async def _compose(
                 memory=memory_service,
                 people_erasure=people_erasure,
                 memory_retriever=memory_retriever,
+                semantic_services=semantic_index_pass,
+                recall_composition=recall_composition,
                 memory_profiles=memory_profiles,
                 folder_profiles=folder_profiles,
                 folder_proposals=folder_proposal_pass,
@@ -4790,6 +4864,9 @@ async def _compose(
             list(effective_providers.values()),
         )
     except BaseException:
+        if semantic_index_pass is not None:
+            with suppress(BaseException):
+                await semantic_index_pass.close()
         if mcp_runtime is not None:
             with suppress(BaseException):
                 await mcp_runtime.close()
@@ -4812,10 +4889,27 @@ def _sdk_mcp_clients(http_proxy_url: str | None = None) -> MCPClientFactory:
     return SDKMCPClientFactory(http_proxy_url=http_proxy_url)
 
 
+class _ModelProviderDescription:
+    """Availability metadata for a configuration capture; never a callable backend."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def stream(
+        self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+    ) -> AsyncIterator[ModelEvent]:
+        raise ConfigurationError("Metadata-only composition cannot execute model requests")
+
+    async def close(self) -> None:
+        return
+
+
 def _provider_adapters(
     settings: Settings,
     registry: ProviderRegistry,
     attachment_resolver: AttachmentResolver | None = None,
+    *,
+    describe_only: bool = False,
 ) -> dict[str, ModelProvider]:
     # A provider SDK loads only in a role that constructs model providers, not
     # in every service that starts by importing this module.
@@ -4823,6 +4917,19 @@ def _provider_adapters(
     for profile_name, loaded in registry.profiles.items():
         profile = loaded.document
         credential = settings.credentials.get(profile_name)
+        if describe_only:
+            if profile.adapter not in {"openai", "anthropic", "chat_completions"}:
+                raise ConfigurationError(f"adapter {profile.adapter!r} is not constructible")
+            if profile.adapter in providers:
+                raise ConfigurationError(
+                    f"multiple enabled profiles select adapter {profile.adapter!r}"
+                )
+            providers[profile.adapter] = (
+                MissingCredentialProvider(profile.adapter)
+                if credential is None and profile.adapter in {"openai", "anthropic"}
+                else _ModelProviderDescription(profile.adapter)
+            )
+            continue
         api_key = None if credential is None else credential.get_secret_value()
         if profile.adapter == "openai":
             from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
@@ -5166,6 +5273,8 @@ async def build(
     memory_people_evaluation_mode: bool = False,
     memory_legacy_retrieval_control: bool = False,
     memory_reasoning_effort: ReasoningEffort | None = None,
+    model_metadata_only: bool = False,
+    recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
     service_logging: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
@@ -5174,6 +5283,8 @@ async def build(
     effective_settings = settings or load_settings()
     _configure_service_logging(effective_settings, enabled=service_logging)
     validate_settings(effective_settings)
+    if recall_capture is not None and not model_metadata_only:
+        raise ConfigurationError("Recall capture requires model metadata-only mode")
     if (
         (
             memory_provider_evaluation_mode
@@ -5557,6 +5668,7 @@ async def build(
             update={"version": _content_addressed_agent_version(agent)}, deep=True
         )
     engine = None
+    recall_schema_sha256 = None
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
     media_provider: MediaGenerationProvider | None = None
@@ -5623,6 +5735,10 @@ async def build(
             )
             engine = create_engine(effective_settings.database_url)
             await assert_schema_revision(engine)
+            if effective_settings.memory_semantic_index_enabled or model_metadata_only:
+                from agent_core.adapters.persistence.recall_schema import capture_recall_schema
+
+                recall_schema_sha256 = configuration_digest(await capture_recall_schema(engine))
             uow_factory = cast(
                 UnitOfWorkFactory,
                 PostgresUnitOfWorkFactory(
@@ -5650,8 +5766,10 @@ async def build(
             principal=effective_principal,
             clock=effective_clock,
         )
-        provider_adapters = _provider_adapters(
-            effective_settings, provider_registry, attachment_resolver
+        provider_adapters = (
+            _provider_adapters(effective_settings, provider_registry, describe_only=True)
+            if model_metadata_only
+            else _provider_adapters(effective_settings, provider_registry, attachment_resolver)
         )
         effective_credential_resolver = credential_resolver or MappingCredentialResolver(
             {
@@ -5779,6 +5897,7 @@ async def build(
                 one_click_transport = HttpOneClickTransport(unsubscribe_proxy.url)
         composition, model_providers = await _compose(
             storage=storage,
+            recall_schema_sha256=recall_schema_sha256,
             settings=effective_settings,
             agent=agent,
             email_budget_limits=email_budget_limits,
@@ -5851,6 +5970,7 @@ async def build(
             device_invocation_poll_seconds=float(device_config["invocation_poll_seconds"]),
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
             surface_limits=surface_limits,
+            recall_capture=recall_capture,
         )
         composition = replace(
             composition,
@@ -5868,6 +5988,13 @@ async def build(
         yield composition
     finally:
         if composition is not None:
+            if composition.semantic_services is not None:
+                try:
+                    await composition.semantic_services.close()
+                except Exception as exc:
+                    logger.warning(
+                        "semantic_close_failed", extra={"error_class": type(exc).__name__}
+                    )
             for import_task in tuple(composition.local_import_tasks):
                 import_task.cancel()
             await asyncio.gather(*composition.local_import_tasks, return_exceptions=True)

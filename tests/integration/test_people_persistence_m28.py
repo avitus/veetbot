@@ -37,6 +37,21 @@ from tests.contract.test_people_store_contract import (
 from tests.integration.m2_support import database_settings
 
 
+async def test_postgres_named_people_formation_preserves_independent_claims() -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, session
+    from tests.unit.test_people_named_distillation import named_people_formation_contract
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await named_people_formation_contract(clock, app.uow_factory)
+
+
 async def test_postgres_import_priority_checks_due_work_for_the_same_owner() -> None:
     from agent_core.bootstrap import build
     from tests.contract.test_run_repository_contract import higher_priority_work_contract

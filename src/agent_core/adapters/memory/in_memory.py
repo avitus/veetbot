@@ -48,7 +48,9 @@ from agent_core.domain.memory import (
     recall_query_terms,
 )
 from agent_core.domain.memory_candidates import select_candidates
+from agent_core.domain.reconsolidation import SourceVersion
 from agent_core.domain.trajectory import ArtifactRef
+from agent_core.memory.identity_recall import identity_scoped_records
 from agent_core.ports.determinism import Clock
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.reconsolidation import ReconsolidationStore
@@ -174,7 +176,7 @@ class InMemoryMemoryStore:
         self._clock = clock
         self._transaction = reconsolidation_index.transaction
         self._records: MutableMapping[UUID, MemoryRecord] = self._transaction.mapping()
-        self._history: MutableMapping[UUID, list[tuple[datetime, MemoryRecord]]] = (
+        self._history: MutableMapping[UUID, list[tuple[datetime, MemoryRecord, SourceVersion]]] = (
             self._transaction.mapping()
         )
         self._rejections: MutableMapping[UUID, BeliefRejection] = self._transaction.mapping()
@@ -185,12 +187,21 @@ class InMemoryMemoryStore:
         reconsolidation_index.bind_memory(clock, self._allocate_position)
         self._erasure_pending: set[UUID] = set()
         self._lock = asyncio.Lock()
+        self._people: PeopleStore | None = None
+
+    def bind_people(self, people: PeopleStore) -> None:
+        """Complete the same-UOW memory/People dependency cycle during composition."""
+        if self._people is not None and self._people is not people:
+            raise ValueError("Memory identity filtering is already bound")
+        self._people = people
 
     def _remember_revision(self, record: MemoryRecord) -> None:
-        self._reconsolidation_index.record(record)
+        version = self._reconsolidation_index.record(record)
         revisions = self._history.setdefault(record.id, [])
         if not revisions or revisions[-1][1] != record:
-            self._transaction.append(revisions, (self._clock.now(), record.model_copy(deep=True)))
+            self._transaction.append(
+                revisions, (self._clock.now(), record.model_copy(deep=True), version)
+            )
 
     async def get_at(
         self, belief_id: UUID, principal: Principal, *, known_at: datetime
@@ -210,7 +221,7 @@ class InMemoryMemoryStore:
             historical = next(
                 (
                     record
-                    for at, record in reversed(self._history.get(belief_id, []))
+                    for at, record, _ in reversed(self._history.get(belief_id, []))
                     if at <= known_at
                 ),
                 None,
@@ -310,7 +321,7 @@ class InMemoryMemoryStore:
                     historical = next(
                         (
                             row
-                            for at, row in reversed(self._history.get(record.id, []))
+                            for at, row, _ in reversed(self._history.get(record.id, []))
                             if at <= query.known_at
                         ),
                         None,
@@ -388,6 +399,12 @@ class InMemoryMemoryStore:
                     if not lexical_text_matches(term_lexemes, text):
                         continue
                 result.append(record.model_copy(deep=True))
+            if query.people_scope is not None:
+                return (
+                    []
+                    if self._people is None
+                    else await identity_scoped_records(self._people, query, result)
+                )
             return result
 
     async def related(

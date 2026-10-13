@@ -9,9 +9,13 @@ database only after marking it disposable with ``VEETBOT_TEST_DATABASE_DISPOSABL
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.engine import make_url
 
 from agent_core.adapters.persistence.database import create_engine
 from agent_core.adapters.persistence.sqlalchemy_models import Base
@@ -55,5 +59,29 @@ async def truncate_application_tables(*, existing_only: bool = False) -> None:
                 await connection.execute(
                     text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
                 )
+    finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def clone_recall_database() -> AsyncIterator[str]:
+    """Clone only an opted-in scratch schema into a new, uniquely named eval DB.
+
+    Only the database successfully created by this invocation is removed. The
+    template URL and all cleanup remain behind the integration opt-in guard.
+    """
+    database_url = disposable_database_url()
+    source = make_url(database_url)
+    name = f"veetbot_m33_eval_{uuid4().hex}"
+    engine = create_engine(database_url)
+    quoted_source = engine.dialect.identifier_preparer.quote_identifier(source.database or "")
+    try:
+        async with engine.connect() as connection:
+            connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await connection.execute(text(f'CREATE DATABASE "{name}" TEMPLATE {quoted_source}'))
+            try:
+                yield source.set(database=name).render_as_string(hide_password=False)
+            finally:
+                await connection.execute(text(f'DROP DATABASE "{name}"'))
     finally:
         await engine.dispose()

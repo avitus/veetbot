@@ -8,6 +8,7 @@ from uuid import UUID, uuid5
 from agent_core.application.people_erasure_batches import ErasureManifest, write_manifest
 from agent_core.domain.agents import Principal
 from agent_core.domain.memory import MemoryRecord, Sensitivity
+from agent_core.domain.memory_sources import recovery_source_id
 from agent_core.domain.people import PeopleErasure, PeopleQuery
 from agent_core.ports.persistence import RepositoryUnitOfWork
 
@@ -92,7 +93,18 @@ async def erase_belief_copies(
         if len(page) <= 100:
             break
         query = query.model_copy(update={"after": page[99].id})
-    cleanup = await uow.session_deletions.erase_people_copies(principal, [belief.id, *links], now)
+    # A quote may have been recovered through a different live fact, even
+    # before this fact was formed. Stable source-copy keys reach every such
+    # generated copy without deleting the original conversation or People source.
+    blocked = [
+        belief.id,
+        *links,
+        *(
+            recovery_source_id(principal, belief.source_session_id, sequence)
+            for sequence in belief.source_event_ids
+        ),
+    ]
+    cleanup = await uow.session_deletions.erase_people_copies(principal, blocked, now)
     await uow.people.fence_for_erasure(principal, links)
     pending_people = await uow.people.purge_erased(principal)
     await withhold_email_summaries(uow, principal, [belief.id])
@@ -131,7 +143,7 @@ async def erase_belief_copies(
         uow.people,
         receipt,
         ErasureManifest(
-            blocked_record_ids=[belief.id, *links],
+            blocked_record_ids=blocked,
             blocked_belief_ids=[belief.id],
             pending_artifact_ids=cleanup.artifact_ids,
             pending_run_ids=cleanup.pending_run_ids,

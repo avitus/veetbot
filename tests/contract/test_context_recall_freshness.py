@@ -153,3 +153,100 @@ async def test_composed_context_refreshes_elapsed_expiry(people_enabled: bool) -
         after = await app.executor._context_builder.assemble(active, saved, configured, principal())
         assert original.statement not in after.request.model_dump_json()
         assert before.request.metadata["prefix_sha256"] == after.request.metadata["prefix_sha256"]
+
+
+@pytest.mark.parametrize(
+    "change", ["source", "erasure", "expiry", "admission", "lease", "checkpoint", "search_deadline"]
+)
+async def test_saved_search_result_cannot_hide_invalidated_evidence(change: str) -> None:
+    from agent_core.domain.messages import TextPart, ToolCallItem, ToolResultItem
+    from agent_core.domain.policies import TrustLevel
+    from agent_core.tools.memory_search import MemorySearchTool
+    from tests.contract.support import tool_context
+
+    clock, factory, provider, _, retriever, state = await runtime_stack(
+        run_changes={"lease_expires_at": NOW + timedelta(seconds=30)} if change == "lease" else None
+    )
+    original = memory(statement="Dairy causes the user digestive discomfort").model_copy(
+        update={
+            "subject": "diet",
+            "expires_at": NOW + timedelta(minutes=1) if change == "expiry" else None,
+        }
+    )
+    tool = MemorySearchTool(retriever)
+    arguments = {"text": "Suggest a breakfast", "scope": "project-a"}
+    search = tool.query(
+        arguments, tenant_id=principal().tenant_id, principal_id=principal().principal_id
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(original)
+        source = await uow.semantic_memory.capture(principal(), original.id, SPACE)
+        assert source is not None and await uow.semantic_memory.put(principal(), source, VECTOR)
+        active = await uow.runs.get(RUN_ID, principal())
+        checkpoint = await uow.checkpoints.latest(RUN_ID)
+    assert checkpoint is not None
+    assert (
+        await retriever.prepare_semantic_queries([search], session_id=SESSION_ID, run_id=RUN_ID)
+        == 1
+    )
+    result = await tool.execute(arguments, tool_context())
+    assert original.statement in result.model_dump_json()
+    checkpoint.conversation.extend(
+        [
+            ToolCallItem(
+                call_id="saved",
+                item_index=0,
+                name="memory.search",
+                arguments=arguments,
+                raw_arguments="{}",
+            ),
+            ToolResultItem(
+                call_id="saved",
+                content=result.content,
+                trust=TrustLevel.MEMORY,
+                memory_recall=result.memory_recall,
+            ),
+        ]
+    )
+    builder = _builder(
+        memory_retriever=retriever,
+        query_former=DeterministicQueryFormer(principal(), current_scope="project-a"),
+    )
+    before = await builder.build(active, checkpoint, agent(), principal())
+    assert original.statement in before.model_dump_json()
+    if change == "source":
+        async with factory() as uow:
+            await uow.memories.reinforce(
+                original.model_copy(update={"statement": "The dietary constraint was corrected"})
+            )
+    elif change == "erasure":
+        async with factory() as uow:
+            await uow.memories.fence_for_erasure(principal(), [original.id])
+    elif change == "expiry":
+        clock.advance(timedelta(minutes=1))
+    elif change == "admission":
+        state.enabled = False
+    elif change in {"checkpoint", "search_deadline"}:
+        from agent_core.domain.runs import RecallWorkBudget
+
+        if change == "search_deadline":
+            checkpoint.recall_work = RecallWorkBudget(searches=4, rounds=2, deadline_at=NOW)
+        async with factory() as uow:
+            await uow.checkpoints.write(
+                RUN_ID, checkpoint.model_copy(update={"version": checkpoint.version + 1}), full=True
+            )
+    else:
+        clock.advance(timedelta(seconds=30))
+    after = await builder.build(active, checkpoint, agent(), principal())
+    if change in {"checkpoint", "search_deadline"}:
+        assert original.statement in after.model_dump_json(), (
+            "Current evidence survives a checkpoint advance"
+        )
+    else:
+        assert original.statement not in after.model_dump_json(), f"saved search survived {change}"
+    assert isinstance(result.content[0], TextPart)
+    assert any(
+        isinstance(item, ToolResultItem) and item.content == [result.content[0]]
+        for item in checkpoint.conversation
+    ), "Canonical history remains intact"
+    assert len(provider.calls) == 1, "Validation must not issue another embedding call"

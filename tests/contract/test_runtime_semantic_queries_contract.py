@@ -461,3 +461,104 @@ async def test_bound_handle_expires_with_its_run_lease_without_another_state_rea
     assert handle is not None
     clock.advance(timedelta(seconds=2))
     assert handle.lookup(retriever._effective_query(query(), "in_turn")) is None
+
+
+async def test_authority_can_resolve_current_sources_outside_the_state_transaction() -> None:
+    """Privacy floors require current source reads, rather than a cached label."""
+    clock, factory, provider, _, _, state = await runtime_stack()
+    reads = 0
+
+    async def resolve_authority(*_: Any) -> SemanticQueryAuthority | None:
+        nonlocal reads
+        async with factory() as uow:
+            saved = await uow.checkpoints.latest(RUN_ID)
+            assert saved is not None
+        reads += 1
+        return state.authority
+
+    runtime = RunSemanticQueries(
+        factory,
+        clock,
+        principal(),
+        provider,
+        INDEX_CONFIG,
+        admitted=lambda: state.enabled,
+        authority=resolve_authority,
+    )
+    assert (
+        await runtime.prepare([query()], session_id=SESSION_ID, run_id=RUN_ID, surface_id="private")
+        == 1
+    )
+    assert reads >= 3, "Source authority must be refreshed before sending and publishing."
+    bound = await bind(runtime)
+    assert bound is not None and bound.lookup(query()) is not None
+    state.authority = AUTHORITY.model_copy(update={"sensitivity_floor": Sensitivity.RESTRICTED})
+    assert await bind(runtime) is None
+    assert bound.lookup(query()) is None
+
+
+async def test_cancel_during_authority_resolution_cannot_return_an_old_handle() -> None:
+    clock, factory, provider, _, _, state = await runtime_stack()
+    cancel_on_resolve = False
+
+    async def resolve_authority(*_: Any) -> SemanticQueryAuthority | None:
+        if cancel_on_resolve:
+            async with factory() as uow:
+                await uow.runs.request_cancellation(RUN_ID, RunStatus.RUNNING)
+        return state.authority
+
+    runtime = RunSemanticQueries(
+        factory,
+        clock,
+        principal(),
+        provider,
+        INDEX_CONFIG,
+        admitted=lambda: state.enabled,
+        authority=resolve_authority,
+    )
+    assert (
+        await runtime.prepare([query()], session_id=SESSION_ID, run_id=RUN_ID, surface_id="private")
+        == 1
+    )
+    previous = await bind(runtime)
+    assert previous is not None
+    cancel_on_resolve = True
+    assert await bind(runtime) is None
+    assert previous.lookup(query()) is None
+
+
+async def test_shared_run_deadline_revokes_existing_query_handle() -> None:
+    from agent_core.domain.runs import RecallWorkBudget
+
+    clock, factory, provider, runtime, retriever, _ = await runtime_stack()
+    async with factory() as uow:
+        checkpoint = await uow.checkpoints.latest(RUN_ID)
+        assert checkpoint is not None
+        await uow.checkpoints.write(
+            RUN_ID,
+            checkpoint.model_copy(
+                update={
+                    "version": 2,
+                    "recall_work": RecallWorkBudget(
+                        searches=1, rounds=1, deadline_at=NOW + timedelta(seconds=10)
+                    ),
+                }
+            ),
+            full=True,
+        )
+    assert (
+        await retriever.prepare_semantic_queries([query()], session_id=SESSION_ID, run_id=RUN_ID)
+        == 1
+    )
+    handle = await runtime.bind(session_id=SESSION_ID, run_id=RUN_ID, surface_id="private")
+    assert handle is not None
+    effective = retriever._effective_query(query(), "in_turn")
+    assert handle.lookup(effective) is not None
+    clock.advance(timedelta(seconds=11))
+    assert handle.lookup(effective) is None, "A retained handle cannot outlive its run deadline"
+    assert await runtime.bind(session_id=SESSION_ID, run_id=RUN_ID, surface_id="private") is None
+    assert (
+        await retriever.prepare_semantic_queries([query()], session_id=SESSION_ID, run_id=RUN_ID)
+        == 0
+    )
+    assert len(provider.calls) == 1

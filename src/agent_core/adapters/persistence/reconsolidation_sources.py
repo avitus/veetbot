@@ -3,16 +3,19 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import BigInteger, any_, bindparam, delete, func, select, update
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.persistence.reconsolidation_operations import invalidate_source
 from agent_core.adapters.persistence.sqlalchemy_models import (
+    EventRow,
     MemoryRow,
     MemoryVectorRow,
     ReconsolidationChangeRow,
     ReconsolidationOwnerRow,
+    SessionRow,
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
@@ -53,6 +56,30 @@ async def append_change(
     now: datetime,
 ) -> None:
     if reason != "created":
+        original = await session.scalar(
+            select(MemoryRow).where(
+                MemoryRow.id == belief_id,
+                MemoryRow.tenant_id == owner.tenant_id,
+                MemoryRow.principal_id == owner.principal_id,
+            )
+        )
+        if original is not None:
+            await session.execute(
+                update(EventRow)
+                .where(
+                    EventRow.session_id == original.source_session_id,
+                    ~EventRow.memory_source_blocked,
+                    EventRow.session_id.in_(
+                        select(SessionRow.id).where(
+                            SessionRow.tenant_id == owner.tenant_id,
+                            SessionRow.principal_id == owner.principal_id,
+                        )
+                    ),
+                    EventRow.sequence
+                    == any_(bindparam(None, original.source_event_ids, type_=ARRAY(BigInteger()))),
+                )
+                .values(memory_source_blocked=True)
+            )
         await session.execute(
             delete(MemoryVectorRow).where(
                 MemoryVectorRow.tenant_id == owner.tenant_id,
