@@ -1818,7 +1818,9 @@ linked excerpts from at most four windows of three articles, accepting explicitl
 partial excerpts but never missing/invalid links. Exact home location and X post
 URL structure are mandatory; post IDs deduplicate evidence. Up to six empty or
 stale-read retries wait one second and recheck bounds before dispatch. The empty
-home shell cannot complete collection. Repeated content ends with an explicit
+home shell cannot complete collection. A window of only unseen unlinked articles
+(an ad, or an incomplete or ambiguous link walk) is scrolled past, never reread;
+excerpt digests recognize it. Repeated content ends with an explicit
 insufficient-evidence result. At most three bounded scrolls use one unique fresh
 Account menu control as an anchor, through normal policy and effect accounting.
 A lost scroll response permits read-only collection followed by an uncertain

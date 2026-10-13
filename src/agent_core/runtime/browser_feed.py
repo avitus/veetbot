@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -56,6 +57,19 @@ def post_ids(observed: BrowserObservation) -> list[str]:
     return found
 
 
+def row_digests(observed: BrowserObservation) -> list[str]:
+    """Fingerprint visible excerpts, linked or not, so repeated windows are recognizable."""
+    extracted = observed.extraction
+    if extracted is None or extracted.kind != "articles" or extracted.status != "extracted":
+        return []
+    found = []
+    for row in extracted.rows:
+        excerpt = next((cell for cell in row.cells if cell.field == "excerpt"), None)
+        if excerpt is not None and excerpt.text.strip():
+            found.append(hashlib.sha256(excerpt.text.encode()).hexdigest()[:16])
+    return found
+
+
 def _retryable_read(result: ToolResultItem | None) -> bool:
     if result is None or not result.is_error:
         return False
@@ -89,6 +103,7 @@ async def advance_feed(
         "feed",
         {
             "post_ids": [],
+            "row_digests": [],
             "evidence_call_ids": [],
             "windows": 0,
             "scrolls": 0,
@@ -168,9 +183,14 @@ async def advance_feed(
     feed["post_ids"] = (feed["post_ids"] + fresh)[:12]
     if fresh:
         feed["evidence_call_ids"].append(state["call_id"])
+    # New articles without a valid link (an ad, or a tall post whose link walk is
+    # incomplete) are progress to scroll past, not an empty page to re-read.
+    seen = feed.setdefault("row_digests", [])
+    unseen = [digest for digest in dict.fromkeys(row_digests(observed)) if digest not in seen]
+    feed["row_digests"] = (seen + unseen)[-24:]
     if feed["uncertain_scroll"]:
         await stop(context, state, "uncertain_scroll")
-    elif not ids and feed["retries"] < 6:
+    elif not ids and not unseen and feed["retries"] < 6:
         feed["retries"] += 1
         await context.clock.sleep(1)
         await queue(context, state, "feed_read", "browser.observe", {})
@@ -179,7 +199,7 @@ async def advance_feed(
         if len(feed["post_ids"]) >= 6:
             state["completed_steps"] += 1
             await stop(context, state, "verified")
-        elif not fresh or feed["windows"] >= 4:
+        elif not (fresh or unseen) or feed["windows"] >= 4:
             await stop(context, state, "insufficient_evidence")
         else:
             await queue(context, state, "feed_before_scroll", "browser.observe", {})

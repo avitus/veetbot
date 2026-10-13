@@ -260,6 +260,80 @@ async def test_feed_failures_stop_bounded_without_mutation_replay(problem: str) 
         assert not await app.approvals.list_pending(run_id=run_id)
 
 
+class UnlinkedTopProvider(FeedProvider):
+    """The first window holds one tall post or ad whose link walk supplies no link."""
+
+    def __init__(self, *, stuck: bool = False) -> None:
+        super().__init__()
+        self.stuck = stuck
+
+    async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+        from agent_core.adapters.browser.extraction import extracted_observation
+
+        if self.actions and not self.stuck:
+            return await super().extract(request)
+        self.reads += 1
+        observed = await self.observe()
+        raw = {
+            "status": "extracted",
+            "source_name": "",
+            "rows": [
+                [
+                    {
+                        "text": "A tall video quote post without a usable link.",
+                        "text_truncated": True,
+                    },
+                    None,
+                ]
+            ],
+            "source_nodes": 2,
+            "source_scan_limit_reached": False,
+            "row_nodes": 1,
+            "row_scan_limit_reached": False,
+            "omitted_rows": 0,
+        }
+        result = extracted_observation(raw, request, observed.revision)
+        return observed.model_copy(update={"extraction": result})
+
+
+async def test_unlinked_top_post_is_scrolled_past_instead_of_reread() -> None:
+    # Production 2026-10-13: one unlinkable post filled the first window, the
+    # workflow re-read it six times without scrolling and reported no posts.
+    provider = UnlinkedTopProvider()
+    async with feed_app(provider) as app:
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await app.runs.submit(INTENT, session.id)
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        state = checkpoint.working_state["browser_workflow"]
+        assert state["status"] == "verified", "an unlinked first window blocked collection"
+        assert len(state["feed"]["post_ids"]) == 6
+        assert len(provider.actions) == 2
+        assert provider.reads == 3
+
+
+async def test_unlinked_window_that_never_moves_stops_bounded() -> None:
+    provider = UnlinkedTopProvider(stuck=True)
+    async with feed_app(provider) as app:
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await app.runs.submit(INTENT, session.id)
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        state = checkpoint.working_state["browser_workflow"]
+        assert state["status"] == "insufficient_evidence"
+        assert state["feed"]["post_ids"] == []
+        assert len(provider.actions) == 1
+        assert provider.reads <= 8
+
+
 async def test_stale_extraction_recovers_with_fresh_evidence() -> None:
     class Provider(FeedProvider):
         stale = True
