@@ -167,6 +167,7 @@ class BrowserWorkflowRunner:
                 state.update(completed_steps=0, phase="start", call_id=None)
                 state["feed"] = {
                     "post_ids": [],
+                    "row_digests": [],
                     "evidence_call_ids": [],
                     "windows": 0,
                     "scrolls": state.get("feed", {}).get("scrolls", 0),
