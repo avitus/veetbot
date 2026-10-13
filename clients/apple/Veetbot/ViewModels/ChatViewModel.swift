@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 import UserNotifications
 
 public struct LoadedArtifact: Sendable {
@@ -961,6 +962,9 @@ public final class ChatViewModel: ObservableObject {
         activeTaskGrant = nil
         selectedSessionUsesWebsiteProfile = false
         runState.reset()
+        let log = ConversationDiagnostics.logger
+        let trace = requestID.uuidString.prefix(8)
+        log.notice("select \(trace, privacy: .public) session=\(entry.sessionID.uuidString, privacy: .public)")
         do {
             let session = try await api.getSession(entry.sessionID)
             guard selectionRequestID == requestID,
@@ -980,6 +984,7 @@ public final class ChatViewModel: ObservableObject {
                             $0.sessionID != entry.sessionID
                         }
                 }
+                log.notice("select \(trace, privacy: .public) superseded after history store")
                 return
             }
             // Read status before the transcript so a terminal snapshot guarantees
@@ -1004,8 +1009,14 @@ public final class ChatViewModel: ObservableObject {
                 sessionID: session.id,
                 requestID: requestID
             )
-            guard selectionRequestID == requestID else { return }
+            guard selectionRequestID == requestID else {
+                log.notice("select \(trace, privacy: .public) superseded after messages")
+                return
+            }
             runState.restore(messages: messages)
+            log.notice(
+                "select \(trace, privacy: .public) restored messages=\(messages.count) rows=\(self.runState.activityTimeline.count) run=\(restoredRun?.id.uuidString ?? "none", privacy: .public) status=\(restoredRun.map { String(describing: $0.status) } ?? "none", privacy: .public)"
+            )
             if let run = restoredRun {
                 runState.seed(run: run)
                 // Historical reports need not wait for their activity replay to
@@ -1019,6 +1030,9 @@ public final class ChatViewModel: ObservableObject {
                 await loadTaskGrant()
             }
         } catch {
+            log.notice(
+                "select \(trace, privacy: .public) failed current=\(self.selectionRequestID == requestID) error=\(String(describing: type(of: error)), privacy: .public)"
+            )
             if selectionRequestID == requestID {
                 present(error)
             }
@@ -2644,9 +2658,18 @@ public final class ChatViewModel: ObservableObject {
         guard let eventStream else { return }
         watchTasks.cancel()
         watchTasks.task = Task { [weak self] in
+            var frames = 0
+            defer {
+                if let self {
+                    ConversationDiagnostics.logger.notice(
+                        "replay run=\(runID.uuidString, privacy: .public) frames=\(frames) cancelled=\(Task.isCancelled) rows=\(self.runState.activityTimeline.count) selected=\(self.selectedSessionID?.uuidString ?? "none", privacy: .public)"
+                    )
+                }
+            }
             do {
                 for try await frame in eventStream.frames(runID: runID) {
                     guard let self else { return }
+                    frames += 1
                     self.runState.reduce(frame)
                     if ["run.completed", "run.failed", "run.cancelled"].contains(frame.event),
                         self.runState.activeRunID == runID {
@@ -2815,4 +2838,12 @@ private final class WatchTaskBox: @unchecked Sendable {
     }
 
     deinit { task?.cancel() }
+}
+
+/// Notice-level lines that persist in the unified log, so a conversation that
+/// opens blank can be diagnosed afterwards with
+/// `log show --last 1h --predicate 'subsystem == "com.veetbot.apple" AND category == "conversation"'`.
+/// They carry identifiers and counts only, never conversation content.
+enum ConversationDiagnostics {
+    static let logger = Logger(subsystem: "com.veetbot.apple", category: "conversation")
 }
