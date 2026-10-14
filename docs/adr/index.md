@@ -211,3 +211,6 @@ implementation without one.
 - [ADR-0186 — Persistent dreaming review sign-in (Proposed; implementation authorized)](0186-dreaming-review-session.md)
 
 - [ADR-0187 — Semantic index production composition (Accepted mechanism; activation gated)](0187-semantic-index-production-composition.md)
+
+- [ADR-0203: Email junk first pass](0203-email-junk-first-pass.md)
+- [ADR-0204: Owner-reviewed email junk pilot (Proposed)](0204-owner-reviewed-email-junk-pilot.md)

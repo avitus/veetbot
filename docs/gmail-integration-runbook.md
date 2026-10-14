@@ -824,3 +824,49 @@ Common failures:
 | configured account id rejected | Confirm the bootstrap `--account-id` matches the manifest `account_id`; re-bootstrap rather than editing the credential document. |
 | `gmail.outcome_unknown` | Never retry the write/send. Reconcile directly in Gmail and the recipient mailbox. |
 | schedule authorization failure | Confirm the schedule was created over HTTP with the exact `mcp.gmail_read.use` and `mcp.gmail_write.use` scopes. |
+
+## Email junk first pass (ADR-0203)
+
+The first pass is off by default. With the existing TypeSafe selector/key set,
+`AGENT_EMAIL_JUNK_FILTER_MODE=shadow` screens newly eligible mail while preserving
+normal assessment. It does not reprocess already-current assessments. Every
+request and its charge appear as content-free `email.junk.started` and
+`email.junk.completed` events. Unknown usage retains conservative email charging.
+
+For a bounded diagnostic outside normal refresh, use
+`uv run python -m scripts.email_junk_calibration replay --input PRIVATE_SNAPSHOT --output PRIVATE_RESULTS --max-threads 100 --max-cost-usd 0.05`.
+The input is an object with `items`, each containing an `EmailThread`-shaped
+`thread` and its current protection/feedback `learning` context. Obtain them
+under the owner's read authority; do not use stale or incomplete protection
+context. Keep both files outside the repository. The command requires the
+existing `TYPESAFE_API_KEY`, never reads Gmail or a database, and writes private,
+exclusive-create results plus an attempt journal before dispatch. A fresh
+invocation is a separately budgeted experiment; preserve every prior journal.
+Baseline-model agreement is diagnostic, not independently measured precision.
+
+Independently review the sampled source mail. Build a private calibration packet
+with `policy`, `model` and `observations`. Each observation contains its unique
+`fingerprint`, observed `category` (`spam`, `bulk`, `keep`), `probability`, the
+owner's `label` (`junk`, `keep`), `source: owner_review`, and `stratum` (`random`,
+`personal_outreach`, `transactional`). Do not include subjects, bodies or sender
+addresses in this activation packet. Replay leaves labels empty deliberately.
+`uv run python -m scripts.email_junk_calibration check PRIVATE_PACKET` recomputes
+readiness; fabricated tests and model labels are not production evidence.
+
+A bounded filter pilot requires at least 100 unique reviewed cases, at least 80
+random cases, ten legitimate personal-outreach and ten transactional cases,
+at least twenty predicted junk cases, and zero false positives at the fixed
+0.99 combined spam-plus-bulk threshold. Protected-topic relevance must be at
+most 0.05. These vendor scores are not measured error rates. This pilot floor
+is not a guarantee of zero errors. Set
+`AGENT_EMAIL_JUNK_FILTER_EVIDENCE` to the reviewed packet and select `filter`
+only after checking it. Each run rechecks the packet; missing, invalid or
+mismatched evidence uses shadow mode. The classifier pins `jev-1.13.0`.
+
+Filtered mail remains in Other/All mail with an explanation. Important restores
+priority immediately and sends it through normal assessment on the next refresh.
+Known correspondents, kept subscriptions, Important/Needs reply, Not spam,
+unknown attachments, incomplete sources and uncertain decisions are protected.
+Bulk is not marked as spam. No Gmail labels change. Setting the mode to `off`
+stops new judgments and restores ordinary assessment of previously bypassed
+threads on subsequent bounded refreshes. No budget or milestone gate changes.

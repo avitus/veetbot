@@ -323,3 +323,12 @@ which previously held only the error's class name.
 2. Whether a verdict cache is worth its invalidation rules. Folder matching
    re-judges an unfiled conversation on each pass while proposal slots are
    free; the cost is small and the cache is deferred until a metric asks.
+
+## Email junk consumer
+
+[ADR-0203](../adr/0203-email-junk-first-pass.md) amends ADR-0110 to admit
+production email junk screening, with bounded received mail as its only
+external data. Its default is off; uncertain or protected cases preserve
+normal assessment. Its consumer owns durable run/email cost reservations,
+a pinned model, one-attempt requests, and independent calibration before
+bypass. Existing consumers retain their provider defaults.

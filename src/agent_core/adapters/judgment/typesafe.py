@@ -141,7 +141,7 @@ class TypeSafeJudgmentProvider:
         body = json.dumps(
             {
                 "state": request.state,
-                "model": TYPESAFE_MODEL_ALIAS,
+                "model": request.model or TYPESAFE_MODEL_ALIAS,
                 "questions": {
                     key: _wire_question(question) for key, question in request.questions.items()
                 },
@@ -153,19 +153,19 @@ class TypeSafeJudgmentProvider:
             raise _failure(JudgmentFailure.INPUT_TOO_LARGE) from None
         try:
             async with asyncio.timeout(self._total_timeout_seconds):
-                received = await self._send(body)
+                received = await self._send(body, request.maximum_attempts)
         except TimeoutError:
             raise _failure(JudgmentFailure.PROVIDER_UNAVAILABLE, retryable=True) from None
         result = self._result(request, received)
         validate_result(request, result)
         return result
 
-    async def _send(self, body: bytes) -> bytes:
-        for attempt in range(1, MAXIMUM_ATTEMPTS + 1):
+    async def _send(self, body: bytes, maximum_attempts: int = MAXIMUM_ATTEMPTS) -> bytes:
+        for attempt in range(1, maximum_attempts + 1):
             try:
                 return await self._attempt(body)
             except JudgmentProviderError as failure:
-                if not failure.retryable or attempt == MAXIMUM_ATTEMPTS:
+                if not failure.retryable or attempt == maximum_attempts:
                     raise
             await self._clock.sleep(RETRY_DELAYS_SECONDS[attempt - 1])
         raise AssertionError("judgment retry loop exited without a result")

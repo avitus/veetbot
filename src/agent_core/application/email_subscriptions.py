@@ -681,6 +681,7 @@ class EmailSubscriptions:
                 else value.model_copy(update={"state": "active"})
             )
             row = await self._save(uow.email, principal, "subscription", subscription_id, value)
+            await self.service._bump_profile(uow.email, principal)
             return self.view(value, row.revision, await self._protected(uow.email, principal))
 
     async def unsubscribe(
