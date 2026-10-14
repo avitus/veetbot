@@ -55,6 +55,7 @@ from agent_core.memory.semantic_runtime import RunSemanticQueries
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.ports.embeddings import EmbeddingProvider
 from agent_core.ports.models import ModelProvider, ModelRouter
+from agent_core.runtime.loop import RecallPreparation
 
 
 def reader_runtime_inputs(
@@ -311,6 +312,23 @@ class _Preparation:
             raise ValueError("Semantic evaluation preparation was unavailable")
 
 
+class _DeliberatePreparation:
+    """Isolate deliberate recall before either planning or reserving automatic work."""
+
+    execution_budget = True
+
+    def __init__(self, preparation: RecallPreparation) -> None:
+        self.preparation = preparation
+
+    async def plan(self, run: Run, checkpoint: RunCheckpoint) -> Sequence[RecallQuery]:
+        if not checkpoint.pending_tool_calls:
+            return []
+        return await self.preparation.plan(run, checkpoint)
+
+    async def prepare(self, run: Run, queries: Sequence[RecallQuery]) -> None:
+        await self.preparation.prepare(run, queries)
+
+
 async def read_through_runtime(
     app: Any,
     task: TaskInput,
@@ -347,6 +365,8 @@ async def read_through_runtime(
         app.executor._prepare_recall = SemanticRecallPreparation(
             app.uow_factory, app.principal, retriever, former
         )
+    if path == "deliberate":
+        app.executor._prepare_recall = _DeliberatePreparation(app.executor._prepare_recall)
     reader = _Reader(app, task, path, provider, search_planning)
     if production_reader:
         app.executor._model_providers = {**app.executor._model_providers, resolved.provider: reader}

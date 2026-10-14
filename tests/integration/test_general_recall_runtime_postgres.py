@@ -42,6 +42,20 @@ async def recall_database() -> AsyncIterator[Settings]:
         yield replace(settings, database_url=database_url)
 
 
+@pytest.mark.parametrize("channel", ["sparse", "dense", "hybrid"])
+async def test_deliberate_recall_budget_starts_after_slow_reader_planning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    channel: Channel,
+    recall_database: Settings,
+) -> None:
+    from tests.unit.test_general_recall_execution import (
+        test_deliberate_measurement_reserves_only_after_reader_plans_search as exercise,
+    )
+
+    await exercise(tmp_path, monkeypatch, channel, settings=recall_database, storage="postgres")
+
+
 @pytest.mark.parametrize("path", ["automatic", "deliberate"])
 @pytest.mark.parametrize("channel", ["sparse", "hybrid"])
 @pytest.mark.parametrize("search_planning", ["scripted", "reader"])
@@ -154,8 +168,9 @@ async def test_observation_runs_in_postgres_and_reaches_the_reader(
     searched = path == "deliberate" or search_planning == "reader"
     assert row["tool_calls"] == int(searched)
     assert row["planning_calls"] == int(search_planning == "reader")
-    assert row["recall_work"]["searches"] == (3 if searched else 2)
-    assert row["recall_work"]["rounds"] == (2 if searched else 1)
+    automatic_slots = 2 if path == "automatic" else 0
+    assert row["recall_work"]["searches"] == automatic_slots + int(searched)
+    assert row["recall_work"]["rounds"] == int(path == "automatic") + int(searched)
     assert 1 <= row["executed_searches"] <= row["recall_work"]["searches"] <= 4
     from datetime import UTC, datetime
 

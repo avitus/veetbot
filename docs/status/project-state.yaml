@@ -2595,6 +2595,8 @@ milestones:
       - Historical semantic revisions, verified-input release binding and confirmatory dependency capture have mechanism checks; comparative People evidence, end-to-end load budgets and reviewed release observations/publication remain open
       - The initial USD 100 cap governed the first confirmation, stopped at 34 of 4800 observations because the required M32 fixture correction changes the ADR-0199 input manifest
       - The interrupted attempt retains all original records and failed status; prior reported and held cost is USD 5.45365250, included in the owner-approved USD 300 aggregate cap for one replacement after final review and CI; its run allocation is USD 290
+      - The replacement passed review and all eleven exact-head CI1105 checks on 7214a8df but failed at 4 of 4800 observations; deliberate evaluation incorrectly reserved disabled automatic work before a slow reader response; the isolation repair preserves production budget limits
+      - Replacement originals remain under evals/observations/general-memory-recall/20261014-confirmation-v2/; aggregate reported and held cost is USD 5.62063000, and another paid confirmation requires a new owner decision
       - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
       - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; remainder PR158 still requires final review, exact-head CI and production delivery
       - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder

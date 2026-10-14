@@ -228,7 +228,15 @@ The first paid confirmation was interrupted after 34 of 4,800 observations when 
 required integration-fixture correction changed the bound test inputs. Its original
 records and failed status are retained under
 `evals/observations/general-memory-recall/20261013-confirmation-v1/`. The separately
-authorized replacement has not started, and all twelve M33 gates remain pending.
+authorized replacement later failed at 4 of 4,800 observations on reviewed and
+CI-verified `7214a8df`; its originals remain under `20261014-confirmation-v2/`.
+An evaluation-isolation defect reserved automatic work even when the deliberate
+arm disabled automatic context. A delayed model response expired that reservation
+before its search. Deliberate measurement now suppresses automatic preparation
+as well; validated tool calls retain all production budget checks. The unchanged
+source cannot certify that repair. Aggregate reported and held cost is
+USD 5.62063000; another paid attempt requires a new owner decision. All twelve
+M33 gates remain pending.
 Completion of a raw collection
 does not publish evidence or activate a channel; independent failure review,
 mechanical scoring, all gate reports, CodeRabbit, hosted CI and delivery remain required.

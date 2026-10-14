@@ -426,7 +426,17 @@ The first confirmation stopped after 34 observations because a necessary integra
 fixture correction changes the ADR-0199 input manifest. The original failed attempt,
 its complete input capture and settled cost journal remain under
 `evals/observations/general-memory-recall/20261013-confirmation-v1/`. The owner
-authorized one replacement with a USD 290 allocation after final review and CI. The native historical-index load measurement
+authorized one replacement with a USD 290 allocation after final review and CI.
+That replacement passed its review/CI prerequisites on `7214a8df` but stopped at
+4 of 4,800 observations. The deliberate arm disabled automatic context while still
+reserving automatic preparation; a slow reader response exhausted that unused
+reservation before its search. The evaluator now suppresses both automatic context
+and automatic preparation in deliberate arms. Validated deliberate calls retain
+the same durable reservation, ten-second deadline and execution limits. This is
+an evaluation-isolation repair, not a production budget change. All originals
+remain under `20261014-confirmation-v2/`; aggregate reported and held cost is
+USD 5.62063000. No further paid attempt is authorized by the earlier one-run decision.
+The native historical-index load measurement
 under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
 100,000 competing records. It measures one synthetic information need and cannot
 replace complete confirmatory execution, independent failure review or answer gates.

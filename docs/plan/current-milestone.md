@@ -102,6 +102,12 @@ title: Current Milestone
   after final review and CI; its USD 290 allocation includes no forgiveness of
   earlier charges. Foundation PR #159 deployed successfully as
   `81062c5b`; PR #158 retains review, exact-head CI and deployment requirements.
+  The replacement on reviewed/verified `7214a8df` failed at 4 of 4,800 observations:
+  an unused automatic preparation reservation expired before a delayed deliberate
+  search. The evaluator now isolates deliberate preparation as well as context;
+  production budget enforcement is unchanged. Originals remain retained under
+  `20261014-confirmation-v2/`, with aggregate reported and held cost USD 5.62063000.
+  A further paid confirmation requires a new owner decision.
   Complete confirmation, independent failure review and release publication
   remain outstanding.
   Optional-channel activation remains evidence-gated.

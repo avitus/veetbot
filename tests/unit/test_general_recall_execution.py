@@ -9,7 +9,7 @@ import pytest
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.config import Settings
-from agent_core.domain.general_recall_release import PathKind
+from agent_core.domain.general_recall_release import Channel, PathKind
 from agent_core.domain.memory import BeliefType
 from agent_core.domain.messages import FakeModelScript, ResolvedModel, ScriptedTurn
 from agent_core.evals.general_recall_corpus import EvidenceFixture
@@ -730,6 +730,110 @@ async def test_live_reader_can_plan_one_search_without_gold_or_external_actions(
     assert any(
         trace["query"]["text"] == "step-free routes" for trace in result["recall_observations"]
     )
+
+
+@pytest.mark.parametrize("channel", ["sparse", "dense", "hybrid"])
+async def test_deliberate_measurement_reserves_only_after_reader_plans_search(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    channel: Channel,
+    *,
+    settings: Settings | None = None,
+    storage: Literal["memory", "postgres"] = "memory",
+) -> None:
+    from collections.abc import AsyncIterator
+    from datetime import timedelta
+
+    from agent_core.domain.embeddings import EmbeddingRequest, EmbeddingResponse
+    from agent_core.domain.messages import (
+        ModelAttempt,
+        ModelEvent,
+        ModelRequest,
+        ScriptedToolCall,
+        StopReason,
+        ToolResultItem,
+    )
+    from tests.contract.test_local_semantic_preparation import LOCAL
+
+    delay = timedelta()
+    original_now = FixedClock.now
+    monkeypatch.setattr(FixedClock, "now", lambda self: original_now(self) + delay)
+
+    class DelayedReader(FakeModelProvider):
+        async def stream(
+            self, request: ModelRequest, resolved_model: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            nonlocal delay
+            if not self.requests:
+                # Reproduce a real planning response longer than the recall deadline,
+                # without a live provider call or a slow sleep in the test suite.
+                delay = timedelta(seconds=12)
+            async for event in super().stream(request, resolved_model, attempt):
+                yield event
+
+    class Embeddings:
+        async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+            return EmbeddingResponse(
+                request_digest=request.digest,
+                vectors=tuple((1.0, 0.0, 0.0) for _ in request.texts),
+                input_tokens=2,
+            )
+
+    inner = DelayedReader(
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    tool_calls=[
+                        ScriptedToolCall(
+                            name="memory.search",
+                            call_id="planned",
+                            arguments={"text": "step-free routes", "scope": "general"},
+                        )
+                    ],
+                    stop_reason=StopReason.TOOL_USE,
+                ),
+                ScriptedTurn(text='{"action":"answer","values":{"route":"east ramp"}}'),
+            ]
+        ),
+        FixedClock(AT),
+    )
+    case = fixture().model_copy(
+        update={
+            "evidence": (
+                EvidenceFixture(
+                    id="accessibility",
+                    source_ids=("h1",),
+                    subject="routes",
+                    statement="User requires step-free routes",
+                ),
+            )
+        }
+    )
+    row = await evaluate_fixture(
+        case=case,
+        settings=settings or _settings(),
+        pipeline="seeded",
+        channel=channel,
+        path="deliberate",
+        reader=BudgetedProvider(inner, EvaluationBudget(Decimal("0.5"), tmp_path / "costs.jsonl")),
+        resolved=ResolvedModel(provider="fake", model="scripted", resolved_at=AT),
+        noise=0,
+        search_planning="reader",
+        storage=storage,
+        disposable_database=storage == "postgres",
+        local=LOCAL if channel != "sparse" else None,
+        embeddings=Embeddings() if channel != "sparse" else None,
+    )
+    assert row["recall_work"]["searches"] == row["recall_work"]["rounds"] == 1
+    assert row["executed_searches"] == 1
+    assert row["rendered"] == ["accessibility"]
+    assert row["answer_success"] and row["planning_calls"] == 1
+    assert "User requires step-free routes" not in inner.requests[0].model_dump_json()
+    results = [item for item in inner.requests[-1].conversation if isinstance(item, ToolResultItem)]
+    assert len(results) == 1 and not results[0].is_error
+    assert results[0].memory_recall is not None
+    if channel != "sparse":
+        assert row["semantic_fallback"] is False
 
 
 @pytest.mark.parametrize("kind", ["multiple", "different_tool", "second_search"])
