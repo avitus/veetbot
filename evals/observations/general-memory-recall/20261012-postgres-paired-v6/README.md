@@ -54,3 +54,17 @@ records; `matrix/` contains the execution manifest and original provider ledger.
 All histories are fabricated. Corpus independence and difficult-failure reviews,
 the full release matrix, larger loads and matching final implementation evidence
 remain outstanding. This directory cannot authorize optional-channel activation.
+
+## Original records
+
+[The verified archive](original-records.tar.gz) preserves all 31 original data
+files byte for byte, with their repository-relative paths. This packaging keeps
+the combined release within the hosted review's file limit; no observation,
+answer, run identity, cost journal or formation bank was changed or omitted.
+
+Archive SHA-256: `9fea3ed709f71806f10853e3d63ed9f335545ab2bc9fa265a06b52fc45cab1a6`.
+The archive includes `original-file-sha256.json` with every original path, byte
+count and SHA-256 digest. Each extracted file was compared with its committed
+original before the loose copies were removed. Extract into a separate directory
+to inspect the original layout. The original build references and experimental
+limitations above remain unchanged; packaging supplies no new release evidence.
