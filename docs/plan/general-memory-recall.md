@@ -370,6 +370,16 @@ Retain failed runs; never resample only failures and publish the favorable subse
 Publication recomputes gates from observations and refuses missing or mixed tuples.
 Synthetic offline retrieval lift does not establish live answer lift.
 
+The confirmation job registers a finite whole-job deadline separately from its
+per-answer latency ceiling. Its default remains one day; an explicit deadline
+may extend to seven days so the complete 4,800-observation matrix can include
+fixture construction and native indexing. The first retained run's median
+inter-observation interval projects roughly 113 hours, beyond the earlier
+three-day implementation limit; this small-sample projection is not a completion
+guarantee. A longer job deadline changes neither the model-spend allowance nor
+the production recall deadline or answer-latency acceptance gate. Expiration
+still fails the run and retains its original observations and settled/held costs.
+
 ## Release admission mechanism
 
 `general-recall-release@1` binds reviewed scenario/independence manifests, exact

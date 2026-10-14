@@ -31,7 +31,8 @@ class ConfirmationOptions(Experiment):
     production_reader: Literal[True] = True
     # This task's separately approved aggregate cap, never twelve arm allowances.
     maximum_cost_usd: Decimal = Field(default=Decimal("100"), gt=0, le=300, allow_inf_nan=False)
-    deadline_seconds: int = Field(default=86400, ge=1, le=259200)
+    # Whole-matrix setup/indexing time, separate from the answer-latency gate.
+    deadline_seconds: int = Field(default=86400, ge=1, le=604800)
     independence_review: Path
     baseline_report: Path
     build_ref: str = Field(pattern=r"^[a-f0-9]{40}$")

@@ -36,6 +36,17 @@ def test_explicit_owner_approved_cap_does_not_raise_the_existing_default(tmp_pat
         options(tmp_path, maximum_cost_usd=301)
 
 
+def test_complete_matrix_can_register_a_bounded_seven_day_job(tmp_path: Path) -> None:
+    assert options(tmp_path).deadline_seconds == 86400
+    selected = options(tmp_path, deadline_seconds=604800)
+    assert selected.deadline_seconds == 604800
+    assert selected.maximum_cost_usd == 100
+    assert selected.p95_latency_ms == 6000
+    for deadline in (0, 604801):
+        with pytest.raises(ValidationError):
+            options(tmp_path, deadline_seconds=deadline)
+
+
 @pytest.mark.parametrize("changed", [False, True])
 async def test_preflight_captures_actual_dependencies_before_parsing_holdout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool
