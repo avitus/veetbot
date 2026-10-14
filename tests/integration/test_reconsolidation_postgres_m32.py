@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal, cast
@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from agent_core.adapters.determinism import FixedClock, RandomIdFactory
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
@@ -1061,3 +1062,38 @@ async def test_forward_cutover_rolls_back_atomically(postgres_stores: Factory) -
             raise RuntimeError("abort")
     async with postgres_stores() as uow:
         assert await uow.people.forward_dreaming_boundary(principal()) is None
+
+
+@pytest.mark.parametrize("blocked_on", ["events", "owner"])
+async def test_forward_cutover_bounds_lock_waits_and_allows_retry(
+    postgres_stores: Factory, blocked_on: str
+) -> None:
+    from agent_core.application.reconsolidation import PublicReconsolidationService
+
+    owner = principal().model_copy(update={"scopes": {"memory.write"}})
+    service = PublicReconsolidationService(
+        cast(UnitOfWorkFactory, postgres_stores), FixedClock(NOW)
+    )
+    async with postgres_stores() as blocking, AsyncExitStack() as locks:
+        assert isinstance(blocking.people, PostgresPeopleStore)
+        if blocked_on == "events":
+            await blocking.people._session.execute(text("LOCK TABLE events IN ROW EXCLUSIVE MODE"))
+        else:
+            await locks.enter_async_context(blocking.people.lock(owner))
+
+        # A database lock timeout must abort the cutover before this outer test deadline.
+        # The owner case blocks after the event fence has already been acquired.
+        with pytest.raises(DBAPIError) as failure:
+            await asyncio.wait_for(service.enable_forward_dreaming(owner), timeout=10)
+        assert getattr(failure.value.orig, "sqlstate", None) == "55P03"
+        async with postgres_stores() as checking:
+            assert await checking.people.forward_dreaming_boundary(owner) is None
+            assert isinstance(checking.people, PostgresPeopleStore)
+            connection = checking.people._session
+            assert await connection.scalar(text("SHOW lock_timeout")) == "0"
+            # The failed transaction must release its global fence even while the
+            # original owner blocker remains, so unrelated event inserts can proceed.
+            await connection.execute(text("LOCK TABLE events IN ROW EXCLUSIVE MODE NOWAIT"))
+
+    boundary = await service.enable_forward_dreaming(owner)
+    assert await service.enable_forward_dreaming(owner) == boundary

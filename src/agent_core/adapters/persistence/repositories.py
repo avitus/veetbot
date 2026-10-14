@@ -852,6 +852,7 @@ class PostgresEventRepository:
     async def dreaming_cutover_event_id(self) -> int:
         # Wait for writers that allocated an ID before the fence to commit.
         # Take this lock before owner locks to preserve append -> owner order.
+        await self._session.execute(text("SET LOCAL lock_timeout = '5s'"))
         await self._session.execute(text("LOCK TABLE events IN SHARE MODE"))
         return int(await self._session.scalar(select(func.coalesce(func.max(EventRow.id), 0))) or 0)
 

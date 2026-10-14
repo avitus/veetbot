@@ -20,8 +20,10 @@ time and a digest of the erased heads with unknown attribution. It refuses live
 unknown heads and an active dreaming lease. Repeating the command returns the
 original boundary; it cannot move the cutover or reset daily budgets/scheduling.
 PostgreSQL fences event insertion before taking owner/People locks, so allocated
-but uncommitted originals cannot fall through the boundary. The whole cutover
-rolls back on failure. A migration downgrade refuses to remove an active boundary.
+but uncommitted originals cannot fall through the boundary. A transaction-local
+five-second timeout bounds each lock wait, including waits after the event fence.
+The whole cutover rolls back on failure and can be retried after contention clears.
+A migration downgrade refuses to remove an active boundary.
 
 Only memories created after the boundary whose every original event also follows
 the boundary may enter dreaming. Backdated timestamps, updated old memories,

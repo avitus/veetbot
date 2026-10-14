@@ -1247,14 +1247,15 @@ class InMemoryReconsolidationStore:
             ]
             candidates = [change.source for change in changes]
             candidates.extend(index.versions[key] for key in ids)
-            valid = {s.belief_id: s for s in candidates if await self._valid(principal, s, now)}
+            checks = [(s, await self._valid(principal, s, now)) for s in candidates]
+            valid = {s.belief_id: s for s, ok in checks if ok}
             return InventoryPage(
                 sources=tuple(valid.values()),
                 changes=tuple(changes),
                 full_cursor=job.full_cursor + full_count,
                 change_cursor=job.change_cursor + changed_count,
                 inspected=len(candidates),
-                excluded=sum([not await self._valid(principal, s, now) for s in candidates]),
+                excluded=sum(not ok for _, ok in checks),
             )
 
     async def neighbors(

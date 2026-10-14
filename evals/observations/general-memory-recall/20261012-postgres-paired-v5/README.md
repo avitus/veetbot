@@ -48,3 +48,17 @@ These artifacts contain fabricated histories. This experiment cannot provide a
 release receipt: corpus independence and difficult-failure review, the full matrix,
 combined rank accounting, larger loads and final implementation evidence remain
 unverified. Automatic admission remains disabled.
+
+## Original records
+
+[The verified archive](original-records.tar.gz) preserves all 28 original data
+files byte for byte, with their repository-relative paths. This packaging keeps
+the combined release within the hosted review's file limit; no observation,
+answer, run identity, cost journal or formation bank was changed or omitted.
+
+Archive SHA-256: `cc98522d66fb3d3f9bbf3fa110d8b5eb4b88a603fa1c1be4eb426e8e19e48326`.
+The archive includes `original-file-sha256.json` with every original path, byte
+count and SHA-256 digest. Each extracted file was compared with its committed
+original before the loose copies were removed. Extract into a separate directory
+to inspect the original layout. The original build references and experimental
+limitations above remain unchanged; packaging supplies no new release evidence.
