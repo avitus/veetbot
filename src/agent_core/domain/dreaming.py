@@ -77,7 +77,16 @@ class DreamingRun(ReconValue):
     charged_usd: Decimal | None = Field(default=None, ge=0, le=1)
 
 
+class ForwardDreamingBoundary(ReconValue):
+    activated_at: AwareDatetime
+    event_id: int = Field(ge=0)
+    creation_sequence: int = Field(ge=0)
+    change_sequence: int = Field(ge=0)
+    legacy_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class DreamingStatus(ReconValue):
+    forward_only_since: AwareDatetime | None = None
     blockers: tuple[Literal["legacy_attribution_unavailable"], ...] = ()
     schedule: DreamingSchedule
     runs: tuple[DreamingRun, ...]

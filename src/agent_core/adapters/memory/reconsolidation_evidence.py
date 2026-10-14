@@ -41,6 +41,29 @@ class ReconsolidationEvidence:
         self.people = people
         self.memories = memories
 
+    async def after_forward_boundary(
+        self, principal: Principal, record: MemoryRecord, version: SourceVersion
+    ) -> bool:
+        boundary = await self.people.forward_dreaming_boundary(principal)
+        if boundary is None:
+            return True
+        if (
+            version.creation_sequence <= boundary.creation_sequence
+            or not record.source_event_ids
+            or len(record.source_event_ids) > 256
+        ):
+            return False
+        for sequence in set(record.source_event_ids):
+            try:
+                events = await self.events.list_after(
+                    record.source_session_id, sequence - 1, principal, limit=1
+                )
+            except NotFoundError:
+                return False
+            if not events or events[0].sequence != sequence or events[0].id <= boundary.event_id:
+                return False
+        return True
+
     async def original_input(
         self,
         principal: Principal,
@@ -139,6 +162,14 @@ class ReconsolidationEvidence:
     ) -> tuple[MergeSource, ...] | None:
         if not 2 <= len(originals) <= 32:
             return None
+        if not all(
+            [
+                await self.after_forward_boundary(principal, record, version)
+                for record, version in originals
+            ]
+        ):
+            return None
+        forward_only = await self.people.forward_dreaming_boundary(principal) is not None
         leaves = {
             (record.source_session_id, sequence)
             for record, _ in originals
@@ -183,7 +214,9 @@ class ReconsolidationEvidence:
                 source_id(principal, record.source_session_id, n)
                 for n in sorted(set(record.source_event_ids))
             )
-            records = await self.people.memory_attribution_records(principal, record.id, identities)
+            records = await self.people.memory_attribution_records(
+                principal, record.id, identities, forward_only=forward_only
+            )
             if records is None:
                 return None
             for item in records:

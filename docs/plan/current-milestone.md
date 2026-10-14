@@ -163,7 +163,11 @@ title: Current Milestone
   diagnosis found legacy erased People heads with missing reverse attribution;
   their existing source refusal remains intact. ADR-0186 implements persistent
   review sign-in and explicit blocker/deferral reporting, pending delivery.
-  Metadata recovery requires a separate decision. Unattended processing stays disabled.
+  Authorized metadata-only recovery found no complete surviving identifiers.
+  On October 13 the owner authorized forward-only dreaming (ADR-0202): a durable
+  cutover excludes existing memories and source events while allowing new evidence
+  through existing safety checks. Focused regression coverage passes; production
+  cutover awaits verified delivery. Unattended application stays disabled.
   The once/dry-run operator
   controls, remaining complete runtime gates and fresh matching comparative
   release evidence remain required; no verified sequential ceiling advances.

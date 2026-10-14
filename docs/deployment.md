@@ -1508,8 +1508,9 @@ alerts; cleanup and viewed-result acknowledgement require the updated client.
 
 ## Owner-reviewed dreaming rollout (ADR-0174)
 
-Deploy the reviewed-dreaming build and run its normal migration to
-`ea3210a1b00c`. Apply these same flags to every enabled application role:
+Deploy the reviewed-dreaming build and run its normal migration to the current
+schema head (daily review state was introduced in `ea3210a1b00c`). Apply these
+same flags to every enabled application role:
 
 ```dotenv
 AGENT_MEMORY_API_ENABLED=1
@@ -1539,8 +1540,8 @@ empty, blocked, failed or interrupted outcomes. No provider call is made by
 opening the page or approving an operation. Inspect the exact statement and
 supporting originals, select **Approve and apply**, and confirm. Applied
 merges can be undone here. Summaries/connections retain the existing memory
-browser rejection/deletion controls. Reloading requires reconnecting and
-reads the saved server decisions. Pause previews from Review settings to
+browser rejection/deletion controls. The HTTPS review session lasts up to thirty
+days (ADR-0186); reloading reads saved server decisions without another token. Pause previews from Review settings to
 stop new daily claims; an already running bounded slice may finish.
 
 An empty or blocked run can mean there are no eligible attributed memories;
@@ -1551,3 +1552,26 @@ blinded packet. To stop reviewed recall and proposals, disable the review
 flag and restart those same roles; retain the operation API for inspection and undo. Do not
 downgrade the database after review/scheduling state exists: the migration
 refuses to discard that history.
+
+
+### Forward-only cutover after legacy attribution loss (ADR-0202)
+
+Deploy the current schema head, including migration `ea3210a1b00d`, before
+activation. With the existing protected owner operator environment loaded, run:
+
+```sh
+agent memory reconsolidations forward-only --owner TENANT/PRINCIPAL --confirm
+```
+
+Use the exact configured owner identity. The command refuses an active dreaming
+lease; retry after that bounded slice finishes. A successful retry returns the
+same cutover, never a later one. It retires queued legacy groups while retaining
+their records, excludes existing memories and source messages, and leaves the
+next daily opportunity and spend budgets unchanged. It restores no deleted text.
+
+Verify that the authenticated review page shows the cutover date and that its
+current legacy blocker is absent. Retained blocked run receipts remain visible.
+The next daily run may legitimately report no change until enough suitable new
+evidence exists. Keep supervised review enabled and unattended application off;
+new proposals still require individual approval. Never remove an activated
+boundary or replace unknown legacy attribution with empty metadata to unblock work.

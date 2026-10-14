@@ -171,6 +171,7 @@ nav:
       - "ADR-0199: Recall evidence release binding": adr/0199-recall-evidence-release-binding.md
       - "ADR-0200: Historical semantic revisions": adr/0200-historical-semantic-revisions.md
       - "ADR-0201: Foundation signing evidence": adr/0201-foundation-signing-evidence.md
+      - "ADR-0202: Forward-only dreaming": adr/0202-forward-only-dreaming.md
       - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md
       - ADR-0177 Bounded browser startup recovery: adr/0177-bounded-browser-startup-recovery.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md

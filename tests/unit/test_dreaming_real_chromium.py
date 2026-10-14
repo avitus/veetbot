@@ -1,6 +1,7 @@
 """Real browser controls exercise the authenticated API and actual memory writer."""
 
 from dataclasses import replace
+from datetime import timedelta
 from typing import cast
 
 from httpx import ASGITransport, AsyncClient
@@ -28,9 +29,8 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
         memory_reconsolidation_api_enabled=True,
         memory_dreaming_review_enabled=True,
     )
-    async with build(
-        settings=settings, storage="memory", principal=owner(), clock=FixedClock(NOW)
-    ) as app:
+    clock = FixedClock(NOW)
+    async with build(settings=settings, storage="memory", principal=owner(), clock=clock) as app:
         async with app.uow_factory() as uow:
             await uow.sessions.create(session())
         prepared, review = await prepared_batch(cast(Factory, app.uow_factory))
@@ -115,6 +115,15 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
             assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             await page.screenshot(path="/tmp/dreaming-mobile.png", full_page=True)
             assert await page.evaluate("localStorage.length === 0 && sessionStorage.length === 0")
+            clock.advance(timedelta(minutes=4))
+            assert app.services.reconsolidation is not None
+            await app.services.reconsolidation.enable_forward_dreaming(owner())
+            await page.reload()
+            await expect(page.locator("#forward-only")).to_contain_text(
+                "only new memories and source messages"
+            )
+            await expect(page.locator("#blocker")).to_be_hidden()
+            assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             await page.get_by_role("button", name="Sign out", exact=True).click()
             await expect(page.locator("#connect")).to_be_visible()
             await page.reload()

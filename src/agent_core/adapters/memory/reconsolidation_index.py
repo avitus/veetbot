@@ -6,6 +6,7 @@ from uuid import UUID
 
 from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.domain.derived_memory import SummaryWriteReceipt
+from agent_core.domain.dreaming import ForwardDreamingBoundary
 from agent_core.domain.memory import LIVE_MEMORY_STATUSES, MemoryRecord
 from agent_core.domain.reconsolidation import SourceChange, SourceVersion, content_signature
 from agent_core.domain.reconsolidation_merge import MergeUndoReceipt
@@ -18,6 +19,9 @@ from agent_core.ports.determinism import Clock
 class ReconsolidationIndex:
     def __init__(self, transaction: MemoryTransaction) -> None:
         self.transaction = transaction
+        self.forward_dreaming: MutableMapping[tuple[str, str], ForwardDreamingBoundary] = (
+            transaction.mapping()
+        )
         self._clock: Clock | None = None
         self._position: Callable[[], int] | None = None
         self.operations: MutableMapping[UUID, StoredOperation] = transaction.mapping()

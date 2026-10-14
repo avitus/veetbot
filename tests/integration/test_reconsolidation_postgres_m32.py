@@ -967,3 +967,97 @@ async def test_legacy_attribution_blocker_is_owner_bound(postgres_stores: Factor
             await uow.people.memory_attribution_records(principal(), UUID(int=501), (UUID(int=1),))
             is None
         )
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_forward_only_dreaming_retains_legacy_exclusion(
+    postgres_stores: Factory, legacy: bool
+) -> None:
+    from tests.contract.dreaming_forward_cases import forward_only_sources
+
+    if legacy:
+        async with postgres_stores() as uow:
+            assert isinstance(uow.people, PostgresPeopleStore)
+            await uow.people._session.execute(
+                text("""
+                INSERT INTO people_heads
+                (tenant_id, principal_id, id, kind, revision, sensitivity, erased,
+                 excluded, memory_attribution)
+                VALUES (:tenant, :principal, :id, 'person', 1, 1, true, false, NULL)
+            """),
+                {
+                    "tenant": principal().tenant_id,
+                    "principal": principal().principal_id,
+                    "id": UUID(int=9876),
+                },
+            )
+            assert not await uow.people.memory_attribution_complete(principal())
+    await forward_only_sources(postgres_stores)
+    async with postgres_stores() as uow:
+        assert await uow.people.dreaming_attribution_ready(principal())
+        if legacy:
+            assert not await uow.people.memory_attribution_complete(principal())
+            assert isinstance(uow.people, PostgresPeopleStore)
+            await uow.people._session.execute(
+                text("""
+                UPDATE people_heads SET revision = revision + 1
+                WHERE tenant_id = :tenant AND principal_id = :principal AND id = :id
+            """),
+                {
+                    "tenant": principal().tenant_id,
+                    "principal": principal().principal_id,
+                    "id": UUID(int=9876),
+                },
+            )
+            assert not await uow.people.dreaming_attribution_ready(principal())
+
+
+async def test_forward_cutover_waits_for_inflight_event_commit(postgres_stores: Factory) -> None:
+    from agent_core.domain.events import NewEvent
+    from tests.contract.support import SESSION_ID
+
+    inserted, commit = asyncio.Event(), asyncio.Event()
+
+    async def writer() -> int:
+        async with postgres_stores() as uow:
+            event = await uow.events.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=principal().principal_id,
+                    payload={"content": "Synthetic original before the cutover."},
+                )
+            )
+            inserted.set()
+            await commit.wait()
+            return event.id
+
+    async def cutover() -> int:
+        async with postgres_stores() as uow:
+            event_id = await uow.events.dreaming_cutover_event_id()
+            async with uow.people.lock(principal()):
+                return (
+                    await uow.people.enable_forward_dreaming(principal(), event_id, NOW)
+                ).event_id
+
+    async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+        writing = tasks.create_task(writer())
+        await inserted.wait()
+        fencing = tasks.create_task(cutover())
+        await asyncio.sleep(0.05)
+        assert not fencing.done(), "Cutover must not miss an allocated, uncommitted original"
+        commit.set()
+    assert fencing.result() >= writing.result()
+
+
+async def test_forward_cutover_rolls_back_atomically(postgres_stores: Factory) -> None:
+    with pytest.raises(RuntimeError, match="abort"):
+        async with postgres_stores() as uow:
+            event_id = await uow.events.dreaming_cutover_event_id()
+            async with uow.people.lock(principal()):
+                await uow.people.enable_forward_dreaming(principal(), event_id, NOW)
+            raise RuntimeError("abort")
+    async with postgres_stores() as uow:
+        assert await uow.people.forward_dreaming_boundary(principal()) is None

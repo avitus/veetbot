@@ -37,6 +37,12 @@ from agent_core.domain.reconsolidation_views import (
 
 
 class ReconsolidationStore(Protocol):
+    async def retire_dreaming_groups(self, principal: Principal) -> None:
+        """Under the owner/People locks, retire queued work during a one-time cutover."""
+        ...
+
+    async def dreaming_cutover_idle(self, principal: Principal, now: datetime) -> bool: ...
+
     async def dreaming_schedule(self, principal: Principal) -> DreamingSchedule: ...
     async def pause_dreaming(
         self, principal: Principal, paused: bool, revision: int

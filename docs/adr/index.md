@@ -232,3 +232,5 @@ implementation without one.
 - [ADR-0200: Historical semantic revisions](0200-historical-semantic-revisions.md)
 
 - [ADR-0201: Foundation signing evidence](0201-foundation-signing-evidence.md)
+
+- [ADR-0202: Forward-only dreaming](0202-forward-only-dreaming.md)
