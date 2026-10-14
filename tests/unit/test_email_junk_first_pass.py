@@ -4,6 +4,7 @@
 import hashlib
 import json
 from dataclasses import replace
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -12,7 +13,7 @@ import pytest
 
 from agent_core.adapters.judgment import FakeJudgmentProvider
 from agent_core.bootstrap import build
-from agent_core.config import load_settings
+from agent_core.config import ConfigurationError, load_settings
 from agent_core.domain.email_junk import (
     JUNK_MODEL,
     JUNK_POLICY,
@@ -34,7 +35,22 @@ from tests.gates.test_email_spam_m31 import _seed
 from tests.unit.test_config import base_environment
 
 
+@pytest.mark.parametrize("mode", ["off", "shadow", "filter"])
+def test_junk_mode_accepts_surrounding_whitespace(mode: str) -> None:
+    """Normalize padded environment values without changing the selected mode."""
+    settings = load_settings({**base_environment(), "AGENT_EMAIL_JUNK_FILTER_MODE": f" {mode}\t"})
+    assert settings.email_junk_filter_mode == EmailJunkMode(mode)
+
+
+@pytest.mark.parametrize("mode", ["", " \t"])
+def test_empty_junk_mode_is_rejected(mode: str) -> None:
+    """Keep explicitly empty configuration invalid instead of silently enabling a default."""
+    with pytest.raises(ConfigurationError, match="AGENT_EMAIL_JUNK_FILTER_MODE"):
+        load_settings({**base_environment(), "AGENT_EMAIL_JUNK_FILTER_MODE": mode})
+
+
 def decision() -> JudgmentResult:
+    """Build a synthetic pinned-model bulk verdict with known usage."""
     return JudgmentResult(
         answers={
             "category": ChoiceAnswer(
@@ -54,6 +70,7 @@ def decision() -> JudgmentResult:
 
 
 async def test_shadow_screens_before_assessment_and_accounts_both_calls() -> None:
+    """Preserve full assessment in shadow while charging its preliminary judgment."""
     settings = replace(
         load_settings({**base_environment(), "AGENT_EMAIL_JUNK_FILTER_MODE": "shadow"}),
         credentials=_email_settings().credentials,
@@ -83,6 +100,7 @@ async def test_shadow_screens_before_assessment_and_accounts_both_calls() -> Non
 
 
 def calibration() -> dict[str, Any]:
+    """Build fabricated test-only admission evidence covering every required stratum."""
     return {
         "policy": JUNK_POLICY,
         "model": JUNK_MODEL,
@@ -105,6 +123,7 @@ def calibration() -> dict[str, Any]:
 
 
 def filter_settings(tmp_path: Path, mode: str = "filter", *, admitted: bool = True) -> Any:
+    """Configure an isolated evidence path without granting real production admission."""
     path = tmp_path / "fabricated-calibration.json"
     if admitted:
         path.write_text(json.dumps(calibration()))
@@ -117,9 +136,97 @@ def filter_settings(tmp_path: Path, mode: str = "filter", *, admitted: bool = Tr
     )
 
 
+@pytest.mark.parametrize(
+    "evidence", ["missing", "invalid", "oversized", "insufficient", "off", "shadow"]
+)
+async def test_only_failed_filter_evidence_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, evidence: str
+) -> None:
+    """Expose evidence failures without logging private packet content or normal observation."""
+    settings = filter_settings(
+        tmp_path, evidence if evidence in {"off", "shadow"} else "filter", admitted=False
+    )
+    if evidence == "invalid":
+        settings.email_junk_filter_evidence.write_text("private-invalid-evidence")
+    elif evidence == "oversized":
+        settings.email_junk_filter_evidence.write_bytes(b"x" * 2_000_001)
+    elif evidence == "insufficient":
+        packet = calibration()
+        packet["observations"] = packet["observations"][:1]
+        settings.email_junk_filter_evidence.write_text(json.dumps(packet))
+    async with build(
+        settings=settings,
+        judgment_provider_override=FakeJudgmentProvider([decision()]),
+        script=FakeModelScript(turns=[_assessment_turn()]),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        await app.services.email.submit_task(app.principal, kind="refresh")
+    assert ("email_junk_evidence_unavailable" in caplog.text) is (
+        evidence in {"missing", "invalid", "oversized"}
+    )
+    assert "private-invalid-evidence" not in caplog.text
+    assert str(settings.email_junk_filter_evidence) not in caplog.text
+
+
+async def test_deadline_expiring_after_budget_check_does_not_reserve_or_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deadline reached at reservation time must leave no charge, event or provider call."""
+    from agent_core.runtime.email_junk import EmailJunkFilter
+
+    original = EmailJunkFilter.screen
+    observed: dict[str, Any] = {}
+
+    async def screen(
+        self: EmailJunkFilter, c: Any, thread: Any, learning: Any, previous: Any
+    ) -> Any:
+        now: datetime = c.clock.now()
+        deadline = c.run.deadline_at
+        assert isinstance(deadline, datetime) and deadline > now
+
+        class DeadlineClock:
+            calls = 0
+
+            def now(self) -> datetime:
+                self.calls += 1
+                return now if self.calls == 1 else deadline
+
+        original_clock = c.clock
+        c.clock = DeadlineClock()
+        try:
+            receipt = await original(self, c, thread, learning, previous)
+            async with c.uow_factory() as uow:
+                events = await uow.events.list_after(
+                    c.run.session_id, 0, c.principal, run_id=c.run.id
+                )
+            observed["events"] = [
+                event for event in events if event.event_type.startswith("email.junk.")
+            ]
+            observed["receipt"] = receipt
+            return receipt
+        finally:
+            c.clock = original_clock
+
+    monkeypatch.setattr(EmailJunkFilter, "screen", screen)
+    judge = FakeJudgmentProvider([decision()])
+    async with build(
+        settings=filter_settings(tmp_path),
+        judgment_provider_override=judge,
+        script=FakeModelScript(turns=[_assessment_turn()]),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert observed["events"] == []
+        assert observed["receipt"] is None
+        assert judge.requests == []
+
+
 async def test_evidenced_filter_skips_generation_without_moving_mail_and_caches(
     tmp_path: Path,
 ) -> None:
+    """Reuse admitted decisions while preserving mailbox labels and suppressing generation."""
     judge = FakeJudgmentProvider([decision()])
     async with build(
         settings=filter_settings(tmp_path),
@@ -151,6 +258,7 @@ async def test_evidenced_filter_skips_generation_without_moving_mail_and_caches(
 async def test_provider_failure_preserves_assessment_and_uncertain_cost(
     tmp_path: Path, reason: JudgmentFailure
 ) -> None:
+    """Provider failures retain assessment and distinguish unknown charges from known rejection."""
     judge = FakeJudgmentProvider([JudgmentProviderError(reason, retryable=False)])
     async with build(
         settings=filter_settings(tmp_path),
@@ -177,6 +285,7 @@ async def test_provider_failure_preserves_assessment_and_uncertain_cost(
 async def test_uncertain_or_wrong_model_keeps_normal_assessment(
     tmp_path: Path, change: str
 ) -> None:
+    """Only a supported high-confidence junk result may bypass the ordinary assessor."""
     result = decision()
     if change == "wrong_model":
         result = result.model_copy(
@@ -208,6 +317,7 @@ async def test_uncertain_or_wrong_model_keeps_normal_assessment(
 async def test_off_and_missing_evidence_never_bypass(
     tmp_path: Path, mode: str, admitted: bool
 ) -> None:
+    """Disabled or unadmitted modes must preserve the normal processing path."""
     judge = FakeJudgmentProvider([decision()])
     async with build(
         settings=filter_settings(tmp_path, mode, admitted=admitted),
@@ -221,6 +331,7 @@ async def test_off_and_missing_evidence_never_bypass(
 
 
 async def test_revoked_evidence_restores_normal_assessment(tmp_path: Path) -> None:
+    """Removing admission evidence invalidates an earlier bypass on refresh."""
     settings = filter_settings(tmp_path)
     judge = FakeJudgmentProvider([decision()])
     async with build(
@@ -256,6 +367,7 @@ async def test_revoked_evidence_restores_normal_assessment(tmp_path: Path) -> No
     ],
 )
 async def test_protection_precedes_egress(protection: str) -> None:
+    """Protected sources and unsafe payloads never reach the judgment provider."""
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
@@ -308,6 +420,7 @@ async def test_protection_precedes_egress(protection: str) -> None:
     ["wrong_policy", "duplicate", "false_positive", "too_small", "missing_stratum", "model_labels"],
 )
 def test_calibration_rejects_unreliable_or_mismatched_evidence(mutation: str) -> None:
+    """Reject incomplete, duplicated, mislabeled or policy-mismatched admission packets."""
     data = calibration()
     if mutation == "wrong_policy":
         data["policy"] = "old"
@@ -328,6 +441,7 @@ def test_calibration_rejects_unreliable_or_mismatched_evidence(mutation: str) ->
 
 
 async def test_important_restores_priority_and_normal_assessment(tmp_path: Path) -> None:
+    """An owner correction restores visibility immediately and invalidates the bypass."""
     judge = FakeJudgmentProvider([decision()])
     async with build(
         settings=filter_settings(tmp_path),
@@ -354,6 +468,7 @@ async def test_important_restores_priority_and_normal_assessment(tmp_path: Path)
 
 
 async def test_owner_override_during_judgment_prevents_bypass(tmp_path: Path) -> None:
+    """A correction arriving during provider latency wins the assessment-save race."""
     import asyncio
 
     started, finish = asyncio.Event(), asyncio.Event()
@@ -390,6 +505,7 @@ async def test_owner_override_during_judgment_prevents_bypass(tmp_path: Path) ->
 async def test_new_relationship_memory_rechecks_cached_junk_without_profile_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """New relationship evidence protects cached mail even without a profile revision bump."""
     judge = FakeJudgmentProvider([decision()])
     async with build(
         settings=filter_settings(tmp_path),
@@ -418,6 +534,7 @@ async def test_new_relationship_memory_rechecks_cached_junk_without_profile_chan
 async def test_crash_after_reservation_is_not_replayed_and_remains_charged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Recovery must retain the uncertain reservation and avoid duplicate provider dispatch."""
     from agent_core.runtime.email_junk import EmailJunkFilter
 
     captured: dict[str, Any] = {}
@@ -455,6 +572,7 @@ async def test_crash_after_reservation_is_not_replayed_and_remains_charged(
 
 
 async def test_shadow_does_not_reassess_already_current_mail(tmp_path: Path) -> None:
+    """Observation mode leaves already assessed mail and its existing costs untouched."""
     settings = filter_settings(tmp_path, "off")
     judge = FakeJudgmentProvider([])
     async with build(
@@ -474,6 +592,7 @@ async def test_shadow_does_not_reassess_already_current_mail(tmp_path: Path) -> 
 
 
 async def test_single_attempt_and_model_pin_reach_typesafe() -> None:
+    """The wire request must pin Jev and suppress adapter retries after a failed attempt."""
     import httpx
 
     from agent_core.domain.email_junk import JUNK_QUESTION
@@ -505,6 +624,7 @@ async def test_single_attempt_and_model_pin_reach_typesafe() -> None:
 async def test_private_replay_keeps_labels_empty_and_journals_before_dispatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Diagnostic output stays private and unlabeled, with a durable pre-dispatch journal."""
     from agent_core.domain.email import EmailThread
     from scripts import email_junk_calibration as replay
 
@@ -538,6 +658,7 @@ async def test_private_replay_keeps_labels_empty_and_journals_before_dispatch(
 async def test_interrupted_replay_preserves_outstanding_cost(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Cancellation retains the conservative charge and closes the provider client."""
     import asyncio
 
     from scripts import email_junk_calibration as replay
@@ -568,6 +689,7 @@ async def test_interrupted_replay_preserves_outstanding_cost(
     [(0.0, "bulk"), (0.05, "bulk"), (0.051, "keep"), (0.5, "keep"), (1.0, "keep")],
 )
 async def test_protected_topics_must_be_clearly_unrelated(relevance: float, expected: str) -> None:
+    """Topic uncertainty vetoes filtering at the documented relevance boundary."""
     from agent_core.domain.email_junk import junk_result
     from agent_core.domain.judgment import NoulAnswer
 
@@ -589,6 +711,7 @@ async def test_protected_topics_must_be_clearly_unrelated(relevance: float, expe
 
 
 def test_junk_score_combines_junk_categories_without_treating_keep_as_junk() -> None:
+    """Combine spam and bulk probability while preserving the keep decision boundary."""
     from agent_core.domain.email_junk import JUNK_QUESTION, JUNK_THRESHOLD, junk_result
     from agent_core.domain.judgment import JudgmentRequest
 
@@ -608,3 +731,64 @@ def test_junk_score_combines_junk_categories_without_treating_keep_as_junk() -> 
     assert receipt["category"] == "bulk"
     assert receipt["probability"] == pytest.approx(0.99)
     assert receipt["probability"] >= JUNK_THRESHOLD
+
+
+@pytest.mark.parametrize("indexed", [True, False])
+@pytest.mark.parametrize("same_account", [True, False])
+async def test_kept_subscription_protects_mail_when_subscription_ui_is_disabled(
+    indexed: bool, same_account: bool
+) -> None:
+    """Saved keep preferences remain account-scoped protections when census bindings stop."""
+    from agent_core.domain.email import EmailRecord
+    from agent_core.domain.email_subscriptions import EmailSubscription
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        thread = await _seed(app)
+        now = app.clock.now()
+        subscription = EmailSubscription(
+            id="kept-subscription",
+            account_id=thread.account_id if same_account else "another-account",
+            identity_kind="sender",
+            identity="news@example.test",
+            first_seen_at=now,
+            last_received_at=now,
+            state="kept",
+        )
+        key = hashlib.sha256(
+            f"{thread.account_id}:{thread.provider_thread_id}".encode()
+        ).hexdigest()
+        seed_rows: tuple[tuple[str, str, dict[str, object]], ...] = (
+            ("subscription", subscription.id, subscription.model_dump(mode="json")),
+            ("subscription_thread", key, {"subscription_id": subscription.id}),
+        )
+        async with app.uow_factory() as uow:
+            for kind, identifier, payload in seed_rows:
+                if kind == "subscription_thread" and not indexed:
+                    continue
+                await uow.email.put(
+                    EmailRecord(
+                        tenant_id=app.principal.tenant_id,
+                        principal_id=app.principal.principal_id,
+                        kind=kind,
+                        key=identifier,
+                        revision=1,
+                        payload=payload,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    expected_revision=0,
+                )
+        assert app.services.email.subscriptions.enabled is False
+        learning = await app.services.email.learning_context(app.principal, thread)
+        assert learning["junk_subscription_kept"] is same_account
+        assert (junk_request(thread, learning, now) is None) is same_account
+        async with app.uow_factory() as uow:
+            assert (
+                await app.services.email.subscriptions.thread_block(
+                    uow.email, app.principal, thread
+                )
+                is None
+            )

@@ -2057,10 +2057,10 @@ class EmailExperienceService:
             relationships = [
                 row.payload async for row in records(uow.email, principal, "relationship")
             ]
-            subscription = (
-                None
+            subscription_kept = (
+                False
                 if thread is None
-                else await self.subscriptions.thread_block(uow.email, principal, thread)
+                else await self.subscriptions.protects_from_junk(uow.email, principal, thread)
             )
             shared_memories = (
                 [] if thread is None else await self._relationship_evidence(uow, principal, thread)
@@ -2085,7 +2085,7 @@ class EmailExperienceService:
         result: dict[str, object] = {
             "profile_revision": state.profile_revision,
             "paused": state.paused,
-            "junk_subscription_kept": bool(subscription and subscription.get("state") == "kept"),
+            "junk_subscription_kept": subscription_kept,
             "junk_protected_topics": sorted(
                 {
                     topic
@@ -2681,13 +2681,15 @@ class EmailExperienceService:
             supported = bool(admitted_ids.intersection(proposed_ids))
             relationship = min(relationship, 1.0 if supported else min(1.0, replies / 5))
             if assessment.get("junk_bypassed"):
-                subscription = await self.subscriptions.thread_block(uow.email, principal, thread)
+                subscription_kept = await self.subscriptions.protects_from_junk(
+                    uow.email, principal, thread
+                )
                 feedback = await self._feedback(uow.email, principal)
                 if (
                     thread.spam_cleared
                     or replies > 0
                     or admitted_ids
-                    or (subscription and subscription.get("state") == "kept")
+                    or subscription_kept
                     or any(
                         f.undone_at is None
                         and f.judgment in {"important", "needs_reply"}

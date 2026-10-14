@@ -623,6 +623,25 @@ class EmailSubscriptions:
                     found[subscription_id] = self.view(value, revision, protected)
         return found
 
+    async def protects_from_junk(
+        self, store: EmailStore, principal: Principal, thread: EmailThread
+    ) -> bool:
+        """Saved keep decisions survive disabling the subscription census and UI.
+
+        Without the census, new thread-to-subscription bindings are unavailable;
+        protect the account conservatively if it has any saved kept subscription.
+        """
+        if self.enabled:
+            block = await self.thread_block(store, principal, thread)
+            return bool(block and block.get("state") == "kept")
+        async for row in self._rows(store, principal):
+            if (
+                row.payload.get("account_id") == thread.account_id
+                and row.payload.get("state") == "kept"
+            ):
+                return True
+        return False
+
     async def thread_block(
         self, store: EmailStore, principal: Principal, thread: EmailThread
     ) -> dict[str, object] | None:

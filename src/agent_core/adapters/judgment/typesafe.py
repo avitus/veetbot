@@ -138,6 +138,7 @@ class TypeSafeJudgmentProvider:
         self._total_timeout_seconds = total_timeout_seconds
 
     async def judge(self, request: JudgmentRequest) -> JudgmentResult:
+        """Validate and meter a bounded request using its model pin and attempt allowance."""
         body = json.dumps(
             {
                 "state": request.state,

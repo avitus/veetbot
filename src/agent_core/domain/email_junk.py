@@ -115,6 +115,7 @@ class JunkCalibration(BaseModel):
     observations: list[JunkObservation] = Field(max_length=10_000)
 
     def admitted(self) -> bool:
+        """Require matching policy, unique owner labels, strata and zero false positives."""
         rows = self.observations
         predicted = [r for r in rows if r.category != "keep" and r.probability >= JUNK_THRESHOLD]
         return (
@@ -197,6 +198,7 @@ def junk_request(
 def junk_fingerprint(
     request: JudgmentRequest, thread: EmailThread, learning: dict[str, Any]
 ) -> str:
+    """Bind cached decisions to source content, assessment context and classifier policy."""
     return hashlib.sha256(
         json.dumps(
             {

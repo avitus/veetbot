@@ -22,6 +22,7 @@ from tests.unit.test_email_junk_first_pass import decision, filter_settings
 async def test_junk_usage_and_uncertain_settlement_survive_database_reload(
     tmp_path: Path, uncertain: bool
 ) -> None:
+    """Verify durable receipts distinguish actual usage from reserved unknown costs."""
     settings = replace(filter_settings(tmp_path), database_url=database_settings().database_url)
     judge = FakeJudgmentProvider(
         [

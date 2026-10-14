@@ -36,15 +36,18 @@ class EmailJunkFilter:
         admitted: bool = False,
         evidence_digest: str = "none",
     ) -> None:
+        """Downgrade unadmitted filtering to observation and bind the cache revision."""
         self.provider = provider
         self.mode = mode if mode != EmailJunkMode.FILTER or admitted else EmailJunkMode.SHADOW
         self.revision = f"{JUNK_POLICY}:{self.mode.value}:{evidence_digest}"
 
     @property
     def enabled(self) -> bool:
+        """Permit screening only when a provider exists and the mode allows calls."""
         return self.mode != EmailJunkMode.OFF and self.provider is not None
 
     def bypass(self, receipt: dict[str, Any] | None) -> bool:
+        """Require admitted filter mode and a completed, matching, high-scoring junk receipt."""
         return bool(
             self.mode == EmailJunkMode.FILTER
             and receipt
@@ -58,6 +61,7 @@ class EmailJunkFilter:
     async def screen(
         self, c: RunContext, thread: EmailThread, learning: dict[str, Any], previous: dict[str, Any]
     ) -> dict[str, Any] | None:
+        """Reconcile prior attempts, reserve before egress and settle verified usage atomically."""
         if not self.enabled or self.provider is None:
             return None
         request = junk_request(thread, learning, c.clock.now())
@@ -96,6 +100,13 @@ class EmailJunkFilter:
                 and c.run.usage.cost + JUNK_RESERVATION > c.run.limits.max_cost
             ):
                 return None
+            timeout = (
+                min(8.0, max(0.0, (c.run.deadline_at - c.clock.now()).total_seconds()))
+                if c.run.deadline_at
+                else 8.0
+            )
+            if timeout <= 0:
+                return None
             # Reserve before egress in the same fenced transaction as the audit event.
             updated = c.run.model_copy(deep=True)
             updated.usage.cost += JUNK_RESERVATION
@@ -111,11 +122,6 @@ class EmailJunkFilter:
                 lease=c.lease,
             )
         c.run.usage = updated.usage
-        timeout = (
-            min(8.0, max(0.0, (c.run.deadline_at - c.clock.now()).total_seconds()))
-            if c.run.deadline_at
-            else 8.0
-        )
         actual: Decimal | None = None
         receipt = fallback
         try:

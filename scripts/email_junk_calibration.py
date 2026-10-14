@@ -40,6 +40,7 @@ def private_json(path: Path, value: object) -> None:
 
 
 async def replay(source: Path, output: Path, maximum: int, budget: Decimal) -> dict[str, Any]:
+    """Record a bounded diagnostic replay without inventing labels or activating filtering."""
     if not budget.is_finite() or not Decimal("0.001") <= budget <= Decimal("1"):
         raise ValueError("budget must be between USD 0.001 and USD 1")
     if not 1 <= maximum <= 1000 or source.stat().st_size > 20_000_000:
@@ -149,6 +150,7 @@ async def replay(source: Path, output: Path, maximum: int, budget: Decimal) -> d
 
 
 def main() -> None:
+    """Validate an owner-reviewed packet or run a separately budgeted private replay."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check", help="Recompute readiness from a private reviewed packet")

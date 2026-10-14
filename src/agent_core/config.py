@@ -1801,7 +1801,7 @@ def _load_settings(
     email_mode_enabled = _parse_flag(values, "AGENT_EMAIL_MODE_ENABLED")
     email_junk_filter_mode = _parse_enum(
         EmailJunkMode,
-        values.get("AGENT_EMAIL_JUNK_FILTER_MODE", "off"),
+        values.get("AGENT_EMAIL_JUNK_FILTER_MODE", "off").strip(),
         "AGENT_EMAIL_JUNK_FILTER_MODE",
     )
     junk_evidence = values.get("AGENT_EMAIL_JUNK_FILTER_EVIDENCE", "").strip()

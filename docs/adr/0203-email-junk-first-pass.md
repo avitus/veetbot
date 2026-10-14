@@ -15,7 +15,8 @@ This is not generative model routing and grants no Gmail write authority.
 The default is off. Shadow mode records judgments and still runs the normal
 assessment. Filter mode requires an operator-held, independently reviewed
 calibration packet matching the exact classifier policy and pinned Jev model.
-Missing, invalid or stale evidence falls back to shadow. A probability alone
+Missing, invalid or stale evidence falls back to shadow. Unreadable, malformed
+or oversized evidence emits a content-free operator warning. A probability alone
 never establishes readiness. The pilot evidence must contain at least 100
 unique reviewed observations, at least 20 predicted junk cases and no false
 positives, including reviewed legitimate personal outreach and transactional
@@ -34,7 +35,10 @@ signals, not measured error rates; independent calibration remains mandatory.
 Before egress protect any known reply partner or admitted relationship memory,
 any matching Important or Needs reply owner feedback, Not spam, kept
 subscriptions, sent correspondence, incomplete or oversized conversations,
-and attachments whose contents are unknown. A failed authentication check alone
+and attachments whose contents are unknown. Saved keep preferences survive
+disabling Subscriptions: without its census, an account with any kept
+subscription conservatively retains normal assessment for all mail.
+A failed authentication check alone
 never removes these first-pass protections. Send only a bounded complete recent
 received conversation's sender, subject, body and closed authentication result;
 never send owner identity metadata, recipients, memory statements, feedback explanations, drafts,
@@ -55,7 +59,8 @@ priority immediately and forces normal reassessment. No mail is deleted, moved,
 reported as spam or unsubscribed. Bypass performs no draft or memory formation.
 
 Jev calls are bounded to one provider attempt and eight seconds inside the
-existing run deadline. Reserve a conservative USD 0.001 in the run before dial,
+existing run deadline, checked again before reserving an attempt. Reserve a
+conservative USD 0.001 in the run before dial,
 using a durable content-free event and fenced usage update in one transaction.
 Successful usage replaces that reservation atomically. Unknown outcomes retain
 it and prevent false actual-cost settlement; the existing conservative email

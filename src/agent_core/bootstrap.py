@@ -4113,8 +4113,10 @@ async def _compose(
                         junk_calibration = JunkCalibration.model_validate_json(raw_junk_evidence)
                         junk_admitted = junk_calibration.admitted()
                         junk_digest = hashlib.sha256(raw_junk_evidence).hexdigest()
+                    else:
+                        logger.warning("email_junk_evidence_unavailable")
                 except (OSError, ValueError):
-                    pass
+                    logger.warning("email_junk_evidence_unavailable")
             junk_filter = EmailJunkFilter(
                 judgment_provider,
                 settings.email_junk_filter_mode,
