@@ -208,14 +208,15 @@ public struct SessionView: Codable, Identifiable, Sendable {
         folderSupported = container.contains(.folderID)
     }
 
-    /// People audit anchors and import workers are sessions, not conversations.
     /// The schedule that materialized this session, when its metadata names one.
     /// A value that is not a UUID string is treated as absent.
     public var scheduleID: UUID? {
         metadata["schedule_id"]?.stringValue.flatMap(UUID.init(uuidString:))
     }
 
-    var isPeopleOperational: Bool {
+    /// Internal Email and People work must never become a Chat conversation.
+    var isOperational: Bool {
+        if metadata["email_operational"]?.boolValue == true { return true }
         guard let purpose = metadata["purpose"]?.stringValue else { return false }
         return purpose == "people-management" || purpose == "people-import"
     }

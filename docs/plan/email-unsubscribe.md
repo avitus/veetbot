@@ -120,7 +120,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:796-799).
+  (email-experience.md:800-803).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -627,7 +627,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:794-814): the owner names one thread and the
+delta (email-experience.md:798-818): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.

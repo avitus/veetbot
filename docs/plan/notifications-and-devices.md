@@ -415,7 +415,12 @@ For each claimed row it:
 2. Checks staleness against the row's identifiers: an approval already
    resolved or expired, a question already answered, a run no longer waiting,
    or a session that no longer exists settles the row `superseded` with no
-   transport call.
+   transport call. A `run_failed` row for a server-marked `email_operational`
+   session is also superseded: its failure belongs to Email refresh status,
+   never a Chat conversation. The triggering event and transactional outbox
+   remain audited. Delivered-notification reconciliation applies this same
+   rule to remove alerts sent by earlier versions; approvals and questions
+   retain their ordinary attention rules.
 3. Checks `expires_at`; an expired row settles `expired` with no transport
    call.
 4. Resolves push targets: the principal's active devices with a token whose

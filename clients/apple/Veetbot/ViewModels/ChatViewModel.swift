@@ -491,10 +491,12 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         do {
-            var fetched: SessionView?
+            let session = try await api.getSession(link.sessionID)
+            guard !session.isOperational else {
+                try await hideOperationalSession(session.id)
+                return
+            }
             if let emailNotificationHandler {
-                let session = try await api.getSession(link.sessionID)
-                fetched = session
                 if let value = session.metadata["email_thread_id"]?.stringValue,
                     let threadID = UUID(uuidString: value),
                     await emailAnswers(link.focus, threadID: threadID, api: api) {
@@ -508,8 +510,6 @@ public final class ChatViewModel: ObservableObject {
             if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
             } else {
-                let session: SessionView
-                if let fetched { session = fetched } else { session = try await api.getSession(link.sessionID) }
                 try await store(
                     session: session,
                     lastRunID: link.runID
@@ -1098,8 +1098,8 @@ public final class ChatViewModel: ObservableObject {
             let page = try await api.listSessions(cursor: cursor)
             guard historyReconciliationID == reconciliationID else { return }
             for session in page.items {
-                // A cached People session left unlisted is pruned below.
-                guard !session.isPeopleOperational else { continue }
+                // A cached internal session left unlisted is pruned below.
+                guard !session.isOperational else { continue }
                 serverIDs.insert(session.id)
                 serverSpeaksFolders = serverSpeaksFolders || session.folderSupported
                 guard !removedHistorySessionIDs.contains(session.id),
@@ -1130,8 +1130,8 @@ public final class ChatViewModel: ObservableObject {
         var prunedHistory = false
         for resolution in missingResolutions {
             switch resolution {
-            case .found(let session) where session.isPeopleOperational:
-                // The session backs People data, so it is hidden locally, never deleted.
+            case .found(let session) where session.isOperational:
+                // Preserve the server audit session; remove only its local Chat row.
                 try await historyStore.delete(sessionID: session.id)
                 guard historyReconciliationID == reconciliationID else { return }
                 if selectedSessionID == session.id {
@@ -2708,12 +2708,22 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    private func hideOperationalSession(_ sessionID: UUID) async throws {
+        try await historyStore.delete(sessionID: sessionID)
+        history = try await historyStore.list()
+        if selectedSessionID == sessionID { resetSelectedSession() }
+    }
+
     private func store(
         session: SessionView,
         lastRunID: UUID?,
         suggestedTitle: String? = nil,
         touchedNow: Bool = false
     ) async throws {
+        guard !session.isOperational else {
+            try await hideOperationalSession(session.id)
+            return
+        }
         let existing = history.first { $0.sessionID == session.id }
         let entry = Self.mergedHistoryEntry(
             session: session,

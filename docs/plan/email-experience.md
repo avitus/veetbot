@@ -706,7 +706,11 @@ An email thread session becomes visible after an owner `user.message.created`
 event or an explicit Discuss in Chat action, recorded once per session as a
 content-free, principal-authored `email.discussion.opened` event. Existing draft
 sessions without either event remain accessible to Email but absent from Chat;
-existing owner conversations remain visible. No draft or session is deleted.
+existing owner conversations remain visible. Native Chat also rejects operational
+Email sessions from notification and shared-session deep links and prunes any
+previously cached operational rows during history reconciliation. This removes
+only local Chat entries; the server session and email evidence remain intact.
+No draft or session is deleted.
 Feedback evidence queries are scoped to the current run before fetching events,
 retaining the same principal and owner-authorship checks.
 
