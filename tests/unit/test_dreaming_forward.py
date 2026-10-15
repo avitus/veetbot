@@ -1,5 +1,6 @@
 """Uncertain legacy People attribution cannot block safe new evidence forever."""
 
+import hashlib
 from typing import cast
 from uuid import UUID
 
@@ -8,7 +9,8 @@ import pytest
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.people import InMemoryPeopleStore
 from agent_core.application.reconsolidation import PublicReconsolidationService
-from agent_core.domain.errors import AuthorizationError
+from agent_core.domain.errors import AuthorizationError, ConflictError
+from agent_core.domain.people import Person
 from tests.contract.dreaming_forward_cases import forward_only_sources
 from tests.contract.reconsolidation_cases import Factory, Stores
 from tests.contract.support import NOW, memory_uow_factory, principal
@@ -20,7 +22,7 @@ async def test_forward_only_sources_and_erasure(legacy: bool) -> None:
     if legacy:
         async with factory() as uow:
             people = cast(InMemoryPeopleStore, uow.people)
-            people._erased.add((principal().tenant_id, principal().principal_id, UUID(int=9876)))
+            await _unknown_erased_person(people, UUID(int=9876))
             assert not await people.memory_attribution_complete(principal())
     await forward_only_sources(cast(Factory, factory))
     async with factory() as uow:
@@ -81,7 +83,7 @@ async def test_forward_only_legacy_owner_reaches_provider_review() -> None:
     owner = principal().model_copy(update={"scopes": {"memory.write"}})
     async with factory() as uow:
         people = cast(InMemoryPeopleStore, uow.people)
-        people._erased.add((owner.tenant_id, owner.principal_id, UUID(int=9876)))
+        await _unknown_erased_person(people, UUID(int=9876))
     await PublicReconsolidationService(factory, FixedClock(NOW)).enable_forward_dreaming(owner)
     tracked = TrackedFactory(cast(Factory, factory))
     async with tracked() as uow:
@@ -118,3 +120,124 @@ async def test_cutover_retires_queued_legacy_groups_without_deleting_history() -
         assert retained.state == "stale" and retained.reason == "source_changed"
         assert retained.sources == group.sources and retained.attempts == group.attempts
         assert await uow.memories.get(group.sources[0].belief_id, principal()) is not None
+
+
+async def test_forward_cutover_refuses_live_unknown_people_before_and_after_activation() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        people = cast(InMemoryPeopleStore, uow.people)
+        owner = principal()
+        record = Person(
+            id=UUID(int=9880),
+            tenant_id=owner.tenant_id,
+            principal_id=owner.principal_id,
+            display_name="Fabricated legacy person",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        await people.put(record, expected_revision=0)
+        footprint = people._attributions.pop((owner.tenant_id, owner.principal_id, record.id))
+        with pytest.raises(ConflictError, match="Unattributed live People evidence"):
+            await people.enable_forward_dreaming(owner, 0, NOW)
+        assert await people.forward_dreaming_boundary(owner) is None
+        foreign = owner.model_copy(update={"principal_id": "foreign"})
+        await people.enable_forward_dreaming(foreign, 0, NOW)
+        assert await people.dreaming_attribution_ready(foreign)
+        key = (owner.tenant_id, owner.principal_id, record.id)
+        people._attributions[key] = footprint
+        await people.enable_forward_dreaming(owner, 0, NOW)
+        del people._attributions[key]
+        assert not await people.dreaming_attribution_ready(owner)
+
+
+@pytest.mark.parametrize("fence_only", [False, True])
+async def test_forward_digest_keeps_erased_head_identity_after_payload_purge(
+    fence_only: bool,
+) -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        people = cast(InMemoryPeopleStore, uow.people)
+        owner = principal()
+        record = Person(
+            id=UUID(int=9881),
+            tenant_id=owner.tenant_id,
+            principal_id=owner.principal_id,
+            display_name="Fabricated erased person",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        await people.put(record, expected_revision=0)
+        record = record.model_copy(update={"revision": 2})
+        await people.put(record, expected_revision=1)
+        key = (owner.tenant_id, owner.principal_id, record.id)
+        del people._attributions[key]
+        if fence_only:
+            await people.fence_for_erasure(owner, [record.id])
+        else:
+            await people.erase(owner, [record.id])
+        boundary = await people.enable_forward_dreaming(owner, 0, NOW)
+        expected = hashlib.sha256(f"{record.id}:2:person".encode()).hexdigest()
+        assert boundary.legacy_digest == expected
+        while await people.purge_erased(owner, limit=1):
+            assert await people.dreaming_attribution_ready(owner)
+        assert key not in people._records
+        assert await people.dreaming_attribution_ready(owner)
+
+
+async def _unknown_erased_person(people: InMemoryPeopleStore, record_id: UUID) -> None:
+    owner = principal()
+    await people.put(
+        Person(
+            id=record_id,
+            tenant_id=owner.tenant_id,
+            principal_id=owner.principal_id,
+            display_name="Fabricated legacy person",
+            created_at=NOW,
+            updated_at=NOW,
+        ),
+        expected_revision=0,
+    )
+    await people.erase(owner, [record_id])
+    del people._attributions[(owner.tenant_id, owner.principal_id, record_id)]
+
+
+@pytest.mark.parametrize("identity", [(2, "person"), (1, "memory_link")])
+async def test_forward_digest_rejects_changed_erased_head_identity(
+    identity: tuple[int, str],
+) -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        people = cast(InMemoryPeopleStore, uow.people)
+        await _unknown_erased_person(people, UUID(int=9882))
+        await people.enable_forward_dreaming(principal(), 0, NOW)
+        people._erased_heads[(principal().tenant_id, principal().principal_id, UUID(int=9882))] = (
+            identity
+        )
+        assert not await people.dreaming_attribution_ready(principal())
+
+
+async def test_forward_cutover_refuses_missing_erased_head_identity() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        people = cast(InMemoryPeopleStore, uow.people)
+        people._erased.add((principal().tenant_id, principal().principal_id, UUID(int=9883)))
+        with pytest.raises(ConflictError, match="head identity is unavailable"):
+            await people.enable_forward_dreaming(principal(), 0, NOW)
+        assert await people.forward_dreaming_boundary(principal()) is None
+
+
+async def test_erased_head_metadata_rolls_back_and_is_removed_with_owner() -> None:
+    _, factory = await memory_uow_factory()
+    key = (principal().tenant_id, principal().principal_id, UUID(int=9884))
+    with pytest.raises(RuntimeError, match="Rollback"):
+        async with factory() as uow:
+            people = cast(InMemoryPeopleStore, uow.people)
+            await _unknown_erased_person(people, key[2])
+            assert key in people._erased_heads
+            raise RuntimeError("Rollback")
+    async with factory() as uow:
+        people = cast(InMemoryPeopleStore, uow.people)
+        assert key not in people._erased_heads and key not in people._erased
+        await _unknown_erased_person(people, key[2])
+        await people.erase_principal(principal())
+        assert key not in people._erased_heads and key not in people._erased
