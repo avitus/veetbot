@@ -25,7 +25,9 @@ public final class AppCoordinator: ObservableObject {
         chat.emailNotificationHandler = { [weak self] threadID, approvalID in
             guard let self else { return }
             self.mode = .email
-            await self.email.openThread(threadID, approvalID: approvalID)
+            if let threadID {
+                await self.email.openThread(threadID, approvalID: approvalID)
+            }
         }
     }
 

@@ -153,6 +153,9 @@ Existing content-free approval notifications and pending-action recovery use
 the server-owned thread/session association to open the correct Email draft,
 including after a cold launch. Resolving an approval on another device updates
 both modes without discarding unsaved input. No mail content is added to push.
+An outcome alert for a server-marked operational email session opens Email
+without adding the ingestion session to Chat history or replacing its draft.
+Approval and question alerts retain their existing resolution paths.
 
 ## 3. Retrieval and historical learning
 
@@ -699,6 +702,13 @@ rejection is reused until the ordinary invalidation rules reassess the thread.
 A rejected automatic draft leaves the thread undrafted. The slice continues and
 its attempt settles as a completed response. An owner-requested draft still
 fails its task. Provider failures and request rejections still end the run.
+
+If a source, learned profile or junk protection changes during assessment,
+the guarded save rejects that stale result. Foreground refresh defers only
+that thread and continues its bounded slice, retaining the attempt's cost.
+No stale assessment or derived memory is saved, and no immediate model retry
+is made; a later foreground slice reassesses current evidence. Unrelated
+conflicts and provider failures still end the run.
 
 The conversation index excludes the server-owned operational marker and draft-only
 email thread sessions within each repository query before cursor limits apply.

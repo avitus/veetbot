@@ -2639,7 +2639,10 @@ class EmailExperienceService:
                 thread.revision != source_revision
                 or assessment.get("profile_revision") != state.profile_revision
             ):
-                raise ConflictError("email source or learning changed during assessment")
+                raise ConflictError(
+                    "email source or learning changed during assessment",
+                    reason="email_assessment_stale",
+                )
 
             def score(name: str) -> float:
                 """Validate one normalized importance feature before saving the assessment."""
@@ -2702,7 +2705,10 @@ class EmailExperienceService:
                         for f in feedback
                     )
                 ):
-                    raise ConflictError("email protection changed during junk screening")
+                    raise ConflictError(
+                        "email protection changed during junk screening",
+                        reason="email_assessment_stale",
+                    )
             urgency = score("urgency")
             priority = min(
                 1.0, max(content * 0.9, relationship * 0.7 + content * 0.3) + urgency * 0.1

@@ -363,7 +363,7 @@ import UserNotifications
             Issue.record("Email notification unexpectedly replaced Chat: \(request.url?.path ?? "")")
             return try response(for: request, statusCode: 500, body: "{}")
         }
-        var routed: [(UUID, UUID?)] = []
+        var routed: [(UUID?, UUID?)] = []
         model.emailNotificationHandler = { routed.append(($0, $1)) }
         let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
             "version": 1, "kind": "approval_requested", "title": "Approval needed",
@@ -385,6 +385,43 @@ import UserNotifications
         #expect(model.composerText == "Keep the unfinished Chat message")
         #expect(model.selectedSessionID == nil)
         #expect(model.runState.activeRunID == nil)
+    }
+
+    @Test
+    func testColdAndWarmOperationalEmailAlertsNeverCreateChatHistory() async throws {
+        let sessionID = UUID()
+        let runID = UUID()
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            }
+            if request.url?.path == "/v1/sessions/\(sessionID)" {
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"email_operational":true},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":"\(runID)"}
+                    """)
+            }
+            Issue.record("Operational email alert unexpectedly opened Chat: \(request.url?.path ?? "")")
+            return try response(for: request, statusCode: 500, body: "{}")
+        }
+        let coordinator = AppCoordinator(chat: model)
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "run_failed", "title": "Run failed",
+            "status": "FAILED", "session_id": sessionID.uuidString,
+            "run_id": runID.uuidString, "notification_id": UUID().uuidString,
+        ]]))
+        await model.openNotification(payload)
+        #expect(coordinator.mode == .chat)
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(coordinator.mode == .email)
+        coordinator.mode = .chat
+        model.composerText = "Keep the unfinished Chat message"
+        await model.openNotification(payload)
+        #expect(coordinator.mode == .email)
+        #expect(model.composerText == "Keep the unfinished Chat message")
+        #expect(model.history.isEmpty)
+        #expect(model.selectedSessionID == nil)
+        #expect(model.runState.activeRunID == nil)
+        #expect(coordinator.email.selectedThreadID == nil)
     }
 
     /// Discuss in Chat runs in the thread's own session, so a tool approval the

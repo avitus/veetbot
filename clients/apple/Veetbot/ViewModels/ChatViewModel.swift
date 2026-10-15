@@ -121,7 +121,7 @@ public final class ChatViewModel: ObservableObject {
     /// run's session.
     public var chatNotificationHandler: (() -> Void)?
     @Published public private(set) var callResult: CallResultViewData?
-    public var emailNotificationHandler: ((UUID, UUID?) async -> Void)?
+    public var emailNotificationHandler: ((UUID?, UUID?) async -> Void)?
     @Published public private(set) var history: [SessionHistoryEntry] = []
     @Published public private(set) var selectedSessionID: UUID?
     @Published public private(set) var baseURL: URL?
@@ -495,6 +495,10 @@ public final class ChatViewModel: ObservableObject {
             if let emailNotificationHandler {
                 let session = try await api.getSession(link.sessionID)
                 fetched = session
+                if session.metadata["email_operational"]?.boolValue == true, link.focus == nil {
+                    await emailNotificationHandler(nil, nil)
+                    return
+                }
                 if let value = session.metadata["email_thread_id"]?.stringValue,
                     let threadID = UUID(uuidString: value),
                     await emailAnswers(link.focus, threadID: threadID, api: api) {

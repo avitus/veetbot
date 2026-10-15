@@ -497,9 +497,11 @@ async def test_owner_override_during_judgment_prevents_bypass(tmp_path: Path) ->
         )
         finish.set()
         operation = await pending
-        assert (await app.runs.get(operation.run_id)).status is RunStatus.FAILED
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
         detail = await app.services.email.thread(app.principal, UUID(row.key))
         assert detail["priority"] == 1 and detail["summary"] != "Filtered promotional bulk"
+        async with app.uow_factory() as uow:
+            assert await uow.email.get(app.principal, "assessment", row.key) is None
 
 
 async def test_new_relationship_memory_rechecks_cached_junk_without_profile_change(
