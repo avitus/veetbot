@@ -50,7 +50,10 @@ def test_admitted_task_query_uses_pending_work_without_turning_hints_into_filter
     assert query.as_of is None and query.known_at is None
     assert current.model_dump() == before
     changed = former.form(
-        run(), current.model_copy(update={"next_action": "Choose lunch"}), "Continue"
+        run(),
+        current.model_copy(update={"next_action": "Choose lunch"}),
+        "Continue",
+        current_scope="current-project",
     )
     assert query_digest(query) != query_digest(changed[0])
 

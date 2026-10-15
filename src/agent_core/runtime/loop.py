@@ -281,7 +281,9 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         await checkpoint(context, "compaction")
 
 
-async def prepare_recall(context: RunContext) -> None:
+async def prepare_recall(
+    context: RunContext, *, pending_batch_budget: dict[str, int] | None = None
+) -> None:
     """Reserve optional work durably; cache misses and resume cannot renew it."""
     if context.prepare_recall is None:
         return
@@ -323,7 +325,7 @@ async def prepare_recall(context: RunContext) -> None:
         deadline_at=deadline,
     )
     # This write is authoritative and must not be swallowed as optional work.
-    await checkpoint(context, "memory_preparation")
+    await checkpoint(context, "memory_preparation", pending_batch_budget=pending_batch_budget)
     if execution_bound:
         context.recall_permit = RecallExecutionPermit(
             context.principal.tenant_id,
@@ -355,7 +357,12 @@ def _apply_context_origin_trust(checkpoint_state: RunCheckpoint, request: ModelR
         raise ContextOverflow("context builder returned an invalid trust marker") from exc
 
 
-async def checkpoint(context: RunContext, trigger: str) -> None:
+async def checkpoint(
+    context: RunContext,
+    trigger: str,
+    *,
+    pending_batch_budget: dict[str, int] | None = None,
+) -> None:
     """Advance the materialized M1 checkpoint and record the checkpoint event."""
 
     previous = context.checkpoint.model_copy(deep=True)
@@ -377,6 +384,12 @@ async def checkpoint(context: RunContext, trigger: str) -> None:
             ),
         ),
     }
+    if pending_batch_budget is not None:
+        # A resumed batch still belongs to its proposing step until dispatch
+        # finishes. Other usage and the new recall reservation remain current.
+        context.checkpoint.budget_state.update(
+            {key: pending_batch_budget[key] for key in ("step_count", "tool_call_count")}
+        )
     context.checkpoint.version += 1
     context.checkpoint.status = context.run.status
     context.checkpoint.created_at = context.clock.now()

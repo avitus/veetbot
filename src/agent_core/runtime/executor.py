@@ -1172,6 +1172,7 @@ class RunExecutor:
             if missing > 0:
                 await context.budgets.record_tool_usage(context.run, missing, step=step)
         unrecorded_batch: int | None = None
+        pending_batch_budget: dict[str, int] | None = None
         if any(isinstance(item, (AssistantMessage, ToolCallItem)) for item in adopted):
             # The log holds a turn the checkpoint never saw. Its own batch
             # returned before that turn, whose continuation was never
@@ -1224,6 +1225,7 @@ class RunExecutor:
             # later one, so the batch keeps the step its checkpoint recorded.
             proposed_at = restored.budget_state.get("step_count")
             step_number = proposed_at if isinstance(proposed_at, int) else context.run.step_count
+            pending_batch_budget = {"step_count": step_number, "tool_call_count": baseline}
         restored.pending_tool_calls = [call.model_dump(mode="json") for call in calls]
         step = Step(
             run_id=context.run.id,
@@ -1233,7 +1235,7 @@ class RunExecutor:
         # The queued generation is revalidating the persisted calls. Any approval
         # raised below becomes the sole pending suspension for the next generation.
         restored.pending_approval_ids = []
-        await prepare_recall(context)
+        await prepare_recall(context, pending_batch_budget=pending_batch_budget)
         with recall_phase(context.recall_permit):
             results = await context.dispatch_tools(
                 run=context.run,
