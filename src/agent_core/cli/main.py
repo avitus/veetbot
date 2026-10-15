@@ -981,6 +981,40 @@ def _emit_reconsolidation(
     typer.echo(result.model_dump_json())
 
 
+async def _forward_dreaming(owner: str) -> None:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise ConflictError("Owner must match the configured tenant/principal")
+        service = composition.services.reconsolidation
+        if service is None:
+            raise NotFoundError("Reconsolidation controls are unavailable")
+        boundary = await service.enable_forward_dreaming(principal)
+        typer.echo(
+            f"Forward-only dreaming since {boundary.activated_at.isoformat()}. "
+            "Existing evidence remains excluded."
+        )
+
+
+@reconsolidations_app.command("forward-only")
+def forward_dreaming(
+    owner: Annotated[
+        str, typer.Option("--owner", help="Exact configured tenant/principal identity.")
+    ],
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Permanently exclude existing dreaming evidence.")
+    ] = False,
+) -> None:
+    """Enable a one-time forward-only boundary without changing the daily schedule."""
+    if not confirm:
+        raise typer.BadParameter("--confirm is required to establish the permanent boundary")
+    try:
+        asyncio.run(_forward_dreaming(owner))
+    except (ConfigurationError, AgentCoreError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
 @reconsolidations_app.command("list")
 def reconsolidations_list(
     ceiling: Annotated[Sensitivity, typer.Option("--ceiling")],

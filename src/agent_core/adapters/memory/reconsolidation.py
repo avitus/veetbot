@@ -108,6 +108,20 @@ class InMemoryReconsolidationStore:
         self._dreaming = dreaming
         self._audits: list[ReconsolidationAudit] = []
 
+    async def retire_dreaming_groups(self, principal: Principal) -> None:
+        for key, group in self._groups.items():
+            if (group.tenant_id, group.principal_id) == (
+                principal.tenant_id,
+                principal.principal_id,
+            ) and group.state in {"pending", "claimed"}:
+                self._groups[key] = group.model_copy(
+                    update={"state": "stale", "reason": "source_changed"}
+                )
+
+    async def dreaming_cutover_idle(self, principal: Principal, now: datetime) -> bool:
+        job = self._jobs.get((principal.tenant_id, principal.principal_id))
+        return job is None or job.state != "running" or job.lease_expires_at <= now
+
     def _job(self, principal: Principal, token: UUID, now: datetime) -> ReconsolidationJob:
         return check_lease(
             self._jobs.get((principal.tenant_id, principal.principal_id)), principal, token, now
@@ -116,7 +130,7 @@ class InMemoryReconsolidationStore:
     def _save(self, job: ReconsolidationJob) -> None:
         self._jobs[job.tenant_id, job.principal_id] = job
 
-    def _valid(self, principal: Principal, source: SourceVersion, now: datetime) -> bool:
+    async def _valid(self, principal: Principal, source: SourceVersion, now: datetime) -> bool:
         record = self._memories._records.get(source.belief_id)
         return (
             record is not None
@@ -125,6 +139,10 @@ class InMemoryReconsolidationStore:
             and source.belief_id not in self._memories._erasure_pending
             and self._memories._reconsolidation_index.versions.get(source.belief_id) == source
             and eligible(record, now)
+            and (
+                self._evidence is None
+                or await self._evidence.after_forward_boundary(principal, record, source)
+            )
         )
 
     async def _summary_blocked(self, principal: Principal, content: PreparedSummary) -> bool:
@@ -486,7 +504,7 @@ class InMemoryReconsolidationStore:
         if self._evidence is None:
             return None
         async with self._evidence.people.lock(principal):
-            if not all(self._valid(principal, source, now) for source in sources):
+            if not all([await self._valid(principal, source, now) for source in sources]):
                 return None
             snapshots = await self._evidence.sources(
                 principal,
@@ -917,7 +935,7 @@ class InMemoryReconsolidationStore:
                 current = None
                 if self._evidence is not None:
                     async with self._evidence.people.lock(principal):
-                        if all(self._valid(principal, source, now) for source in sources):
+                        if all([await self._valid(principal, source, now) for source in sources]):
                             current = await self._evidence.plan(
                                 principal,
                                 tuple(
@@ -1067,7 +1085,7 @@ class InMemoryReconsolidationStore:
             if self._evidence is None:
                 return None
             async with self._evidence.people.lock(principal):
-                if not all(self._valid(principal, source, now) for source in group.sources):
+                if not all([await self._valid(principal, source, now) for source in group.sources]):
                     return None
                 return await self._evidence.original_input(
                     principal,
@@ -1104,7 +1122,7 @@ class InMemoryReconsolidationStore:
             if self._evidence is None:
                 return None
             async with self._evidence.people.lock(principal):
-                if not all(self._valid(principal, source, now) for source in sources):
+                if not all([await self._valid(principal, source, now) for source in sources]):
                     return None
                 plan = await self._evidence.plan(
                     principal,
@@ -1187,6 +1205,22 @@ class InMemoryReconsolidationStore:
                 else old.lease_expirations + int(old.state == "running"),
                 revision=1 if old is None else old.revision + 1,
             )
+            boundary = (
+                None
+                if self._evidence is None
+                else await self._evidence.people.forward_dreaming_boundary(principal)
+            )
+            if boundary is not None:
+                job = job.model_copy(
+                    update={
+                        "full_cursor": min(
+                            job.full_bound, max(job.full_cursor, boundary.creation_sequence)
+                        ),
+                        "change_cursor": min(
+                            job.change_bound, max(job.change_cursor, boundary.change_sequence)
+                        ),
+                    }
+                )
             self._save(job)
             return job
 
@@ -1213,21 +1247,22 @@ class InMemoryReconsolidationStore:
             ]
             candidates = [change.source for change in changes]
             candidates.extend(index.versions[key] for key in ids)
-            valid = {s.belief_id: s for s in candidates if self._valid(principal, s, now)}
+            checks = [(s, await self._valid(principal, s, now)) for s in candidates]
+            valid = {s.belief_id: s for s, ok in checks if ok}
             return InventoryPage(
                 sources=tuple(valid.values()),
                 changes=tuple(changes),
                 full_cursor=job.full_cursor + full_count,
                 change_cursor=job.change_cursor + changed_count,
                 inspected=len(candidates),
-                excluded=sum(not self._valid(principal, s, now) for s in candidates),
+                excluded=sum(not ok for _, ok in checks),
             )
 
     async def neighbors(
         self, principal: Principal, source: SourceVersion, now: datetime
     ) -> tuple[SourceVersion, ...]:
         async with self._transaction.owner((principal.tenant_id, principal.principal_id)):
-            if not self._valid(principal, source, now):
+            if not await self._valid(principal, source, now):
                 return ()
             anchor = self._memories._records[source.belief_id]
             terms = lexical_query_terms(anchor.subject + " " + anchor.statement)[:64]
@@ -1236,7 +1271,7 @@ class InMemoryReconsolidationStore:
                 candidate = self._memories._reconsolidation_index.versions[record.id]
                 if (
                     record.id == anchor.id
-                    or not self._valid(principal, candidate, now)
+                    or not await self._valid(principal, candidate, now)
                     or not compatible(anchor, record)
                 ):
                     continue
@@ -1291,7 +1326,7 @@ class InMemoryReconsolidationStore:
                     raise ValueError("group needs two to thirty-two distinct sources")
                 if not any(s in page.sources for s in sources):
                     raise ConflictError("group has no inspected anchor")
-                if not all(self._valid(principal, s, now) for s in sources):
+                if not all([await self._valid(principal, s, now) for s in sources]):
                     raise ConflictError("source changed before checkpoint")
                 first = self._memories._records[sources[0].belief_id]
                 if not all(
@@ -1381,7 +1416,7 @@ class InMemoryReconsolidationStore:
                     principal.principal_id,
                 ) or group.state != "pending":
                     continue
-                if not all(self._valid(principal, s, now) for s in group.sources):
+                if not all([await self._valid(principal, s, now) for s in group.sources]):
                     self._groups[group.id] = group.model_copy(
                         update={"state": "stale", "reason": "source_changed"}
                     )

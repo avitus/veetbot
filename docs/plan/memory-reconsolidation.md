@@ -1065,7 +1065,8 @@ withholds its affected plan; unrelated purged heads no longer disable an owner's
 bank. Migration `ea3210a1b005` backfills keys from each available current revision
 without retaining names, statements, roles or evidence excerpts. A legacy head
 whose payload was already purged keeps unknown metadata, and planning still
-abstains for that owner rather than guessing absent attribution. Original memories
+abstains for that owner rather than guessing absent attribution, except for the
+explicit forward-only boundary authorized in ADR-0202. Original memories
 remain available under their existing rules. Outstanding rejection text uses the formation
 duplicate resolver's casefold/whitespace comparison, and deleted prose remains
 blocked by its existing hash; changing a belief ID or subject does not bypass it.
@@ -1691,3 +1692,25 @@ Preparation retains the same refusal and new daily receipts carry bounded finite
 default to an empty reason list; they are never rewritten. A legacy blocker needs
 metadata recovery, not repeated provider attempts. This change supplies diagnosis,
 not permission to reconstruct erased sources or relax admission.
+
+## Forward-only supervised dreaming (ADR-0202)
+
+The owner-authorized operator command `agent memory reconsolidations forward-only
+--owner TENANT/PRINCIPAL --confirm` persists an immutable cutover under the owner
+and People locks, after fencing event insertion. It refuses active dreaming
+leases and live unknown People heads. Repeat execution preserves the original
+boundary and leaves the daily schedule, budgets and historical receipts intact.
+
+Both immutable memory creation order and every original event ID must follow the
+saved cutover. Inventory cursors start at its creation/change counters; neighbor
+filtering precedes ranking and limits. Old queued groups are stale. Shared source
+resolution rechecks the boundary for preparation, verification, commit, review
+and current/historical derived reads. The saved digest of unknown erased heads
+must still match; new uncertainty fails closed. Existing attribution, suppression,
+privacy and erasure checks continue to apply to every admitted original.
+
+The review page displays the cutover date. Daily supervised proposals can resume
+on new evidence without reconstructing uncertain legacy attribution. Individual
+approval still applies each proposal; unattended activation and all evaluation
+floors remain unchanged. A run with no eligible new group is a valid no-change
+outcome. The migration refuses downgrade after a cutover has been established.

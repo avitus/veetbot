@@ -14,6 +14,10 @@ from agent_core.domain.persistence import ProjectionCursor, WorkerLease
 
 
 class EventRepository(Protocol):
+    async def dreaming_cutover_event_id(self) -> int:
+        """Fence event insertion before acquiring the owner/People guards."""
+        ...
+
     async def list_window(
         self,
         principal: Principal,

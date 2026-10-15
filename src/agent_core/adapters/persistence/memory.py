@@ -635,6 +635,10 @@ class InMemoryRunRepository:
 
 
 class InMemoryEventRepository:
+    async def dreaming_cutover_event_id(self) -> int:
+        async with self._lock:
+            return self._next_id - 1
+
     def __init__(self, sessions: InMemorySessionRepository, clock: Clock) -> None:
         self._sessions = sessions
         self._clock = clock

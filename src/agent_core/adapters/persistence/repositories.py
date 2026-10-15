@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, update
+from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -841,6 +841,13 @@ class PostgresRunRepository:
 
 
 class PostgresEventRepository:
+    async def dreaming_cutover_event_id(self) -> int:
+        # Wait for writers that allocated an ID before the fence to commit.
+        # Take this lock before owner locks to preserve append -> owner order.
+        await self._session.execute(text("SET LOCAL lock_timeout = '5s'"))
+        await self._session.execute(text("LOCK TABLE events IN SHARE MODE"))
+        return int(await self._session.scalar(select(func.coalesce(func.max(EventRow.id), 0))) or 0)
+
     def __init__(
         self, session: AsyncSession, clock: Clock, upcasters: EventUpcasterRegistry
     ) -> None:
