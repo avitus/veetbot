@@ -2347,6 +2347,7 @@ class PeopleLinkRow(Base):
 
 
 class ReconsolidationOwnerRow(Base):
+    forward_dreaming: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     dreaming_state: Mapped[dict[str, Any]] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb")
     )

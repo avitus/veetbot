@@ -270,6 +270,29 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Independent supervised dreaming release authorization (2026-10-15)
+      outcome: authorized_pending_delivery
+      detail: >-
+        The owner authorized separating the forward-only fix from Milestone 33,
+        opening its dedicated pull request, handling review and merging after
+        verification. Migration ea3210a1b00d follows production ea3310a1b003;
+        later recall migrations must rebase before their own release. Frozen
+        recall inputs and outcomes remain unchanged. Production cutover still
+        requires successful delivery and authenticated boundary verification.
+    - check: Forward-only dreaming implementation (2026-10-13, ADR-0202)
+      outcome: implemented_pending_delivery
+      detail: >-
+        Metadata-only recovery found no complete surviving reverse identifiers for
+        the uncertain erased legacy heads. The owner explicitly authorized a
+        durable forward-only cutover. Existing memories and source events remain
+        excluded from dreaming; new evidence must pass all existing source,
+        attribution and erasure checks. Individual owner approval remains required
+        to apply a proposal. The pre-fix selector regression returns legacy
+        records instead of new sources; the implemented boundary passes the
+        shared source case and all 272 PostgreSQL reconsolidation tests. A
+        fabricated legacy owner reaches two-call provider review on new evidence.
+        Production cutover awaits verified delivery; no unattended activation
+        or evaluation gate changes.
     - check: Dreaming deferral diagnosis and persistent review access (2026-10-11 Pacific)
       outcome: implemented_pending_delivery
       detail: >-

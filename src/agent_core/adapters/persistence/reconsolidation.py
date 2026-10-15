@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import and_, case, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import ColumnElement
 
 from agent_core.adapters.memory.reconsolidation_evidence import ReconsolidationEvidence
 from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
@@ -30,6 +31,7 @@ from agent_core.adapters.persistence.reconsolidation_operations import (
 )
 from agent_core.adapters.persistence.reconsolidation_sources import lock_owner
 from agent_core.adapters.persistence.sqlalchemy_models import (
+    EventRow,
     MemoryRow,
     ReconsolidationAuditRow,
     ReconsolidationBlockRow,
@@ -166,6 +168,57 @@ class PostgresReconsolidationStore:
             .values(**job_values(job))
         )
 
+    async def retire_dreaming_groups(self, principal: Principal) -> None:
+        await self._session.execute(
+            update(ReconsolidationGroupRow)
+            .where(
+                ReconsolidationGroupRow.tenant_id == principal.tenant_id,
+                ReconsolidationGroupRow.principal_id == principal.principal_id,
+                ReconsolidationGroupRow.state.in_(("pending", "claimed")),
+            )
+            .values(state="stale", reason="source_changed")
+        )
+
+    async def dreaming_cutover_idle(self, principal: Principal, now: datetime) -> bool:
+        return (
+            await self._session.scalar(
+                select(ReconsolidationJobRow.id)
+                .where(
+                    ReconsolidationJobRow.tenant_id == principal.tenant_id,
+                    ReconsolidationJobRow.principal_id == principal.principal_id,
+                    ReconsolidationJobRow.state == "running",
+                    ReconsolidationJobRow.lease_expires_at > now,
+                )
+                .limit(1)
+            )
+            is None
+        )
+
+    async def _forward_predicate(self, principal: Principal) -> ColumnElement[bool]:
+        boundary = (
+            None
+            if self._evidence is None
+            else await self._evidence.people.forward_dreaming_boundary(principal)
+        )
+        if boundary is None:
+            return literal(True)
+        count = (
+            select(func.count())
+            .select_from(EventRow)
+            .where(
+                EventRow.session_id == MemoryRow.source_session_id,
+                EventRow.id > boundary.event_id,
+                MemoryRow.source_event_ids.op("@>")(func.jsonb_build_array(EventRow.sequence)),
+            )
+            .correlate(MemoryRow)
+            .scalar_subquery()
+        )
+        return and_(
+            MemoryRow.creation_sequence > boundary.creation_sequence,
+            func.jsonb_array_length(MemoryRow.source_event_ids) > 0,
+            count == func.jsonb_array_length(MemoryRow.source_event_ids),
+        )
+
     async def _sources(
         self, principal: Principal, sources: tuple[SourceVersion, ...], now: datetime
     ) -> list[MemoryRow]:
@@ -178,6 +231,7 @@ class PostgresReconsolidationStore:
                     MemoryRow.tenant_id == principal.tenant_id,
                     MemoryRow.principal_id == principal.principal_id,
                     MemoryRow.id.in_([s.belief_id for s in sources]),
+                    await self._forward_predicate(principal),
                     ~MemoryRow.erasure_pending,
                 )
                 .order_by(MemoryRow.id)
@@ -1463,6 +1517,22 @@ class PostgresReconsolidationStore:
             else old.lease_expirations + int(old.state == "running"),
             revision=1 if old is None else old.revision + 1,
         )
+        boundary = (
+            None
+            if self._evidence is None
+            else await self._evidence.people.forward_dreaming_boundary(principal)
+        )
+        if boundary is not None:
+            job = job.model_copy(
+                update={
+                    "full_cursor": min(
+                        job.full_bound, max(job.full_cursor, boundary.creation_sequence)
+                    ),
+                    "change_cursor": min(
+                        job.change_bound, max(job.change_cursor, boundary.change_sequence)
+                    ),
+                }
+            )
         if fresh:
             await self._session.execute(pg_insert(ReconsolidationJobRow).values(**job_values(job)))
         else:
@@ -1499,7 +1569,14 @@ class PostgresReconsolidationStore:
             )
         ).all()
         full_valid = [
-            _version(r) for r in rows if not r.erasure_pending and eligible(_memory(r), now)
+            _version(r)
+            for r in rows
+            if not r.erasure_pending
+            and eligible(_memory(r), now)
+            and (
+                self._evidence is None
+                or await self._evidence.after_forward_boundary(principal, _memory(r), _version(r))
+            )
         ]
         changes = (
             await self._session.scalars(
@@ -1574,6 +1651,7 @@ class PostgresReconsolidationStore:
                     MemoryRow.tenant_id == principal.tenant_id,
                     MemoryRow.principal_id == principal.principal_id,
                     MemoryRow.id != source.belief_id,
+                    await self._forward_predicate(principal),
                     ~MemoryRow.erasure_pending,
                     MemoryRow.status.in_(("active", "provisional")),
                     MemoryRow.derivation == "direct",

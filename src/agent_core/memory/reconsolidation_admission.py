@@ -105,7 +105,7 @@ class ReconsolidationRequestAdmission:
         # Both adapters acquire the memory owner guard before the People lock.
         # Keep source reads stable through local policy and reservation.
         async with self._factory() as uow, uow.people.lock(self._principal):
-            if not await uow.people.memory_attribution_complete(self._principal):
+            if not await uow.people.dreaming_attribution_ready(self._principal):
                 return ProposalPreparation(
                     prepared=None,
                     deferred=tuple(

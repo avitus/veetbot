@@ -46,8 +46,10 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     PeopleHeadRow,
     PeopleLinkRow,
     PeopleRevisionRow,
+    ReconsolidationOwnerRow,
 )
 from agent_core.domain.agents import Principal
+from agent_core.domain.dreaming import ForwardDreamingBoundary
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import LIVE_MEMORY_STATUSES, SENSITIVITY_ORDER, Sensitivity
 from agent_core.domain.people import (
@@ -237,17 +239,69 @@ class InMemoryPeopleStore:
             pending.extend(dependencies(target))
         return current.model_copy(deep=True)
 
+    async def _legacy_dreaming_digest(self, principal: Principal) -> str:
+        owner = (principal.tenant_id, principal.principal_id)
+        keys = sorted(
+            str(key[2])
+            for key in self._erased
+            if key[:2] == owner and key not in self._attributions
+        )
+        return hashlib.sha256("\n".join(keys).encode()).hexdigest()
+
+    async def forward_dreaming_boundary(
+        self, principal: Principal
+    ) -> ForwardDreamingBoundary | None:
+        if self._memory_index is None:
+            return None
+        return self._memory_index.forward_dreaming.get(
+            (principal.tenant_id, principal.principal_id)
+        )
+
+    async def enable_forward_dreaming(
+        self, principal: Principal, event_id: int, now: datetime
+    ) -> ForwardDreamingBoundary:
+        if self._memory_index is None:
+            raise ConflictError("Forward dreaming requires the memory index")
+        existing = await self.forward_dreaming_boundary(principal)
+        if existing is not None:
+            return existing
+        owner = (principal.tenant_id, principal.principal_id)
+        boundary = ForwardDreamingBoundary(
+            activated_at=now,
+            event_id=event_id,
+            creation_sequence=len(self._memory_index.creations.get(owner, [])),
+            change_sequence=len(self._memory_index.changes.get(owner, [])),
+            legacy_digest=await self._legacy_dreaming_digest(principal),
+        )
+        self._memory_index.forward_dreaming[owner] = boundary
+        return boundary
+
+    async def dreaming_attribution_ready(self, principal: Principal) -> bool:
+        boundary = await self.forward_dreaming_boundary(principal)
+        if boundary is None:
+            return await self.memory_attribution_complete(principal)
+        return boundary.legacy_digest == await self._legacy_dreaming_digest(principal)
+
     async def memory_attribution_complete(self, principal: Principal) -> bool:
         owner = (principal.tenant_id, principal.principal_id)
         return not any(key[:2] == owner and key not in self._attributions for key in self._erased)
 
     async def memory_attribution_records(
-        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
+        self,
+        principal: Principal,
+        belief_id: UUID,
+        source_ids: tuple[UUID, ...],
+        *,
+        forward_only: bool = False,
     ) -> tuple[PeopleRecord, ...] | None:
         if not 1 <= len(source_ids) <= 256:
             raise ValueError("attribution needs bounded original source identities")
         owner = (principal.tenant_id, principal.principal_id)
-        if not await self.memory_attribution_complete(principal):
+        if not (
+            await self.dreaming_attribution_ready(principal)
+            if forward_only
+            else await self.memory_attribution_complete(principal)
+        ):
             return None
         result: list[PeopleRecord] = []
         for key, footprint in self._attributions.items():
@@ -1031,6 +1085,66 @@ class PostgresPeopleStore:
         ).scalar_one_or_none()
         return None if row is None else PEOPLE_RECORD.validate_python(row.payload)
 
+    async def _legacy_dreaming_digest(self, principal: Principal) -> str:
+        rows = (
+            await self._session.execute(
+                select(
+                    PeopleHeadRow.id,
+                    PeopleHeadRow.revision,
+                    PeopleHeadRow.kind,
+                    PeopleHeadRow.erased,
+                )
+                .where(
+                    PeopleHeadRow.tenant_id == principal.tenant_id,
+                    PeopleHeadRow.principal_id == principal.principal_id,
+                    PeopleHeadRow.memory_attribution.is_(None),
+                )
+                .order_by(PeopleHeadRow.id)
+            )
+        ).all()
+        if any(not row.erased for row in rows):
+            raise ConflictError("Unattributed live People evidence cannot be excluded by a cutover")
+        return hashlib.sha256(
+            "\n".join(f"{r.id}:{r.revision}:{r.kind}" for r in rows).encode()
+        ).hexdigest()
+
+    async def forward_dreaming_boundary(
+        self, principal: Principal
+    ) -> ForwardDreamingBoundary | None:
+        value = await self._session.scalar(
+            select(ReconsolidationOwnerRow.forward_dreaming).where(
+                ReconsolidationOwnerRow.tenant_id == principal.tenant_id,
+                ReconsolidationOwnerRow.principal_id == principal.principal_id,
+            )
+        )
+        return None if value is None else ForwardDreamingBoundary.model_validate(value)
+
+    async def enable_forward_dreaming(
+        self, principal: Principal, event_id: int, now: datetime
+    ) -> ForwardDreamingBoundary:
+        owner = await lock_owner(self._session, principal)
+        if owner.forward_dreaming is not None:
+            return ForwardDreamingBoundary.model_validate(owner.forward_dreaming)
+        boundary = ForwardDreamingBoundary(
+            activated_at=now,
+            event_id=event_id,
+            creation_sequence=owner.creation_count,
+            change_sequence=owner.change_count,
+            legacy_digest=await self._legacy_dreaming_digest(principal),
+        )
+        owner.forward_dreaming = boundary.model_dump(mode="json")
+        await self._session.flush()
+        return boundary
+
+    async def dreaming_attribution_ready(self, principal: Principal) -> bool:
+        boundary = await self.forward_dreaming_boundary(principal)
+        if boundary is None:
+            return await self.memory_attribution_complete(principal)
+        try:
+            return boundary.legacy_digest == await self._legacy_dreaming_digest(principal)
+        except ConflictError:
+            return False
+
     async def memory_attribution_complete(self, principal: Principal) -> bool:
         return (
             await self._session.scalar(
@@ -1046,11 +1160,20 @@ class PostgresPeopleStore:
         )
 
     async def memory_attribution_records(
-        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
+        self,
+        principal: Principal,
+        belief_id: UUID,
+        source_ids: tuple[UUID, ...],
+        *,
+        forward_only: bool = False,
     ) -> tuple[PeopleRecord, ...] | None:
         if not 1 <= len(source_ids) <= 256:
             raise ValueError("attribution needs bounded original source identities")
-        if not await self.memory_attribution_complete(principal):
+        if not (
+            await self.dreaming_attribution_ready(principal)
+            if forward_only
+            else await self.memory_attribution_complete(principal)
+        ):
             return None
         keys = (
             await self._session.scalars(

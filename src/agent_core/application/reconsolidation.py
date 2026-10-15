@@ -9,7 +9,7 @@ from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
-from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus
+from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, ForwardDreamingBoundary
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.reconsolidation_views import (
@@ -85,12 +85,33 @@ class PublicReconsolidationService:
         self._uow_factory = uow_factory
         self._clock = clock
 
+    async def enable_forward_dreaming(self, principal: Principal) -> ForwardDreamingBoundary:
+        require_scope(principal, "memory.write")
+        async with self._uow_factory() as uow:
+            event_id = await uow.events.dreaming_cutover_event_id()
+            async with uow.people.lock(principal):
+                existing = await uow.people.forward_dreaming_boundary(principal)
+                if existing is not None:
+                    return existing
+                if not await uow.reconsolidation.dreaming_cutover_idle(
+                    principal, self._clock.now()
+                ):
+                    raise ConflictError(
+                        "Dreaming is running; retry the cutover after its lease ends"
+                    )
+                await uow.reconsolidation.retire_dreaming_groups(principal)
+                return await uow.people.enable_forward_dreaming(
+                    principal, event_id, self._clock.now()
+                )
+
     async def dreaming_status(self, principal: Principal) -> DreamingStatus:
         require_scope(principal, "memory.read")
         async with self._uow_factory() as uow:
+            boundary = await uow.people.forward_dreaming_boundary(principal)
             return DreamingStatus(
+                forward_only_since=None if boundary is None else boundary.activated_at,
                 blockers=()
-                if await uow.people.memory_attribution_complete(principal)
+                if await uow.people.dreaming_attribution_ready(principal)
                 else ("legacy_attribution_unavailable",),
                 schedule=await uow.reconsolidation.dreaming_schedule(principal),
                 runs=await uow.reconsolidation.dreaming_runs(principal, self._clock.now()),

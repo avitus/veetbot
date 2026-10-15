@@ -58,13 +58,14 @@
           </p>
         </section>
         <div id="workspace" hidden>
+          <div id="forward-only" class="notice" role="status" hidden></div>
           <div id="blocker" class="notice" role="status" hidden>
-            <div><strong>Dreaming needs legacy deletion metadata.</strong>
+            <div><strong>Dreaming needs a source-safety check.</strong>
             <p>Some erased People records predate retained source attribution.
             Veetbot cannot safely tell which memories depend on them, so proposal
             generation is blocked before any model call. Retrying will not repair
-            this. An operator must recover the missing identifiers without restoring
-            erased text. Existing run history is preserved.</p></div>
+            this. An operator must investigate the missing identifiers or establish
+            an authorized forward-only boundary. Existing run history is preserved.</p></div>
           </div>
           <div class="notice">
             <div>

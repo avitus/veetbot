@@ -235,6 +235,10 @@ async function load(append = false) {
   ]);
   if (ticket !== generation) return;
   $("blocker").hidden = !status.blockers?.includes("legacy_attribution_unavailable");
+  $("forward-only").hidden = !status.forward_only_since;
+  $("forward-only").textContent = status.forward_only_since
+    ? "Dreaming uses only new memories and source messages since " + date(status.forward_only_since) + ". Uncertain legacy evidence remains excluded. Proposals still need your approval."
+    : "";
   schedule = status.schedule;
   cursor = page.next_cursor;
   rows = append ? [...rows, ...page.items] : page.items;

@@ -7,6 +7,7 @@ from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.dreaming import ForwardDreamingBoundary
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import PeopleQuery, PeopleRecord
 
@@ -24,12 +25,29 @@ class PeopleStore(Protocol):
         at_revision: int | None = None,
     ) -> PeopleRecord | None: ...
 
+    async def forward_dreaming_boundary(
+        self, principal: Principal
+    ) -> ForwardDreamingBoundary | None: ...
+
+    async def enable_forward_dreaming(
+        self, principal: Principal, event_id: int, now: datetime
+    ) -> ForwardDreamingBoundary:
+        """Under the People lock, persist a one-time boundary; retries return the original."""
+        ...
+
+    async def dreaming_attribution_ready(self, principal: Principal) -> bool: ...
+
     async def memory_attribution_complete(self, principal: Principal) -> bool:
         """Whether every owner head retains its opaque reverse attribution."""
         ...
 
     async def memory_attribution_records(
-        self, principal: Principal, belief_id: UUID, source_ids: tuple[UUID, ...]
+        self,
+        principal: Principal,
+        belief_id: UUID,
+        source_ids: tuple[UUID, ...],
+        *,
+        forward_only: bool = False,
     ) -> tuple[PeopleRecord, ...] | None:
         """Under the People lock, read at most 64 current source/mention/link records.
 
@@ -37,6 +55,8 @@ class PeopleStore(Protocol):
         filtering hidden attribution into an apparently unattributed belief is unsafe.
         Opaque reverse attribution survives payload purge. A legacy purged head
         with unknown attribution conservatively returns None for its owner.
+        forward_only is for callers that already checked every original against
+        the persisted cutover; it still requires the unchanged legacy digest.
         """
         ...
 
