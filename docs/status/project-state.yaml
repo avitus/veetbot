@@ -273,6 +273,33 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Independent supervised dreaming delivery and cutover (2026-10-15, ADR-0202)
+      outcome: delivered_supervised_cutover_verified
+      detail: >-
+        PR 165 merged as 0c7b0d748082118aed1a57104558ba8540e59656 after clean
+        CodeRabbit review and ten passing hosted checks. Delivery pipeline 1141
+        passed every job, including application, documentation, website and
+        TestFlight. Public API, documentation and website identify release
+        20261015-185949-0c7b0d7; production schema is ea3210a1b00d. The authorized
+        forward cutover activated at 2026-10-15T19:05:44.185661Z with no blockers.
+        All 469 unknown erased heads and five historical run receipts remain
+        retained; schedule revision 6 and its next opportunity at
+        2026-10-16T01:31:49.837090Z are unchanged. Supervised review is enabled
+        and unattended application remains disabled. HTTPS cookie-only review
+        access passes with thirty-day Secure, HttpOnly and SameSite persistence.
+        These operational checks do not advance comparative quality, independent
+        review or unattended activation gates; original failed observations remain.
+      evidence_links:
+      - https://github.com/avitus/veetbot/pull/165
+    - check: Independent supervised dreaming release authorization (2026-10-15)
+      outcome: authorized_pending_delivery
+      detail: >-
+        The owner authorized separating the forward-only fix from Milestone 33,
+        opening its dedicated pull request, handling review and merging after
+        verification. Migration ea3210a1b00d follows production ea3310a1b003;
+        later recall migrations must rebase before their own release. Frozen
+        recall inputs and outcomes remain unchanged. Production cutover still
+        requires successful delivery and authenticated boundary verification.
     - check: Forward-only dreaming implementation (2026-10-13, ADR-0202)
       outcome: implemented_pending_delivery
       detail: >-
@@ -2544,7 +2571,7 @@ milestones:
     design: docs/plan/general-memory-recall.md
     adr: docs/adr/0178-general-memory-recall.md
     gates_registered: 12
-    implementation_status: runtime_evaluation_and_reviewed_release_evidence_in_progress
+    implementation_status: authorized_cross_category_recovery_and_combined_release_in_progress
     implementation_evidence:
       - tests/contract/test_runtime_semantic_queries_contract.py
       - tests/contract/test_context_recall_freshness.py
@@ -2574,6 +2601,7 @@ milestones:
       - tests/unit/test_people_named_distillation.py
       - tests/unit/test_context_memory_budget.py
       - tests/contract/test_retained_recall.py
+      - tests/contract/test_retained_people.py
       - tests/unit/test_run_recall_execution_budget.py
       - tests/unit/test_general_recall_publication.py
       - tests/unit/test_general_recall_collection.py
@@ -2605,8 +2633,10 @@ milestones:
       - V3 on 74b14815 failed after 1217 observations; original archive and scratch database are retained, a mandatory incident failed, and aggregate reported/held cost is USD 55.913546
       - The owner requested completion before merging PR163 on 2026-10-15; ADR-0206 repairs session-default search and provider diagnostics, with a fresh full confirmation capped at USD 240 after ledger reconciliation and final review/CI/signing
       - No v3 observation or original load measurement can certify changed evaluated inputs; independent review and all quality/budget gates remain required
+      - Partial development results exposed formation, relationship retrieval and evidence-use failures; the owner authorized broad recovery before any fresh confirmation, with all gates unchanged
+      - Bounded two-worker collection uses separate scratch databases and one shared ledger (ADR-0207); release requires final combined input verification and complete fresh evidence, not reused partial observations
       - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
-      - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; remainder PR158 still requires final review, exact-head CI and production delivery
+      - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; the owner authorized coordination with reliability PR163 for one combined release, final review, exact-head CI and production delivery
       - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder
     authorized_scope:
       - cross-category retrieval and implicit-use evaluation with frozen controls

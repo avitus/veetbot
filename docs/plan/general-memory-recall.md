@@ -162,6 +162,13 @@ without an explicit user constraint and a tested fallback. Failure to find a
 memory is not proof that the underlying fact is false. A second search targets
 missing evidence; it cannot invent a value to make an answer complete.
 
+Planned `memory.search` defaults to the authenticated session's project and
+current knowledge. Its schema directs the planner to omit temporal filters for
+ordinary current recall, rather than inventing dates. Explicit requested scope,
+valid-time and recorded-knowledge constraints remain hard filters. Planned search
+shares the People context and retained-dependency checks in
+[ADR-0208](../adr/0208-grounded-relationship-discovery.md).
+
 ## Semantic experiment and index contract
 
 Use a provider-neutral embedding seam with bounded batches, explicit model and
@@ -389,6 +396,17 @@ three-day implementation limit; this small-sample projection is not a completion
 guarantee. A longer job deadline changes neither the model-spend allowance nor
 the production recall deadline or answer-latency acceptance gate. Expiration
 still fails the run and retains its original observations and settled/held costs.
+
+[ADR-0207](../adr/0207-bounded-confirmation-concurrency.md) permits an explicitly
+registered second scenario worker with a separate guarded scratch database and
+native encoder. Both workers share one provider reservation ledger and allowance;
+their schema and actual runtime captures must match before held-out task parsing.
+The version-two execution manifest binds this choice without rewriting older
+manifests. Each scenario still executes all twelve variants in order with its
+exclusive paired formation bank. Failures stop new work while already admitted
+requests settle. Setup, native indexing and actual reader runtime are reported
+separately; contention remains part of measured answer latency. No corpus, load,
+quality, monetary or per-answer latency requirement changes.
 
 ## Release admission mechanism
 

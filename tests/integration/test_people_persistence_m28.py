@@ -37,6 +37,46 @@ from tests.contract.test_people_store_contract import (
 from tests.integration.m2_support import database_settings
 
 
+@pytest.mark.parametrize("role", ["father", "accountant", "coach", "emergency contact"])
+@pytest.mark.parametrize(
+    "restriction",
+    [None, "ambiguous", "private", "expired", "unresolved", "indirect", "excluded", "permission"],
+)
+async def test_postgres_relationship_discovery(role: str, restriction: str | None) -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, session
+    from tests.unit.test_people_context import relationship_recall_contract
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await relationship_recall_contract(clock, app.uow_factory, role, restriction)
+
+
+@pytest.mark.parametrize(
+    "change", [None, "person", "private", "erased", "ambiguous", "edge_expiry", "belief_expiry"]
+)
+@pytest.mark.parametrize("max_items", [1, 20])
+async def test_postgres_retained_people(change: str | None, max_items: int) -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, run, session
+    from tests.contract.test_retained_people import retained_people_contract
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+            await uow.runs.create(run())
+        await retained_people_contract(clock, app.uow_factory, change, max_items)
+
+
 async def test_postgres_named_people_formation_preserves_independent_claims() -> None:
     from agent_core.bootstrap import build
     from tests.contract.support import agent, session

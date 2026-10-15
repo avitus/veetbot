@@ -56,3 +56,14 @@ Deployment must apply the additive migration, run the command once for the
 configured production owner, and verify the status boundary and next daily run.
 A no-change run is valid when no suitable new evidence exists; proposals are not
 manufactured from legacy evidence merely to produce activity.
+
+## Independent delivery (2026-10-15)
+
+The owner authorized a separate dreaming release, its pull request, review and
+merge so supervised dreaming does not wait for Milestone 33 recall evaluations.
+Migration `ea3210a1b00d` descends directly from production's `ea3310a1b003`.
+The later recall migrations must be rebased after it before their own release,
+following the existing linear migration contract. Their old evaluated checkouts,
+databases and observations retain their original ancestry and identities; new
+recall candidates use freshly migrated databases and fresh release evidence.
+This release includes no optional recall implementation or evaluation-rule change.

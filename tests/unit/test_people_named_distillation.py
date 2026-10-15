@@ -1,5 +1,6 @@
 """Formation@11 retains source-named subjects without assigning their facts to the owner."""
 
+import json
 from typing import Any
 
 import pytest
@@ -90,6 +91,38 @@ async def test_source_named_claims_survive_people_distillation(
 
 
 @pytest.mark.parametrize(
+    "predicate",
+    [
+        "no longer drives the delivery van",
+        "no longer teaches evening chemistry",
+        "no longer has a gym membership",
+        "is no longer the workshop lead",
+        "is no longer commuting by train",
+    ],
+)
+async def test_named_subject_corrections_preserve_third_person_predicates(predicate: str) -> None:
+    from agent_core.domain.memory import Polarity
+
+    text = f"Hugo {predicate}."
+    candidate, events = await proposed(text, "Hugo", kind="habit")
+    candidate = candidate.model_copy(update={"polarity": Polarity.RETRACT})
+    result = PeopleAssistedCandidateExtractor._normalize_candidate(
+        candidate, by_sequence=events, scope="user"
+    )
+    assert result.polarity is Polarity.RETRACT and result.statement == text
+    with pytest.raises(ValueError):
+        PeopleAssistedCandidateExtractor._normalize_candidate(
+            candidate.model_copy(update={"polarity": Polarity.ASSERT}),
+            by_sequence=events,
+            scope="user",
+        )
+    with pytest.raises(ValueError):
+        NemoriAssistedCandidateExtractor._normalize_candidate(
+            candidate, by_sequence=events, scope="user"
+        )
+
+
+@pytest.mark.parametrize(
     "change",
     [
         {"start": 0, "end": 4},
@@ -164,7 +197,54 @@ async def test_three_calls_preserve_both_relationships_without_inventing_identit
     await named_people_formation_contract(clock, factory)
 
 
-async def named_people_formation_contract(clock: FixedClock, factory: UnitOfWorkFactory) -> None:
+async def test_invalid_interaction_cannot_discard_independently_grounded_claims() -> None:
+    clock, factory = await memory_uow_factory()
+    await named_people_formation_contract(clock, factory, invalid_interaction=True)
+
+
+@pytest.mark.parametrize(
+    ("interactions", "message"),
+    [
+        ([{}] * 33, "32 interactions"),
+        ([{"mentions": [{}] * 65}], "64 evidence mentions"),
+        ([{"mentions": [{}] * 33}, {"mentions": [{}] * 32}], "64 evidence mentions"),
+    ],
+)
+def test_invalid_interactions_still_count_toward_segment_bounds(
+    interactions: list[dict[str, Any]], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        PeopleAssistedCandidateExtractor._parse_distillation(
+            json.dumps(
+                {
+                    "candidates": [],
+                    "coverage": [
+                        {
+                            "coverage_unit_id": "1:1",
+                            "decision": "not_memory",
+                            "candidate_indexes": [],
+                            "prediction_indexes": [],
+                        }
+                    ],
+                    "interactions": interactions,
+                }
+            )
+        )
+
+
+def test_malformed_claims_are_not_admitted_by_interaction_isolation() -> None:
+    with pytest.raises(ValueError, match="candidates"):
+        PeopleAssistedCandidateExtractor._parse_distillation(
+            json.dumps({"candidates": [{}], "coverage": [], "interactions": [{}]})
+        )
+
+
+async def named_people_formation_contract(
+    clock: FixedClock,
+    factory: UnitOfWorkFactory,
+    *,
+    invalid_interaction: bool = False,
+) -> None:
     import json
 
     from agent_core.adapters.models.fake import FakeModelProvider
@@ -218,7 +298,7 @@ async def named_people_formation_contract(clock: FixedClock, factory: UnitOfWork
     }
     sequence = await user_event(factory, text)
     assert marriage.source_event_ids == [sequence]
-    replies = [
+    replies: list[dict[str, Any]] = [
         {
             "episodes": [
                 {
@@ -242,6 +322,21 @@ async def named_people_formation_contract(clock: FixedClock, factory: UnitOfWork
             ],
         },
     ]
+    if invalid_interaction:
+        replies[-1]["interactions"] = [
+            {
+                "source_event_id": sequence,
+                "text": text,
+                "summary": text,
+                "interaction_kind": "meeting",
+                "occurred_at": None,
+                "precision": "unknown",
+                "source_timezone": None,
+                "mentions": mentions,
+                # The reserved owner endpoint is not a locally evidenced person.
+                "participant_keys": ["owner", "noel"],
+            }
+        ]
     provider = FakeModelProvider(
         FakeModelScript(turns=[ScriptedTurn(text=json.dumps(reply)) for reply in replies]), clock
     )
@@ -267,10 +362,20 @@ async def named_people_formation_contract(clock: FixedClock, factory: UnitOfWork
         "Noel is married to Rhea.",
     }
     assert len(provider.requests) == 3
-    assert (
-        result.run.provider_stage_metrics["prediction_error_distillation"]["outcome"] == "success"
-    )
+    metrics = result.run.provider_stage_metrics["prediction_error_distillation"]
+    assert metrics["outcome"] == ("partial_validation" if invalid_interaction else "success")
+    if invalid_interaction:
+        assert metrics["rejected_interactions"] == 1
     async with factory() as uow:
+        if invalid_interaction:
+            assert not await uow.people.query(
+                PeopleQuery(
+                    tenant_id=principal().tenant_id,
+                    principal_id=principal().principal_id,
+                    kinds=["interaction"],
+                    sensitivity_ceiling=Sensitivity.RESTRICTED,
+                )
+            )
         people = await uow.people.query(
             PeopleQuery(
                 tenant_id=principal().tenant_id,

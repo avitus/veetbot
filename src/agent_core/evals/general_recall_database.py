@@ -4,6 +4,7 @@ import asyncio
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -28,6 +29,23 @@ def validate_evaluation_database(settings: Settings, *, authorized: bool) -> Non
             "PostgreSQL recall evaluation requires explicit scratch authorization and a "
             "development database named veetbot_m33_eval_<name>"
         )
+
+
+def confirmation_databases(
+    settings: Settings, *, additional: str | None, authorized: bool
+) -> tuple[Settings, ...]:
+    """One coordinator, at most two explicitly authorized databases on the same host."""
+    validate_evaluation_database(settings, authorized=authorized)
+    if additional is None:
+        return (settings,)
+    url = make_url(settings.database_url)
+    if additional == url.database:
+        raise ValueError("Confirmation workers require distinct scratch databases")
+    second = replace(
+        settings, database_url=url.set(database=additional).render_as_string(hide_password=False)
+    )
+    validate_evaluation_database(second, authorized=authorized)
+    return settings, second
 
 
 @asynccontextmanager

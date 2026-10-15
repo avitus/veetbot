@@ -3,7 +3,10 @@ from dataclasses import replace
 import pytest
 
 from agent_core.config import DeploymentMode
-from agent_core.evals.general_recall_database import validate_evaluation_database
+from agent_core.evals.general_recall_database import (
+    confirmation_databases,
+    validate_evaluation_database,
+)
 from tests.gates.test_runtime_tool_budget import _settings
 
 
@@ -28,6 +31,32 @@ def test_explicit_postgres_scratch_database_is_accepted() -> None:
     validate_evaluation_database(
         replace(_settings(), database_url="postgresql+asyncpg://localhost/veetbot_m33_eval_unit"),
         authorized=True,
+    )
+
+
+@pytest.mark.parametrize("additional", ["veetbot_m33_eval_unit", "agent", "invalid/path"])
+def test_parallel_database_cannot_share_storage_or_escape_the_scratch_guard(
+    additional: str,
+) -> None:
+    settings = replace(
+        _settings(), database_url="postgresql+asyncpg://localhost/veetbot_m33_eval_unit"
+    )
+    with pytest.raises(ValueError):
+        confirmation_databases(settings, additional=additional, authorized=True)
+
+
+def test_parallel_database_preserves_configuration_and_still_requires_authorization() -> None:
+    settings = replace(
+        _settings(), database_url="postgresql+asyncpg://localhost/veetbot_m33_eval_unit"
+    )
+    with pytest.raises(ValueError, match="authorization"):
+        confirmation_databases(settings, additional="veetbot_m33_eval_second", authorized=False)
+    first, second = confirmation_databases(
+        settings, additional="veetbot_m33_eval_second", authorized=True
+    )
+    assert first == settings
+    assert second == replace(
+        settings, database_url="postgresql+asyncpg://localhost/veetbot_m33_eval_second"
     )
 
 

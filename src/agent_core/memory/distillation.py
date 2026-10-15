@@ -701,7 +701,15 @@ def _normalize_provider_candidate(
         )
         or (
             any(
-                contains_automatic_memory_correction(span.text) for span in candidate.evidence_spans
+                contains_automatic_memory_correction(span.text)
+                or any(
+                    re.search(
+                        rf"(?<!\w){re.escape(name)}\s+(?:(?:is|are|was|were)\s+)?no\s+longer\s+\w",
+                        span.text,
+                    )
+                    for name in named_subjects
+                )
+                for span in candidate.evidence_spans
             )
             is not (candidate.polarity is Polarity.RETRACT)
         )
@@ -1435,7 +1443,9 @@ class NemoriAssistedCandidateExtractor:
                 provider_failure = provider_failure or failure
                 failures["prediction_error_distillation"] = failure.failure_kind
             try:
-                distilled, segment_interactions = self._parse_distillation(distilled_raw or "")
+                distilled, segment_interactions, rejected_interactions = self._parse_distillation(
+                    distilled_raw or ""
+                )
                 validation = _validate_coverage(
                     distilled,
                     coverage_units(segment),
@@ -1474,7 +1484,11 @@ class NemoriAssistedCandidateExtractor:
                 for decision, count in validation.counts.items():
                     coverage_counts[decision] = coverage_counts.get(decision, 0) + count
                 coverage_dispositions.update(validation.dispositions)
-                if segment_rejections or validation.represented_unverified:
+                if rejected_interactions:
+                    stage_metrics[stage_key("prediction_error_distillation")][
+                        "rejected_interactions"
+                    ] = rejected_interactions
+                if segment_rejections or validation.represented_unverified or rejected_interactions:
                     stage_metrics[stage_key("prediction_error_distillation")]["outcome"] = (
                         "partial_validation"
                     )
@@ -1598,8 +1612,10 @@ class NemoriAssistedCandidateExtractor:
         return _DistillationResponse.model_json_schema()
 
     @staticmethod
-    def _parse_distillation(raw: str) -> tuple[_DistillationResponse, list[InteractionEvidence]]:
-        return _DistillationResponse.model_validate_json(raw), []
+    def _parse_distillation(
+        raw: str,
+    ) -> tuple[_DistillationResponse, list[InteractionEvidence], int]:
+        return _DistillationResponse.model_validate_json(raw), [], 0
 
     @staticmethod
     def _normalize_candidate(
@@ -1954,11 +1970,42 @@ class PeopleAssistedCandidateExtractor(NemoriAssistedCandidateExtractor):
         return _PeopleDistillationResponse.model_json_schema()
 
     @staticmethod
-    def _parse_distillation(raw: str) -> tuple[_DistillationResponse, list[InteractionEvidence]]:
-        response = _PeopleDistillationResponse.model_validate_json(raw)
-        return _DistillationResponse(
-            candidates=list(response.candidates), coverage=response.coverage
-        ), response.interactions
+    def _parse_distillation(
+        raw: str,
+    ) -> tuple[_DistillationResponse, list[InteractionEvidence], int]:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or not isinstance(data.get("interactions"), list):
+            raise ValueError("People distillation requires an interaction list")
+        proposed = data["interactions"]
+        if len(proposed) > 32:
+            raise ValueError("People segment exceeds 32 interactions")
+        # The claim/coverage ledger is independent of the interaction proposals.
+        # Reject a malformed interaction without discarding valid grounded claims.
+        # Original proposal counts still enforce every segment-wide bound.
+        response = _PeopleDistillationResponse.model_validate({**data, "interactions": []})
+        mention_count = sum(
+            len(candidate.people.mentions) + len(candidate.people.organizations)
+            for candidate in response.candidates
+            if candidate.people is not None
+        ) + sum(
+            len(item["mentions"])
+            for item in proposed
+            if isinstance(item, dict) and isinstance(item.get("mentions"), list)
+        )
+        if mention_count > 64:
+            raise ValueError("People segment exceeds 64 evidence mentions")
+        interactions = []
+        rejected = 0
+        for item in proposed:
+            try:
+                interactions.append(InteractionEvidence.model_validate(item))
+            except ValueError:
+                rejected += 1
+        return (
+            _DistillationResponse(candidates=list(response.candidates), coverage=response.coverage),
+            interactions,
+            rejected,
+        )
 
     @staticmethod
     def _normalize_candidate(

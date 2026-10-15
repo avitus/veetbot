@@ -14,12 +14,14 @@ from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     SENSITIVITY_ORDER,
+    BeliefType,
     MemoryCorrection,
     RecallQuery,
     RecallResult,
     Sensitivity,
     TracedPersonContext,
 )
+from agent_core.domain.memory_candidates import candidate_strength
 from agent_core.domain.messages import MemoryRecallUsage
 from agent_core.domain.people import (
     OrganizationReference,
@@ -63,6 +65,7 @@ class PeopleContextService:
         moment: str = "in_turn",
         surface_id: str = "private",
         include_ordinary: bool = False,
+        relationship_discovery: bool = False,
         measure_rendered_tokens: Callable[[str], int] | None = None,
     ) -> RecallResult:
         require_scope(principal, "people.read")
@@ -73,12 +76,22 @@ class PeopleContextService:
         ceiling = min(
             (query.sensitivity_ceiling, self._surface_ceiling), key=SENSITIVITY_ORDER.__getitem__
         )
+        bound_semantic_queries = await self._retriever.bind_semantic_queries(
+            query, session_id=session_id, run_id=run_id, surface_id=surface_id
+        )
         belief_ids: set[UUID] = set()
         context: list[TracedPersonContext] = []
         neighbors: set[UUID] = set()
         projected: set[UUID] = set()
         async with self._factory() as uow, uow.people.lock(principal):
             await uow.sessions.get(session_id, principal)
+            selection_belief_ids: tuple[UUID, ...] = ()
+            if relationship_discovery:
+                current, _, selection_belief_ids = await self._relationship_people(
+                    uow, principal, query, ceiling
+                )
+                if current != person_ids:
+                    raise NotFoundError("relationship identity changed")
             for person_id in person_ids:
                 person = await uow.people.get(
                     principal, person_id, ceiling=ceiling, known_at=query.known_at
@@ -189,6 +202,8 @@ class PeopleContextService:
                 moment=moment,
                 surface_id=surface_id,
                 people_items=context,
+                people_selection_belief_ids=selection_belief_ids,
+                bound_semantic_queries=bound_semantic_queries,
                 existing_uow=uow,
                 measure_rendered_tokens=measure_rendered_tokens,
             )
@@ -297,6 +312,7 @@ class PeopleContextService:
     ) -> RecallResult:
         ids: list[UUID] = []
         person_query = False
+        relationship_discovery = False
         if "people.read" in principal.scopes and query.text and moment == "in_turn":
             ceiling = min(
                 (query.sensitivity_ceiling, self._surface_ceiling),
@@ -382,6 +398,11 @@ class PeopleContextService:
                             if matches
                             else []
                         )
+                        if not person_query and query.candidate_selection == "relevance":
+                            ids, person_query, _ = await self._relationship_people(
+                                uow, principal, query, ceiling
+                            )
+                            relationship_discovery = bool(ids)
         if ids:
             try:
                 return await self.recall(
@@ -395,6 +416,7 @@ class PeopleContextService:
                     surface_id=surface_id,
                     measure_rendered_tokens=measure_rendered_tokens,
                     include_ordinary=True,
+                    relationship_discovery=relationship_discovery,
                 )
             except NotFoundError:
                 # Discovery can precede a concurrent erasure or privacy change.
@@ -410,6 +432,47 @@ class PeopleContextService:
             surface_id=surface_id,
             measure_rendered_tokens=measure_rendered_tokens,
         )
+
+    async def _relationship_people(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        query: RecallQuery,
+        ceiling: Sensitivity,
+    ) -> tuple[list[UUID], bool, tuple[UUID, ...]]:
+        # This is identity discovery, not a hard type filter on the final facts.
+        # Keep every visibility restriction and use ordinary bounded lexical
+        # selection; no inferred role vocabulary or extra encoder call.
+        discovery = query.model_copy(
+            update={
+                "belief_types": [BeliefType.RELATIONSHIP],
+                "structured_belief_types": [],
+                "include_owned_resources": False,
+                "expand_ids": (),
+                "subjects": [],
+                "sensitivity_ceiling": ceiling,
+                "max_items": min(query.max_items, 20),
+            }
+        )
+        records = await uow.memories.query(discovery)
+        evidence = [row.id for row in records if candidate_strength(row, discovery)[1] > 0]
+        if not evidence:
+            return [], False, ()
+        people = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                sensitivity_ceiling=ceiling,
+                states=["active", "provisional"],
+                owner_relationship_belief_ids=evidence,
+                as_of=query.as_of,
+                known_at=query.known_at,
+                limit=1,  # The repository returns one additional row for ambiguity.
+            )
+        )
+        if len(people) == 1 and isinstance(people[0], Person) and _safe(people[0].display_name):
+            return [people[0].id], True, tuple(evidence)
+        return [], bool(people), ()
 
     async def validate_retained(
         self, usage: MemoryRecallUsage, *, session_id: UUID, run_id: UUID

@@ -11,7 +11,13 @@ from decimal import Decimal
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.general_recall_release import (
@@ -69,14 +75,24 @@ class ConfirmationVariant(ReleaseValue):
 
 
 class RecallExecutionManifest(ReleaseValue):
-    version: Literal["recall-execution-manifest@1"]
+    version: Literal["recall-execution-manifest@1", "recall-execution-manifest@2"]
     captured_at: AwareDatetime
     principal: ConfirmationPrincipal
     maximum_cost_usd: Decimal = Field(gt=0, allow_inf_nan=False)
     variants: tuple[ConfirmationVariant, ...] = Field(min_length=12, max_length=12)
+    worker_count: Literal[2] | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_bytes(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        if self.worker_count is None:
+            result.pop("worker_count", None)
+        return result
 
     @model_validator(mode="after")
     def complete_runtime_matrix(self) -> Self:
+        if (self.version == "recall-execution-manifest@2") != (self.worker_count == 2):
+            raise ValueError("Confirmation concurrency must match its manifest version")
         required = {
             (pipeline, path, channel)
             for pipeline in ("seeded", "formation")

@@ -6,6 +6,7 @@ import hashlib
 from copy import deepcopy
 from typing import Any
 
+from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
 from agent_core.domain.memory import (
     BeliefType,
     RecallMoment,
@@ -85,29 +86,32 @@ class MemorySearchTool:
         *,
         model_planning: bool = False,
         factory: UnitOfWorkFactory | None = None,
+        people_context: PeopleContextService | None = None,
     ) -> None:
         self._retriever = retriever
         self._model_planning = model_planning
         self._factory = factory
+        self._people_context = people_context
         if model_planning:
             schema = deepcopy(INPUT_SCHEMA)
             schema["required"] = ["text"]
-            schema["properties"]["scope"]["description"] = (
-                "Omit for this session's project. Set only for deliberate cross-project lookup."
-            )
             kinds = schema["properties"].pop("belief_types")
             kinds["description"] = "Optional relevance hints; never exclude other stored types."
             schema["properties"]["type_hints"] = kinds
-            schema["properties"]["known_at"] = {"type": "string", "format": "date-time"}
+            schema["properties"]["as_of"]["description"] = "Requested time when facts were true."
+            schema["properties"]["known_at"] = {
+                "type": "string",
+                "format": "date-time",
+                "description": "Requested cutoff for recorded evidence.",
+            }
             self.spec = self.spec.model_copy(
                 update={
                     "version": "2.1.0",
                     "input_schema": schema,
                     "description": (
-                        "Search remembered context before asking again. Type hints rank, "
-                        "never filter. as_of selects validity; known_at selects recorded "
-                        "knowledge. Scope gates local memories unless subjects match; otherwise "
-                        "ranks. Tenant, principal and sensitivity restrictions apply."
+                        "Recall context before asking again. Omit scope/dates unless requested; "
+                        "scope defaults to this session. Type hints rank, never filter. Tenant, "
+                        "principal, sensitivity and local-memory scope limits apply."
                     ),
                 }
             )
@@ -167,7 +171,12 @@ class MemorySearchTool:
             current_scope=scope,
         )
         try:
-            result = await self._retriever.recall(
+            retriever = (
+                PeopleAwareMemoryRetriever(self._people_context, context.principal)
+                if self._model_planning and self._people_context is not None
+                else self._retriever
+            )
+            result = await retriever.recall(
                 query,
                 session_id=context.session_id,
                 run_id=context.run_id,

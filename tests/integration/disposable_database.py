@@ -65,6 +65,18 @@ async def truncate_application_tables(*, existing_only: bool = False) -> None:
 
 
 @asynccontextmanager
+async def paired_recall_databases() -> AsyncIterator[tuple[str, str]]:
+    """Create two opted-in empty clones before admitting either scenario worker."""
+    async with clone_recall_database() as first:
+        # The original template has the first clone's guard connection open.
+        # Copy the owned, still-empty clone before either worker opens it.
+        with pytest.MonkeyPatch.context() as environment:
+            environment.setenv("DATABASE_URL", first)
+            async with clone_recall_database() as second:
+                yield first, second
+
+
+@asynccontextmanager
 async def clone_recall_database() -> AsyncIterator[str]:
     """Clone only an opted-in scratch schema into a new, uniquely named eval DB.
 

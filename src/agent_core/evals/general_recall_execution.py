@@ -583,6 +583,7 @@ async def evaluate_fixture(
             lookup = None
             runtime_queries = None
             indexed = 0
+            indexing_ms = 0.0
             if channel != "sparse":
                 assert local is not None and embeddings is not None and embedding is not None
                 worker = SemanticIndexingPass(
@@ -594,6 +595,7 @@ async def evaluate_fixture(
                     admitted=lambda: True,
                     local=local,
                 )
+                indexing_started = perf_counter()
                 for _ in range(2 * ceil((len(records) + noise) / 16) + 2):
                     indexed_slice = await worker.run_slice()
                     indexed += indexed_slice.indexed
@@ -603,6 +605,7 @@ async def evaluate_fixture(
                         raise ValueError(f"Incomplete index: {indexed_slice.reason}")
                 else:
                     raise ValueError("Semantic inventory did not finish within its slice bound")
+                indexing_ms = (perf_counter() - indexing_started) * 1000
                 lookup = SemanticQueryPreparation(
                     app.uow_factory,
                     app.clock,
@@ -916,6 +919,8 @@ async def evaluate_fixture(
                 "context_tokens": sum(observed.tokens for observed in actual_results),
                 "retrieval_ms": retrieval_ms,
                 "formation_and_setup_ms": formation_ms,
+                "indexing_ms": indexing_ms,
+                "fixture_before_teardown_ms": (perf_counter() - formation_started) * 1000,
                 "elapsed_ms": (perf_counter() - started) * 1000,
                 "reader_usage": completed.turn.usage.model_dump(mode="json"),
                 "provider_calls": measured.calls + len(replayed_usages),

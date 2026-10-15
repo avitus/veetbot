@@ -4,12 +4,58 @@ from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
+import pytest
+
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.semantic_memory import query_digest
 from agent_core.memory.semantic_queries import SemanticQueryContext, SemanticQueryPreparation
 from tests.contract.memory_fixtures import recall_query
+from tests.contract.people_fixtures import PeopleFields
 from tests.contract.semantic_indexing_cases import INDEX_CONFIG, Provider
 from tests.contract.support import NOW, memory_uow_factory, principal
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+async def test_people_discovery_keeps_the_runtime_bound_semantic_reader(revoked: bool) -> None:
+    from agent_core.application.people_context import PeopleContextService
+    from agent_core.domain.people import Person, PersonMemoryLink
+    from tests.contract.memory_fixtures import memory
+    from tests.contract.semantic_memory_cases import SPACE, VECTOR
+    from tests.contract.support import RUN_ID, SESSION_ID
+    from tests.contract.test_runtime_semantic_queries_contract import runtime_stack
+
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    _, factory, provider, _, retriever, state = await runtime_stack(owner=owner)
+    person_id = UUID(int=9000)
+    async with factory() as uow:
+        record = await uow.memories.upsert_belief(memory(statement="Alex avoids all dairy"))
+        common: PeopleFields = {
+            "tenant_id": owner.tenant_id,
+            "principal_id": owner.principal_id,
+            "created_at": NOW,
+            "updated_at": NOW,
+        }
+        await uow.people.put(
+            Person(id=person_id, display_name="Alex", **common), expected_revision=0
+        )
+        await uow.people.put(
+            PersonMemoryLink(id=UUID(int=9100), person_id=person_id, belief_id=record.id, **common),
+            expected_revision=0,
+        )
+        source = await uow.semantic_memory.capture(owner, record.id, SPACE)
+        assert source is not None and await uow.semantic_memory.put(owner, source, VECTOR)
+    query = recall_query(text="Plan supper with Alex").model_copy(
+        update={"candidate_selection": "relevance"}
+    )
+    assert (
+        await retriever.prepare_semantic_queries([query], session_id=SESSION_ID, run_id=RUN_ID) == 1
+    )
+    state.enabled = not revoked
+    result = await PeopleContextService(factory, retriever).automatic_recall(
+        owner, query, session_id=SESSION_ID, run_id=RUN_ID
+    )
+    assert result.items and ("semantic" in result.items[0].arms) is (not revoked)
+    assert len(provider.calls) == 1, "Binding People context must not run another encoder call"
 
 
 async def test_people_narrowing_preserves_encoder_input_and_hard_restrictions() -> None:

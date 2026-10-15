@@ -39,6 +39,9 @@ class ConfirmationOptions(Experiment):
     context_tokens: int = Field(default=2000, gt=0, le=100000)
     p95_latency_ms: float = Field(gt=0, allow_inf_nan=False)
     maximum_case_usd: float = Field(gt=0, allow_inf_nan=False)
+    parallel_scratch_database: str | None = Field(
+        default=None, pattern=r"^veetbot_m33_eval_[a-z0-9_]{1,32}$"
+    )
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,7 @@ class PreparedConfirmation:
     settings: Settings
     snapshots: dict[str, Any]
     original_artifacts: dict[str, bytes] = field(default_factory=dict)
+    worker_settings: tuple[Settings, ...] = ()
 
 
 async def prepare_confirmation(
@@ -63,6 +67,7 @@ async def prepare_confirmation(
     from agent_core.evals.general_recall_collection import scenario_manifest
     from agent_core.evals.general_recall_composition import system_clock
     from agent_core.evals.general_recall_corpus import corpus_digest, load_corpus
+    from agent_core.evals.general_recall_database import confirmation_databases
     from agent_core.evals.general_recall_publication import IndependenceReview
     from agent_core.evals.general_recall_runtime import reader_runtime_inputs
     from agent_core.evals.memory_distillation import require_committed_tree
@@ -88,6 +93,11 @@ async def prepare_confirmation(
         raise ValueError("Confirmation requires both PostgreSQL runtime paths and fresh banks")
     # The review, source tree, intended deployment graph, actual migrated schema,
     # verified encoder and frozen controls all precede held-out task parsing.
+    workers = confirmation_databases(
+        scratch,
+        additional=options.parallel_scratch_database,
+        authorized=options.disposable_database,
+    )
     baseline = _read_bounded(options.baseline_report)
     deployment = await capture_deployment(
         settings, scratch, authorized=options.disposable_database, model_policy=options.model_policy
@@ -127,6 +137,28 @@ async def prepare_confirmation(
         local=profile.local,
         maximum_cost_usd=options.maximum_cost_usd,
     )
+    worker_settings = tuple(
+        replace(effective, database_url=value.database_url) for value in workers
+    )
+    for worker in worker_settings[1:]:
+        if await capture_schema(worker.database_url) != schema:
+            raise ValueError("Confirmation worker schema differs from the captured schema")
+        other = await capture_runtime_configurations(
+            options,
+            settings=worker,
+            principal=authority.principal(),
+            resolved=resolved,
+            local=profile.local,
+            maximum_cost_usd=options.maximum_cost_usd,
+        )
+        if other.model_dump(exclude={"captured_at"}) != manifest.model_dump(
+            exclude={"captured_at"}
+        ):
+            raise ValueError("Confirmation worker runtime configuration differs")
+    if len(worker_settings) == 2:
+        manifest = type(manifest).model_validate(
+            {**manifest.model_dump(), "version": "recall-execution-manifest@2", "worker_count": 2}
+        )
     target = deployment["composition"]
     if (
         target["configuration"]["context"]["classes"]["in_turn_recall"]["max_tokens"]
@@ -201,6 +233,7 @@ async def prepare_confirmation(
             "baseline_sha256": _digest(baseline),
         },
         {"independence-review.json": review_bytes, "baseline-report.json": baseline},
+        worker_settings,
     )
 
 
@@ -256,6 +289,18 @@ async def verify_external_inputs(
         or capture_frozen_controls(root) != prepared.snapshots["frozen_controls"]
     ):
         raise ValueError("Captured deployment, schema or frozen controls changed")
+    for worker in prepared.worker_settings[1:]:
+        if (
+            await capture_schema(worker.database_url) != schema
+            or await capture_deployment(
+                settings,
+                worker,
+                authorized=options.disposable_database,
+                model_policy=options.model_policy,
+            )
+            != deployment
+        ):
+            raise ValueError("Captured parallel worker inputs changed")
 
 
 async def run_confirmation(
@@ -273,6 +318,7 @@ async def run_confirmation(
         provider_adapters,
         system_clock,
     )
+    from agent_core.evals.general_recall_database import confirmation_databases
     from agent_core.evals.general_recall_execution import evaluate_fixture
     from agent_core.evals.people_execution import BudgetedProvider, EvaluationBudget
     from agent_core.memory.recall_release_binding import capture_inputs, input_stamps
@@ -285,6 +331,14 @@ async def run_confirmation(
         raise ValueError("Confirmation output already exists; preserve every prior attempt")
     prepared = await prepare_confirmation(root, options, settings, scratch)
     confirmation = prepared.confirmation
+    workers = prepared.worker_settings or (prepared.settings,)
+    expected_workers = confirmation_databases(
+        prepared.settings,
+        additional=options.parallel_scratch_database,
+        authorized=options.disposable_database,
+    )
+    if workers != expected_workers or len(workers) != (confirmation.manifest.worker_count or 1):
+        raise ValueError("Confirmation worker settings differ from the registered manifest")
     identity = confirmation.identity
     initial_stamps = input_stamps(root)
     output = options.output
@@ -316,7 +370,7 @@ async def run_confirmation(
     }
     _write(output / "run.json", metadata)
     providers = {}
-    embeddings = None
+    encoders = []
     try:
         registry = ProviderRegistry.load(
             PACKAGE_ROOT / "models",
@@ -330,51 +384,77 @@ async def run_confirmation(
         ):
             raise ValueError("Inputs changed before provider construction")
         providers = provider_adapters(prepared.settings, registry)
-        embeddings = local_embedding_provider(prepared.model_directory, prepared.local)
+        for _ in workers:
+            encoders.append(local_embedding_provider(prepared.model_directory, prepared.local))
         reader = BudgetedProvider(providers[prepared.resolved.provider], budget)
+
+        async def worker(index: int) -> None:
+            try:
+                for case in prepared.cases[index :: len(workers)]:
+                    if budget.failed:
+                        return
+                    await measure(case, index)
+            except BaseException:
+                # Do not cancel another already admitted provider request just
+                # because its peer failed. Stop new sends and let it settle.
+                async with budget.lock:
+                    budget.failed = True
+                raise
+
+        async def measure(case: RecallFixture, index: int) -> None:
+            key = _digest(case.id.encode())
+            with (output / "observations" / f"{key}.jsonl").open("x") as stream:
+                for variant in confirmation.manifest.variants:
+                    if budget.failed:
+                        return
+                    if input_stamps(root) != initial_stamps:
+                        raise ValueError("Evaluated files changed during confirmation")
+                    row = await evaluate_fixture(
+                        case=case,
+                        settings=workers[index],
+                        principal=confirmation.manifest.principal.principal(),
+                        pipeline=variant.pipeline,
+                        path=variant.path,
+                        channel=variant.channel,
+                        reader=reader,
+                        resolved=prepared.resolved,
+                        local=prepared.local,
+                        embeddings=encoders[index],
+                        noise=options.noise,
+                        storage="postgres",
+                        disposable_database=options.disposable_database,
+                        recover_sources=options.source_recovery,
+                        semantic_fusion_weight=options.semantic_fusion_weight,
+                        formation_policy=options.formation_policy,
+                        reranking=options.reranking,
+                        query_planning=options.query_planning,
+                        search_planning=options.search_planning,
+                        historical_indexing=options.historical_indexing,
+                        production_reader=options.production_reader,
+                        confirmation=confirmation,
+                        formation_bank_path=output / "banks" / f"{key}.json"
+                        if variant.pipeline == "formation"
+                        else None,
+                    )
+                    row["observed_at"] = system_clock().now().isoformat()
+                    stream.write(json.dumps(row) + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    metadata["completed"] += 1
+            print(
+                json.dumps({"completed": metadata["completed"], "scenario": case.id}),
+                flush=True,
+            )
+
         async with asyncio.timeout(options.deadline_seconds):
-            for case in prepared.cases:
-                key = _digest(case.id.encode())
-                with (output / "observations" / f"{key}.jsonl").open("x") as stream:
-                    for variant in confirmation.manifest.variants:
-                        if input_stamps(root) != initial_stamps:
-                            raise ValueError("Evaluated files changed during confirmation")
-                        row = await evaluate_fixture(
-                            case=case,
-                            settings=prepared.settings,
-                            principal=confirmation.manifest.principal.principal(),
-                            pipeline=variant.pipeline,
-                            path=variant.path,
-                            channel=variant.channel,
-                            reader=reader,
-                            resolved=prepared.resolved,
-                            local=prepared.local,
-                            embeddings=embeddings,
-                            noise=options.noise,
-                            storage="postgres",
-                            disposable_database=options.disposable_database,
-                            recover_sources=options.source_recovery,
-                            semantic_fusion_weight=options.semantic_fusion_weight,
-                            formation_policy=options.formation_policy,
-                            reranking=options.reranking,
-                            query_planning=options.query_planning,
-                            search_planning=options.search_planning,
-                            historical_indexing=options.historical_indexing,
-                            production_reader=options.production_reader,
-                            confirmation=confirmation,
-                            formation_bank_path=output / "banks" / f"{key}.json"
-                            if variant.pipeline == "formation"
-                            else None,
-                        )
-                        row["observed_at"] = system_clock().now().isoformat()
-                        stream.write(json.dumps(row) + "\n")
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                        metadata["completed"] += 1
-                print(
-                    json.dumps({"completed": metadata["completed"], "scenario": case.id}),
-                    flush=True,
-                )
+            outcomes = await asyncio.gather(
+                *(worker(index) for index in range(len(workers))), return_exceptions=True
+            )
+            for outcome in outcomes:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+        if budget.failed or metadata["completed"] != metadata["expected_observations"]:
+            raise ValueError("Confirmation stopped before the complete registered matrix")
         if (
             capture_inputs(root, identity.model_dump(mode="json")).digest
             != identity.evaluated_inputs_sha256
@@ -419,8 +499,8 @@ async def run_confirmation(
         )
         (output / "run.json").write_text(json.dumps(metadata, indent=2) + "\n")
         try:
-            if embeddings is not None:
-                await embeddings.close()
+            for encoder in encoders:
+                await encoder.close()
         finally:
             for provider in providers.values():
                 await provider.close()

@@ -9,6 +9,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.domain.agents import Principal
 from agent_core.domain.embeddings import EmbeddingRequest, EmbeddingResponse
 from agent_core.domain.memory import RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import TextPart, UserMessage
@@ -40,11 +41,12 @@ class State:
 
 
 async def runtime_stack(
-    *, run_changes: dict[str, Any] | None = None
+    *, run_changes: dict[str, Any] | None = None, owner: Principal | None = None
 ) -> tuple[
     FixedClock, UnitOfWorkFactory, Provider, RunSemanticQueries, HybridMemoryRetriever, State
 ]:
     clock, factory, _, _ = await formation_stack()
+    owner = owner or principal()
     live = run(status=RunStatus.RUNNING).model_copy(
         update={
             "lease_owner": "worker",
@@ -70,7 +72,7 @@ async def runtime_stack(
     runtime = RunSemanticQueries(
         factory,
         clock,
-        principal(),
+        owner,
         provider,
         INDEX_CONFIG,
         admitted=lambda: state.enabled,
@@ -80,7 +82,7 @@ async def runtime_stack(
         factory,
         clock,
         SequenceIdFactory(UUID(int=i) for i in range(8000, 9000)),
-        principal(),
+        owner,
         profile=DEFAULT_RETRIEVAL_PROFILE.model_copy(update={"semantic_enabled": True}),
         reconsolidation_enabled=True,
         reconsolidation_owner_approved_only=True,

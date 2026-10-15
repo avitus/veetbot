@@ -3531,7 +3531,17 @@ async def _compose(
         reranking_admitted=None if semantic_index_pass is None else semantic_index_pass.admitted,
     )
     registry.register(MemorySearchTool(memory_retriever))
-    registry.register(MemorySearchTool(memory_retriever, model_planning=True, factory=uow_factory))
+    people_context = (
+        PeopleContextService(uow_factory, memory_retriever) if settings.people_enabled else None
+    )
+    registry.register(
+        MemorySearchTool(
+            memory_retriever,
+            model_planning=True,
+            factory=uow_factory,
+            people_context=people_context,
+        )
+    )
     people_erasure = PeopleErasureService(uow_factory, clock)
     people_identity = PeopleIdentityService(uow_factory, clock, ids)
     people_duplicates = (
@@ -3620,7 +3630,7 @@ async def _compose(
         )
     people_retriever = None
     if people_service is not None:
-        people_context = PeopleContextService(uow_factory, memory_retriever)
+        assert people_context is not None
         people_retriever = PeopleAwareMemoryRetriever(people_context, principal)
         registry.register(PeopleSearchTool(uow_factory, clock))
         registry.register(PeopleContextTool(people_context))

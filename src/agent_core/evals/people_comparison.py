@@ -73,6 +73,7 @@ from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.determinism import IdFactory
 from agent_core.ports.people_runtime import PeopleRecall
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
+from agent_core.ports.semantic_memory import SemanticQueryLookup
 
 Pipeline = Literal["current-memory", "identity-links", "full-people"]
 PIPELINES: tuple[Pipeline, ...] = ("current-memory", "identity-links", "full-people")
@@ -93,6 +94,13 @@ class IdentityOnlyRecall:
     def current_time(self) -> datetime:
         return self.inner.current_time()
 
+    async def bind_semantic_queries(
+        self, query: RecallQuery, *, session_id: UUID, run_id: UUID | None, surface_id: str
+    ) -> SemanticQueryLookup | None:
+        return await self.inner.bind_semantic_queries(
+            query, session_id=session_id, run_id=run_id, surface_id=surface_id
+        )
+
     async def corrections(
         self, *, snapshot_id: UUID, watermark: int, as_of: datetime | None = None
     ) -> list[MemoryCorrection]:
@@ -111,6 +119,8 @@ class IdentityOnlyRecall:
         surface_id: str = "private",
         measure_rendered_tokens: Callable[[str], int] | None = None,
         people_items: list[TracedPersonContext] | None = None,
+        people_selection_belief_ids: tuple[UUID, ...] = (),
+        bound_semantic_queries: SemanticQueryLookup | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
     ) -> RecallResult:
         return await self.inner.recall(
@@ -122,6 +132,8 @@ class IdentityOnlyRecall:
             surface_id=surface_id,
             measure_rendered_tokens=measure_rendered_tokens,
             people_items=[],
+            people_selection_belief_ids=people_selection_belief_ids,
+            bound_semantic_queries=bound_semantic_queries,
             existing_uow=existing_uow,
         )
 

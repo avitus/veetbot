@@ -25,6 +25,7 @@ from agent_core.ports.determinism import Clock
 from agent_core.ports.email import EmailSemanticPort
 from agent_core.ports.memory import MemoryRetriever
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
+from agent_core.ports.semantic_memory import SemanticQueryLookup
 
 
 class PeopleOwnerCorrections(Protocol):
@@ -45,6 +46,10 @@ class PeopleOwnerCorrections(Protocol):
 class PeopleRecall(MemoryRetriever, Protocol):
     def current_time(self) -> datetime: ...
 
+    async def bind_semantic_queries(
+        self, query: RecallQuery, *, session_id: UUID, run_id: UUID | None, surface_id: str
+    ) -> SemanticQueryLookup | None: ...
+
     async def recall(
         self,
         query: RecallQuery,
@@ -56,6 +61,8 @@ class PeopleRecall(MemoryRetriever, Protocol):
         surface_id: str = "private",
         measure_rendered_tokens: Callable[[str], int] | None = None,
         people_items: list[TracedPersonContext] | None = None,
+        people_selection_belief_ids: tuple[UUID, ...] = (),
+        bound_semantic_queries: SemanticQueryLookup | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
     ) -> RecallResult: ...
 

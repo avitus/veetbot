@@ -79,6 +79,43 @@ def test_confirmation_binds_independent_authority_and_complete_matrix() -> None:
     assert confirmation.manifest.principal.principal().principal_id == "selected"
 
 
+def test_parallel_manifest_binds_worker_count_without_rewriting_legacy_bytes() -> None:
+    original = capture()
+    original_bytes = original.model_dump_json()
+    assert "worker_count" not in original.model_dump()
+    parallel = RecallExecutionManifest.model_validate(
+        {**original.model_dump(), "version": "recall-execution-manifest@2", "worker_count": 2}
+    )
+    assert parallel.digest != original.digest
+    assert parallel.maximum_cost_usd == original.maximum_cost_usd
+    assert RecallExecutionManifest.model_validate_json(original_bytes).model_dump_json() == (
+        original_bytes
+    )
+    legacy_binding = binding(original)
+    changed = ConfirmedExecution(legacy_binding.identity, parallel)
+    with pytest.raises(ValueError, match="identity or captured inputs changed"):
+        changed.validate(parallel.variants[0].configuration)
+    binding(parallel).validate(parallel.variants[0].configuration)
+
+
+@pytest.mark.parametrize(
+    ("version", "count"),
+    [
+        ("recall-execution-manifest@1", 2),
+        ("recall-execution-manifest@2", None),
+        ("recall-execution-manifest@2", 1),
+        ("recall-execution-manifest@2", 3),
+    ],
+)
+def test_manifest_refuses_unsupported_or_unbound_concurrency(
+    version: str, count: int | None
+) -> None:
+    with pytest.raises(ValueError):
+        RecallExecutionManifest.model_validate(
+            {**capture().model_dump(), "version": version, "worker_count": count}
+        )
+
+
 def test_confirmation_rejects_the_unpinned_diagnostic_reader() -> None:
     from agent_core.evals.general_recall_confirmation import RecallExecutionManifest
 

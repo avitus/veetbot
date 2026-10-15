@@ -1079,6 +1079,15 @@ class TracedPersonContext(BaseModel):
     source_ids: list[UUID] = Field(default_factory=list, max_length=256)
 
 
+class PeopleRecallDependencies(BaseModel):
+    """Owner-fenced revisions and the evidence used for role discovery."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    people_revision: int = Field(ge=0)
+    memory_revision: int = Field(ge=0)
+    selection_belief_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)
+
+
 class RecallTrace(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1107,6 +1116,7 @@ class RecallTrace(BaseModel):
     beliefs: list[RecalledItem] = Field(default_factory=list)
     passages: list[TracedPassage] = Field(default_factory=list)
     people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)
+    people_dependencies: PeopleRecallDependencies | None = None
     retrieval_policy_version: str
     created_at: datetime
     operator_fields_expire_at: datetime

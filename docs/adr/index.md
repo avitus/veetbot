@@ -240,3 +240,6 @@ implementation without one.
 - [ADR-0204: Owner-reviewed email junk pilot](0204-owner-reviewed-email-junk-pilot.md)
 
 - [ADR-0206 — Default deliberate memory search to the trusted session](0206-session-default-memory-search.md)
+
+- [ADR-0207: Bounded confirmation concurrency](0207-bounded-confirmation-concurrency.md)
+- [ADR-0208: Grounded relationship discovery](0208-grounded-relationship-discovery.md)

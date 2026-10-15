@@ -1,5 +1,6 @@
 """Confirmation refusal precedes provider construction and held-out parsing."""
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -7,8 +8,16 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from agent_core.config import Settings
 from agent_core.evals import general_recall_confirmatory as runner
+from agent_core.evals.general_recall_corpus import RecallFixture
 from tests.integration.m2_support import memory_settings
+
+
+def scratch_settings() -> Settings:
+    return replace(
+        memory_settings(), database_url="postgresql+asyncpg://localhost/veetbot_m33_eval_unit"
+    )
 
 
 def options(tmp_path: Path, **updates: Any) -> runner.ConfirmationOptions:
@@ -47,9 +56,22 @@ def test_complete_matrix_can_register_a_bounded_seven_day_job(tmp_path: Path) ->
             options(tmp_path, deadline_seconds=deadline)
 
 
+def test_confirmation_accepts_one_explicit_isolated_worker_without_renewing_cost(
+    tmp_path: Path,
+) -> None:
+    selected = options(tmp_path, parallel_scratch_database="veetbot_m33_eval_parallel")
+    assert selected.parallel_scratch_database == "veetbot_m33_eval_parallel"
+    assert selected.maximum_cost_usd == 100
+    assert options(tmp_path).parallel_scratch_database is None
+    for name in ("agent", "veetbot_m33_eval_", "veetbot_m33_eval_../other"):
+        with pytest.raises(ValidationError):
+            options(tmp_path, parallel_scratch_database=name)
+
+
 @pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("worker_mode", ["serial", "parallel", "schema", "runtime"])
 async def test_preflight_captures_actual_dependencies_before_parsing_holdout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool, worker_mode: str
 ) -> None:
     import hashlib
     from types import SimpleNamespace
@@ -72,7 +94,10 @@ async def test_preflight_captures_actual_dependencies_before_parsing_holdout(
     from tests.unit.test_general_recall_corpus import fixture
     from tests.unit.test_general_recall_release import fixture as release_fixture
 
-    selected = options(tmp_path)
+    selected = options(
+        tmp_path,
+        parallel_scratch_database="veetbot_m33_eval_parallel" if worker_mode != "serial" else None,
+    )
     base = fixture()
     cases = tuple(
         base.model_copy(
@@ -181,17 +206,26 @@ async def test_preflight_captures_actual_dependencies_before_parsing_holdout(
 
     async def schema_capture(*_: Any) -> dict[str, Any]:
         stages.append("schema")
+        if worker_mode == "schema" and stages.count("schema") == 2:
+            return {"version": "different-schema"}
         return schema
 
     async def runtime(*_: Any, **__: Any) -> Any:
         stages.append("runtime")
+        if worker_mode == "runtime" and stages.count("runtime") == 2:
+            other = captured.model_copy(deep=True)
+            other.variants[0].configuration["noise"] = 999
+            return other
         return captured
 
     async def resolve(*_: Any, **__: Any) -> ResolvedModel:
         return resolved
 
     def corpus(*_: Any, **__: Any) -> Any:
-        assert stages == ["committed", "deployment", "schema", "controls", "runtime"]
+        expected_stages = ["committed", "deployment", "schema", "controls", "runtime"]
+        if worker_mode != "serial":
+            expected_stages += ["schema", "runtime"]
+        assert stages == expected_stages
         stages.append("holdout")
         return cases[:-1] if changed else cases
 
@@ -213,17 +247,28 @@ async def test_preflight_captures_actual_dependencies_before_parsing_holdout(
     monkeypatch.setattr(general_recall_evidence, "scorer_digest", lambda _: "c" * 64)
     evaluated = SimpleNamespace(digest="e" * 64, model_dump=lambda **_: {})
     monkeypatch.setattr(recall_release_binding, "capture_inputs", lambda *_: evaluated)
-    if changed:
+    if worker_mode in {"schema", "runtime"}:
+        with pytest.raises(ValueError, match=r"worker .* differs"):
+            await runner.prepare_confirmation(
+                tmp_path, selected, memory_settings(), scratch_settings()
+            )
+        assert "holdout" not in stages
+    elif changed:
         with pytest.raises(ValueError, match="Corpus differs"):
             await runner.prepare_confirmation(
-                tmp_path, selected, memory_settings(), memory_settings()
+                tmp_path, selected, memory_settings(), scratch_settings()
             )
     else:
         prepared = await runner.prepare_confirmation(
-            tmp_path, selected, memory_settings(), memory_settings()
+            tmp_path, selected, memory_settings(), scratch_settings()
         )
         assert len(prepared.cases) == 400
-        assert prepared.confirmation.identity.execution_manifest_sha256 == captured.digest
+        assert (
+            prepared.confirmation.identity.execution_manifest_sha256
+            == prepared.confirmation.manifest.digest
+        )
+        assert (prepared.confirmation.manifest.worker_count or 1) == len(prepared.worker_settings)
+        assert len(prepared.worker_settings) == (1 if worker_mode == "serial" else 2)
         assert prepared.preregistration.registered_at >= captured.captured_at
         assert prepared.confirmation.manifest.maximum_cost_usd == 100
         assert stages[-1] == "holdout"
@@ -255,10 +300,21 @@ async def test_confirmation_refuses_before_holdout_or_provider_work(
         )
 
 
-@pytest.mark.parametrize("stop", ["none", "budget", "controls", "registry"])
+@pytest.mark.parametrize(
+    ("stop", "parallel"),
+    [
+        ("none", False),
+        ("none", True),
+        ("parallel_failure", True),
+        ("budget", False),
+        ("controls", False),
+        ("registry", False),
+    ],
+)
 async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: str, parallel: bool
 ) -> None:
+    import asyncio
     import json
     from types import SimpleNamespace
 
@@ -277,12 +333,29 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
     from tests.unit.test_general_recall_corpus import fixture
     from tests.unit.test_general_recall_release import fixture as release_fixture
 
-    selected = options(tmp_path)
-    confirmed = binding(capture())
+    selected = options(
+        tmp_path,
+        parallel_scratch_database="veetbot_m33_eval_parallel" if parallel else None,
+    )
+    manifest = capture()
+    if parallel:
+        manifest = type(manifest).model_validate(
+            {**manifest.model_dump(), "version": "recall-execution-manifest@2", "worker_count": 2}
+        )
+    confirmed = binding(manifest)
+    cases: tuple[RecallFixture, ...] = (fixture(),)
+    workers: tuple[Settings, ...] = (scratch_settings(),)
+    if parallel:
+        cases += (fixture().model_copy(update={"id": "second-independent-fixture"}),)
+        workers += (
+            replace(
+                workers[0], database_url="postgresql+asyncpg://localhost/veetbot_m33_eval_parallel"
+            ),
+        )
     prepared = runner.PreparedConfirmation(
         confirmed,
         release_fixture().preregistration,
-        (fixture(),),
+        cases,
         LOCAL,
         tmp_path,
         ResolvedModel(
@@ -292,8 +365,9 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
             policy_name="fake-balanced",
             resolved_at=NOW,
         ),
-        memory_settings(),
+        workers[0],
         {"deployment": {}, "schema": {}, "frozen_controls": {}},
+        worker_settings=workers,
     )
 
     async def prepare(*_: Any) -> runner.PreparedConfirmation:
@@ -321,6 +395,13 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
         general_recall_composition, "local_embedding_provider", lambda *_: Resource()
     )
     budgets: list[Any] = []
+    started: set[str] = set()
+    both_started = asyncio.Event()
+    first_failed = asyncio.Event()
+    drained = asyncio.Event()
+    seen: dict[str, list[tuple[str, str, str]]] = {}
+    database_by_case: dict[str, str] = {}
+    encoder_by_case: dict[str, int] = {}
 
     async def deployment_capture(*_: Any, **__: Any) -> dict[str, Any]:
         return {}
@@ -337,6 +418,26 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
         budget = kwargs["reader"].budget
         budgets.append(budget)
         assert kwargs["confirmation"] == confirmed
+        case_id = kwargs["case"].id
+        key = (kwargs["pipeline"], kwargs["path"], kwargs["channel"])
+        seen.setdefault(case_id, []).append(key)
+        database_by_case.setdefault(case_id, kwargs["settings"].database_url)
+        encoder_by_case.setdefault(case_id, id(kwargs["embeddings"]))
+        assert database_by_case[case_id] == kwargs["settings"].database_url
+        assert encoder_by_case[case_id] == id(kwargs["embeddings"])
+        if parallel and len(seen[case_id]) == 1:
+            started.add(case_id)
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=0.2)
+        if stop == "parallel_failure":
+            if case_id == cases[0].id:
+                first_failed.set()
+                raise ValueError("Synthetic peer failure")
+            await first_failed.wait()
+            await asyncio.sleep(0)
+            assert budget.failed, "A peer failure must stop admission before draining"
+            drained.set()
         if stop == "budget" and len(budgets) == 4:
             budget.held = Decimal("0.25")
             budget.failed = True
@@ -376,18 +477,28 @@ async def test_one_shared_budget_and_immutable_rows_survive_completion_or_failur
         assert not budgets and not closed
         assert not (selected.output / "collection.json").exists()
         return
-    assert result["completed"] == (3 if stop == "budget" else 12)
+    expected = 12 * len(cases)
+    retained = 3 if stop == "budget" else 1 if stop == "parallel_failure" else expected
+    assert result["completed"] == retained
     assert result["activation_evidence"] is False
     assert result["held_cost_usd"] == ("0.25" if stop == "budget" else "0")
     assert len({id(budget) for budget in budgets}) == 1
     assert budgets[0].maximum == Decimal("100")
-    assert len(closed) == 2
+    assert len(closed) == len(workers) + 1
+    if parallel:
+        assert both_started.is_set()
+        assert len(set(database_by_case.values())) == len(set(encoder_by_case.values())) == 2
+        expected_keys = [variant.key for variant in manifest.variants]
+        if stop == "parallel_failure":
+            assert drained.is_set() and budgets[0].failed
+            expected_keys = expected_keys[:1]
+        assert all(keys == expected_keys for keys in seen.values())
     rows = [
         json.loads(row)
         for path in (selected.output / "observations").glob("*.jsonl")
         for row in path.read_text().splitlines()
     ]
-    assert len(rows) == (3 if stop == "budget" else 12)
+    assert len(rows) == retained
     assert all(
         row["identity_sha256"] == confirmed.observation_fields()["identity_sha256"] for row in rows
     )

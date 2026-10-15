@@ -20,8 +20,9 @@ from tests.contract.test_runtime_semantic_queries_contract import runtime_stack
 
 @pytest.mark.parametrize("deliberate", [False, True])
 @pytest.mark.parametrize("task_context", [False, True])
+@pytest.mark.parametrize("omit_scope", [False, True])
 async def test_prepared_queries_match_the_governed_reader(
-    deliberate: bool, task_context: bool
+    deliberate: bool, task_context: bool, omit_scope: bool
 ) -> None:
     _, factory, _, _, retriever, _ = await runtime_stack()
     async with factory() as uow:
@@ -52,6 +53,8 @@ async def test_prepared_queries_match_the_governed_reader(
             "scope": "general",
             "type_hints": ["preference"],
         }
+        if omit_scope:
+            args.pop("scope")
         checkpoint.pending_tool_calls = [
             ToolCallItem(
                 item_index=0,
@@ -62,7 +65,12 @@ async def test_prepared_queries_match_the_governed_reader(
             ).model_dump(mode="json")
         ]
         expected = [
-            tool.query(args, tenant_id=principal().tenant_id, principal_id=principal().principal_id)
+            tool.query(
+                args,
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                current_scope=project_scope(session.metadata),
+            )
         ]
     calls: list[RecallQuery] = []
 

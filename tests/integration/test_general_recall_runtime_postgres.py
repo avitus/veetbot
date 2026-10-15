@@ -28,7 +28,7 @@ from agent_core.evals.general_recall_corpus import EvidenceFixture
 from agent_core.evals.general_recall_execution import evaluate_fixture
 from agent_core.evals.people_execution import BudgetedProvider, EvaluationBudget
 from agent_core.memory.semantic_runtime import SemanticQueryAuthority
-from tests.integration.disposable_database import clone_recall_database
+from tests.integration.disposable_database import clone_recall_database, paired_recall_databases
 from tests.integration.m2_support import database_settings
 from tests.unit.test_general_recall_corpus import AT, fixture
 
@@ -199,6 +199,94 @@ async def test_a_second_experiment_cannot_reset_a_running_case(recall_database: 
                 pytest.fail("The second experiment must not enter the database")
     async with evaluation_database(recall_database, storage="postgres", authorized=True):
         pass  # Completion releases the lock for the next case.
+
+
+async def test_parallel_cases_isolate_the_same_owner_and_share_one_provider_budget(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    from agent_core.domain.messages import ModelAttempt, ModelEvent, ModelRequest
+    from tests.contract.test_local_semantic_preparation import LOCAL
+
+    reached_reader: set[str] = set()
+    ready = asyncio.Event()
+    shared = EvaluationBudget(Decimal("1"), tmp_path / "shared.jsonl")
+
+    class Reader(FakeModelProvider):
+        def __init__(self, label: str) -> None:
+            super().__init__(
+                FakeModelScript(
+                    turns=[ScriptedTurn(text='{"action":"clarify","values":{"route":null}}')]
+                ),
+                FixedClock(AT),
+            )
+            self.label = label
+
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            reached_reader.add(self.label)
+            if len(reached_reader) == 2:
+                ready.set()
+            await asyncio.wait_for(ready.wait(), timeout=5)
+            async for event in super().stream(request, resolved, attempt):
+                yield event
+
+    class Embeddings:
+        async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+            return EmbeddingResponse(
+                request_digest=request.digest,
+                vectors=tuple((1.0, 0.0, 0.0) for _ in request.texts),
+                input_tokens=len(request.texts),
+            )
+
+    async def measure(database_url: str, label: str) -> dict[str, Any]:
+        base = fixture()
+        statement = f"User requires {label} routes."
+        case = base.model_copy(
+            update={
+                "id": f"isolated-{label}",
+                "history": (base.history[0].model_copy(update={"content": statement}),),
+                "task": base.task.model_copy(
+                    update={"question": f"What {label} routes do I require?"}
+                ),
+                "evidence": (
+                    EvidenceFixture(
+                        id="accessibility",
+                        source_ids=(base.history[0].id,),
+                        subject="routes",
+                        statement=statement,
+                    ),
+                ),
+            }
+        )
+        result = await evaluate_fixture(
+            case=case,
+            settings=replace(database_settings(), database_url=database_url),
+            pipeline="seeded",
+            channel="hybrid",
+            path="automatic",
+            reader=BudgetedProvider(Reader(label), shared),
+            resolved=ResolvedModel(provider="fake", model="scripted", resolved_at=AT),
+            noise=0,
+            storage="postgres",
+            disposable_database=True,
+            local=LOCAL,
+            embeddings=Embeddings(),
+            historical_indexing=True,
+        )
+        assert result["rendered"] == ["accessibility"]
+        assert [record["statement"] for record in result["formed_records"]] == [statement]
+        assert result["semantic_fallback"] is False
+        return result
+
+    async with paired_recall_databases() as (first, second):
+        rows = await asyncio.gather(measure(first, "step-free"), measure(second, "weatherproof"))
+    assert reached_reader == {"step-free", "weatherproof"}
+    assert len({row["scenario_id"] for row in rows}) == 2
+    assert set(rows[0]["retrieved_ids"]).isdisjoint(rows[1]["retrieved_ids"])
+    assert shared.calls == 2 and shared.spent == shared.held == 0
 
 
 async def test_confirmation_is_checked_before_provider_work_and_preserved_in_actual_row(

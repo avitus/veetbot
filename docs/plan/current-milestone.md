@@ -121,6 +121,16 @@ title: Current Milestone
   diagnostic repair; a new complete run may use at most USD 240 after ledger
   reconciliation, CodeRabbit review and exact-head CI/signing. Old measurements
   cannot certify the changed evaluated inputs.
+  The approved recovery now isolates invalid interaction proposals from grounded
+  claims, preserves named-subject corrections, discovers unambiguous people through
+  governed relationship evidence and shares their context with planned recall.
+  Retained evidence validates its identity and temporal dependencies, and People
+  retrieval preserves prepared semantic authority (ADR-0208). Two isolated
+  evaluation workers share one allowance without changing the observation matrix
+  or release thresholds (ADR-0207). Focused regressions pass; combined verification,
+  review and exact-head CI must precede new paid collection. Reviewed reliability
+  and the independent dreaming release are integrated for existing PR #163, with
+  migration ancestry ea3310a1b003 → ea3210a1b00d → ea3310a1b004 → ea3310a1b005.
   Complete confirmation, independent failure review and release publication
   remain outstanding.
   Optional-channel activation remains evidence-gated.
@@ -187,6 +197,19 @@ title: Current Milestone
   cutover excludes existing memories and source events while allowing new evidence
   through existing safety checks. Focused regression coverage passes; production
   cutover awaits verified delivery. Unattended application stays disabled.
+  On October 15 the owner authorized an independent dreaming release and its
+  dedicated pull request; supervised delivery does not depend on Milestone 33's
+  remaining recall evaluations. Migration ea3210a1b00d follows production
+  ea3310a1b003, with later recall migrations rebased before their own release.
+  That release subsequently completed through PR #165 at `0c7b0d74`: all ten
+  hosted checks and every delivery job in pipeline 1141 passed, including
+  TestFlight. The public API, documentation and website identify
+  `20261015-185949-0c7b0d7`. The forward cutover activated at
+  2026-10-15T19:05:44.185661Z with no blockers, preserving all 469 unknown erased
+  heads, five historical run receipts and the existing daily schedule. HTTPS
+  review-only sign-in works with thirty-day cookie persistence. Supervised review
+  remains enabled and unattended application remains off; this operational
+  delivery does not supply the missing comparative quality or independent review.
   The once/dry-run operator
   controls, remaining complete runtime gates and fresh matching comparative
   release evidence remain required; no verified sequential ceiling advances.

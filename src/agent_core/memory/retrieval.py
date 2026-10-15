@@ -26,6 +26,7 @@ from agent_core.domain.memory import (
     MemoryCorrection,
     MemoryRecord,
     MemoryStatus,
+    PeopleRecallDependencies,
     Portability,
     RecalledBelief,
     RecalledItem,
@@ -52,6 +53,7 @@ from agent_core.domain.reconsolidation_operations import StoredMerge
 from agent_core.domain.runs import Run
 from agent_core.domain.semantic_memory import SemanticHit, checked_vector, query_digest
 from agent_core.memory.identity_recall import identity_scoped_records
+from agent_core.memory.people_retained import validate_people_dependencies
 from agent_core.memory.profiles import (
     DEFAULT_RETRIEVAL_PROFILE,
     DEFAULT_TRACE_PROFILE,
@@ -391,6 +393,25 @@ class HybridMemoryRetriever:
             updates["include_owned_resources"] = False
         return query.model_copy(update=updates)
 
+    async def bind_semantic_queries(
+        self, query: RecallQuery, *, session_id: UUID, run_id: UUID | None, surface_id: str
+    ) -> SemanticQueryLookup | None:
+        """Bind local query authority before opening a People read transaction."""
+        if self._runtime_semantic_queries is None:
+            return self._semantic_queries
+        if (
+            self._profile.semantic_enabled
+            and run_id is not None
+            and query.profile != RecallProfile.CORE
+            and query.tenant_id == self._principal.tenant_id
+            and query.principal_id == self._principal.principal_id
+        ):
+            with suppress(Exception):
+                return await self._runtime_semantic_queries.bind(
+                    session_id=session_id, run_id=run_id, surface_id=surface_id
+                )
+        return None
+
     async def recall(
         self,
         query: RecallQuery,
@@ -402,6 +423,8 @@ class HybridMemoryRetriever:
         surface_id: str = "private",
         measure_rendered_tokens: Callable[[str], int] | None = None,
         people_items: list[TracedPersonContext] | None = None,
+        people_selection_belief_ids: tuple[UUID, ...] = (),
+        bound_semantic_queries: SemanticQueryLookup | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
     ) -> RecallResult:
         async with recall_search(query, session_id=session_id, run_id=run_id):
@@ -414,6 +437,8 @@ class HybridMemoryRetriever:
                 surface_id=surface_id,
                 measure_rendered_tokens=measure_rendered_tokens,
                 people_items=people_items,
+                people_selection_belief_ids=people_selection_belief_ids,
+                bound_semantic_queries=bound_semantic_queries,
                 existing_uow=existing_uow,
             )
 
@@ -428,6 +453,8 @@ class HybridMemoryRetriever:
         surface_id: str = "private",
         measure_rendered_tokens: Callable[[str], int] | None = None,
         people_items: list[TracedPersonContext] | None = None,
+        people_selection_belief_ids: tuple[UUID, ...] = (),
+        bound_semantic_queries: SemanticQueryLookup | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
     ) -> RecallResult:
         """Register influence atomically with reads under the owner erasure fence.
@@ -436,26 +463,13 @@ class HybridMemoryRetriever:
         and the recall trace share one transaction and never reacquire its lock.
         """
 
-        semantic_queries = self._semantic_queries
-        if self._runtime_semantic_queries is not None:
-            # Bind before taking the erasure-fenced read transaction. A caller
-            # already inside a UOW (People) retains sparse recall for now.
-            semantic_queries = None
-            if (
-                self._profile.semantic_enabled
-                and existing_uow is None
-                and run_id is not None
-                and query.profile != RecallProfile.CORE
-                and query.tenant_id == self._principal.tenant_id
-                and query.principal_id == self._principal.principal_id
-            ):
-                # Optional binding failure preserves ordinary recall.
-                with suppress(Exception):
-                    semantic_queries = await self._runtime_semantic_queries.bind(
-                        session_id=session_id,
-                        run_id=run_id,
-                        surface_id=surface_id,
-                    )
+        semantic_queries = (
+            bound_semantic_queries
+            if existing_uow is not None
+            else await self.bind_semantic_queries(
+                query, session_id=session_id, run_id=run_id, surface_id=surface_id
+            )
+        )
 
         async def apply(uow: RepositoryUnitOfWork, *, recover_sources: bool) -> RecallResult:
             return await self._recall(
@@ -468,6 +482,7 @@ class HybridMemoryRetriever:
                 surface_id=surface_id,
                 measure_rendered_tokens=measure_rendered_tokens,
                 people_items=people_items,
+                people_selection_belief_ids=people_selection_belief_ids,
                 semantic_queries=semantic_queries,
                 recover_sources=recover_sources,
             )
@@ -502,6 +517,7 @@ class HybridMemoryRetriever:
         surface_id: str,
         measure_rendered_tokens: Callable[[str], int] | None,
         people_items: list[TracedPersonContext] | None,
+        people_selection_belief_ids: tuple[UUID, ...],
         semantic_queries: SemanticQueryLookup | None,
         recover_sources: bool,
     ) -> RecallResult:
@@ -900,6 +916,15 @@ class HybridMemoryRetriever:
             carried_in=[item.belief_id for item in selected_items if item.carried],
             beliefs=[item.model_copy(deep=True) for item in selected_items],
             people=selected_people,
+            people_dependencies=(
+                PeopleRecallDependencies(
+                    people_revision=await uow.people.watermark(self._principal),
+                    memory_revision=head,
+                    selection_belief_ids=people_selection_belief_ids,
+                )
+                if authorized and (people_items or effective_query.people_scope)
+                else None
+            ),
             retrieval_policy_version=policy_version,
             created_at=self._clock.now(),
             operator_fields_expire_at=(
@@ -1075,10 +1100,9 @@ class HybridMemoryRetriever:
                 or trace.moment is not RecallMoment.IN_TURN
                 or trace.rendered_sha256 != usage.content_sha256
                 or hashlib.sha256(trace.rendered.encode()).hexdigest() != usage.content_sha256
-                or trace.people
                 or trace.passages
-                or len(trace.beliefs) != usage.items
-                or len(trace.beliefs) > 20
+                or len(trace.beliefs) + len(trace.people) != usage.items
+                or len(trace.beliefs) + len(trace.people) > 20
             ):
                 return False
             query = trace.query
@@ -1103,6 +1127,10 @@ class HybridMemoryRetriever:
                         return False
             if "+relevance-rerank@" in trace.retrieval_policy_version and (
                 self._reranking_admitted is None or not self._reranking_admitted()
+            ):
+                return False
+            if not await validate_people_dependencies(
+                uow, self._principal, trace, now=self._clock.now()
             ):
                 return False
             originals = [item for item in trace.beliefs if isinstance(item, RecalledBelief)]

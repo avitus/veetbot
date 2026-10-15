@@ -24,6 +24,7 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    true,
     tuple_,
     update,
 )
@@ -162,6 +163,10 @@ class InMemoryPeopleStore:
             {} if self._transaction is None else self._transaction.mapping()
         )
         self._erased: set[tuple[str, str, UUID]] = set()
+        # Payload-free head identity survives erasure just as people_heads does.
+        self._erased_heads: MutableMapping[tuple[str, str, UUID], tuple[int, str]] = (
+            {} if self._transaction is None else self._transaction.mapping()
+        )
         self._positions: MutableMapping[tuple[str, str], int] = (
             {} if self._transaction is None else self._transaction.mapping()
         )
@@ -247,12 +252,21 @@ class InMemoryPeopleStore:
 
     async def _legacy_dreaming_digest(self, principal: Principal) -> str:
         owner = (principal.tenant_id, principal.principal_id)
-        keys = sorted(
-            str(key[2])
-            for key in self._erased
-            if key[:2] == owner and key not in self._attributions
-        )
-        return hashlib.sha256("\n".join(keys).encode()).hexdigest()
+        if any(
+            key[:2] == owner and key not in self._attributions and key not in self._erased
+            for key in self._records
+        ):
+            raise ConflictError("Unattributed live People evidence cannot be excluded by a cutover")
+        heads = []
+        for key in sorted(self._erased):
+            if key[:2] != owner or key in self._attributions:
+                continue
+            identity = self._erased_heads.get(key)
+            if identity is None:
+                raise ConflictError("Unattributed erased People head identity is unavailable")
+            revision, kind = identity
+            heads.append(f"{key[2]}:{revision}:{kind}")
+        return hashlib.sha256("\n".join(heads).encode()).hexdigest()
 
     async def forward_dreaming_boundary(
         self, principal: Principal
@@ -286,7 +300,10 @@ class InMemoryPeopleStore:
         boundary = await self.forward_dreaming_boundary(principal)
         if boundary is None:
             return await self.memory_attribution_complete(principal)
-        return boundary.legacy_digest == await self._legacy_dreaming_digest(principal)
+        try:
+            return boundary.legacy_digest == await self._legacy_dreaming_digest(principal)
+        except ConflictError:
+            return False
 
     async def memory_attribution_complete(self, principal: Principal) -> bool:
         owner = (principal.tenant_id, principal.principal_id)
@@ -342,7 +359,10 @@ class InMemoryPeopleStore:
             tenant_id=query.tenant_id, principal_id=query.principal_id, roles=set(), scopes=set()
         )
         relationship_matches: set[UUID] = set()
-        if query.relationship is not None and self._memories is not None:
+        owner_relationship = (
+            query.relationship is not None or query.owner_relationship_belief_ids is not None
+        )
+        if owner_relationship and self._memories is not None:
             instant = query.as_of or self._clock.now()
             for key in self._records:
                 if key[:2] != (owner.tenant_id, owner.principal_id):
@@ -354,7 +374,14 @@ class InMemoryPeopleStore:
                     not isinstance(edge, RelationshipAssertion)
                     or edge.unresolved
                     or (
-                        edge.predicate not in OWNER_RELATIONSHIP_GROUPS[query.relationship]
+                        (
+                            query.relationship is not None
+                            and edge.predicate not in OWNER_RELATIONSHIP_GROUPS[query.relationship]
+                        )
+                        or (
+                            query.owner_relationship_belief_ids is not None
+                            and edge.belief_id not in query.owner_relationship_belief_ids
+                        )
                         or not any(
                             endpoint.kind == "owner" for endpoint in (edge.subject, edge.object)
                         )
@@ -458,7 +485,7 @@ class InMemoryPeopleStore:
                 not isinstance(record, PeopleErasure) or record.parent_id is not None
             ):
                 continue
-            if query.relationship is not None and record.id not in relationship_matches:
+            if owner_relationship and record.id not in relationship_matches:
                 continue
             if query.states is not None and getattr(record, "state", None) not in query.states:
                 continue
@@ -823,6 +850,8 @@ class InMemoryPeopleStore:
             key = (principal.tenant_id, principal.principal_id, record_id)
             if key in self._records:
                 count += int(key not in self._erased) if fence_only else 1
+                head = self._records[key][-1]
+                self._erased_heads[key] = (head.revision, head.kind)
                 if not fence_only:
                     self._forget_dependencies(key)
                     del self._records[key]
@@ -954,7 +983,7 @@ class InMemoryPeopleStore:
                     self._erased.discard(key)
                 else:
                     self._transaction.discard(self._erased, key)
-        for mapping in (self._attributions, self._dependents):
+        for mapping in (self._attributions, self._dependents, self._erased_heads):
             for key in list(mapping):
                 if key[:2] == owner:
                     del mapping[key]
@@ -1358,7 +1387,7 @@ class PostgresPeopleStore:
         statement = self._query(owner, query.sensitivity_ceiling, query.known_at).where(
             PeopleRevisionRow.kind.in_(query.kinds)
         )
-        if query.relationship is not None:
+        if query.relationship is not None or query.owner_relationship_belief_ids is not None:
             instant = query.as_of or self._clock.now()
             edges = (
                 self._query(owner, query.sensitivity_ceiling, query.known_at)
@@ -1366,7 +1395,14 @@ class PostgresPeopleStore:
                     PeopleRevisionRow.kind == "relationship",
                     PeopleRevisionRow.payload["predicate"].astext.in_(
                         OWNER_RELATIONSHIP_GROUPS[query.relationship]
-                    ),
+                    )
+                    if query.relationship is not None
+                    else true(),
+                    PeopleRevisionRow.payload["belief_id"].astext.in_(
+                        [str(key) for key in query.owner_relationship_belief_ids]
+                    )
+                    if query.owner_relationship_belief_ids is not None
+                    else true(),
                     PeopleRevisionRow.payload["unresolved"].astext == "false",
                     or_(
                         PeopleRevisionRow.payload["subject"]["kind"].astext == "owner",
