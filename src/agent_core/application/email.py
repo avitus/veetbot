@@ -20,6 +20,7 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.email_junk import admit_pilot
 from agent_core.application.email_subscriptions import EmailSubscriptions, SubscriptionRequest
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
@@ -58,6 +59,7 @@ from agent_core.domain.email import (
     feedback_matches,
     retained_thread,
 )
+from agent_core.domain.email_junk import JunkPilot, JunkPilotUnavailableError
 from agent_core.domain.email_semantics import thread_source_key
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -2626,6 +2628,7 @@ class EmailExperienceService:
         *,
         run: Run | None = None,
         lease: WorkerLease | None = None,
+        junk_pilot: JunkPilot | None = None,
     ) -> EmailThread:
         """Validate and save features against the current source and owner-profile revisions."""
         async with self.uow_factory() as uow, uow.email.lock(principal):
@@ -2681,6 +2684,8 @@ class EmailExperienceService:
             supported = bool(admitted_ids.intersection(proposed_ids))
             relationship = min(relationship, 1.0 if supported else min(1.0, replies / 5))
             if assessment.get("junk_bypassed"):
+                if assessment.get("junk_pilot_policy") and junk_pilot is None:
+                    raise JunkPilotUnavailableError("email junk pilot authorization is missing")
                 subscription_kept = await self.subscriptions.protects_from_junk(
                     uow.email, principal, thread
                 )
@@ -2741,6 +2746,8 @@ class EmailExperienceService:
                     "suspected_spam": suspected_spam,
                 }
             )
+            if assessment.get("junk_bypassed") and junk_pilot is not None:
+                await admit_pilot(uow.email, principal, thread, junk_pilot, self.clock.now())
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )

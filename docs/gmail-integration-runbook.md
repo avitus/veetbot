@@ -870,3 +870,41 @@ unknown attachments, incomplete sources and uncertain decisions are protected.
 Bulk is not marked as spam. No Gmail labels change. Setting the mode to `off`
 stops new judgments and restores ordinary assessment of previously bypassed
 threads on subsequent bounded refreshes. No budget or milestone gate changes.
+
+### Approved work-account pilot (ADR-0204)
+
+`pilot` uses a separate packet, never the general filter calibration shape. Bind
+`policy` to `JUNK_PILOT_POLICY`, `model` to `JUNK_MODEL`, `tenant_id` and
+`principal_id` to the approved owner, `account_id` to `work`, `sample` to
+`selected_live_inbox`, and aware `issued_at`/`expires_at` no more than seven days
+apart. Each observation contains only `fingerprint`, the observed **raw**
+`category`, independent owner `label`, and `source: owner_review`. Require at
+least 43 unique classifications, twenty junk nominations, seven legitimate keep
+cases and no false-positive nominations. Protected skips are not classifications
+and must not be invented as keep labels. Validate with `JunkPilot.model_validate_json`
+and `admitted(principal, "work", now)` from the deployed source. Keep the real
+packet outside the repository, readable only by the operator and service identity.
+
+The October 14 selected 50-conversation sample contained 43 classifications,
+30 correct junk nominations, six missed junk items and seven correct keeps;
+seven more conversations were protected before egress. It is not random or
+population-level accuracy evidence. The approved exception uses valid raw
+spam/bulk choices and retains keep/uncertain outcomes, all pre-egress protections,
+and the unchanged questions/model. It does not relax the general filter.
+
+After reviewed deployment, set `AGENT_EMAIL_JUNK_FILTER_MODE=pilot` and point
+`AGENT_EMAIL_JUNK_FILTER_EVIDENCE` at the validated private packet. Restart the
+API, interactive worker, async worker and maintenance roles using the normal
+configuration procedure. Verify their actual process configuration and release,
+then a bounded foreground refresh: content-free judgment receipts/costs, the
+`junk_pilot_day` counter and `junk_pilot_admission` records, ordinary assessment
+for protected/keep mail, and unchanged Gmail labels. At most fifty **new**
+conversations per UTC day may bypass; refresh/recovery of already admitted
+conversations consumes no additional slot. Changing the packet cannot reset
+that day's counter. Losing the final slot while Jev runs uses normal assessment.
+
+Expiry and invalid evidence stop new pilot calls. The existing cached-mail
+rotation restores full assessments on subsequent refreshes. Set mode `off` and
+restart the same roles for immediate operator revocation. Do not renew or widen
+the pilot without new owner-reviewed evidence and authorization. This pilot
+neither completes Milestone 26 nor establishes general-rollout readiness.

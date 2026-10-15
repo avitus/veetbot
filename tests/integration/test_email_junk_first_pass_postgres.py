@@ -55,3 +55,112 @@ async def test_junk_usage_and_uncertain_settlement_survive_database_reload(
             "email.junk.started",
             "email.junk.completed",
         ]
+
+
+async def test_pilot_limit_survives_concurrent_saves_and_reload(tmp_path: Path) -> None:
+    """PostgreSQL serializes the daily cap and preserves idempotency across fresh units of work."""
+
+    from tests.unit.test_email_junk_pilot import (
+        assert_durable_pilot_cap,
+        pilot_decision,
+        pilot_settings,
+        work_factory,
+    )
+
+    settings = replace(pilot_settings(tmp_path), database_url=database_settings().database_url)
+    async with build(
+        settings=settings,
+        storage="postgres",
+        judgment_provider_override=FakeJudgmentProvider([pilot_decision()]),
+        script=FakeModelScript(turns=[]),
+        mcp_client_factory=await work_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        worker = cast(DurableWorker, app.async_worker_factory("email-junk-pilot-test"))
+        assert await worker.run_once()
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        await assert_durable_pilot_cap(app)
+
+
+async def test_failed_pilot_save_rolls_back_slot_and_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed assessment commit cannot consume a slot or leave a partial bypass behind."""
+    from typing import Any
+    from uuid import uuid4
+
+    from agent_core.application.email import save_value
+    from agent_core.domain.email import EmailThread
+    from agent_core.domain.email_junk import JunkPilot
+    from tests.unit.test_email_junk_pilot import (
+        pilot_decision,
+        pilot_packet,
+        pilot_settings,
+        work_factory,
+    )
+
+    settings = replace(pilot_settings(tmp_path), database_url=database_settings().database_url)
+    async with build(
+        settings=settings,
+        storage="postgres",
+        judgment_provider_override=FakeJudgmentProvider([pilot_decision()]),
+        script=FakeModelScript(turns=[]),
+        mcp_client_factory=await work_factory(),
+    ) as app:
+        await app.services.email.submit_task(app.principal, kind="refresh")
+        assert await cast(
+            DurableWorker, app.async_worker_factory("email-pilot-rollback")
+        ).run_once()
+        async with app.uow_factory() as uow, uow.email.lock(app.principal):
+            [source] = await uow.email.list(app.principal, "thread")
+            [assessment] = await uow.email.list(app.principal, "assessment")
+            thread = EmailThread.model_validate(source.payload).model_copy(
+                update={"id": uuid4(), "provider_thread_id": "rollback-case", "summary": "before"}
+            )
+            await save_value(
+                uow.email, app.principal, "thread", str(thread.id), thread, app.clock.now()
+            )
+            before_days = {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_day")
+            }
+            before_admissions = {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_admission")
+            }
+        service = app.services.email
+        original = type(service)._put_data
+
+        async def fail(
+            self: Any, store: Any, principal: Any, kind: str, key: str, payload: Any
+        ) -> Any:
+            """Abort after the quota and thread updates but before the assessment write."""
+            if kind == "assessment":
+                raise RuntimeError("simulated failed commit")
+            return await original(self, store, principal, kind, key, payload)
+
+        monkeypatch.setattr(type(service), "_put_data", fail)
+        with pytest.raises(RuntimeError, match="simulated failed commit"):
+            await service.save_assessment(
+                app.principal,
+                thread.id,
+                thread.revision,
+                assessment.payload,
+                junk_pilot=JunkPilot.model_validate(pilot_packet()),
+            )
+        async with app.uow_factory() as uow:
+            assert {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_day")
+            } == before_days
+            assert {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_admission")
+            } == before_admissions
+            [counter] = await uow.email.list(app.principal, "junk_pilot_day")
+            assert counter.payload == {"count": 1}
+            assert len(await uow.email.list(app.principal, "junk_pilot_admission")) == 1
+            assert await uow.email.get(app.principal, "assessment", str(thread.id)) is None
+            stored = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert stored and stored.payload["summary"] == "before"

@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailThread
 from agent_core.domain.email_junk import (
     JUNK_MODEL,
+    JUNK_PILOT_POLICY,
     JUNK_POLICY,
     JUNK_RESERVATION,
     JUNK_THRESHOLD,
     EmailJunkMode,
+    JunkPilot,
     junk_fingerprint,
+    junk_pilot_capacity,
+    junk_pilot_keys,
     junk_request,
     junk_result,
 )
@@ -35,25 +41,49 @@ class EmailJunkFilter:
         *,
         admitted: bool = False,
         evidence_digest: str = "none",
+        pilot: JunkPilot | None = None,
     ) -> None:
         """Downgrade unadmitted filtering to observation and bind the cache revision."""
         self.provider = provider
         self.mode = mode if mode != EmailJunkMode.FILTER or admitted else EmailJunkMode.SHADOW
-        self.revision = f"{JUNK_POLICY}:{self.mode.value}:{evidence_digest}"
+        self.pilot = pilot if mode == EmailJunkMode.PILOT else None
+        if mode == EmailJunkMode.PILOT and pilot is None:
+            self.mode = EmailJunkMode.OFF
+        policy = JUNK_PILOT_POLICY if self.pilot is not None else JUNK_POLICY
+        self.revision = f"{policy}:{self.mode.value}:{evidence_digest}"
 
     @property
     def enabled(self) -> bool:
         """Permit screening only when a provider exists and the mode allows calls."""
         return self.mode != EmailJunkMode.OFF and self.provider is not None
 
-    def bypass(self, receipt: dict[str, Any] | None) -> bool:
-        """Require admitted filter mode and a completed, matching, high-scoring junk receipt."""
-        return bool(
-            self.mode == EmailJunkMode.FILTER
-            and receipt
+    def bypass(
+        self,
+        receipt: dict[str, Any] | None,
+        *,
+        principal: Principal | None = None,
+        account_id: str | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Apply the calibrated threshold or the active pilot's scoped raw-choice rule."""
+        if not (
+            receipt
             and receipt.get("status") == "completed"
             and receipt.get("model") == JUNK_MODEL
             and receipt.get("policy") == JUNK_POLICY
+        ):
+            return False
+        if self.mode == EmailJunkMode.PILOT:
+            return bool(
+                self.pilot is not None
+                and principal is not None
+                and account_id is not None
+                and now is not None
+                and self.pilot.admitted(principal, account_id, now)
+                and receipt.get("raw_category") in {"spam", "bulk"}
+            )
+        return (
+            self.mode == EmailJunkMode.FILTER
             and receipt.get("category") in {"spam", "bulk"}
             and float(receipt.get("probability", 0)) >= JUNK_THRESHOLD
         )
@@ -63,6 +93,10 @@ class EmailJunkFilter:
     ) -> dict[str, Any] | None:
         """Reconcile prior attempts, reserve before egress and settle verified usage atomically."""
         if not self.enabled or self.provider is None:
+            return None
+        if self.pilot is not None and not self.pilot.admitted(
+            c.principal, thread.account_id, c.clock.now()
+        ):
             return None
         request = junk_request(thread, learning, c.clock.now())
         if request is None:
@@ -81,6 +115,17 @@ class EmailJunkFilter:
         }
         # Reconcile a possibly dispatched judgment before considering another request.
         async with c.uow_factory() as uow, uow.email.lock(c.principal):
+            if self.pilot is not None:
+                if not self.pilot.admitted(c.principal, thread.account_id, c.clock.now()):
+                    return None
+                key, day = junk_pilot_keys(thread, c.clock.now())
+                admission = await uow.email.get(c.principal, "junk_pilot_admission", key)
+                counter = await uow.email.get(c.principal, "junk_pilot_day", day)
+                if not junk_pilot_capacity(
+                    None if admission is None else admission.payload,
+                    None if counter is None else counter.payload,
+                ):
+                    return None
             events = await uow.events.list_after(c.run.session_id, 0, c.principal, run_id=c.run.id)
             matching = [
                 e
@@ -106,6 +151,10 @@ class EmailJunkFilter:
                 else 8.0
             )
             if timeout <= 0:
+                return None
+            if self.pilot is not None and not self.pilot.admitted(
+                c.principal, thread.account_id, c.clock.now()
+            ):
                 return None
             # Reserve before egress in the same fenced transaction as the audit event.
             updated = c.run.model_copy(deep=True)

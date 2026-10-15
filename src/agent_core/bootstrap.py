@@ -4075,7 +4075,7 @@ async def _compose(
             policy_version=ruleset.policy_version,
         )
 
-        from agent_core.domain.email_junk import EmailJunkMode, JunkCalibration
+        from agent_core.domain.email_junk import EmailJunkMode, JunkCalibration, JunkPilot
         from agent_core.runtime.email_junk import EmailJunkFilter
 
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
@@ -4102,16 +4102,24 @@ async def _compose(
                 # checking current authority; disabled mode grants no new write.
             junk_admitted = False
             junk_digest = "none"
+            junk_pilot = None
             if (
-                settings.email_junk_filter_mode == EmailJunkMode.FILTER
+                settings.email_junk_filter_mode in {EmailJunkMode.FILTER, EmailJunkMode.PILOT}
                 and settings.email_junk_filter_evidence
             ):
                 try:
                     with settings.email_junk_filter_evidence.open("rb") as evidence_file:
                         raw_junk_evidence = evidence_file.read(2_000_001)
                     if len(raw_junk_evidence) <= 2_000_000:
-                        junk_calibration = JunkCalibration.model_validate_json(raw_junk_evidence)
-                        junk_admitted = junk_calibration.admitted()
+                        if settings.email_junk_filter_mode == EmailJunkMode.PILOT:
+                            candidate = JunkPilot.model_validate_json(raw_junk_evidence)
+                            if candidate.admitted(context.principal, "work", context.clock.now()):
+                                junk_pilot = candidate
+                        else:
+                            junk_calibration = JunkCalibration.model_validate_json(
+                                raw_junk_evidence
+                            )
+                            junk_admitted = junk_calibration.admitted()
                         junk_digest = hashlib.sha256(raw_junk_evidence).hexdigest()
                     else:
                         logger.warning("email_junk_evidence_unavailable")
@@ -4122,6 +4130,7 @@ async def _compose(
                 settings.email_junk_filter_mode,
                 admitted=junk_admitted,
                 evidence_digest=junk_digest,
+                pilot=junk_pilot,
             )
 
             return await EmailTaskRunner(

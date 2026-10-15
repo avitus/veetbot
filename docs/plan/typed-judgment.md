@@ -332,3 +332,8 @@ external data. Its default is off; uncertain or protected cases preserve
 normal assessment. Its consumer owns durable run/email cost reservations,
 a pinned model, one-attempt requests, and independent calibration before
 bypass. Existing consumers retain their provider defaults.
+
+The explicitly approved [ADR-0204 pilot](../adr/0204-owner-reviewed-email-junk-pilot.md)
+retains those questions, request bounds and accounting, but permits the reviewed
+raw choice under its separate owner/account, seven-day and daily-cap admission.
+It does not change other consumers or the general calibrated filter.
