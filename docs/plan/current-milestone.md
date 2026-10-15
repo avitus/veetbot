@@ -113,7 +113,14 @@ title: Current Milestone
   search. The evaluator now isolates deliberate preparation as well as context;
   production budget enforcement is unchanged. Originals remain retained under
   `20261014-confirmation-v2/`, with aggregate reported and held cost USD 5.62063000.
-  A further paid confirmation requires a new owner decision.
+  V3 subsequently failed at 1,217 observations on `74b14815`; its original archive
+  and scratch database remain retained. A mandatory incident returned clarification
+  despite rendered evidence, and a diagnostic defect obscured the terminal provider
+  failure. Aggregate reported and held cost is USD 55.913546. The owner requested
+  completion before merging PR #163 on 2026-10-15. ADR-0206 records the scope and
+  diagnostic repair; a new complete run may use at most USD 240 after ledger
+  reconciliation, CodeRabbit review and exact-head CI/signing. Old measurements
+  cannot certify the changed evaluated inputs.
   Complete confirmation, independent failure review and release publication
   remain outstanding.
   Optional-channel activation remains evidence-gated.

@@ -686,8 +686,10 @@ Two tools, both returning `TrustLevel.MEMORY` data:
   personal context. The query names the fact needed to answer, such as home
   location, even when the question names another topic. Absence from the bounded
   snapshot or automatic recall does not establish that the fact is unknown.
-  Production `memory.search@2.0.0` uses `type_hints` as structured relevance
-  anchors, never guessed hard storage-type predicates (ADR-0198). Explicit
+  Production `memory.search@2.1.0` uses `type_hints` as structured relevance
+  anchors, never guessed hard storage-type predicates (ADR-0198). Omitted scope
+  resolves from the authenticated session, identically in preparation and execution;
+  an explicit scope retains intentional cross-project lookup (ADR-0206). Explicit
   `RecallQuery.belief_types` filters and the frozen/direct legacy tool remain
   unchanged; the model-facing schema rejects that old argument.
   `as_of` selects when a fact applied; `known_at` selects the recorded knowledge

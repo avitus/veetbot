@@ -220,6 +220,50 @@ async def test_uncertain_call_retains_safe_failure_class(tmp_path: Path) -> None
     assert budget.failed and budget.held > 0
 
 
+async def test_failed_terminal_preserves_provider_diagnostics_and_uncertain_usage(
+    tmp_path: Path,
+) -> None:
+    from agent_core.domain.messages import ModelFailedEvent, ModelTransientError
+    from agent_core.model.streaming import ModelStreamError, collect_turn
+
+    request, resolved, attempt = request_model_attempt()
+    failure = ModelTransientError(
+        provider="test",
+        model="test",
+        attempt_id=attempt.attempt_id,
+        message="Private provider response must not enter the journal",
+        provider_code="transport_error",
+        http_status=503,
+    )
+
+    class FailedProvider(CompletingProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            yield ModelFailedEvent(
+                attempt_id=attempt.attempt_id,
+                run_id=attempt.run_id,
+                step_number=1,
+                sequence=0,
+                error=failure,
+            )
+
+    budget = EvaluationBudget(Decimal("1"), tmp_path / "costs.jsonl")
+    provider = BudgetedProvider(FailedProvider(None), budget)
+    with pytest.raises(ModelStreamError) as caught:
+        await collect_turn(provider.stream(request, resolved, attempt))
+    assert caught.value.failure == failure
+    rows = [json.loads(line) for line in budget.journal.read_text().splitlines()]
+    assert rows[-1]["outcome"] == "uncertain"
+    assert rows[-1]["provider_code"] == "transport_error"
+    assert rows[-1]["failure_kind"] == "transient"
+    assert rows[-1]["http_status"] == 503
+    assert failure.message not in budget.journal.read_text()
+    assert budget.failed and budget.held == Decimal("0.11") and budget.spent == 0
+    with pytest.raises(BudgetExceededError):
+        _ = [event async for event in provider.stream(request, resolved, attempt)]
+
+
 def request_model_attempt() -> tuple[ModelRequest, ResolvedModel, ModelAttempt]:
     return (
         ModelRequest(model_policy="test", conversation=[], tools=[], maximum_output_tokens=100),

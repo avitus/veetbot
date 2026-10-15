@@ -151,6 +151,12 @@ priority as one deduplicated twenty-original rank prefix, as specified in
 runtime receipt against exact observed blocks; it never invents a cross-query
 order. A missing receipt leaves different per-search orders uncertifiable.
 
+[ADR-0206](../adr/0206-session-default-memory-search.md) makes the planned tool's
+project scope optional. Ordinary searches use the authenticated session project;
+an explicit scope retains cross-project lookup. Preparation and execution resolve
+the same default. No model must guess a project from a task topic, and no default
+changes confidence, portability or source-recovery restrictions.
+
 Intent and inferred dates can boost matches but cannot become mandatory filters
 without an explicit user constraint and a tested fallback. Failure to find a
 memory is not proof that the underlying fact is false. A second search targets
@@ -450,6 +456,15 @@ the same durable reservation, ten-second deadline and execution limits. This is
 an evaluation-isolation repair, not a production budget change. All originals
 remain under `20261014-confirmation-v2/`; aggregate reported and held cost is
 USD 5.62063000. No further paid attempt is authorized by the earlier one-run decision.
+The subsequent v3 confirmation on reviewed/verified `74b14815` failed after
+1,217 of 4,800 observations. Its original archive and scratch database remain
+retained. A mandatory development incident failed in formation/deliberate hybrid
+recall despite rendered evidence; the terminal provider cause is unproven because
+the budget wrapper could mask its structured failure. Aggregate reported and held
+cost is USD 55.913546. On 2026-10-15 the owner requested completion of these gates
+before merging PR #163. ADR-0206 records the scope and diagnostic repairs; a fresh
+complete run is limited to USD 240 after ledger reconciliation and final review/CI.
+The failed run and earlier load measurements cannot certify changed inputs.
 The native historical-index load measurement
 under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
 100,000 competing records. It measures one synthetic information need and cannot

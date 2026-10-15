@@ -15,6 +15,7 @@ from agent_core.domain.messages import (
     ModelAttempt,
     ModelCompletedEvent,
     ModelEvent,
+    ModelFailedEvent,
     ModelRequest,
     ResolvedModel,
 )
@@ -82,11 +83,15 @@ class BudgetedProvider:
             ledger.held += reserve
         completed = False
         error_class: str | None = None
+        failure: ModelFailedEvent | None = None
         try:
             async for event in self.provider.stream(request, resolved, attempt):
+                if isinstance(event, ModelFailedEvent):
+                    failure = event
+                    ledger.failed = True
                 if isinstance(event, ModelCompletedEvent):
                     actual = event.turn.usage.cost
-                    if completed or not actual.is_finite() or actual < 0:
+                    if failure is not None or completed or not actual.is_finite() or actual < 0:
                         raise ValueError("evaluation received invalid final usage")
                     async with ledger.lock:
                         ledger.append(
@@ -105,7 +110,7 @@ class BudgetedProvider:
                                 "cost", "People evaluation usage exceeded its reservation"
                             )
                 yield event
-            if not completed:
+            if not completed and failure is None:
                 raise ValueError("evaluation provider ended without final usage")
         except BaseException as error:
             error_class = type(error).__name__
@@ -115,7 +120,22 @@ class BudgetedProvider:
             if not completed:
                 async with ledger.lock:
                     ledger.failed = True
-                    ledger.append({**record, "outcome": "uncertain", "error_class": error_class})
+                    diagnostic: dict[str, object] = {}
+                    if failure is not None:
+                        diagnostic = {
+                            "failure_kind": failure.error.kind,
+                            "provider_code": failure.error.provider_code,
+                            "provider_parameter": failure.error.provider_parameter,
+                            "http_status": failure.error.http_status,
+                        }
+                    ledger.append(
+                        {
+                            **record,
+                            "outcome": "uncertain",
+                            "error_class": error_class,
+                            **diagnostic,
+                        }
+                    )
 
 
 class BorrowedProvider:

@@ -16,6 +16,7 @@ from agent_core.domain.memory import (
 from agent_core.domain.messages import MemoryRecallUsage, TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
+from agent_core.domain.sessions import project_scope
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolFailure,
@@ -24,6 +25,7 @@ from agent_core.domain.tools import (
     ToolSpec,
 )
 from agent_core.memory.retrieval import HybridMemoryRetriever, recalls_owned_resources
+from agent_core.ports.persistence import UnitOfWorkFactory
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -77,36 +79,59 @@ class MemorySearchTool:
         output_trust=TrustLevel.MEMORY,
     )
 
-    def __init__(self, retriever: HybridMemoryRetriever, *, model_planning: bool = False) -> None:
+    def __init__(
+        self,
+        retriever: HybridMemoryRetriever,
+        *,
+        model_planning: bool = False,
+        factory: UnitOfWorkFactory | None = None,
+    ) -> None:
         self._retriever = retriever
         self._model_planning = model_planning
+        self._factory = factory
         if model_planning:
             schema = deepcopy(INPUT_SCHEMA)
+            schema["required"] = ["text"]
+            schema["properties"]["scope"]["description"] = (
+                "Omit for this session's project. Set only for deliberate cross-project lookup."
+            )
             kinds = schema["properties"].pop("belief_types")
             kinds["description"] = "Optional relevance hints; never exclude other stored types."
             schema["properties"]["type_hints"] = kinds
             schema["properties"]["known_at"] = {"type": "string", "format": "date-time"}
             self.spec = self.spec.model_copy(
                 update={
-                    "version": "2.0.0",
+                    "version": "2.1.0",
                     "input_schema": schema,
                     "description": (
                         "Search remembered context before asking again. Type hints rank, "
                         "never filter. as_of selects validity; known_at selects recorded "
                         "knowledge. Scope gates local memories unless subjects match; otherwise "
-                        "it ranks. Tenant, principal and sensitivity restrictions apply."
+                        "ranks. Tenant, principal and sensitivity restrictions apply."
                     ),
                 }
             )
 
-    def query(self, arguments: dict[str, Any], *, tenant_id: str, principal_id: str) -> RecallQuery:
+    def query(
+        self,
+        arguments: dict[str, Any],
+        *,
+        tenant_id: str,
+        principal_id: str,
+        current_scope: str | None = None,
+    ) -> RecallQuery:
         if self._model_planning and "belief_types" in arguments:
             raise ValueError("Planned memory.search accepts type_hints, not hard belief_types")
+        scope = arguments.get("scope") if self._model_planning else arguments["scope"]
+        if scope is None:
+            scope = current_scope
+        if scope is None:
+            raise ValueError("Memory search requires a trusted session scope")
         return RecallQuery.model_validate(
             {
                 "tenant_id": tenant_id,
                 "principal_id": principal_id,
-                "current_scope": arguments["scope"],
+                "current_scope": scope,
                 "text": arguments["text"],
                 "candidate_selection": self._retriever.retrieval_profile.candidate_selection,
                 "subjects": arguments.get("subjects", []),
@@ -128,8 +153,18 @@ class MemorySearchTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        scope: str | None = None
+        if self._model_planning and "scope" not in arguments:
+            if self._factory is None:
+                raise ValueError("Memory search requires a trusted session scope")
+            async with self._factory() as uow:
+                session = await uow.sessions.get(context.session_id, context.principal)
+            scope = project_scope(session.metadata)
         query = self.query(
-            arguments, tenant_id=context.tenant_id, principal_id=context.principal.principal_id
+            arguments,
+            tenant_id=context.tenant_id,
+            principal_id=context.principal.principal_id,
+            current_scope=scope,
         )
         try:
             result = await self._retriever.recall(

@@ -14,6 +14,69 @@ from tests.contract.support import NOW
 from tests.gates.test_runtime_tool_budget import _settings
 
 
+@pytest.mark.parametrize("session_scope", ["general", "workshop"])
+@pytest.mark.parametrize("explicit_scope", [None, "another-project"])
+async def test_deliberate_search_defaults_to_trusted_session_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    session_scope: str,
+    explicit_scope: str | None,
+) -> None:
+    from agent_core.memory.recall_preparation import SemanticRecallPreparation
+    from agent_core.memory.retrieval import DeterministicQueryFormer
+
+    arguments = {"text": "Remembered project constraints"}
+    if explicit_scope is not None:
+        arguments["scope"] = explicit_scope
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="memory.search",
+                        call_id="search",
+                        arguments=arguments,
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Done"),
+        ]
+    )
+    async with build(settings=_settings(), script=script, clock=FixedClock(NOW)) as app:
+        session = await app.services.sessions.create(
+            app.principal, "general", {"project_scope": session_scope}
+        )
+        actual: list[RecallQuery] = []
+        planned: list[RecallQuery] = []
+        original = app.memory_retriever._recall
+
+        async def observe(query: RecallQuery, **kwargs: Any) -> RecallResult:
+            if kwargs["moment"] == "in_turn" and query.text == arguments["text"]:
+                actual.append(query)
+            return await original(query, **kwargs)
+
+        class Preparation(SemanticRecallPreparation):
+            async def plan(self, run: Run, checkpoint: RunCheckpoint) -> list[RecallQuery]:
+                queries = await super().plan(run, checkpoint)
+                if checkpoint.pending_tool_calls:
+                    planned.extend(queries)
+                return queries
+
+        monkeypatch.setattr(app.memory_retriever, "_recall", observe)
+        app.executor._prepare_recall = Preparation(
+            app.uow_factory,
+            app.principal,
+            app.memory_retriever,
+            DeterministicQueryFormer(app.principal),
+        )
+        run_id = await app.runs.submit("Find remembered project constraints", session.id)
+        outcome = await app.runs.wait_terminal(run_id)
+        assert outcome.status is RunStatus.COMPLETED, outcome.failure
+        assert len(actual) == 1, "The model must not have to invent a project scope to search"
+        assert actual[0].current_scope == (explicit_scope or session_scope)
+        assert planned == actual, "Preparation and execution must share the resolved scope"
+
+
 async def test_reserved_allowance_bounds_actual_sparse_searches_across_all_turns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

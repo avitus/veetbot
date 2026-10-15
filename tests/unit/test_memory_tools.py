@@ -44,7 +44,8 @@ async def test_live_search_does_not_ask_the_model_to_guess_hard_storage_filters(
         "A guessed storage kind must not exclude a differently classified true fact"
     )
     assert "type_hints" in search.input_schema["properties"]
-    assert search.version == "2.0.0"
+    assert search.version == "2.1.0"
+    assert search.input_schema["required"] == ["text"]
 
 
 @pytest.mark.parametrize("kind", list(BeliefType))
@@ -125,6 +126,39 @@ async def test_memory_search_tool_cannot_reach_other_principals() -> None:
     assert result.ok is True
     assert result.structured is not None
     assert result.structured["belief_ids"] == []
+
+
+async def test_default_scope_preserves_local_evidence_and_explicit_scope_restrictions() -> None:
+    from agent_core.domain.memory import Portability
+    from agent_core.domain.sessions import project_scope
+
+    _, factory, _, retriever = await formation_stack()
+    async with factory() as uow:
+        session = await uow.sessions.get(SESSION_ID, principal())
+        scope = project_scope(session.metadata)
+        belief = memory(statement="Copper sentinel is the deployment approval phrase.").model_copy(
+            update={"scope": scope, "origin_scopes": [scope], "portability": Portability.LOCAL}
+        )
+        await uow.memories.upsert_belief(belief)
+    tool = MemorySearchTool(retriever, model_planning=True, factory=factory)
+    arguments = {"text": "copper sentinel deployment approval"}
+    here = await tool.execute(arguments, tool_context())
+    elsewhere = await tool.execute({**arguments, "scope": "another-project"}, tool_context())
+    assert here.structured is not None and str(belief.id) in here.structured["belief_ids"]
+    assert elsewhere.structured is not None and elsewhere.structured["belief_ids"] == []
+
+
+async def test_default_scope_requires_an_accessible_session_and_never_guesses() -> None:
+    from agent_core.domain.errors import NotFoundError
+
+    _, factory, _, retriever = await formation_stack()
+    arguments = {"text": "Project constraints"}
+    with pytest.raises(ValueError, match="trusted session scope"):
+        await MemorySearchTool(retriever, model_planning=True).execute(arguments, tool_context())
+    foreign = principal().model_copy(update={"principal_id": "someone-else"})
+    tool = MemorySearchTool(retriever, model_planning=True, factory=factory)
+    with pytest.raises(NotFoundError):
+        await tool.execute(arguments, replace(tool_context(), principal=foreign))
 
 
 async def test_recall_episodes_tool_returns_trusted_sorted_events() -> None:

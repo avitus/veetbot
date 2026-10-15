@@ -3530,7 +3530,7 @@ async def _compose(
         else semantic_index_pass.source_recovery,
         reranking_admitted=None if semantic_index_pass is None else semantic_index_pass.admitted,
     )
-    registry.register(MemorySearchTool(memory_retriever, model_planning=True))
+    registry.register(MemorySearchTool(memory_retriever, model_planning=True, factory=uow_factory))
     people_erasure = PeopleErasureService(uow_factory, clock)
     people_identity = PeopleIdentityService(uow_factory, clock, ids)
     people_duplicates = (

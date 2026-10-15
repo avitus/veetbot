@@ -64,11 +64,14 @@ class SemanticRecallPreparation:
             ]
             if not 1 <= len(searches) <= 4:
                 return []
+            async with self._factory() as uow:
+                session = await uow.sessions.get(run.session_id, self._principal)
             queries = [
                 self._tool.query(
                     call.arguments,
                     tenant_id=self._principal.tenant_id,
                     principal_id=self._principal.principal_id,
+                    current_scope=project_scope(session.metadata),
                 )
                 for call in searches
                 if self._validate.is_valid(call.arguments)
