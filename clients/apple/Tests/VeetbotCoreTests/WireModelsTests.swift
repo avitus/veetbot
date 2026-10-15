@@ -5,6 +5,18 @@ import Testing
 @testable import VeetbotCore
 
 @Suite struct WireModelsTests {
+    @Test(arguments: ["diagnostic_id", "details"])
+    func testFailureDiagnosticReferenceSurvivesSnapshotAndStream(field: String) throws {
+        let reference = "00000000-0000-0000-0000-000000000042"
+        let diagnostic = field == "details"
+            ? "\"details\":{\"diagnostic_id\":\"\(reference)\"}"
+            : "\"diagnostic_id\":\"\(reference)\""
+        let data = Data("{\"reason\":\"internal_error\",\"message\":\"The task failed.\",\"occurred_at\":\"2026-10-14T12:00:00Z\",\(diagnostic)}".utf8)
+        let failure = try JSONDecoder.server.decode(RunFailureView.self, from: data)
+        #expect(failure.diagnosticSummary.contains(reference))
+        #expect(failure.userFacingMessage == "The task failed.")
+    }
+
     @Test
     func testContentBlockUsesRequestTypeAndAcceptsPersistedKind() throws {
         let encoded = try JSONEncoder.server.encode(ContentBlock.text("hello"))

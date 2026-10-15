@@ -1,0 +1,23 @@
+[Unit]
+Description=Veetbot opt-in reliability check
+After=network-online.target veetbot-execution.service
+
+[Service]
+Type=oneshot
+User=veetbot
+Group=veetbot
+WorkingDirectory=/opt/veetbot/current
+EnvironmentFile=/etc/veetbot/veetbot.env
+EnvironmentFile=-/opt/veetbot/current/.release.env
+EnvironmentFile=-/etc/veetbot/reliability.env
+LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential
+Environment=BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=%d/browser-control-plane
+ExecStart=/bin/sh /opt/veetbot/current/deploy/ops/reliability-check.sh
+# A degraded result was successfully observed and its transition enqueued.
+SuccessExitStatus=2
+TimeoutStartSec=90s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0077

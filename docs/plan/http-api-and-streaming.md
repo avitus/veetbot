@@ -2359,3 +2359,14 @@ cookie authenticates only the dreaming and reconsolidation review routes listed 
 ADR-0186, with the configured principal's memory scopes and exact same-origin write
 checks. No cookie authenticates general API access or renews its own lifetime.
 The original bearer flow and development loopback restrictions remain unchanged.
+
+## Failure support references (ADR-0203)
+
+A run failure view has an optional `diagnostic_id` UUID, projected from the
+platform's durable failure record. Missing or malformed historical references
+project as null; stack locations and other internal details remain private. The
+native client accepts this field on a snapshot and its nested `details` form on
+a durable `run.failed` event, and shows the reference beside the failure. The
+additive `dependency_unavailable` reason carries fixed recovery guidance for an
+email draft whose source could not be refreshed; it never implies the draft was
+sent or that an external write may be replayed.

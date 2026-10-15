@@ -234,3 +234,5 @@ implementation without one.
 - [ADR-0201: Foundation signing evidence](0201-foundation-signing-evidence.md)
 
 - [ADR-0202: Forward-only dreaming](0202-forward-only-dreaming.md)
+
+- [ADR-0203: Safe failure diagnostics and bounded recovery](0203-reliability-diagnostics-and-recovery.md)

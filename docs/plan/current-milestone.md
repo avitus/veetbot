@@ -4,6 +4,12 @@ title: Current Milestone
 
 # Current milestone
 
+- **Reliability repair — ADR-0203:** The owner authorized safe root-cause
+  diagnostics, bounded recovery and scoped reliability reporting on the
+  `reliability` branch. This begins part of Milestone 15 and repairs the
+  expired-source drafting gap in Milestone 26. It does not complete either
+  milestone or authorize production activation.
+
 - **Milestone 33 — General memory search and recall:** the owner authorized
   the six-stage plan on 2026-10-11 under ADR-0178.
   [General memory recall](general-memory-recall.md) registers twelve gates for

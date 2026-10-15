@@ -188,7 +188,11 @@ and source-exclusion audit sessions render no skill catalog, so they record an
 empty one without starting any MCP server. When the worker executes a typed
 run, it starts only the servers that task kind calls (ADR-0104): each admitted
 account's read server for refresh, read and write for archive, read and send for
-send, and none for a draft. A thread-bound session opens its full catalog before
+send, and none for a draft with complete cached evidence. Under ADR-0203, a
+draft with expired or incomplete evidence lazily prepares only its account's
+read server and refetches within the existing read, deadline and budget limits.
+It validates mailbox identity and requires a complete result before generation;
+a failed read preserves existing drafts and edits. A thread-bound session opens its full catalog before
 the lock is taken and releases an unused one after the lock is released. Clients
 reuse an in-flight initial thread read during foreground polling within the same
 activation, and display received messages without waiting for a separate draft

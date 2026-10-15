@@ -50,6 +50,7 @@ from agent_core.domain.errors import (
     WorkspaceEscape,
 )
 from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, NewEvent
+from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.messages import (
     ContentPart,
     FileReferencePart,
@@ -1308,7 +1309,15 @@ class ToolPipeline:
             "browser.act",
             "browser.upload",
         }
-        with collect_browser_diagnostics(clock=loop.time, enabled=browser_operation) as diagnostics:
+        with (
+            log_context(
+                run_id=str(run.id),
+                session_id=str(run.session_id),
+                tenant_id=run.tenant_id,
+                tool_invocation_id=str(invocation.id),
+            ),
+            collect_browser_diagnostics(clock=loop.time, enabled=browser_operation) as diagnostics,
+        ):
             try:
                 if effective_timeout <= 0:
                     raise TimeoutError
@@ -1415,12 +1424,16 @@ class ToolPipeline:
             # Tool implementation failures are deliberately normalized at this boundary.
             except Exception as exc:
                 # Exception text may contain private upstream bodies or credentials.
-                logger.error(
+                log_failure(
+                    logger,
                     "tool_execution_failed",
-                    extra={
-                        "tool_name": tool.spec.name,
-                        "error_class": type(exc).__name__,
-                    },
+                    exc,
+                    phase="tool",
+                    diagnostic_id=str(self._ids.new_id()),
+                    tool_name=tool.spec.name,
+                    run_id=str(run.id),
+                    session_id=str(run.session_id),
+                    tool_invocation_id=str(invocation.id),
                 )
                 result = ToolResult(
                     ok=False,

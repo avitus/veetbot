@@ -120,7 +120,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:800-803).
+  (email-experience.md:804-807).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -137,7 +137,7 @@ not find it here should find the reason here.
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
   exclusion of Spam and Trash, apply unchanged
-  (email-experience.md:271-285).
+  (email-experience.md:275-289).
 
 Nothing in the platform dials an arbitrary public host today. `web.fetch`
 hands its URL to a hosted provider, which owns resolution and redirects
@@ -282,7 +282,7 @@ without any of them carrying it.
 ### How records form
 
 The refresh task already pages thread summaries for each account, up to 100
-per slice (email-experience.md:295-300). The census reads the `bulk` block on
+per slice (email-experience.md:299-304). The census reads the `bulk` block on
 the summaries refresh was already reading. It issues no query of its own and
 adds no page. A summary whose block says anything but `none`, or that carries
 a `List-Id`, creates or updates its subscription; owner-sent mail, Spam, and
@@ -579,7 +579,7 @@ Gmail's own filter already holds back most spam, and Spam is excluded from
 refresh, so the target is junk that reached the Inbox anyway.
 
 **The verdict.** The importance assessment
-(email-experience.md:396-419) gains one boolean, `spam`, beside `bulk`. Spam
+(email-experience.md:400-423) gains one boolean, `spam`, beside `bulk`. Spam
 is unsolicited mail that is deceptive or unwanted and comes from a party with
 no relationship to the owner: phishing, scams, fake invoices and account
 notices, and mass cold marketing. Mail the owner signed up for is `bulk`, not
@@ -627,7 +627,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:798-818): the owner names one thread and the
+delta (email-experience.md:802-822): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.

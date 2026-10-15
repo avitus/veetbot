@@ -87,6 +87,7 @@ from agent_core.domain.devices import (
     device_routing_issue,
 )
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
+from agent_core.domain.failures import log_failure
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
 from agent_core.domain.notifications import (
@@ -672,9 +673,14 @@ def create_app(
     async def internal_error(request: Request, exc: Exception) -> JSONResponse:
         # Exception text can contain private request or model content.
         """Log only failure identity and return a content-free internal-error response."""
-        logger.error(
+        log_failure(
+            logger,
             "api_request_failed",
-            extra={"request_id": _request_id(request), "error_class": type(exc).__name__},
+            exc,
+            phase="api",
+            diagnostic_id=new_request_id(),
+            request_id=_request_id(request),
+            release_id=settings.release_id,
         )
         return _error_response(
             request,
