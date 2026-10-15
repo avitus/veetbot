@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
+from agent_core.application.email_junk import JunkPilotUnavailableError
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.cache import session_cache_key
@@ -35,7 +36,7 @@ from agent_core.domain.email import (
     body_cutoff,
     retained_thread,
 )
-from agent_core.domain.email_junk import junk_request
+from agent_core.domain.email_junk import JUNK_PILOT_POLICY, junk_request
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
 from agent_core.domain.email_semantics import (
     EmailSemanticFact,
@@ -800,7 +801,7 @@ class _TaskIO:
         return assessment is not None and (
             assessment.payload.get("source_fingerprint") == thread.source_fingerprint
             and assessment.payload.get("model_revision") == self._model_revision()
-            and self._junk_current(assessment.payload)
+            and self._junk_current(assessment.payload, thread)
             and assessment.payload.get("analysis_complete") is True
             # A rejected result keeps its passage for the one promised retry.
             and assessment.payload.get("retry_pending") is not True
@@ -974,7 +975,7 @@ class _TaskIO:
                 thread.assessment_version == EMAIL_POLICY_VERSION
                 and thread.profile_revision == revision
                 and prior is not None
-                and self._junk_current(prior.payload)
+                and self._junk_current(prior.payload, thread)
                 # Relationship memory can change without an email-profile bump.
                 # Revisit bypasses in the existing four-thread bounded rotation;
                 # assess() reuses the receipt when protections remain unchanged.
@@ -1497,14 +1498,19 @@ class _TaskIO:
         revision = "email-assessment@6" if self.semantics.people_enabled else "email-assessment@5"
         return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:{revision}"
 
-    def _junk_current(self, prior: dict[str, Any]) -> bool:
+    def _junk_current(self, prior: dict[str, Any], thread: EmailThread) -> bool:
         """Invalidate prior bypasses when mode, policy or admission evidence changes."""
         if not prior.get("junk_bypassed"):
             return True
         return (
             self.junk_filter is not None
             and self.junk_filter.enabled
-            and self.junk_filter.bypass(prior.get("junk_screen"))
+            and self.junk_filter.bypass(
+                prior.get("junk_screen"),
+                principal=self.context.principal,
+                account_id=thread.account_id,
+                now=self.context.clock.now(),
+            )
             and prior.get("junk_filter_revision") == self.junk_filter.revision
         )
 
@@ -1516,7 +1522,7 @@ class _TaskIO:
         same_source = (
             previous.get("source_fingerprint") == thread.source_fingerprint
             and previous.get("model_revision") == self._model_revision()
-            and self._junk_current(previous)
+            and self._junk_current(previous, thread)
         )
         if (
             previous.get("junk_bypassed")
@@ -1532,57 +1538,70 @@ class _TaskIO:
             and previous.get("assessment_context") == learning.get("assessment_context")
             and isinstance(learning.get("assessment_context"), str)
         ):
-            await self.service.save_assessment(
-                self.context.principal,
-                thread.id,
-                thread.revision,
-                {**previous, "profile_revision": learning["profile_revision"]},
-                run=self.context.run,
-                lease=self.context.lease,
-            )
-            return
+            try:
+                await self.service.save_assessment(
+                    self.context.principal,
+                    thread.id,
+                    thread.revision,
+                    {**previous, "profile_revision": learning["profile_revision"]},
+                    run=self.context.run,
+                    lease=self.context.lease,
+                    junk_pilot=None if self.junk_filter is None else self.junk_filter.pilot,
+                )
+            except JunkPilotUnavailableError:
+                same_source = False
+            else:
+                return
         receipt = (
             None
             if self.junk_filter is None
             else await self.junk_filter.screen(self.context, thread, learning, previous)
         )
-        if self.junk_filter is not None and self.junk_filter.bypass(receipt):
+        if self.junk_filter is not None and self.junk_filter.bypass(
+            receipt,
+            principal=self.context.principal,
+            account_id=thread.account_id,
+            now=self.context.clock.now(),
+        ):
             assert receipt is not None
-            category = receipt["category"]
-            await self.service.save_assessment(
-                self.context.principal,
-                thread.id,
-                thread.revision,
-                {
-                    "summary": "Filtered promotional bulk"
-                    if category == "bulk"
-                    else "Filtered likely junk",
-                    "reason": (
-                        "High-confidence junk first pass. "
-                        "Mark Important to restore full assessment."
-                    ),
-                    "topics": [],
-                    "content_importance": 0,
-                    "relationship_importance": 0,
-                    "urgency": 0,
-                    "needs_reply": False,
-                    "bulk": True,
-                    "spam": False,
-                    "grounded": False,
-                    "junk_screen": receipt,
-                    "junk_bypassed": True,
-                    "junk_filter_revision": self.junk_filter.revision,
-                    "assessment_context": learning.get("assessment_context"),
-                    "profile_revision": int(str(learning.get("profile_revision", 0))),
-                    "analysis_complete": True,
-                    "retry_pending": False,
-                    "source_fingerprint": thread.source_fingerprint,
-                    "model_revision": self._model_revision(),
-                },
-                run=self.context.run,
-                lease=self.context.lease,
-            )
-            return
+            category = receipt["raw_category"] if self.junk_filter.pilot else receipt["category"]
+            try:
+                await self.service.save_assessment(
+                    self.context.principal,
+                    thread.id,
+                    thread.revision,
+                    {
+                        "summary": "Filtered promotional bulk"
+                        if category == "bulk"
+                        else "Filtered likely junk",
+                        "reason": ("Junk first pass. Mark Important to restore full assessment."),
+                        "topics": [],
+                        "content_importance": 0,
+                        "relationship_importance": 0,
+                        "urgency": 0,
+                        "needs_reply": False,
+                        "bulk": True,
+                        "spam": False,
+                        "grounded": False,
+                        "junk_screen": receipt,
+                        "junk_bypassed": True,
+                        "junk_pilot_policy": JUNK_PILOT_POLICY if self.junk_filter.pilot else None,
+                        "junk_filter_revision": self.junk_filter.revision,
+                        "assessment_context": learning.get("assessment_context"),
+                        "profile_revision": int(str(learning.get("profile_revision", 0))),
+                        "analysis_complete": True,
+                        "retry_pending": False,
+                        "source_fingerprint": thread.source_fingerprint,
+                        "model_revision": self._model_revision(),
+                    },
+                    run=self.context.run,
+                    lease=self.context.lease,
+                    junk_pilot=None if self.junk_filter is None else self.junk_filter.pilot,
+                )
+            except JunkPilotUnavailableError:
+                pass
+            else:
+                return
         cursor = int(str(previous.get("analysis_cursor", 0))) if same_source else 0
         segments = [
             (message, start)

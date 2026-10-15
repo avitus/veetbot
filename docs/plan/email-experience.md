@@ -1319,3 +1319,17 @@ spam, stays readable in Other and All mail, and Important restores priority.
 Judgment attempts consume the existing aggregate and run allowance through
 durable reservations; unknown outcomes remain conservatively charged.
 There are no automatic Gmail writes and no change to the quality gates.
+
+The separately approved [ADR-0204 pilot](../adr/0204-owner-reviewed-email-junk-pilot.md)
+uses only a valid raw spam/bulk choice under the reviewed questions and pinned
+model, without the general filter's score cutoff or topic veto. A selected-sample
+packet requires 43 unique owner labels, twenty correct junk nominations, seven
+legitimate keeps and zero false-positive nominations, bound to the exact policy,
+owner, tenant, `work` account and a maximum seven-day window. Invalid or expired
+pilot evidence stops new calls; bypassed mail returns to normal assessment through
+the existing bounded refresh. The principal lock atomically commits each bypass
+with a content-free daily counter and hashed-conversation admission. At most fifty
+new conversations per UTC day are admitted; replay costs no further slot and
+evidence revisions never reset the allowance. A concurrent last-slot loser uses
+ordinary assessment. Expiry is rechecked before dispatch and at save. No other
+first-pass protection, budget, quality gate, or mail mutation authority changes.

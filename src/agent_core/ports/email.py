@@ -13,6 +13,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.correspondence import CorrespondenceSummaryWork, EmailCorrespondenceSummary
 from agent_core.domain.email import EmailDraft, EmailFeedback, EmailRecord, EmailTask, EmailThread
+from agent_core.domain.email_junk import JunkPilot
 from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSource
 from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.messages import ConversationItem
@@ -220,6 +221,7 @@ class EmailRuntimeServices(Protocol):
         *,
         run: Run | None = None,
         lease: WorkerLease | None = None,
+        junk_pilot: JunkPilot | None = None,
     ) -> EmailThread: ...
 
     async def save_generated_draft(

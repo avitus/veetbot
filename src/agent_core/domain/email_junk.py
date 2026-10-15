@@ -9,8 +9,9 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
 
+from agent_core.domain.agents import Principal
 from agent_core.domain.email import EMAIL_HISTORY_DAYS, EmailThread
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.judgment import (
@@ -94,6 +95,57 @@ class EmailJunkMode(StrEnum):
     OFF = "off"
     SHADOW = "shadow"
     FILTER = "filter"
+    PILOT = "pilot"
+
+
+JUNK_PILOT_DAILY_LIMIT = 50
+JUNK_PILOT_POLICY = hashlib.sha256(
+    f"email-junk-pilot@1:{JUNK_POLICY}:raw_choice:7days:{JUNK_PILOT_DAILY_LIMIT}".encode()
+).hexdigest()
+
+
+class JunkPilotObservation(BaseModel):
+    """One independently labeled raw choice from the selected work-Inbox sample."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    category: Literal["spam", "bulk", "keep"]
+    label: Literal["junk", "keep"]
+    source: Literal["owner_review"]
+
+
+class JunkPilot(BaseModel):
+    """Private operator-held authorization for the seven-day ADR-0204 pilot only."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    policy: str
+    model: str
+    tenant_id: str = Field(min_length=1)
+    principal_id: str = Field(min_length=1)
+    account_id: Literal["work"]
+    issued_at: AwareDatetime
+    expires_at: AwareDatetime
+    sample: Literal["selected_live_inbox"]
+    observations: tuple[JunkPilotObservation, ...] = Field(max_length=10_000)
+
+    def admitted(self, principal: Principal, account_id: str, now: datetime) -> bool:
+        """Require the approved scope, finite window and independent zero-false-positive review."""
+        rows = self.observations
+        predicted = [r for r in rows if r.category != "keep"]
+        return (
+            self.policy == JUNK_PILOT_POLICY
+            and self.model == JUNK_MODEL
+            and self.tenant_id == principal.tenant_id
+            and self.principal_id == principal.principal_id
+            and self.account_id == account_id
+            and timedelta(0) < self.expires_at - self.issued_at <= timedelta(days=7)
+            and self.issued_at <= now < self.expires_at
+            and len(rows) >= 43
+            and len({r.fingerprint for r in rows}) == len(rows)
+            and len(predicted) >= 20
+            and all(r.label == "junk" for r in predicted)
+            and sum(r.label == "keep" and r.category == "keep" for r in rows) >= 7
+        )
 
 
 class JunkObservation(BaseModel):

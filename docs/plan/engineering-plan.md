@@ -4998,3 +4998,10 @@ junk. Protected and uncertain mail retains normal assessment, existing
 run/aggregate budgets count every attempt, and all mail remains readable.
 This amends the requirement to generatively assess eligible junk; it does
 not authorize automatic Gmail writes, model routing, or waive quality gates.
+
+[ADR-0204](../adr/0204-owner-reviewed-email-junk-pilot.md), explicitly approved
+on 2026-10-14, additionally admits a separate seven-day, owner/work-account pilot
+using the selected 43-case owner review and valid raw spam/bulk choices. It is
+limited to fifty new bypasses per UTC day, preserves all pre-egress protections,
+and stops on expiry or invalid evidence. This bounded exception does not change
+the general filter's calibration or thresholds, or establish general readiness.

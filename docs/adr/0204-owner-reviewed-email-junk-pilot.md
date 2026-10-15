@@ -1,10 +1,10 @@
 # ADR-0204: A time-limited owner-reviewed email junk pilot
 
-- Status: Proposed — requires explicit owner approval before implementation
+- Status: Accepted — owner explicitly approved implementation and production activation on 2026-10-14
 - Date: 2026-10-14
 - Amends: ADR-0203 for this bounded pilot only
 
-## Proposed decision
+## Decision
 
 The owner reviewed 43 classifications from 50 live work-Inbox conversations:
 30 correct junk nominations, six missed junk conversations and seven correct
@@ -38,3 +38,22 @@ does not establish general rollout readiness or complete a milestone. A wider
 rollout or renewal requires further owner-reviewed evidence and authorization.
 Release still requires focused regressions, sidecar checks, exact-head hosted
 CI and CodeRabbit, successful deployment, and live release-identity verification.
+
+## Mechanism
+
+`pilot` is a separate `AGENT_EMAIL_JUNK_FILTER_MODE` value. The private packet
+uses `JUNK_PILOT_POLICY` (binding ADR-0203's unchanged questions/model plus
+this pilot's choice rule, lifetime and cap), an owner/tenant identity, the
+literal `work` account, aware issue/expiry timestamps, selected-sample provenance
+and independent labels. It is loaded on every email slice. Missing or invalid
+pilot evidence disables calls rather than falling back to shadow. Scope and
+expiry are checked before dispatch, on receipt use and at assessment commit.
+
+The existing principal lock and email transaction atomically save a content-free
+`junk_pilot_day` counter, a `junk_pilot_admission` keyed by a hash of account and
+provider conversation identity, and the bypass assessment. Repeated refresh or
+recovery of an admitted conversation consumes no further slot; changing evidence
+cannot reset the counter. New UTC days grant at most fifty new conversations.
+The count is checked before a paid request and again at save; losing a concurrent
+last-slot race resumes ordinary assessment. These records contain no mail content
+and require no schema migration. The general filter's calibration is unchanged.
