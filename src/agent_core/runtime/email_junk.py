@@ -65,7 +65,7 @@ class EmailJunkFilter:
         account_id: str | None = None,
         now: datetime | None = None,
     ) -> bool:
-        """Require admitted filter mode and a completed, matching, high-scoring junk receipt."""
+        """Apply the calibrated threshold or the active pilot's scoped raw-choice rule."""
         if not (
             receipt
             and receipt.get("status") == "completed"

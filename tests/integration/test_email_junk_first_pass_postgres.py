@@ -121,6 +121,14 @@ async def test_failed_pilot_save_rolls_back_slot_and_thread(
             await save_value(
                 uow.email, app.principal, "thread", str(thread.id), thread, app.clock.now()
             )
+            before_days = {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_day")
+            }
+            before_admissions = {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_admission")
+            }
         service = app.services.email
         original = type(service)._put_data
 
@@ -142,6 +150,14 @@ async def test_failed_pilot_save_rolls_back_slot_and_thread(
                 junk_pilot=JunkPilot.model_validate(pilot_packet()),
             )
         async with app.uow_factory() as uow:
+            assert {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_day")
+            } == before_days
+            assert {
+                record.key: record.payload
+                for record in await uow.email.list(app.principal, "junk_pilot_admission")
+            } == before_admissions
             [counter] = await uow.email.list(app.principal, "junk_pilot_day")
             assert counter.payload == {"count": 1}
             assert len(await uow.email.list(app.principal, "junk_pilot_admission")) == 1
