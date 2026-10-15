@@ -1,5 +1,6 @@
 """Preparation is a bounded runtime phase before automatic or deliberate recall."""
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -12,6 +13,55 @@ from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, Script
 from agent_core.domain.runs import Run, RunCheckpoint, RunStatus
 from tests.contract.support import NOW
 from tests.gates.test_runtime_tool_budget import _settings
+
+
+@pytest.mark.parametrize("pin_spec", [False, True])
+async def test_preparation_honors_pinned_legacy_search_filters(pin_spec: bool) -> None:
+    from agent_core.domain.memory import BeliefType
+    from agent_core.domain.messages import ToolCallItem
+    from agent_core.memory.recall_preparation import SemanticRecallPreparation
+    from agent_core.memory.retrieval import DeterministicQueryFormer
+
+    async with build(
+        settings=_settings(),
+        script=FakeModelScript(turns=[ScriptedTurn(text="Done")]),
+        clock=FixedClock(NOW),
+    ) as app:
+        run_id = await app.runs.submit("Find remembered constraints")
+        run = await app.runs.wait_terminal(run_id)
+        async with app.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        legacy = app.tool_pipeline._registry.get("memory.search", "1.1.0")
+        arguments = {
+            "text": "Remembered constraints",
+            "scope": "general",
+            "belief_types": ["preference"],
+        }
+        checkpoint.pinned_tool_versions["memory.search"] = "1.1.0"
+        if pin_spec:
+            checkpoint.pinned_tool_specs["memory.search"] = legacy.spec
+        else:
+            checkpoint.pinned_tool_specs.pop("memory.search", None)
+        checkpoint.pending_tool_calls = [
+            ToolCallItem(
+                name="memory.search",
+                call_id="legacy",
+                item_index=0,
+                arguments=arguments,
+                raw_arguments=json.dumps(arguments),
+            ).model_dump(mode="json")
+        ]
+        preparation = SemanticRecallPreparation(
+            app.uow_factory,
+            app.principal,
+            app.memory_retriever,
+            DeterministicQueryFormer(app.principal),
+        )
+        queries = await preparation.plan(run, checkpoint)
+        assert len(queries) == 1, "Pinned legacy searches must receive an execution allowance"
+        assert queries[0].belief_types == [BeliefType.PREFERENCE]
+        assert queries[0].structured_belief_types == []
 
 
 @pytest.mark.parametrize("session_scope", ["general", "workshop"])

@@ -33,7 +33,12 @@ class SemanticRecallPreparation:
         self._factory, self._principal = factory, principal.model_copy(deep=True)
         self._retriever, self._former = retriever, former
         self._tool = MemorySearchTool(retriever, model_planning=True)
-        self._validate = Draft202012Validator(self._tool.spec.input_schema)
+        legacy = MemorySearchTool(retriever)
+        self._tools = {tool.spec.version: tool for tool in (legacy, self._tool)}
+        self._validators = {
+            version: Draft202012Validator(tool.spec.input_schema)
+            for version, tool in self._tools.items()
+        }
 
     async def plan(self, run: Run, checkpoint: RunCheckpoint) -> list[RecallQuery]:
         if checkpoint.pending_tool_calls:
@@ -64,17 +69,28 @@ class SemanticRecallPreparation:
             ]
             if not 1 <= len(searches) <= 4:
                 return []
+            pinned = checkpoint.pinned_tool_specs.get(self._tool.spec.name)
+            version = (
+                pinned.version
+                if pinned is not None
+                else checkpoint.pinned_tool_versions.get(
+                    self._tool.spec.name, self._tool.spec.version
+                )
+            )
+            tool = self._tools.get(version)
+            if tool is None:
+                return []
             async with self._factory() as uow:
                 session = await uow.sessions.get(run.session_id, self._principal)
             queries = [
-                self._tool.query(
+                tool.query(
                     call.arguments,
                     tenant_id=self._principal.tenant_id,
                     principal_id=self._principal.principal_id,
                     current_scope=project_scope(session.metadata),
                 )
                 for call in searches
-                if self._validate.is_valid(call.arguments)
+                if self._validators[version].is_valid(call.arguments)
             ]
         else:
             active = [

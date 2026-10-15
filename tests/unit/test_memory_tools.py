@@ -22,7 +22,32 @@ from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
 from agent_core.tools.memory_remember import MemoryRememberTool
 from agent_core.tools.memory_search import MemorySearchTool
 from tests.contract.memory_fixtures import formation_stack, memory, session_events, user_event
-from tests.contract.support import SESSION_ID, principal, tool_context
+from tests.contract.support import SESSION_ID, principal, session, tool_context
+
+
+async def test_composition_retains_pinned_legacy_memory_search() -> None:
+    from agent_core.bootstrap import build
+    from tests.gates.test_runtime_tool_budget import _settings
+
+    async with build(settings=_settings(), principal=principal()) as app:
+        registry = app.tool_pipeline._registry
+        legacy = registry.get("memory.search", "1.1.0")
+        assert legacy.spec.input_schema["required"] == ["text", "scope"]
+        assert "belief_types" in legacy.spec.input_schema["properties"]
+        assert registry.get("memory.search").spec.version == "2.1.0"
+        original = memory()
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+            await uow.memories.upsert_belief(original)
+        arguments = {"text": original.statement, "scope": original.scope}
+        found = await legacy.execute(arguments, tool_context())
+        filtered = await legacy.execute(
+            {**arguments, "belief_types": [BeliefType.FACT.value]}, tool_context()
+        )
+        assert found.structured is not None
+        assert str(original.id) in found.structured["belief_ids"]
+        assert filtered.structured is not None
+        assert filtered.structured["belief_ids"] == []
 
 
 async def test_live_search_does_not_ask_the_model_to_guess_hard_storage_filters() -> None:
@@ -39,7 +64,9 @@ async def test_live_search_does_not_ask_the_model_to_guess_hard_storage_filters(
         run_id = await app.runs.submit("Find the remembered project decision")
         await app.runs.wait_terminal(run_id)
         requests = app.executor._model_provider.requests  # type: ignore[attr-defined]
-        search = next(tool for tool in requests[-1].tools if tool.name == "memory.search")
+        searches = [tool for tool in requests[-1].tools if tool.name == "memory.search"]
+        assert len(searches) == 1
+        search = searches[0]
     assert "belief_types" not in search.input_schema["properties"], (
         "A guessed storage kind must not exclude a differently classified true fact"
     )

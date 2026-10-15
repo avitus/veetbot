@@ -27,7 +27,11 @@ its existing meaning for intentional cross-project lookup. Preparation and tool
 execution resolve the same default, so a prepared query cannot silently differ
 from its later search. Failure to resolve the session fails the operation; it
 does not invent a default project. The legacy direct tool keeps its required
-scope and original version. No principal, sensitivity, portability, lifecycle,
+scope and original version. Bootstrap retains its `1.1.0` registration for
+existing pinned sessions and advertises only `2.1.0` to new sessions. Recall
+preparation resolves that same pinned version, preserving the legacy hard filters
+and reserving an execution allowance for valid old calls. No principal,
+sensitivity, portability, lifecycle,
 confidence, source-recovery, or erasure requirement changes.
 
 The evaluation budget wrapper passes a failed terminal event through to the
@@ -39,7 +43,8 @@ successful evidence. Provider messages and partial content stay out of the journ
 ## Verification and release boundary
 
 Regressions cover default scope on multiple sessions, deliberate preparation and
-execution parity, retained explicit cross-project lookup, and provider failure
+execution parity, retained explicit cross-project lookup, compatibility resolution
+and hard filtering for pinned legacy sessions, and provider failure
 identity with uncertain accounting. These mechanism tests do not establish reader
 quality or close the failed incident gate.
 
