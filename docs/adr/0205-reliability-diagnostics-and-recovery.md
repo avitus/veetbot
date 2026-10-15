@@ -1,4 +1,4 @@
-# ADR-0203: Safe failure diagnostics and bounded recovery
+# ADR-0205: Safe failure diagnostics and bounded recovery
 
 - Status: Accepted
 - Date: 2026-10-14

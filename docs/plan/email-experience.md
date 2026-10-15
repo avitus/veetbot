@@ -153,6 +153,9 @@ Existing content-free approval notifications and pending-action recovery use
 the server-owned thread/session association to open the correct Email draft,
 including after a cold launch. Resolving an approval on another device updates
 both modes without discarding unsaved input. No mail content is added to push.
+An outcome alert for a server-marked operational email session opens the Email list
+without adding the ingestion session to Chat history or replacing its draft.
+Approval and question alerts retain their existing resolution paths.
 
 ## 3. Retrieval and historical learning
 
@@ -188,7 +191,7 @@ and source-exclusion audit sessions render no skill catalog, so they record an
 empty one without starting any MCP server. When the worker executes a typed
 run, it starts only the servers that task kind calls (ADR-0104): each admitted
 account's read server for refresh, read and write for archive, read and send for
-send, and none for a draft with complete cached evidence. Under ADR-0203, a
+send, and none for a draft with complete cached evidence. Under ADR-0205, a
 draft with expired or incomplete evidence lazily prepares only its account's
 read server and refetches within the existing read, deadline and budget limits.
 It validates mailbox identity and requires a complete result before generation;
@@ -703,6 +706,13 @@ rejection is reused until the ordinary invalidation rules reassess the thread.
 A rejected automatic draft leaves the thread undrafted. The slice continues and
 its attempt settles as a completed response. An owner-requested draft still
 fails its task. Provider failures and request rejections still end the run.
+
+If a source, learned profile or junk protection changes during assessment,
+the guarded save rejects that stale result. Foreground refresh defers only
+that thread and continues its bounded slice, retaining the attempt's cost.
+No stale assessment or derived memory is saved, and no immediate model retry
+is made; a later foreground slice reassesses current evidence. Unrelated
+conflicts and provider failures still end the run.
 
 The conversation index excludes the server-owned operational marker and draft-only
 email thread sessions within each repository query before cursor limits apply.
@@ -1315,3 +1325,29 @@ drafts, and memory source validation treats it as bulk. Report spam on a
 thread is the Archive gesture above with a fixed `SPAM` delta. The rules are
 specified and gated in [email-unsubscribe.md](email-unsubscribe.md); this
 milestone's thirty-two gates are unchanged.
+
+## Cheap junk screening
+
+[ADR-0203](../adr/0203-email-junk-first-pass.md) admits a bounded, cached
+TypeSafe Jev first pass before the full assessment. It defaults off; shadow
+mode preserves normal assessment, and filter mode needs independent reviewed
+calibration matching its pinned policy/model. Protected or uncertain mail
+uses the existing assessment. Obvious promotional bulk remains distinct from
+spam, stays readable in Other and All mail, and Important restores priority.
+Judgment attempts consume the existing aggregate and run allowance through
+durable reservations; unknown outcomes remain conservatively charged.
+There are no automatic Gmail writes and no change to the quality gates.
+
+The separately approved [ADR-0204 pilot](../adr/0204-owner-reviewed-email-junk-pilot.md)
+uses only a valid raw spam/bulk choice under the reviewed questions and pinned
+model, without the general filter's score cutoff or topic veto. A selected-sample
+packet requires 43 unique owner labels, twenty correct junk nominations, seven
+legitimate keeps and zero false-positive nominations, bound to the exact policy,
+owner, tenant, `work` account and a maximum seven-day window. Invalid or expired
+pilot evidence stops new calls; bypassed mail returns to normal assessment through
+the existing bounded refresh. The principal lock atomically commits each bypass
+with a content-free daily counter and hashed-conversation admission. At most fifty
+new conversations per UTC day are admitted; replay costs no further slot and
+evidence revisions never reset the allowance. A concurrent last-slot loser uses
+ordinary assessment. Expiry is rechecked before dispatch and at save. No other
+first-pass protection, budget, quality gate, or mail mutation authority changes.

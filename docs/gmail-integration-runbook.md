@@ -824,3 +824,87 @@ Common failures:
 | configured account id rejected | Confirm the bootstrap `--account-id` matches the manifest `account_id`; re-bootstrap rather than editing the credential document. |
 | `gmail.outcome_unknown` | Never retry the write/send. Reconcile directly in Gmail and the recipient mailbox. |
 | schedule authorization failure | Confirm the schedule was created over HTTP with the exact `mcp.gmail_read.use` and `mcp.gmail_write.use` scopes. |
+
+## Email junk first pass (ADR-0203)
+
+The first pass is off by default. With the existing TypeSafe selector/key set,
+`AGENT_EMAIL_JUNK_FILTER_MODE=shadow` screens newly eligible mail while preserving
+normal assessment. It does not reprocess already-current assessments. Every
+request and its charge appear as content-free `email.junk.started` and
+`email.junk.completed` events. Unknown usage retains conservative email charging.
+
+For a bounded diagnostic outside normal refresh, use
+`uv run python -m scripts.email_junk_calibration replay --input PRIVATE_SNAPSHOT --output PRIVATE_RESULTS --max-threads 100 --max-cost-usd 0.05`.
+The input is an object with `items`, each containing an `EmailThread`-shaped
+`thread` and its current protection/feedback `learning` context. Obtain them
+under the owner's read authority; do not use stale or incomplete protection
+context. Keep both files outside the repository. The command requires the
+existing `TYPESAFE_API_KEY`, never reads Gmail or a database, and writes private,
+exclusive-create results plus an attempt journal before dispatch. A fresh
+invocation is a separately budgeted experiment; preserve every prior journal.
+Baseline-model agreement is diagnostic, not independently measured precision.
+
+Independently review the sampled source mail. Build a private calibration packet
+with `policy`, `model` and `observations`. Each observation contains its unique
+`fingerprint`, observed `category` (`spam`, `bulk`, `keep`), `probability`, the
+owner's `label` (`junk`, `keep`), `source: owner_review`, and `stratum` (`random`,
+`personal_outreach`, `transactional`). Do not include subjects, bodies or sender
+addresses in this activation packet. Replay leaves labels empty deliberately.
+`uv run python -m scripts.email_junk_calibration check PRIVATE_PACKET` recomputes
+readiness; fabricated tests and model labels are not production evidence.
+
+A bounded filter pilot requires at least 100 unique reviewed cases, at least 80
+random cases, ten legitimate personal-outreach and ten transactional cases,
+at least twenty predicted junk cases, and zero false positives at the fixed
+0.99 combined spam-plus-bulk threshold. Protected-topic relevance must be at
+most 0.05. These vendor scores are not measured error rates. This pilot floor
+is not a guarantee of zero errors. Set
+`AGENT_EMAIL_JUNK_FILTER_EVIDENCE` to the reviewed packet and select `filter`
+only after checking it. Each run rechecks the packet; missing, invalid or
+mismatched evidence uses shadow mode. The classifier pins `jev-1.13.0`.
+
+Filtered mail remains in Other/All mail with an explanation. Important restores
+priority immediately and sends it through normal assessment on the next refresh.
+Known correspondents, kept subscriptions, Important/Needs reply, Not spam,
+unknown attachments, incomplete sources and uncertain decisions are protected.
+Bulk is not marked as spam. No Gmail labels change. Setting the mode to `off`
+stops new judgments and restores ordinary assessment of previously bypassed
+threads on subsequent bounded refreshes. No budget or milestone gate changes.
+
+### Approved work-account pilot (ADR-0204)
+
+`pilot` uses a separate packet, never the general filter calibration shape. Bind
+`policy` to `JUNK_PILOT_POLICY`, `model` to `JUNK_MODEL`, `tenant_id` and
+`principal_id` to the approved owner, `account_id` to `work`, `sample` to
+`selected_live_inbox`, and aware `issued_at`/`expires_at` no more than seven days
+apart. Each observation contains only `fingerprint`, the observed **raw**
+`category`, independent owner `label`, and `source: owner_review`. Require at
+least 43 unique classifications, twenty junk nominations, seven legitimate keep
+cases and no false-positive nominations. Protected skips are not classifications
+and must not be invented as keep labels. Validate with `JunkPilot.model_validate_json`
+and `admitted(principal, "work", now)` from the deployed source. Keep the real
+packet outside the repository, readable only by the operator and service identity.
+
+The October 14 selected 50-conversation sample contained 43 classifications,
+30 correct junk nominations, six missed junk items and seven correct keeps;
+seven more conversations were protected before egress. It is not random or
+population-level accuracy evidence. The approved exception uses valid raw
+spam/bulk choices and retains keep/uncertain outcomes, all pre-egress protections,
+and the unchanged questions/model. It does not relax the general filter.
+
+After reviewed deployment, set `AGENT_EMAIL_JUNK_FILTER_MODE=pilot` and point
+`AGENT_EMAIL_JUNK_FILTER_EVIDENCE` at the validated private packet. Restart the
+API, interactive worker, async worker and maintenance roles using the normal
+configuration procedure. Verify their actual process configuration and release,
+then a bounded foreground refresh: content-free judgment receipts/costs, the
+`junk_pilot_day` counter and `junk_pilot_admission` records, ordinary assessment
+for protected/keep mail, and unchanged Gmail labels. At most fifty **new**
+conversations per UTC day may bypass; refresh/recovery of already admitted
+conversations consumes no additional slot. Changing the packet cannot reset
+that day's counter. Losing the final slot while Jev runs uses normal assessment.
+
+Expiry and invalid evidence stop new pilot calls. The existing cached-mail
+rotation restores full assessments on subsequent refreshes. Set mode `off` and
+restart the same roles for immediate operator revocation. Do not renew or widen
+the pilot without new owner-reviewed evidence and authorization. This pilot
+neither completes Milestone 26 nor establishes general-rollout readiness.

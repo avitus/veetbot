@@ -139,6 +139,8 @@ JudgmentQuestion = Annotated[
 class JudgmentRequest(_JudgmentValue):
     """Questions in one request are answered independently over the same state."""
 
+    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
+    maximum_attempts: int = Field(default=3, ge=1, le=3)
     state: JsonValue
     questions: dict[str, JudgmentQuestion] = Field(min_length=1, max_length=MAXIMUM_QUESTIONS)
 

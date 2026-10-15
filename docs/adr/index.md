@@ -235,4 +235,6 @@ implementation without one.
 
 - [ADR-0202: Forward-only dreaming](0202-forward-only-dreaming.md)
 
-- [ADR-0203: Safe failure diagnostics and bounded recovery](0203-reliability-diagnostics-and-recovery.md)
+- [ADR-0205: Safe failure diagnostics and bounded recovery](0205-reliability-diagnostics-and-recovery.md)
+- [ADR-0203: Email junk first pass](0203-email-junk-first-pass.md)
+- [ADR-0204: Owner-reviewed email junk pilot](0204-owner-reviewed-email-junk-pilot.md)

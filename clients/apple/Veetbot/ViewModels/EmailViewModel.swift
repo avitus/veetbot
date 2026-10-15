@@ -10,6 +10,7 @@ public final class AppCoordinator: ObservableObject {
     private var connectionSubscription: AnyCancellable?
     private var emailAccountsSubscription: AnyCancellable?
 
+    /// Coordinate authenticated Chat and Email navigation while retaining each mode's edits.
     public init(chat: ChatViewModel) {
         self.chat = chat
         email = EmailViewModel(makeAPIClient: { [weak chat] in chat?.currentAPIClient })
@@ -24,8 +25,11 @@ public final class AppCoordinator: ObservableObject {
         chat.chatNotificationHandler = { [weak self] in self?.mode = .chat }
         chat.emailNotificationHandler = { [weak self] threadID, approvalID in
             guard let self else { return }
+            if threadID == nil { self.email.clearSelection() }
             self.mode = .email
-            await self.email.openThread(threadID, approvalID: approvalID)
+            if let threadID {
+                await self.email.openThread(threadID, approvalID: approvalID)
+            }
         }
     }
 

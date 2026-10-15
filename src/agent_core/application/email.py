@@ -20,6 +20,7 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.email_junk import admit_pilot
 from agent_core.application.email_subscriptions import EmailSubscriptions, SubscriptionRequest
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
@@ -58,6 +59,7 @@ from agent_core.domain.email import (
     feedback_matches,
     retained_thread,
 )
+from agent_core.domain.email_junk import JunkPilot, JunkPilotUnavailableError
 from agent_core.domain.email_semantics import thread_source_key
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -1530,6 +1532,17 @@ class EmailExperienceService:
             raise NotFoundError("email thread not found")
         async with self.uow_factory() as uow, uow.email.lock(principal):
             thread = await self._thread(uow.email, principal, thread_id)
+            prior_assessment = await uow.email.get(principal, "assessment", str(thread.id))
+            bypassed = bool(prior_assessment and prior_assessment.payload.get("junk_bypassed"))
+            if cleared and bypassed:
+                thread = thread.model_copy(
+                    update={
+                        "assessment_version": "",
+                        "priority": 0.7,
+                        "reason": "Kept by you; full assessment pending.",
+                    }
+                )
+                await self._bump_profile(uow.email, principal)
             thread = thread.model_copy(
                 update={
                     "spam_cleared": cleared,
@@ -1862,6 +1875,16 @@ class EmailExperienceService:
         observed: set[UUID] = set()
         known: set[UUID] = set()
         malformed = False
+        junk_started = {
+            e.payload.get("fingerprint") for e in events if e.event_type == "email.junk.started"
+        }
+        junk_known = {
+            e.payload.get("fingerprint")
+            for e in events
+            if e.event_type == "email.junk.completed" and e.payload.get("usage_known") is True
+        }
+        if junk_started != junk_known or None in junk_started:
+            malformed = True
         for event in events:
             if event.event_type not in {
                 "model.request.started",
@@ -2036,6 +2059,11 @@ class EmailExperienceService:
             relationships = [
                 row.payload async for row in records(uow.email, principal, "relationship")
             ]
+            subscription_kept = (
+                False
+                if thread is None
+                else await self.subscriptions.protects_from_junk(uow.email, principal, thread)
+            )
             shared_memories = (
                 [] if thread is None else await self._relationship_evidence(uow, principal, thread)
             )
@@ -2059,6 +2087,17 @@ class EmailExperienceService:
         result: dict[str, object] = {
             "profile_revision": state.profile_revision,
             "paused": state.paused,
+            "junk_subscription_kept": subscription_kept,
+            "junk_protected_topics": sorted(
+                {
+                    topic
+                    for f in feedback
+                    if f.undone_at is None
+                    and f.target == "topic"
+                    and f.judgment in {"important", "needs_reply"}
+                    for topic in f.target_values
+                }
+            ),
             "owner_feedback": [
                 {**item.model_dump(mode="json"), "explanation": (item.explanation or "")[:1000]}
                 for item in sorted(feedback, key=lambda value: (value.created_at, str(value.id)))
@@ -2090,6 +2129,8 @@ class EmailExperienceService:
                 ),
             ),
         }
+        if result["junk_protected_topics"]:
+            relevant["junk_protected_topics"] = result["junk_protected_topics"]
         result["assessment_context"] = hashlib.sha256(
             json.dumps(relevant, sort_keys=True).encode()
         ).hexdigest()
@@ -2587,6 +2628,7 @@ class EmailExperienceService:
         *,
         run: Run | None = None,
         lease: WorkerLease | None = None,
+        junk_pilot: JunkPilot | None = None,
     ) -> EmailThread:
         """Validate and save features against the current source and owner-profile revisions."""
         async with self.uow_factory() as uow, uow.email.lock(principal):
@@ -2597,7 +2639,10 @@ class EmailExperienceService:
                 thread.revision != source_revision
                 or assessment.get("profile_revision") != state.profile_revision
             ):
-                raise ConflictError("email source or learning changed during assessment")
+                raise ConflictError(
+                    "email source or learning changed during assessment",
+                    reason="email_assessment_stale",
+                )
 
             def score(name: str) -> float:
                 """Validate one normalized importance feature before saving the assessment."""
@@ -2641,6 +2686,29 @@ class EmailExperienceService:
                 raise ValueError("relationship memory references are malformed")
             supported = bool(admitted_ids.intersection(proposed_ids))
             relationship = min(relationship, 1.0 if supported else min(1.0, replies / 5))
+            if assessment.get("junk_bypassed"):
+                if assessment.get("junk_pilot_policy") and junk_pilot is None:
+                    raise JunkPilotUnavailableError("email junk pilot authorization is missing")
+                subscription_kept = await self.subscriptions.protects_from_junk(
+                    uow.email, principal, thread
+                )
+                feedback = await self._feedback(uow.email, principal)
+                if (
+                    thread.spam_cleared
+                    or replies > 0
+                    or admitted_ids
+                    or subscription_kept
+                    or any(
+                        f.undone_at is None
+                        and f.judgment in {"important", "needs_reply"}
+                        and feedback_matches(f, thread)
+                        for f in feedback
+                    )
+                ):
+                    raise ConflictError(
+                        "email protection changed during junk screening",
+                        reason="email_assessment_stale",
+                    )
             urgency = score("urgency")
             priority = min(
                 1.0, max(content * 0.9, relationship * 0.7 + content * 0.3) + urgency * 0.1
@@ -2684,6 +2752,8 @@ class EmailExperienceService:
                     "suspected_spam": suspected_spam,
                 }
             )
+            if assessment.get("junk_bypassed") and junk_pilot is not None:
+                await admit_pilot(uow.email, principal, thread, junk_pilot, self.clock.now())
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )

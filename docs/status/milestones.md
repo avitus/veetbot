@@ -23,7 +23,7 @@ State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
 runs as release `20260928-202932-e55551f`; Milestone 14's completion was
 recorded on 2026-10-09. With Milestone 32 authorized, twenty-two of thirty-three milestones are complete; ten
 were in progress and one was authorized but not started at that review.
-The reliability repair now begins Milestone 15 under ADR-0203.
+The reliability repair now begins Milestone 15 under ADR-0205.
 Milestone 32 has implemented components and registered gates;
 comparative quality and complete runtime/release evidence remain pending.
 
@@ -93,7 +93,7 @@ hosted-CI records.
 
 ### Milestone 15 — Operational hardening
 
-ADR-0203 implements safe root-cause diagnostics, bounded recovery and a scoped
+ADR-0205 implements safe root-cause diagnostics, bounded recovery and a scoped
 application reliability report with optional alerts. Synthetic fault-injection
 and PostgreSQL tests cover these repairs. All sixteen milestone gates remain
 open, including host monitoring, independent outage alerts, backups and restore

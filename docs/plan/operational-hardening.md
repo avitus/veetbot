@@ -528,7 +528,7 @@ Metrics carry no secret, path, or environment value.
 5. Whether an OTLP exporter is ever worth a credential for a single-owner
    host.
 
-## Supplemental application reliability signals (ADR-0203)
+## Supplemental application reliability signals (ADR-0205)
 
 The owner-authorized reliability repair adds `agent run reliability`, a scoped
 operator view over durable runs, model calls and tool invocations. Its default

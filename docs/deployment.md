@@ -1576,7 +1576,7 @@ evidence exists. Keep supervised review enabled and unattended application off;
 new proposals still require individual approval. Never remove an activated
 boundary or replace unknown legacy attribution with empty metadata to unblock work.
 
-### Application reliability diagnostics and optional alerts (ADR-0203)
+### Application reliability diagnostics and optional alerts (ADR-0205)
 
 After deploying the reliability changes, use the existing protected owner
 operator environment to run `agent run reliability --hours 24 --json`.

@@ -172,7 +172,7 @@ nav:
       - "ADR-0200: Historical semantic revisions": adr/0200-historical-semantic-revisions.md
       - "ADR-0201: Foundation signing evidence": adr/0201-foundation-signing-evidence.md
       - "ADR-0202: Forward-only dreaming": adr/0202-forward-only-dreaming.md
-      - "ADR-0203: Reliability diagnostics and recovery": adr/0203-reliability-diagnostics-and-recovery.md
+      - "ADR-0205: Reliability diagnostics and recovery": adr/0205-reliability-diagnostics-and-recovery.md
       - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md
       - ADR-0177 Bounded browser startup recovery: adr/0177-bounded-browser-startup-recovery.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
@@ -334,4 +334,6 @@ nav:
       - ADR-0169 Memory reconsolidation (dreaming): adr/0169-milestone-32-memory-reconsolidation.md
       - ADR-0170 Reconsolidation hypothesis equivalence review: adr/0170-reconsolidation-hypothesis-equivalence-review.md
       - ADR-0171 Owner-confirmed real-data fixtures for offline memory evaluation: adr/0171-owner-confirmed-offline-memory-fixtures.md
+      - ADR-0203 Email junk first pass: adr/0203-email-junk-first-pass.md
+      - ADR-0204 Owner-reviewed email junk pilot (Proposed): adr/0204-owner-reviewed-email-junk-pilot.md
   - Changelog: changelog.md

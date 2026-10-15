@@ -121,7 +121,7 @@ public final class ChatViewModel: ObservableObject {
     /// run's session.
     public var chatNotificationHandler: (() -> Void)?
     @Published public private(set) var callResult: CallResultViewData?
-    public var emailNotificationHandler: ((UUID, UUID?) async -> Void)?
+    public var emailNotificationHandler: ((UUID?, UUID?) async -> Void)?
     @Published public private(set) var history: [SessionHistoryEntry] = []
     @Published public private(set) var selectedSessionID: UUID?
     @Published public private(set) var baseURL: URL?
@@ -463,6 +463,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Resolve the authenticated notification target and open its owning surface.
     public func openNotification(_ payload: NotificationPushPayload) async {
         if payload.kind == .callFinished {
             guard let callID = payload.callID else { return }
@@ -494,6 +495,9 @@ public final class ChatViewModel: ObservableObject {
             let session = try await api.getSession(link.sessionID)
             guard !session.isOperational else {
                 try await hideOperationalSession(session.id)
+                if session.metadata["email_operational"]?.boolValue == true, link.focus == nil {
+                    await emailNotificationHandler?(nil, nil)
+                }
                 return
             }
             if let emailNotificationHandler {

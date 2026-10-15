@@ -4,7 +4,7 @@ title: Current Milestone
 
 # Current milestone
 
-- **Reliability repair — ADR-0203:** The owner authorized safe root-cause
+- **Reliability repair — ADR-0205:** The owner authorized safe root-cause
   diagnostics, bounded recovery and scoped reliability reporting on the
   `reliability` branch. This begins part of Milestone 15 and repairs the
   expired-source drafting gap in Milestone 26. It does not complete either

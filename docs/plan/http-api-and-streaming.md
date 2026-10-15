@@ -2360,7 +2360,7 @@ ADR-0186, with the configured principal's memory scopes and exact same-origin wr
 checks. No cookie authenticates general API access or renews its own lifetime.
 The original bearer flow and development loopback restrictions remain unchanged.
 
-## Failure support references (ADR-0203)
+## Failure support references (ADR-0205)
 
 A run failure view has an optional `diagnostic_id` UUID, projected from the
 platform's durable failure record. Missing or malformed historical references

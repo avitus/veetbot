@@ -1922,7 +1922,7 @@ twice. Uncertain outcomes permit observation only. Changed definitions or stale
 pending action generations cannot authorize a new effect. A bounded stop forces
 a tool-free report of the evidence and remaining gap.
 
-## Reliability recovery (ADR-0203)
+## Reliability recovery (ADR-0205)
 
 Consecutive infrastructure failures in the durable worker back off exponentially
 from the poll interval to a thirty-second ceiling. A successful iteration resets

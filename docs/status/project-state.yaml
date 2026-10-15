@@ -10,7 +10,7 @@ project:
   # hosted CI and a clean CodeRabbit review on its final head; the completion
   # and the ceiling's advance to Milestone 14 (289 gates) were recorded on
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
-  # ADR-0203 authorizes safe diagnostics, bounded recovery, failure isolation and
+  # ADR-0205 authorizes safe diagnostics, bounded recovery, failure isolation and
   # operational reliability reporting on the owner-requested reliability branch.
   # Production activation and the verified milestone ceiling are unchanged.
   current_milestone: 14
@@ -2200,6 +2200,8 @@ milestones:
       - evaluated attributed semantic email memory shared with Chat and both accounts
       - scoped source erasure, retention and bounded automatic email accounting
       - USD 20 per UTC day and USD 200 per rolling thirty days for aggregate automatic email work
+      - a default-off Jev junk first pass, with shadow evaluation and independently reviewed calibration before bypass (ADR-0203, authorized 2026-10-14)
+      - a separate seven-day owner-reviewed work-account Jev pilot, capped at fifty new bypasses per UTC day; implementation and production activation explicitly approved 2026-10-14 (ADR-0204)
       - an offline, non-activating importance replay comparing the production assessor with a typed-judgment arm (ADR-0110); it cannot satisfy or waive a Milestone 26 gate
     deferred_scope:
       - unattended monitoring, Gmail push, scheduled digests and interval scheduling
@@ -2217,7 +2219,7 @@ milestones:
       - check: reply drafting after the retained body expires
         outcome: passed_on_sidecar
         detail: >-
-          ADR-0203 repairs the 2026-09-28 audit gap. The strengthened regression
+          ADR-0205 repairs the 2026-09-28 audit gap. The strengthened regression
           requires a completed draft and a model request containing newly fetched
           provider evidence, excluding the expired body. Unavailable, partial and
           wrong-account source regressions require dependency_unavailable with no
