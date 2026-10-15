@@ -1023,7 +1023,14 @@ class _TaskIO:
         selected.extend(thread for thread in pending if thread.id not in selected_ids)
         for thread in selected[:4]:
             learning = await self.service.learning_context(c.principal, thread)
-            await self.assess(thread, learning)
+            try:
+                await self.assess(thread, learning)
+            except ConflictError as exc:
+                if exc.reason != "email_assessment_stale":
+                    raise
+                # Owner edits and new source evidence win a save race. Keep the
+                # attempt charged; a fresh foreground slice can assess it again.
+                continue
         async with c.uow_factory() as uow:
             feedback = await self.service._feedback(uow.email, c.principal)
             candidates = [

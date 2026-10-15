@@ -1350,6 +1350,98 @@ async def _two_thread_factory() -> MailboxFactory:
     return factory
 
 
+@pytest.mark.parametrize("changed", ["profile", "source"])
+async def test_refresh_defers_stale_assessment_and_continues(
+    changed: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edit during model latency must not fail the refresh or save stale evidence."""
+    from dataclasses import replace
+
+    from agent_core.application.email import save_value
+    from agent_core.domain.messages import FakeModelScript
+    from agent_core.runtime.email_tasks import _TaskIO
+    from tests.gates.test_email_m18 import _email_settings
+
+    original = _TaskIO.model
+    stale_id = None
+
+    async def model(self: Any, *args: Any, **kwargs: Any) -> Any:
+        """Change the first assessment's evidence after its charged model response."""
+        nonlocal stale_id
+        result = await original(self, *args, **kwargs)
+        if stale_id is None:
+            from uuid import UUID
+
+            stale_id = UUID(args[1]["thread"]["id"])
+            if changed == "profile":
+                await self.service.reset_learning(self.context.principal, "style")
+            else:
+                async with (
+                    self.context.uow_factory() as uow,
+                    uow.email.lock(self.context.principal),
+                ):
+                    thread = await self.service._thread(uow.email, self.context.principal, stale_id)
+                    await save_value(
+                        uow.email,
+                        self.context.principal,
+                        "thread",
+                        str(stale_id),
+                        thread.model_copy(update={"revision": thread.revision + 1}),
+                        self.context.clock.now(),
+                    )
+        return result
+
+    monkeypatch.setattr(_TaskIO, "model", model)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(3)]),
+        mcp_client_factory=await _two_thread_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert run.model_call_count == 2
+        async with app.uow_factory() as uow:
+            assessments = await uow.email.list(app.principal, "assessment")
+            assert len(assessments) == 1
+            assert assessments[0].key != str(stale_id)
+            assert await uow.email.get(app.principal, "assessment", str(stale_id)) is None
+        task = await app.services.email.get_task(app.principal, run.id)
+        assert task is not None and task.settled_cost == run.usage.cost
+        # Only a fresh foreground slice retries, with the current profile/source.
+        next_operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(next_operation.run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            assert await uow.email.get(app.principal, "assessment", str(stale_id)) is not None
+
+
+async def test_refresh_does_not_hide_unrelated_assessment_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only an explicit stale-assessment refusal may be deferred."""
+    from dataclasses import replace
+
+    from agent_core.domain.errors import ConflictError
+    from agent_core.domain.messages import FakeModelScript
+    from agent_core.runtime.email_tasks import _TaskIO
+    from tests.gates.test_email_m18 import _email_settings
+
+    async def conflicting(self: Any, *args: Any, **kwargs: Any) -> None:
+        """Simulate an unrelated persistence conflict without a stale-result reason."""
+        raise ConflictError("Unexpected persistence conflict")
+
+    monkeypatch.setattr(_TaskIO, "assess", conflicting)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[]),
+        mcp_client_factory=await _current_mail_factory(),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.FAILED
+        assert run.failure is not None and run.failure.error_class == "ConflictError"
+
+
 @pytest.mark.parametrize("malformed", ["schema", "truncated", "tools"])
 async def test_rejected_assessment_abstains_for_its_thread_and_refresh_continues(
     malformed: str,
