@@ -1307,3 +1307,15 @@ drafts, and memory source validation treats it as bulk. Report spam on a
 thread is the Archive gesture above with a fixed `SPAM` delta. The rules are
 specified and gated in [email-unsubscribe.md](email-unsubscribe.md); this
 milestone's thirty-two gates are unchanged.
+
+## Cheap junk screening
+
+[ADR-0203](../adr/0203-email-junk-first-pass.md) admits a bounded, cached
+TypeSafe Jev first pass before the full assessment. It defaults off; shadow
+mode preserves normal assessment, and filter mode needs independent reviewed
+calibration matching its pinned policy/model. Protected or uncertain mail
+uses the existing assessment. Obvious promotional bulk remains distinct from
+spam, stays readable in Other and All mail, and Important restores priority.
+Judgment attempts consume the existing aggregate and run allowance through
+durable reservations; unknown outcomes remain conservatively charged.
+There are no automatic Gmail writes and no change to the quality gates.

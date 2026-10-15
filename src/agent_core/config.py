@@ -24,6 +24,7 @@ from pydantic import SecretStr, ValidationError
 from agent_core.domain.browser import normalize_browser_origin
 from agent_core.domain.browser_task_grants import BrowserTaskGrantScope, parse_task_grant_scopes
 from agent_core.domain.calls import CallConfiguration
+from agent_core.domain.email_junk import EmailJunkMode
 from agent_core.domain.memory import (
     MemoryDistillationEvidence,
     ProviderExtractionEvaluationEvidence,
@@ -167,6 +168,8 @@ class Settings:
     svp_enabled: bool = False
     email_enabled: bool = False
     email_mode_enabled: bool = False
+    email_junk_filter_mode: EmailJunkMode = EmailJunkMode.OFF
+    email_junk_filter_evidence: Path | None = None
     email_unsubscribe_enabled: bool = False
     attachment_uploads_enabled: bool = False
     email_semantic_evidence: Path | None = None
@@ -1594,7 +1597,7 @@ def _load_settings(
     require_owner_scopes: bool = True,
     refuse_provider_credentials: bool = False,
 ) -> Settings:
-
+    """Validate environment settings and load credentials allowed for this service role."""
     if load_call_credentials is None:
         load_call_credentials = require_execution_environment
     values = _environment(environ)
@@ -1796,6 +1799,15 @@ def _load_settings(
         raise ConfigurationError("SVP_CREDENTIAL_FILE requires AGENT_SVP_ENABLED=1")
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     email_mode_enabled = _parse_flag(values, "AGENT_EMAIL_MODE_ENABLED")
+    email_junk_filter_mode = _parse_enum(
+        EmailJunkMode,
+        values.get("AGENT_EMAIL_JUNK_FILTER_MODE", "off").strip(),
+        "AGENT_EMAIL_JUNK_FILTER_MODE",
+    )
+    junk_evidence = values.get("AGENT_EMAIL_JUNK_FILTER_EVIDENCE", "").strip()
+    email_junk_filter_evidence = (
+        Path(junk_evidence).expanduser().resolve() if junk_evidence else None
+    )
     email_unsubscribe_enabled = _parse_flag(values, "AGENT_EMAIL_UNSUBSCRIBE_ENABLED")
     if email_unsubscribe_enabled and not (email_enabled and email_mode_enabled):
         raise ConfigurationError(
@@ -2033,6 +2045,8 @@ def _load_settings(
         svp_enabled=svp_enabled,
         email_enabled=email_enabled,
         email_mode_enabled=email_mode_enabled,
+        email_junk_filter_mode=email_junk_filter_mode,
+        email_junk_filter_evidence=email_junk_filter_evidence,
         email_unsubscribe_enabled=email_unsubscribe_enabled,
         attachment_uploads_enabled=attachment_uploads_enabled,
         email_semantic_evidence=email_semantic_evidence,

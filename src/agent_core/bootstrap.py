@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import signal
@@ -4074,6 +4075,9 @@ async def _compose(
             policy_version=ruleset.policy_version,
         )
 
+        from agent_core.domain.email_junk import EmailJunkMode, JunkCalibration
+        from agent_core.runtime.email_junk import EmailJunkFilter
+
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
             """Recognize persisted typed work even when its public feature is disabled."""
             await browser_workflows(context)
@@ -4096,10 +4100,35 @@ async def _compose(
                     raise ConflictError("Email mode is disabled")
                 # Archive recovery classifies already-dispatched effects before
                 # checking current authority; disabled mode grants no new write.
+            junk_admitted = False
+            junk_digest = "none"
+            if (
+                settings.email_junk_filter_mode == EmailJunkMode.FILTER
+                and settings.email_junk_filter_evidence
+            ):
+                try:
+                    with settings.email_junk_filter_evidence.open("rb") as evidence_file:
+                        raw_junk_evidence = evidence_file.read(2_000_001)
+                    if len(raw_junk_evidence) <= 2_000_000:
+                        junk_calibration = JunkCalibration.model_validate_json(raw_junk_evidence)
+                        junk_admitted = junk_calibration.admitted()
+                        junk_digest = hashlib.sha256(raw_junk_evidence).hexdigest()
+                    else:
+                        logger.warning("email_junk_evidence_unavailable")
+                except (OSError, ValueError):
+                    logger.warning("email_junk_evidence_unavailable")
+            junk_filter = EmailJunkFilter(
+                judgment_provider,
+                settings.email_junk_filter_mode,
+                admitted=junk_admitted,
+                evidence_digest=junk_digest,
+            )
+
             return await EmailTaskRunner(
                 public_services.email,
                 registry,
                 semantic_factory=email_semantics,
+                junk_filter=junk_filter,
                 render_context=render_email_context,
                 prepare_servers=mcp_runtime.prepare,
             )(context)

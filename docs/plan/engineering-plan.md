@@ -4988,3 +4988,13 @@ credential exposure to the model, or weakening external-write approvals.
 - Secret leakage, prompt injection, stale actions, cross-origin navigation,
   session expiry, device loss, provider failure, and uncertain writes pass the
   adversarial acceptance suite before tenant rollout.
+
+### Email junk first-pass amendment
+
+[ADR-0203](../adr/0203-email-junk-first-pass.md), authorized on 2026-10-14,
+admits a default-off typed-judgment first pass under Milestone 26. Independent
+reviewed calibration precedes bypass of full assessment for high-certainty
+junk. Protected and uncertain mail retains normal assessment, existing
+run/aggregate budgets count every attempt, and all mail remains readable.
+This amends the requirement to generatively assess eligible junk; it does
+not authorize automatic Gmail writes, model routing, or waive quality gates.
