@@ -236,7 +236,7 @@ def git(root: Path, *args: str) -> str:
 
     env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
     return subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", *args],
+        ["git", *args],
         cwd=root,
         env=env,
         capture_output=True,
