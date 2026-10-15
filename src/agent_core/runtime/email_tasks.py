@@ -150,6 +150,7 @@ class EmailTaskRunner:
         render_context: EmailContextRenderer,
         prepare_servers: ServerPreparation,
     ) -> None:
+        """Bind governed email services and the optional preliminary junk screen."""
         self.service = service
         self.registry = registry
         self.semantic_factory = semantic_factory
@@ -158,6 +159,7 @@ class EmailTaskRunner:
         self.prepare_servers = prepare_servers
 
     async def __call__(self, context: RunContext) -> RunOutcome | None:
+        """Validate task ownership and account bindings before executing its typed workflow."""
         task = await self.service.get_task(context.principal, context.run.id)
         if task is None:
             return None
@@ -223,6 +225,7 @@ class _TaskIO:
         render_context: EmailContextRenderer,
         junk_filter: EmailJunkFilter | None = None,
     ) -> None:
+        """Keep this bounded slice's task state, provider interfaces and recovery context."""
         self.context = context
         self.task = task
         self.registry = registry
@@ -1495,6 +1498,7 @@ class _TaskIO:
         return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:{revision}"
 
     def _junk_current(self, prior: dict[str, Any]) -> bool:
+        """Invalidate prior bypasses when mode, policy or admission evidence changes."""
         if not prior.get("junk_bypassed"):
             return True
         return (

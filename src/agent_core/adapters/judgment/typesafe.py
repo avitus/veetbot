@@ -162,6 +162,7 @@ class TypeSafeJudgmentProvider:
         return result
 
     async def _send(self, body: bytes, maximum_attempts: int = MAXIMUM_ATTEMPTS) -> bytes:
+        """Retry only eligible failures within the caller's bounded attempt allowance."""
         for attempt in range(1, maximum_attempts + 1):
             try:
                 return await self._attempt(body)

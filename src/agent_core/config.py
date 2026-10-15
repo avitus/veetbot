@@ -1597,7 +1597,7 @@ def _load_settings(
     require_owner_scopes: bool = True,
     refuse_provider_credentials: bool = False,
 ) -> Settings:
-
+    """Validate environment settings and load credentials allowed for this service role."""
     if load_call_credentials is None:
         load_call_credentials = require_execution_environment
     values = _environment(environ)
