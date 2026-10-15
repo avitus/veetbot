@@ -375,8 +375,8 @@ async def assert_durable_pilot_cap(app: Any) -> None:
     from uuid import uuid4
 
     from agent_core.application.email import save_value
-    from agent_core.application.email_junk import JunkPilotUnavailableError
     from agent_core.domain.email import EmailThread
+    from agent_core.domain.email_junk import JunkPilotUnavailableError
 
     async with app.uow_factory() as uow:
         [source] = await uow.email.list(app.principal, "thread")

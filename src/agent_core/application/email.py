@@ -20,7 +20,7 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
-from agent_core.application.email_junk import JunkPilotUnavailableError, admit_pilot
+from agent_core.application.email_junk import admit_pilot
 from agent_core.application.email_subscriptions import EmailSubscriptions, SubscriptionRequest
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
@@ -59,7 +59,7 @@ from agent_core.domain.email import (
     feedback_matches,
     retained_thread,
 )
-from agent_core.domain.email_junk import JunkPilot
+from agent_core.domain.email_junk import JunkPilot, JunkPilotUnavailableError
 from agent_core.domain.email_semantics import thread_source_key
 from agent_core.domain.errors import (
     AuthorizationError,

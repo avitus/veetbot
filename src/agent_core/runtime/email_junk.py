@@ -7,7 +7,6 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from agent_core.application.email_junk import pilot_has_capacity
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailThread
 from agent_core.domain.email_junk import (
@@ -19,6 +18,8 @@ from agent_core.domain.email_junk import (
     EmailJunkMode,
     JunkPilot,
     junk_fingerprint,
+    junk_pilot_capacity,
+    junk_pilot_keys,
     junk_request,
     junk_result,
 )
@@ -114,11 +115,17 @@ class EmailJunkFilter:
         }
         # Reconcile a possibly dispatched judgment before considering another request.
         async with c.uow_factory() as uow, uow.email.lock(c.principal):
-            if self.pilot is not None and (
-                not self.pilot.admitted(c.principal, thread.account_id, c.clock.now())
-                or not await pilot_has_capacity(uow.email, c.principal, thread, c.clock.now())
-            ):
-                return None
+            if self.pilot is not None:
+                if not self.pilot.admitted(c.principal, thread.account_id, c.clock.now()):
+                    return None
+                key, day = junk_pilot_keys(thread, c.clock.now())
+                admission = await uow.email.get(c.principal, "junk_pilot_admission", key)
+                counter = await uow.email.get(c.principal, "junk_pilot_day", day)
+                if not junk_pilot_capacity(
+                    None if admission is None else admission.payload,
+                    None if counter is None else counter.payload,
+                ):
+                    return None
             events = await uow.events.list_after(c.run.session_id, 0, c.principal, run_id=c.run.id)
             matching = [
                 e

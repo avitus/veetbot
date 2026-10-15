@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
-from agent_core.application.email_junk import JunkPilotUnavailableError
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.cache import session_cache_key
@@ -36,7 +35,7 @@ from agent_core.domain.email import (
     body_cutoff,
     retained_thread,
 )
-from agent_core.domain.email_junk import JUNK_PILOT_POLICY, junk_request
+from agent_core.domain.email_junk import JUNK_PILOT_POLICY, JunkPilotUnavailableError, junk_request
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
 from agent_core.domain.email_semantics import (
     EmailSemanticFact,

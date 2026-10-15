@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal
@@ -13,6 +13,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EMAIL_HISTORY_DAYS, EmailThread
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.judgment import (
     ChoiceAnswer,
@@ -102,6 +103,38 @@ JUNK_PILOT_DAILY_LIMIT = 50
 JUNK_PILOT_POLICY = hashlib.sha256(
     f"email-junk-pilot@1:{JUNK_POLICY}:raw_choice:7days:{JUNK_PILOT_DAILY_LIMIT}".encode()
 ).hexdigest()
+
+
+class JunkPilotUnavailableError(ConflictError):
+    """A pilot stopped or filled during a judgment; resume ordinary assessment."""
+
+
+def junk_pilot_keys(thread: EmailThread, now: datetime) -> tuple[str, str]:
+    """Key content-free conversation admission and the account's fixed UTC-day allowance."""
+    key = hashlib.sha256(f"{thread.account_id}:{thread.provider_thread_id}".encode()).hexdigest()
+    return key, f"{thread.account_id}:{now.astimezone(UTC).date().isoformat()}"
+
+
+def junk_pilot_capacity(admission: dict[str, Any] | None, day: dict[str, Any] | None) -> bool:
+    """Validate durable accounting and allow only replay or an unused daily slot."""
+    if admission is not None:
+        PilotAdmission.model_validate(admission)
+        return True
+    return day is None or PilotDay.model_validate(day).count < JUNK_PILOT_DAILY_LIMIT
+
+
+class PilotDay(BaseModel):
+    """Content-free daily counter, independent of evidence-file revisions."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    count: int = Field(ge=0, le=JUNK_PILOT_DAILY_LIMIT)
+
+
+class PilotAdmission(BaseModel):
+    """One durable conversation admission makes refresh and recovery idempotent."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    admitted_at: AwareDatetime
 
 
 class JunkPilotObservation(BaseModel):
