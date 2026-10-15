@@ -463,6 +463,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Resolve the authenticated notification target and open its owning surface.
     public func openNotification(_ payload: NotificationPushPayload) async {
         if payload.kind == .callFinished {
             guard let callID = payload.callID else { return }

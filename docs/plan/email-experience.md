@@ -153,7 +153,7 @@ Existing content-free approval notifications and pending-action recovery use
 the server-owned thread/session association to open the correct Email draft,
 including after a cold launch. Resolving an approval on another device updates
 both modes without discarding unsaved input. No mail content is added to push.
-An outcome alert for a server-marked operational email session opens Email
+An outcome alert for a server-marked operational email session opens the Email list
 without adding the ingestion session to Chat history or replacing its draft.
 Approval and question alerts retain their existing resolution paths.
 

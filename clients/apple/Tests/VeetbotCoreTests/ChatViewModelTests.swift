@@ -340,6 +340,7 @@ import UserNotifications
         #expect(model.notificationNavigationID != nil)
     }
 
+    /// Route draft approvals to Email during startup and active use without replacing Chat.
     @Test
     func testColdAndWarmEmailNotificationsRouteWithoutReplacingChatState() async throws {
         let sessionID = UUID()
@@ -387,10 +388,12 @@ import UserNotifications
         #expect(model.runState.activeRunID == nil)
     }
 
+    /// Open the Email list for operational alerts and retain unsent drafts in both modes.
     @Test
     func testColdAndWarmOperationalEmailAlertsNeverCreateChatHistory() async throws {
         let sessionID = UUID()
         let runID = UUID()
+        let threadID = UUID()
         let model = try configuredModel { request in
             if request.url?.path == "/v1/sessions" {
                 return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
@@ -399,6 +402,11 @@ import UserNotifications
                 return try response(for: request, statusCode: 200, body: """
                     {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"email_operational":true},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":"\(runID)"}
                     """)
+            }
+            if request.url?.path == "/v1/email/threads/\(threadID)" {
+                return try response(for: request, statusCode: 200, body: Self.emailThreadJSON(
+                    threadID, sessionID: UUID(), runID: UUID(), draftApprovalID: UUID()
+                ))
             }
             Issue.record("Operational email alert unexpectedly opened Chat: \(request.url?.path ?? "")")
             return try response(for: request, statusCode: 500, body: "{}")
@@ -413,6 +421,10 @@ import UserNotifications
         #expect(coordinator.mode == .chat)
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         #expect(coordinator.mode == .email)
+        await coordinator.email.openThread(threadID)
+        let draftID = try #require(coordinator.email.draft?.id)
+        coordinator.email.changeEdit(\.body, to: "Keep this unsent Email reply")
+        #expect(coordinator.email.selectedThreadID == threadID)
         coordinator.mode = .chat
         model.composerText = "Keep the unfinished Chat message"
         await model.openNotification(payload)
@@ -422,6 +434,7 @@ import UserNotifications
         #expect(model.selectedSessionID == nil)
         #expect(model.runState.activeRunID == nil)
         #expect(coordinator.email.selectedThreadID == nil)
+        #expect(coordinator.email.edits[draftID]?.body == "Keep this unsent Email reply")
     }
 
     /// Discuss in Chat runs in the thread's own session, so a tool approval the

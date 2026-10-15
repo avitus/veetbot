@@ -1366,6 +1366,7 @@ async def test_refresh_defers_stale_assessment_and_continues(
     stale_id = None
 
     async def model(self: Any, *args: Any, **kwargs: Any) -> Any:
+        """Change the first assessment's evidence after its charged model response."""
         nonlocal stale_id
         result = await original(self, *args, **kwargs)
         if stale_id is None:
@@ -1426,6 +1427,7 @@ async def test_refresh_does_not_hide_unrelated_assessment_conflicts(
     from tests.gates.test_email_m18 import _email_settings
 
     async def conflicting(self: Any, *args: Any, **kwargs: Any) -> None:
+        """Simulate an unrelated persistence conflict without a stale-result reason."""
         raise ConflictError("Unexpected persistence conflict")
 
     monkeypatch.setattr(_TaskIO, "assess", conflicting)

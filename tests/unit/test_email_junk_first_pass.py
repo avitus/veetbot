@@ -475,6 +475,7 @@ async def test_owner_override_during_judgment_prevents_bypass(tmp_path: Path) ->
 
     class PausedJudge(FakeJudgmentProvider):
         async def judge(self, request: Any) -> JudgmentResult:
+            """Hold the provider response until the owner correction has committed."""
             started.set()
             await finish.wait()
             return await super().judge(request)
