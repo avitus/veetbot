@@ -552,21 +552,7 @@ private struct MarkdownBlockView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
         case .blockquote(let blocks):
-            HStack(alignment: .top, spacing: 12) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.accentColor.opacity(0.65))
-                    .frame(width: 3)
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                        AnyView(MarkdownBlockView(block: block))
-                    }
-                }
-            }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.045))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            MarkdownQuoteView(rows: MarkdownQuoteRow.rows(blocks))
         case .list(let items):
             MarkdownListView(items: items)
         case .codeBlock(let language, let code):
@@ -589,6 +575,61 @@ private struct MarkdownBlockView: View {
         }
     }
 
+}
+
+/// One block of a quote and how many levels deep it sits, so a nested reply
+/// chain renders as one flat stack. One stack per quote level made SwiftUI's
+/// layout cost grow about sevenfold per level, and a ten-level thread hung
+/// the app.
+struct MarkdownQuoteRow: Equatable, Sendable {
+    let depth: Int
+    let block: MarkdownContentBlock
+
+    /// Flattens nested quotes; depth 1 is the outer quote, and no row holds a quote.
+    static func rows(_ blocks: [MarkdownContentBlock], depth: Int = 1) -> [MarkdownQuoteRow] {
+        blocks.flatMap { block -> [MarkdownQuoteRow] in
+            if case .blockquote(let inner) = block { return rows(inner, depth: depth + 1) }
+            return [MarkdownQuoteRow(depth: depth, block: block)]
+        }
+    }
+}
+
+private struct MarkdownQuoteView: View {
+    let rows: [MarkdownQuoteRow]
+
+    private static let barWidth: CGFloat = 3
+    private static let levelIndent: CGFloat = 14
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.accentColor.opacity(0.65))
+                .frame(width: Self.barWidth)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    AnyView(MarkdownBlockView(block: row.block))
+                        .padding(.leading, CGFloat(row.depth - 1) * Self.levelIndent)
+                        .overlay(innerBars(count: row.depth - 1), alignment: .leading)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// One fainter bar per inner level, in the indent the row leaves for them.
+    private func innerBars(count: Int) -> some View {
+        HStack(spacing: Self.levelIndent - Self.barWidth) {
+            ForEach(0..<count, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.accentColor.opacity(0.35))
+                    .frame(width: Self.barWidth)
+            }
+        }
+    }
 }
 
 func markdownHeadingWeight(_ level: Int) -> Font.Weight? {
