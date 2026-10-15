@@ -1064,7 +1064,10 @@ class HybridMemoryRetriever:
             )
         )
         async with self._uow_factory() as uow, uow.people.lock(self._principal):
-            trace = await uow.traces.get(usage.trace_id, self._principal)
+            try:
+                trace = await uow.traces.get(usage.trace_id, self._principal)
+            except NotFoundError:
+                return False
             if (
                 trace.session_id != session_id
                 or trace.run_id != run_id

@@ -792,13 +792,20 @@ class BudgetedContextBuilder:
             )
         except RecallBudgetExceededError:
             # Optional search exhaustion cannot hide mandatory frozen corrections.
-            exhausted_corrections = (
-                []
-                if snapshot_id is None
-                else await self._memory_retriever.corrections(
-                    snapshot_id=snapshot_id, watermark=snapshot_watermark
+            try:
+                exhausted_corrections = (
+                    []
+                    if snapshot_id is None
+                    else await self._memory_retriever.corrections(
+                        snapshot_id=snapshot_id, watermark=snapshot_watermark
+                    )
                 )
-            )
+            except Exception as exc:
+                logger.warning(
+                    "context_memory_recall_failed",
+                    extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+                )
+                return _RecallBundle(base=EXHAUSTED)
             return _RecallBundle(base=EXHAUSTED, corrections=tuple(exhausted_corrections))
         except Exception as exc:
             logger.warning(

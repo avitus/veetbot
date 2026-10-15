@@ -111,3 +111,38 @@ async def test_retained_semantic_summary_validates_support_without_rescoring_rel
     assert await retriever.validate_retained(usage, session_id=SESSION_ID, run_id=RUN_ID) is (
         change is None
     )
+
+
+async def test_missing_trace_does_not_discard_later_valid_search_results() -> None:
+    from agent_core.context.recall_budget import OMITTED, select_current_search_results
+    from agent_core.domain.messages import TextPart
+    from tests.unit.test_context_memory_budget import search_result, tool_result
+
+    clock, factory, _, _ = await formation_stack()
+    record = memory(statement="The workshop is on Thursday.")
+    async with factory() as uow:
+        await uow.memories.upsert_belief(record)
+    retriever = HybridMemoryRetriever(
+        factory, clock, SequenceIdFactory(UUID(int=i) for i in range(8000, 8010)), principal()
+    )
+    result = await retriever.recall(
+        recall_query(text="workshop"), session_id=SESSION_ID, run_id=RUN_ID
+    )
+    assert result.items
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    missing = search_result("missing", text="Erased evidence", tokens=5, items=1)
+    valid = search_result(
+        "valid", text=result.rendered, tokens=result.tokens, items=len(result.items)
+    )
+    valid[1].memory_recall = MemoryRecallUsage(
+        trace_id=result.trace_id,
+        tokens=result.tokens,
+        items=len(result.items),
+        content_sha256=trace.rendered_sha256,
+    )
+    selected, _, _ = await select_current_search_results(
+        [*missing, *valid], retriever, session_id=SESSION_ID, run_id=RUN_ID
+    )
+    assert tool_result(selected, 1).content == [TextPart(text=OMITTED)]
+    assert tool_result(selected, 3).content == valid[1].content

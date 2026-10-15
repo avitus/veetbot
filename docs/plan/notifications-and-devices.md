@@ -420,7 +420,10 @@ For each claimed row it:
    never a Chat conversation. The triggering event and transactional outbox
    remain audited. Delivered-notification reconciliation applies this same
    rule to remove alerts sent by earlier versions; approvals and questions
-   retain their ordinary attention rules.
+   retain their ordinary attention rules. A focused operational approval or
+   question opens the authenticated shared attention cards without persisting
+   its audit session in Chat history; focus-free operational email alerts keep
+   their Email-list routing.
 3. Checks `expires_at`; an expired row settles `expired` with no transport
    call.
 4. Resolves push targets: the principal's active devices with a token whose

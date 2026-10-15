@@ -243,8 +243,8 @@ import UserNotifications
         #expect(model.errorMessage != nil)
     }
 
-    @Test
-    func testNotificationTapRestoresTranscriptAttachesExactRunAndFocusesApproval() async throws {
+    @Test(arguments: ["{}", #"{"email_operational":true}"#, #"{"purpose":"people-management"}"#])
+    func testNotificationTapRestoresTranscriptAttachesExactRunAndFocusesApproval(metadata: String) async throws {
         let sessionID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-000000000101")
         )
@@ -258,7 +258,7 @@ import UserNotifications
             UUID(uuidString: "00000000-0000-0000-0000-000000000104")
         )
         let sessionJSON = """
-            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Push target","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Push target","metadata":\(metadata),"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
             """
         let model = try configuredModel { request in
             switch (request.httpMethod, request.url?.path) {
@@ -338,6 +338,10 @@ import UserNotifications
         #expect(model.runState.approvals.map(\.id) == [approvalID])
         #expect(model.notificationFocus == .approval(approvalID))
         #expect(model.notificationNavigationID != nil)
+        #expect(model.history.isEmpty == (metadata != "{}"))
+        await model.synchronizeHistory()
+        #expect(model.selectedSessionID == sessionID)
+        #expect(model.history.isEmpty == (metadata != "{}"))
     }
 
     @Test(arguments: [false, true], [false, true])
@@ -541,10 +545,10 @@ import UserNotifications
 
     /// Email has no question card, so a question from the thread's discussion
     /// opens in Chat, where the owner can answer it.
-    @Test
-    func testThreadSessionQuestionOpensTheDiscussionInChat() async throws {
+    @Test(arguments: [false, true])
+    func testThreadSessionQuestionOpensTheDiscussionInChat(operational: Bool) async throws {
         let ids = ThreadSessionIDs()
-        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_USER")
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_USER", operational: operational)
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         let coordinator = AppCoordinator(chat: model)
         coordinator.mode = .email
@@ -561,6 +565,7 @@ import UserNotifications
         #expect(coordinator.email.selectedThreadID == nil)
         #expect(model.selectedSessionID == ids.session)
         #expect(model.notificationFocus == .question(ids.question))
+        #expect(model.history.isEmpty == operational)
     }
 
     /// The Mac window observes the coordinator while account capabilities arrive asynchronously.
@@ -3162,7 +3167,7 @@ import UserNotifications
     /// Serves one thread-bound session whose run waits on the discussion's own
     /// approval or question, while the thread's draft awaits a different approval.
     private func threadSessionModel(
-        _ ids: ThreadSessionIDs, runStatus: String, threadReadFails: Bool = false
+        _ ids: ThreadSessionIDs, runStatus: String, threadReadFails: Bool = false, operational: Bool = false
     ) throws -> ChatViewModel {
         try configuredModel { request in
             switch (request.httpMethod, request.url?.path) {
@@ -3170,7 +3175,7 @@ import UserNotifications
                 return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/sessions/\(ids.session)"):
                 return try response(for: request, statusCode: 200, body: """
-                    {"id":"\(ids.session)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Board discussion","metadata":{"email_thread_id":"\(ids.thread)","email_account_id":"work"},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":"\(ids.run)","last_run_id":"\(ids.run)"}
+                    {"id":"\(ids.session)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Board discussion","metadata":\(operational ? #"{"email_operational":true}"# : "{\"email_thread_id\":\"\(ids.thread)\",\"email_account_id\":\"work\"}"),"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":"\(ids.run)","last_run_id":"\(ids.run)"}
                     """)
             case ("GET", "/v1/sessions/\(ids.session)/messages"):
                 return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)

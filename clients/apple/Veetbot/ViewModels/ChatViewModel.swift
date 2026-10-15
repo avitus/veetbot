@@ -493,9 +493,9 @@ public final class ChatViewModel: ObservableObject {
         }
         do {
             let session = try await api.getSession(link.sessionID)
-            guard !session.isOperational else {
+            if session.isOperational, link.focus == nil {
                 try await hideOperationalSession(session.id)
-                if session.metadata["email_operational"]?.boolValue == true, link.focus == nil {
+                if session.metadata["email_operational"]?.boolValue == true {
                     await emailNotificationHandler?(nil, nil)
                 }
                 return
@@ -511,7 +511,14 @@ public final class ChatViewModel: ObservableObject {
                 }
             }
             let entry: SessionHistoryEntry
-            if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
+            if session.isOperational {
+                // A focused approval/question uses the shared attention cards,
+                // without persisting an internal audit session as a conversation.
+                entry = Self.mergedHistoryEntry(
+                    session: session, existing: nil, lastRunID: link.runID,
+                    suggestedTitle: nil, touchedAt: nil
+                )
+            } else if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
             } else {
                 try await store(
@@ -523,7 +530,9 @@ public final class ChatViewModel: ObservableObject {
                 }
                 entry = stored
             }
-            await selectSession(entry, preferredRunID: link.runID)
+            await selectSession(
+                entry, preferredRunID: link.runID, operationalAttention: session.isOperational
+            )
             guard selectedSessionID == link.sessionID, runState.activeRunID == link.runID else {
                 return
             }
@@ -942,7 +951,8 @@ public final class ChatViewModel: ObservableObject {
 
     public func selectSession(
         _ entry: SessionHistoryEntry,
-        preferredRunID: UUID? = nil
+        preferredRunID: UUID? = nil,
+        operationalAttention: Bool = false
     ) async {
         guard let api, !removedHistorySessionIDs.contains(entry.sessionID) else { return }
         let requestID = UUID()
@@ -966,10 +976,15 @@ public final class ChatViewModel: ObservableObject {
                 !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
             selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
-            try await store(
-                session: session,
-                lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
-            )
+            if session.isOperational, operationalAttention {
+                try await historyStore.delete(sessionID: session.id)
+                history = try await historyStore.list()
+            } else {
+                try await store(
+                    session: session,
+                    lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
+                )
+            }
             guard selectionRequestID == requestID else {
                 if removedHistorySessionIDs.contains(entry.sessionID) {
                     try? await historyStore.delete(sessionID: entry.sessionID)

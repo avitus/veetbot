@@ -132,7 +132,11 @@ frozen prefix remains its existing separate class, and correction notices remain
 mandatory when optional recall has exhausted its allowance. Preparation and
 assembly compute the same current remainder. This bounds rendered context; it
 does not by itself certify a whole-run search-work cap or a combined global
-relevance rank.
+relevance rank. A missing retained trace invalidates only that result; later
+valid receipts still receive their own validation. If the correction store is
+unavailable after optional search exhaustion, context assembly applies the same
+logged degradation as its other dependency-failure paths and keeps the explicit
+exhaustion notice. Cancellation still propagates.
 
 [ADR-0196](../adr/0196-run-recall-execution-budget.md) enforces the durable
 reservation during actual M33 search execution, including sparse fallback and

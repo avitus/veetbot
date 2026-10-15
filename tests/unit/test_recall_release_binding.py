@@ -231,16 +231,30 @@ def test_deployment_generated_outputs_do_not_change_evaluated_inputs(
 
 
 def git(root: Path, *args: str) -> str:
+    import os
     import subprocess
 
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
     return subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=True
+        ["git", "-c", "commit.gpgsign=false", *args],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
 
-def test_release_step_independently_compares_both_git_trees(tmp_path: Path) -> None:
+def test_release_step_independently_compares_both_git_trees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from agent_core.evals.general_recall_release_binding import publish_binding
 
+    hostile_config = tmp_path / "global.gitconfig"
+    hostile_config.write_text(
+        "[commit]\n gpgsign = true\n[gpg]\n program = /nonexistent-signing-program\n"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(hostile_config))
     root = small_root(tmp_path)
     git(root, "init")
     git(root, "config", "user.name", "Test fixture")

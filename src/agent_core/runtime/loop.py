@@ -308,7 +308,7 @@ async def prepare_recall(context: RunContext) -> None:
         async with asyncio.timeout(1):
             queries = tuple(await context.prepare_recall.plan(context.run, context.checkpoint))
     except Exception:
-        return  # Planning is optional and performs no provider work.
+        return  # Execution-bound planning failure retains the zero-search permit for this step.
     context.token.raise_if_cancelled()
     remaining = 4 - (0 if budget is None else budget.searches)
     deadline = started + timedelta(seconds=10) if budget is None else budget.deadline_at

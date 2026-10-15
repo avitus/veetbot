@@ -302,3 +302,20 @@ async def test_invalid_receipt_cannot_borrow_another_receipts_trace_permission()
     assert tool_result(selected, 1).content == valid[1].content
     assert tool_result(selected, 3).content == [TextPart(text=OMITTED)]
     assert remaining.items == 19
+
+
+async def test_exhausted_recall_with_unavailable_corrections_degrades_context() -> None:
+    from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
+
+    class Unavailable(CurrentRetriever):
+        async def recall(self, *args: Any, **kwargs: Any) -> Any:
+            raise RecallBudgetExceededError(EXHAUSTED)
+
+        async def corrections(self, **kwargs: Any) -> Any:
+            raise RuntimeError("Synthetic correction-store outage")
+
+    request = await _builder(Unavailable()).build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+    assert EXHAUSTED in request.model_dump_json()
+    assert _correction_line() not in request.model_dump_json()
