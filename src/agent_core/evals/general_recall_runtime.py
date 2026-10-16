@@ -347,6 +347,7 @@ async def read_through_runtime(
     # Existing builder, People service, tool registry and pipeline all retain this
     # shared instance. The experiment substitutes its measured retrieval policy.
     app.memory_retriever._profile = retriever.retrieval_profile
+    app.memory_retriever.bind_semantic_queries = retriever.bind_semantic_queries
     app.memory_retriever.recall = retriever.recall
     app.memory_retriever.validate_retained = retriever.validate_retained
     former = DeterministicQueryFormer(

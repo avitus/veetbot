@@ -57,6 +57,24 @@ async def test_deliberate_recall_budget_starts_after_slow_reader_planning(
 
 
 @pytest.mark.parametrize("path", ["automatic", "deliberate"])
+@pytest.mark.parametrize("channel", ["dense", "hybrid"])
+async def test_people_semantics_reach_the_measured_reader_and_canonical_compiler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path: PathKind,
+    channel: Channel,
+    recall_database: Settings,
+) -> None:
+    from tests.unit.test_general_recall_people import (
+        test_measured_people_recall_keeps_semantics_through_reader_and_compiler as exercise,
+    )
+
+    await exercise(
+        tmp_path, monkeypatch, path, channel, settings=recall_database, storage="postgres"
+    )
+
+
+@pytest.mark.parametrize("path", ["automatic", "deliberate"])
 @pytest.mark.parametrize("channel", ["sparse", "hybrid"])
 @pytest.mark.parametrize("search_planning", ["scripted", "reader"])
 async def test_observation_runs_in_postgres_and_reaches_the_reader(

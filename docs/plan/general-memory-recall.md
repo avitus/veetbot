@@ -483,6 +483,19 @@ cost is USD 55.913546. On 2026-10-15 the owner requested completion of these gat
 before merging PR #163. ADR-0206 records the scope and diagnostic repairs; a fresh
 complete run is limited to USD 240 after ledger reconciliation and final review/CI.
 The failed run and earlier load measurements cannot certify changed inputs.
+The subsequent two-worker v4 on `f55c597c` stopped after 771 observations when
+the normalized-stream credential detector rejected an event. The triggering
+field was not retained, so a real credential versus an opaque-continuation
+false positive remains unproven. All 139 result files, both scratch databases
+and supervision originals are retained; cumulative reported and held cost is
+USD 83.96363625, leaving USD 216.03636375 under the unchanged aggregate cap.
+All four observed hybrid incident checks pass, but this development-only prefix
+cannot establish full quality or held-out lift. The canonical compiler rejects
+37 relationship rows as semantic fallback. A zero-provider reproduction found
+that the evaluator substituted measured recall but left People semantic binding
+on the original retriever. Binding must follow the same measured instance; the
+compiler and semantic-channel requirements remain unchanged. Neither this repair
+nor diagnostic improvements authorize reusing the failed attempt's observations.
 The native historical-index load measurement
 under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
 100,000 competing records. It measures one synthetic information need and cannot

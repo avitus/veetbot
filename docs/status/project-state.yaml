@@ -2635,6 +2635,9 @@ milestones:
       - No v3 observation or original load measurement can certify changed evaluated inputs; independent review and all quality/budget gates remain required
       - Partial development results exposed formation, relationship retrieval and evidence-use failures; the owner authorized broad recovery before any fresh confirmation, with all gates unchanged
       - Bounded two-worker collection uses separate scratch databases and one shared ledger (ADR-0207); release requires final combined input verification and complete fresh evidence, not reused partial observations
+      - V4 on f55c597c stopped after 771 observations at a normalized-stream credential rejection; the triggering field remains unknown, and all originals and both scratch databases are retained
+      - V4 development incident checks pass but 37 relationship rows fail semantic certification; the evaluator left People semantic binding on its original retriever, requiring a measured-instance wiring repair and fresh evidence
+      - Aggregate reported and held cost after v4 is USD 83.96363625, leaving USD 216.03636375 under the unchanged USD 300 cap; no paid attempt is active and full quality remains unmeasured
       - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
       - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; the owner authorized coordination with reliability PR163 for one combined release, final review, exact-head CI and production delivery
       - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder

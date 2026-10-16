@@ -477,6 +477,17 @@ the gateway's own validator raises `ModelProtocolError` when it sees one.
    criterion "No API keys or raw authorization headers enter logs or events"
    is satisfied here or nowhere.
 
+When the shared credential-shape check refuses an event, its protocol failure
+also carries a closed detector-family label, normalized event kind and bounded
+schema field path. These labels reach the durable run failure; arbitrary mapping
+keys become placeholders. No matched bytes, snippets, hashes, provider bodies or
+reasoning text enter the diagnostic. Malformed diagnostic labels are discarded.
+Known provider continuation fields may be named in the path, but remain subject
+to the same whole-event check. A credential-shaped match alone does not establish
+actual credential leakage or identify opaque ciphertext as a false positive.
+The original event is not retained for diagnosis, no retry is added, and opaque
+continuation bytes are neither rewritten nor exempted by this diagnostic repair.
+
 ### Assembling a turn from a stream
 
 The gateway ships one assembler, shared by every adapter, that folds an event

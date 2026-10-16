@@ -62,3 +62,11 @@ before limiting candidates, and preserve dated reads. Ambiguous roles must not
 combine profiles. Runtime checks must exercise the actual context/tool path and
 shared budget. These mechanism checks do not replace complete confirmatory
 answer-quality evidence or the original release gates.
+
+The runtime evaluator must substitute semantic binding together with measured
+recall and retained-result validation on the shared retriever. Leaving binding
+on the original composition makes People reads lose the measured semantic
+handle before their fenced transaction. Regression coverage must exercise both
+automatic and reader-planned search through the actual reader and PostgreSQL
+observation compiler, including dense and hybrid channels. Scripted answers in
+these checks establish wiring only; they supply no release-quality evidence.
