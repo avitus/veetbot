@@ -587,9 +587,21 @@ struct MarkdownQuoteRow: Equatable, Sendable {
 
     /// Flattens nested quotes; depth 1 is the outer quote, and no row holds a quote.
     static func rows(_ blocks: [MarkdownContentBlock], depth: Int = 1) -> [MarkdownQuoteRow] {
-        blocks.flatMap { block -> [MarkdownQuoteRow] in
-            if case .blockquote(let inner) = block { return rows(inner, depth: depth + 1) }
-            return [MarkdownQuoteRow(depth: depth, block: block)]
+        var rows: [MarkdownQuoteRow] = []
+        append(blocks, depth: depth, to: &rows)
+        return rows
+    }
+
+    /// One shared accumulator keeps flattening linear in the number of rows.
+    private static func append(
+        _ blocks: [MarkdownContentBlock], depth: Int, to rows: inout [MarkdownQuoteRow]
+    ) {
+        for block in blocks {
+            if case .blockquote(let inner) = block {
+                append(inner, depth: depth + 1, to: &rows)
+            } else {
+                rows.append(MarkdownQuoteRow(depth: depth, block: block))
+            }
         }
     }
 }
