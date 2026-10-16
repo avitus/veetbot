@@ -278,6 +278,7 @@ public final class ChatViewModel: ObservableObject {
     private let watchTasks = WatchTaskBox()
     private var loadedApprovalIDs: Set<UUID> = []
     private var selectionRequestID: UUID?
+    private var operationalAttentionSessionID: UUID?
     private var callResultRequestID: UUID?
     private var removedHistorySessionIDs: Set<UUID> = []
     private var deletingHistorySessionIDs: Set<UUID> = []
@@ -935,6 +936,7 @@ public final class ChatViewModel: ObservableObject {
 
     private func resetSelectedSession() {
         selectionRequestID = nil
+        operationalAttentionSessionID = nil
         watchTasks.cancel()
         observedTerminalNotificationRunID = nil
         loadedNotificationSessionID = nil
@@ -958,6 +960,7 @@ public final class ChatViewModel: ObservableObject {
         guard let api, !removedHistorySessionIDs.contains(entry.sessionID) else { return }
         let requestID = UUID()
         selectionRequestID = requestID
+        operationalAttentionSessionID = operationalAttention ? entry.sessionID : nil
         watchTasks.cancel()
         if selectedSessionID != entry.sessionID { clearAttachments() }
         observedTerminalNotificationRunID = nil
@@ -1167,7 +1170,7 @@ public final class ChatViewModel: ObservableObject {
                 // Preserve the server audit session; remove only its local Chat row.
                 try await historyStore.delete(sessionID: session.id)
                 guard historyReconciliationID == reconciliationID else { return }
-                if selectedSessionID == session.id {
+                if selectedSessionID == session.id, operationalAttentionSessionID != session.id {
                     resetSelectedSession()
                 }
             case .found(let session):

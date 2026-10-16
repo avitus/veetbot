@@ -197,6 +197,38 @@ async def test_three_calls_preserve_both_relationships_without_inventing_identit
     await named_people_formation_contract(clock, factory)
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_generic_and_people_claims_do_not_merge_merely_for_a_shared_span(
+    reverse: bool,
+) -> None:
+    from agent_core.domain.memory import MemoryClaimKind
+    from agent_core.memory.distillation import _candidates_semantically_duplicate
+
+    candidate, events = await proposed("My brother Noel is married to Rhea.", "Noel")
+    marriage = PeopleAssistedCandidateExtractor._normalize_candidate(
+        candidate, by_sequence=events, scope="user"
+    )
+    sibling = marriage.model_copy(
+        update={
+            "people": None,
+            "subject": "user",
+            "statement": "User has a brother named Noel.",
+            "claim_kind": MemoryClaimKind.RELATIONSHIP,
+        }
+    )
+    left, right = (marriage, sibling) if reverse else (sibling, marriage)
+    assert not _candidates_semantically_duplicate(left, right)
+    same_claim = marriage.model_copy(
+        update={
+            "people": None,
+            "subject": "user",
+            "statement": "Noel is currently married to Rhea.",
+        }
+    )
+    left, right = (marriage, same_claim) if reverse else (same_claim, marriage)
+    assert _candidates_semantically_duplicate(left, right)
+
+
 async def test_invalid_interaction_cannot_discard_independently_grounded_claims() -> None:
     clock, factory = await memory_uow_factory()
     await named_people_formation_contract(clock, factory, invalid_interaction=True)

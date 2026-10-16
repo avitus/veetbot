@@ -212,6 +212,34 @@ async def generations_keep_change_watermark(factory: UnitOfWorkFactory) -> None:
 SCENARIOS.append(generations_keep_change_watermark)
 
 
+async def legacy_configuration_keeps_reservations_and_cursors(factory: UnitOfWorkFactory) -> None:
+    class LegacyConfig(EmbeddingConfig):
+        @property
+        def key(self) -> str:
+            return "92ed35aa3e222cbda9f3e68f342e70c75e65161a5255b698326ffa654fc91764"
+
+    legacy = LegacyConfig.model_validate(CONFIG.model_dump())
+    async with factory() as uow:
+        job = await uow.semantic_work.claim(principal(), legacy, BOUNDS, NOW)
+        assert job is not None
+    async with factory() as uow:
+        spend = await uow.semantic_work.reserve(
+            principal(), job.lease_token, CONFIG, "a" * 64, Decimal(".01"), 16, 16, NOW
+        )
+        assert spend is not None
+        await uow.semantic_work.settle(principal(), job.lease_token, spend.id, Decimal(".005"), NOW)
+        await uow.semantic_work.finish(principal(), job.lease_token, 16, 16, True, NOW)
+    async with factory() as uow:
+        resumed = await uow.semantic_work.claim(principal(), CONFIG, BOUNDS, NOW)
+        assert resumed is not None
+        assert resumed.generation == job.generation
+        assert resumed.full_cursor == resumed.change_cursor == 16
+        assert await uow.semantic_work.spent(principal(), NOW.date()) == Decimal(".005")
+
+
+SCENARIOS.append(legacy_configuration_keeps_reservations_and_cursors)
+
+
 async def changing_configuration_keeps_daily_charge(factory: UnitOfWorkFactory) -> None:
     async with factory() as uow:
         job = await uow.semantic_work.claim(principal(), CONFIG, BOUNDS, NOW)

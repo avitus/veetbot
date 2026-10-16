@@ -42,6 +42,67 @@ async def recall_database() -> AsyncIterator[Settings]:
         yield replace(settings, database_url=database_url)
 
 
+@pytest.mark.parametrize("body_fails", [False, True])
+@pytest.mark.parametrize("cleanup_failure", ["rollback", "unlock"])
+async def test_scratch_cleanup_failure_preserves_error_and_releases_real_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    recall_database: Settings,
+    body_fails: bool,
+    cleanup_failure: str,
+) -> None:
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from agent_core.adapters.persistence.database import create_engine
+    from agent_core.evals import general_recall_database as database
+
+    engine = create_engine(recall_database.database_url)
+    monkeypatch.setattr(database, "create_engine", lambda _: engine)
+    rollback = AsyncConnection.rollback
+    execute = AsyncConnection.execute
+    cleanup_error = RuntimeError("Injected scratch cleanup failure")
+    triggered = False
+
+    async def failed_rollback(connection: AsyncConnection) -> None:
+        nonlocal triggered
+        if connection.engine is engine and cleanup_failure == "rollback" and not triggered:
+            triggered = True
+            raise cleanup_error
+        await rollback(connection)
+
+    async def failed_unlock(
+        connection: AsyncConnection, statement: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        nonlocal triggered
+        if (
+            connection.engine is engine
+            and cleanup_failure == "unlock"
+            and "pg_advisory_unlock" in str(statement)
+        ):
+            triggered = True
+            raise cleanup_error
+        return await execute(connection, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncConnection, "rollback", failed_rollback)
+    monkeypatch.setattr(AsyncConnection, "execute", failed_unlock)
+    body_error = ValueError("Original scratch case failure")
+    expected = body_error if body_fails else cleanup_error
+    with pytest.raises(type(expected)) as caught:
+        async with database.evaluation_database(
+            recall_database, storage="postgres", authorized=True
+        ):
+            if body_fails:
+                raise body_error
+    assert caught.value is expected and triggered
+    probe = create_engine(recall_database.database_url)
+    try:
+        async with probe.connect() as connection:
+            assert await connection.scalar(text("SELECT pg_try_advisory_lock(3300192)"))
+            await connection.execute(text("SELECT pg_advisory_unlock(3300192)"))
+    finally:
+        await probe.dispose()
+
+
 @pytest.mark.parametrize("channel", ["sparse", "dense", "hybrid"])
 async def test_deliberate_recall_budget_starts_after_slow_reader_planning(
     tmp_path: Path,

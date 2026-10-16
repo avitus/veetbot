@@ -29,7 +29,8 @@ class EmbeddingConfig(SemanticValue):
 
     @property
     def key(self) -> str:
-        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        exclude = {"historical_indexing"} if not self.historical_indexing else None
+        return hashlib.sha256(self.model_dump_json(exclude=exclude).encode()).hexdigest()
 
     def price(self, tokens: int) -> Decimal:
         if not 0 <= tokens <= 65536:

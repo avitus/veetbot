@@ -3,13 +3,14 @@
 import asyncio
 import re
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent_core.adapters.determinism import FixedClock, elapsed_time
 from agent_core.adapters.persistence.database import create_engine
@@ -57,6 +58,7 @@ async def evaluation_database(
         return
     validate_evaluation_database(settings, authorized=authorized)
     engine = create_engine(settings.database_url)
+    primary_error: BaseException | None = None
     try:
         # Hold one session lock for the entire case, not just the reset. A second
         # evaluator must not erase this case while its worker is still running.
@@ -71,11 +73,51 @@ async def evaluation_database(
                 )
                 await connection.commit()
                 yield
+            except BaseException as error:
+                primary_error = error
+                raise
             finally:
-                await connection.rollback()
-                await connection.execute(text("SELECT pg_advisory_unlock(3300192)"))
+                try:
+                    await _release_scratch_lock(connection)
+                except asyncio.CancelledError as error:
+                    primary_error = error
+                    raise
+                except Exception:
+                    if primary_error is None:
+                        raise
+    except asyncio.CancelledError as error:
+        primary_error = error
+        raise
+    except Exception as error:
+        if primary_error is None or primary_error is error:
+            primary_error = error
+            raise
+        raise primary_error from None
     finally:
-        await engine.dispose()
+        try:
+            await engine.dispose()
+        except Exception:
+            if primary_error is None:
+                raise
+
+
+async def _release_scratch_lock(connection: AsyncConnection) -> None:
+    """Attempt unlock independently and discard a connection with failed cleanup."""
+    failure: Exception | asyncio.CancelledError | None = None
+    try:
+        await connection.rollback()
+    except (Exception, asyncio.CancelledError) as error:
+        failure = error
+    try:
+        await connection.execute(text("SELECT pg_advisory_unlock(3300192)"))
+    except asyncio.CancelledError as error:
+        failure = error
+    except Exception as error:
+        failure = failure or error
+    if failure is not None:
+        with suppress(Exception):
+            await connection.invalidate()
+        raise failure
 
 
 class EvaluationClock(FixedClock):

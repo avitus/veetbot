@@ -218,6 +218,9 @@ the current original's invalidation fence under
 authoritative revision and its restrictions before similarity and candidate limits.
 Current vectors never stand in for past evidence. Historical indexing is an
 explicit, default-off local configuration; it grants no remote export authority.
+The disabled default preserves the current-only configuration digest used by
+existing jobs, reservations and deployment manifests. An explicitly enabled
+historical arm has a distinct digest and retains the normal inventory reset rule.
 
 The experimental `SemanticQueryLookup` is a bounded local lookup of an exact-query
 hash and explicit embedding tuple. It holds query vectors rather than cached
@@ -573,7 +576,12 @@ activation or complete Milestone 33.
 The development runner also supports a guarded PostgreSQL mode. It requires explicit
 scratch authorization, development settings and a database named
 `veetbot_m33_eval_<name>`. A session advisory lock spans each case and prevents a
-second experiment from resetting its tables. Fixed authored histories are followed
+second experiment from resetting its tables. Cleanup attempts unlock even if
+rollback fails and invalidates a connection whose lock cleanup fails. Ordinary cleanup,
+connection-close or disposal failures cannot replace the original evaluation
+failure; a cleanup failure after a successful body still fails the case. New
+cancellation during cleanup always propagates.
+Fixed authored histories are followed
 by elapsed worker time, so leases and recall deadlines cannot remain frozen during
 provider calls. Both paths execute the actual context builder and tool pipeline;
 semantic experiments use the production run, reader and owner authority checks.
