@@ -1287,7 +1287,11 @@ def _message_text(message: AssistantMessage | None) -> str | None:
 async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
     """Commit one terminal transaction, falling back to FAILED on local errors."""
 
-    if outcome.kind is OutcomeKind.CANCELLED and context.token.reason is CancelReason.DEADLINE:
+    if (
+        outcome.kind is OutcomeKind.CANCELLED
+        and context.token.reason is CancelReason.DEADLINE
+        and context.run.parent_run_id is None
+    ):
         outcome = RunOutcome(
             kind=OutcomeKind.FAILED,
             failure=RunFailure(

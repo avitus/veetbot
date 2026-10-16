@@ -1951,7 +1951,9 @@ budget, capped at sixty seconds, for a tool-free answer. Every model attempt
 rechecks the clock. A tool batch arriving after the reserve begins receives
 persisted budget refusals, leaving paired history for synthesis; a model that
 ignores a time-synthesis instruction fails visibly without dispatch. The hard
-run deadline remains unchanged. Finalization maps deadline cancellation to
-FAILED with `deadline_exceeded` and an explanation that the request can be
-retried. Owner cancellation remains CANCELLED. Approval expiration is capped
+run deadline remains unchanged. For top-level runs, finalization maps deadline
+cancellation to FAILED with `deadline_exceeded` and an explanation that the
+request can be retried. Child runs retain CANCELLED so the existing join reports
+their deadline as a tool error to the parent. Owner cancellation remains
+CANCELLED. Approval expiration is capped
 by the run deadline so the maintenance reaper can release a parked run.
