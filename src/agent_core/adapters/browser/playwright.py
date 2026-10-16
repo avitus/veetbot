@@ -1140,6 +1140,7 @@ class PythonPlaywrightRuntime:
         constraint: BrowserDispatchConstraint | None = None,
         now: datetime | None = None,
     ) -> BrowserObservation:
+        """Revalidate the live control and dispatch within the research or grant constraint."""
         page = self._current_page()
         if constraint is not None and (
             now is None

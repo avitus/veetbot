@@ -970,7 +970,9 @@ specifies this event, so no new event type is introduced — and completes or
 fails the run deterministically. Default expiry by risk: 24 hours for `LOW` and
 `MEDIUM`, 4 hours for `HIGH`, 1 hour for `CRITICAL`, capped by the run deadline
 when present (ADR-0209). Resumption after that deadline fails visibly with
-`deadline_exceeded`. An expired approval is
+`deadline_exceeded`. Cancellation is rechecked after awaited authorization and
+card presentation, before an approval is persisted; an already-expired run fails
+instead of entering another approval wait. An expired approval is
 never auto-approved, in any profile, at any risk level.
 
 **Cancellation** of a `QUEUED` or `WAITING_FOR_APPROVAL` run transitions

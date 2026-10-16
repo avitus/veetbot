@@ -668,6 +668,7 @@ def _parse_web_provider_allocations(
 
 
 def _parse_flag(values: Mapping[str, str], name: str, *, default: bool = False) -> bool:
+    """Parse a strict deployment boolean, preserving the feature-specific default."""
     raw = values.get(name, "1" if default else "0").strip()
     if raw not in {"0", "1"}:
         raise ConfigurationError(f"{name} must be 0 or 1")

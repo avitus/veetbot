@@ -1600,7 +1600,7 @@ renames are.
 
 `engineering-plan.md:722` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:1069-1098` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:1071-1100` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.
