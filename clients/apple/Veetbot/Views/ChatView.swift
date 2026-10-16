@@ -30,6 +30,7 @@ public struct ChatView: View {
     @State private var isDropTargeted = false
     @State private var showingFileImporter = false
     @State private var showingWebsiteAccess = false
+    @State private var transcriptProbe = TranscriptProbe()
     #if os(iOS)
     @State private var showingPhotoPicker = false
     #endif
@@ -162,7 +163,21 @@ public struct ChatView: View {
                     .padding(.vertical)
                     .padding(.horizontal, Self.transcriptHorizontalPadding)
                     .frame(maxWidth: .infinity)
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear
+                                .onAppear { transcriptProbe.contentHeight = geometry.size.height }
+                                .onChange(of: geometry.size.height) { transcriptProbe.contentHeight = $0 }
+                        }
+                    )
                 }
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear
+                            .onAppear { transcriptProbe.viewportHeight = geometry.size.height }
+                            .onChange(of: geometry.size.height) { transcriptProbe.viewportHeight = $0 }
+                    }
+                )
                 .onChange(of: scrollChangeToken) { _ in
                     scroll(proxy)
                 }
@@ -201,6 +216,18 @@ public struct ChatView: View {
         .onChange(of: activeMode) { mode in updateNotificationVisibility(mode: mode) }
         // While the conversation is on screen, its task permission is re-read
         // every 30 seconds; a revoke or sweep elsewhere reaches no run stream.
+        // One diagnostic line per opened conversation once its load settles:
+        // rows in the reducer against the height the transcript laid out.
+        .task(id: "transcript-\(model.selectedSessionID?.uuidString ?? "new")") {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled, let sessionID = model.selectedSessionID else { return }
+            let rows = state.activityTimeline.count
+            let content = Int(transcriptProbe.contentHeight)
+            let viewport = Int(transcriptProbe.viewportHeight)
+            ConversationDiagnostics.logger.notice(
+                "settled session=\(sessionID.uuidString, privacy: .public) rows=\(rows) content=\(content) viewport=\(viewport)"
+            )
+        }
         .task(id: model.selectedSessionID) {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -618,4 +645,12 @@ struct ChatToolbarActions: View {
             .accessibilityIdentifier("chat.stop")
         }
     }
+}
+
+/// The transcript's last laid-out heights, held outside view state so that
+/// recording them never re-renders the conversation.
+@MainActor
+private final class TranscriptProbe {
+    var contentHeight: CGFloat = 0
+    var viewportHeight: CGFloat = 0
 }

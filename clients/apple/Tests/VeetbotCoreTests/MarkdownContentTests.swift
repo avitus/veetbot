@@ -143,6 +143,43 @@ import Testing
     }
 
     @Test
+    func testNestedQuotesFlattenIntoRowsTaggedWithTheirDepth() {
+        let blocks = MarkdownContentParser.parse(
+            """
+            > Outer reply
+            >> Earlier reply
+            >>> Earliest reply
+            > Outer again
+            """
+        )
+
+        #expect(
+            blocks == [
+                .blockquote([
+                    .paragraph("Outer reply"),
+                    .blockquote([
+                        .paragraph("Earlier reply"),
+                        .blockquote([.paragraph("Earliest reply")]),
+                    ]),
+                    .paragraph("Outer again"),
+                ])
+            ]
+        )
+        guard case .blockquote(let quoted)? = blocks.first else {
+            Issue.record("expected a quote")
+            return
+        }
+        #expect(
+            MarkdownQuoteRow.rows(quoted) == [
+                MarkdownQuoteRow(depth: 1, block: .paragraph("Outer reply")),
+                MarkdownQuoteRow(depth: 2, block: .paragraph("Earlier reply")),
+                MarkdownQuoteRow(depth: 3, block: .paragraph("Earliest reply")),
+                MarkdownQuoteRow(depth: 1, block: .paragraph("Outer again")),
+            ]
+        )
+    }
+
+    @Test
     func testParsesBlockquotesListsAndTasks() {
         let blocks = MarkdownContentParser.parse(
             """

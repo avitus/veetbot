@@ -359,6 +359,17 @@ unsupported-request response. Initial connection setup propagates that
 compatibility failure, or a reauthentication response, back to the settings
 form so it remains open instead of reporting a successful save.
 
+Opening a conversation writes notice-level lines to the unified log under
+subsystem `com.veetbot.apple`, category `conversation`: the selection, the
+restored message and row counts, each superseded or failed load, the end of the
+run replay, and, three seconds after selection, the rows held against the
+transcript's laid-out content and viewport heights. They carry identifiers and
+counts only, never conversation content. When a conversation opens blank, read
+them on that Mac with
+`/usr/bin/log show --last 1h --predicate 'subsystem == "com.veetbot.apple" AND category == "conversation"'`;
+a settled line with rows but no content height means the transcript failed to
+draw state it holds.
+
 ## Agent activity and artifacts
 
 The timeline includes generic, collapsible tool activity, approval checkpoints,
