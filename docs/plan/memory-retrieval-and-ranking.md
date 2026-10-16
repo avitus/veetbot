@@ -679,13 +679,22 @@ class TraceStore(Protocol):
 
 Two tools, both returning `TrustLevel.MEMORY` data:
 
-- **`memory.search`** — deliberate belief lookup: text, optional subject and
-  `belief_type` filters, optional `as_of`. Returns ranked beliefs with ids. Subject to
+- **`memory.search`** — deliberate belief lookup: text, optional subjects and
+  soft type hints, optional `as_of` and `known_at`. Returns ranked beliefs with ids. Subject to
   the same hard filter, safety pass, and budget as automatic recall.
   Its description directs the model to search before asking the user to repeat
   personal context. The query names the fact needed to answer, such as home
   location, even when the question names another topic. Absence from the bounded
   snapshot or automatic recall does not establish that the fact is unknown.
+  Production `memory.search@2.1.0` uses `type_hints` as structured relevance
+  anchors, never guessed hard storage-type predicates (ADR-0198). Omitted scope
+  resolves from the authenticated session, identically in preparation and execution;
+  an explicit scope retains intentional cross-project lookup (ADR-0206). Explicit
+  `RecallQuery.belief_types` filters and the frozen/direct legacy tool remain
+  unchanged; the model-facing schema rejects that old argument.
+  `as_of` selects when a fact applied; `known_at` selects the recorded knowledge
+  at a time. The planned tool and M33 rendering preserve both coordinates
+  (ADR-0200); the frozen legacy tool and rendering retain their original schema.
 - **`memory.recall_episodes`** — the escalation path into episodic and archival
   history, scoped by time or session, with its own budget. Not automatic.
 

@@ -207,7 +207,13 @@ def _session_view(
 def _run_view(run: Run) -> RunView:
     failure = None
     if run.status is RunStatus.FAILED and run.failure is not None:
+        raw_reference = run.failure.details.get("diagnostic_id")
+        try:
+            reference = UUID(raw_reference) if isinstance(raw_reference, str) else None
+        except ValueError:
+            reference = None
         failure = RunFailureView(
+            diagnostic_id=reference,
             reason=run.failure.reason,
             message=run.failure.message,
             step_number=run.failure.step_number,

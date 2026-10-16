@@ -152,6 +152,7 @@ class RunLimitsView(BaseModel):
 
 
 class RunFailureView(BaseModel):
+    diagnostic_id: UUID | None = None
     reason: FailureReason
     message: str
     step_number: int | None

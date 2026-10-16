@@ -4946,9 +4946,9 @@ credential exposure to the model, or weakening external-write approvals.
 - `browser.navigate` and `browser.observe` return bounded rendered-page
   observations through a provider-neutral `BrowserProvider`.
 - `browser.act` performs revision-bound interaction and retains conservative
-  external-write classification. ADR-0168 authorizes bounded scroll gestures
-  without an approval in the default policy; other actions still require one
-  or an applicable grant, regardless of the apparent UI element.
+  external-write classification. ADR-0168 permits bounded scroll gestures;
+  ADR-0209 permits bounded ordinary interactions in an owner-selected profile,
+  with provenance checks and a live-page constraint. Other actions need approval.
 - Trusted composition, not model arguments, selects the principal, profile,
   provider, device, origin policy, and standing grant.
 - Authentication secrets and browser profile material never enter model
@@ -4961,7 +4961,8 @@ credential exposure to the model, or weakening external-write approvals.
 - User-delegated login is an interactive platform surface. CAPTCHA, MFA,
   reauthentication, and consent return `needs_user`; the model cannot bypass or
   complete them with a secret.
-- Validated bounded scrolls follow ADR-0168. Other mutations require ordinary
+- Validated bounded scrolls follow ADR-0168; ordinary interactions follow the
+  owner-authorized ADR-0209 profile permission. Other mutations require ordinary
   approval, an exact, expiring, revocable standing grant, or a session-bound
   task grant created from an approval card inside an owner-configured scope
   (ADR-0129). Initial hard exclusions cannot use either grant.
@@ -4984,7 +4985,8 @@ credential exposure to the model, or weakening external-write approvals.
   deletable, and never selected through model-authored identifiers.
 - Every mutation revalidates policy, profile, origin, grant, and page revision immediately
   before dispatch; task grants are rechecked against the live page. Approval or a
-  matching grant is required except for validated bounded scrolls under ADR-0168.
+  matching grant is required except for validated bounded scrolls under ADR-0168
+  and constrained ordinary interactions under ADR-0209.
 - Secret leakage, prompt injection, stale actions, cross-origin navigation,
   session expiry, device loss, provider failure, and uncertain writes pass the
   adversarial acceptance suite before tenant rollout.

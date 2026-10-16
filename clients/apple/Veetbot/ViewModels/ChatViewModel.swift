@@ -278,6 +278,7 @@ public final class ChatViewModel: ObservableObject {
     private let watchTasks = WatchTaskBox()
     private var loadedApprovalIDs: Set<UUID> = []
     private var selectionRequestID: UUID?
+    private var operationalAttentionSessionID: UUID?
     private var callResultRequestID: UUID?
     private var removedHistorySessionIDs: Set<UUID> = []
     private var deletingHistorySessionIDs: Set<UUID> = []
@@ -493,14 +494,15 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         do {
-            var fetched: SessionView?
-            if let emailNotificationHandler {
-                let session = try await api.getSession(link.sessionID)
-                fetched = session
-                if session.metadata["email_operational"]?.boolValue == true, link.focus == nil {
-                    await emailNotificationHandler(nil, nil)
-                    return
+            let session = try await api.getSession(link.sessionID)
+            if session.isOperational, link.focus == nil {
+                try await hideOperationalSession(session.id)
+                if session.metadata["email_operational"]?.boolValue == true {
+                    await emailNotificationHandler?(nil, nil)
                 }
+                return
+            }
+            if let emailNotificationHandler {
                 if let value = session.metadata["email_thread_id"]?.stringValue,
                     let threadID = UUID(uuidString: value),
                     await emailAnswers(link.focus, threadID: threadID, api: api) {
@@ -511,11 +513,16 @@ public final class ChatViewModel: ObservableObject {
                 }
             }
             let entry: SessionHistoryEntry
-            if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
+            if session.isOperational {
+                // A focused approval/question uses the shared attention cards,
+                // without persisting an internal audit session as a conversation.
+                entry = Self.mergedHistoryEntry(
+                    session: session, existing: nil, lastRunID: link.runID,
+                    suggestedTitle: nil, touchedAt: nil
+                )
+            } else if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
             } else {
-                let session: SessionView
-                if let fetched { session = fetched } else { session = try await api.getSession(link.sessionID) }
                 try await store(
                     session: session,
                     lastRunID: link.runID
@@ -525,7 +532,9 @@ public final class ChatViewModel: ObservableObject {
                 }
                 entry = stored
             }
-            await selectSession(entry, preferredRunID: link.runID)
+            await selectSession(
+                entry, preferredRunID: link.runID, operationalAttention: session.isOperational
+            )
             guard selectedSessionID == link.sessionID, runState.activeRunID == link.runID else {
                 return
             }
@@ -927,6 +936,7 @@ public final class ChatViewModel: ObservableObject {
 
     private func resetSelectedSession() {
         selectionRequestID = nil
+        operationalAttentionSessionID = nil
         watchTasks.cancel()
         observedTerminalNotificationRunID = nil
         loadedNotificationSessionID = nil
@@ -944,11 +954,13 @@ public final class ChatViewModel: ObservableObject {
 
     public func selectSession(
         _ entry: SessionHistoryEntry,
-        preferredRunID: UUID? = nil
+        preferredRunID: UUID? = nil,
+        operationalAttention: Bool = false
     ) async {
         guard let api, !removedHistorySessionIDs.contains(entry.sessionID) else { return }
         let requestID = UUID()
         selectionRequestID = requestID
+        operationalAttentionSessionID = operationalAttention ? entry.sessionID : nil
         watchTasks.cancel()
         if selectedSessionID != entry.sessionID { clearAttachments() }
         observedTerminalNotificationRunID = nil
@@ -971,10 +983,15 @@ public final class ChatViewModel: ObservableObject {
                 !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
             selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
-            try await store(
-                session: session,
-                lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
-            )
+            if session.isOperational, operationalAttention {
+                try await historyStore.delete(sessionID: session.id)
+                history = try await historyStore.list()
+            } else {
+                try await store(
+                    session: session,
+                    lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
+                )
+            }
             guard selectionRequestID == requestID else {
                 if removedHistorySessionIDs.contains(entry.sessionID) {
                     try? await historyStore.delete(sessionID: entry.sessionID)
@@ -1117,8 +1134,8 @@ public final class ChatViewModel: ObservableObject {
             let page = try await api.listSessions(cursor: cursor)
             guard historyReconciliationID == reconciliationID else { return }
             for session in page.items {
-                // A cached People session left unlisted is pruned below.
-                guard !session.isPeopleOperational else { continue }
+                // A cached internal session left unlisted is pruned below.
+                guard !session.isOperational else { continue }
                 serverIDs.insert(session.id)
                 serverSpeaksFolders = serverSpeaksFolders || session.folderSupported
                 guard !removedHistorySessionIDs.contains(session.id),
@@ -1149,11 +1166,11 @@ public final class ChatViewModel: ObservableObject {
         var prunedHistory = false
         for resolution in missingResolutions {
             switch resolution {
-            case .found(let session) where session.isPeopleOperational:
-                // The session backs People data, so it is hidden locally, never deleted.
+            case .found(let session) where session.isOperational:
+                // Preserve the server audit session; remove only its local Chat row.
                 try await historyStore.delete(sessionID: session.id)
                 guard historyReconciliationID == reconciliationID else { return }
-                if selectedSessionID == session.id {
+                if selectedSessionID == session.id, operationalAttentionSessionID != session.id {
                     resetSelectedSession()
                 }
             case .found(let session):
@@ -1557,6 +1574,8 @@ public final class ChatViewModel: ObservableObject {
         taskGrant: TaskGrantEcho? = nil
     ) async {
         guard let api, approvalsInFlight[approval.id] == nil else { return }
+        let generation = connectionGeneration
+        let sessionID = selectedSessionID
         approvalsInFlight[approval.id] = decision
         defer { approvalsInFlight[approval.id] = nil }
         do {
@@ -1566,11 +1585,27 @@ public final class ChatViewModel: ObservableObject {
                 reason: reason,
                 taskGrant: taskGrant
             )
+            guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
             runState.mergeApproval(stored)
             if decision == .approveForTask {
                 await loadTaskGrant()
             }
+            if runState.activeRunID == stored.runID {
+                do {
+                    let run = try await api.getRun(stored.runID)
+                    guard generation == connectionGeneration, sessionID == selectedSessionID,
+                        runState.activeRunID == stored.runID else { return }
+                    // A slower point read cannot roll a terminal stream event back.
+                    if !(runState.runStatus?.isTerminal ?? false) || run.status.isTerminal {
+                        runState.seed(run: run)
+                    }
+                } catch {
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
+                    errorMessage = "Your decision was saved, but progress could not be refreshed. Reopen the conversation to check the result."
+                }
+            }
         } catch {
+            guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
             if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 let reason = apiError.details.reason,
@@ -1578,9 +1613,12 @@ public final class ChatViewModel: ObservableObject {
             {
                 // The offer is gone or changed: show the card as it is now.
                 do {
-                    runState.mergeApproval(try await api.getApproval(approval.id))
+                    let stored = try await api.getApproval(approval.id)
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
+                    runState.mergeApproval(stored)
                     errorMessage = "Task permission is no longer available. Allow once or Deny."
                 } catch {
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     present(error)
                 }
             } else if let apiError = apiError(from: error),
@@ -1588,10 +1626,13 @@ public final class ChatViewModel: ObservableObject {
                 apiError.details.reason == "approval_already_resolved"
             {
                 do {
-                    runState.mergeApproval(try await api.getApproval(approval.id))
+                    let stored = try await api.getApproval(approval.id)
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
+                    runState.mergeApproval(stored)
                     errorMessage =
                         "This approval was already resolved; the first decision is shown."
                 } catch {
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     present(error)
                 }
             } else {
@@ -1777,22 +1818,40 @@ public final class ChatViewModel: ObservableObject {
 
     public func refreshPendingApprovals() async {
         guard let api else { return }
+        let generation = connectionGeneration
+        let sessionID = selectedSessionID
+        let runID = runState.activeRunID
+        let knownPending = Set(runState.approvals.filter { $0.status.isPending }.map(\.id))
         do {
             var cursor: String?
             var seenCursors: Set<String> = []
+            var stillPending: Set<UUID> = []
             repeat {
                 let page = try await api.listPendingApprovals(
-                    runID: runState.activeRunID,
-                    sessionID: selectedSessionID,
+                    runID: runID,
+                    sessionID: sessionID,
                     cursor: cursor
                 )
+                guard generation == connectionGeneration, sessionID == selectedSessionID,
+                    runID == runState.activeRunID else { return }
                 for approval in page.items {
+                    stillPending.insert(approval.id)
                     loadedApprovalIDs.insert(approval.id)
                     runState.mergeApproval(approval)
                 }
                 cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             } while cursor != nil
+            // A resolved card disappears from this list. Read its stored decision
+            // so every device updates even if the resolution stream was missed.
+            for approvalID in knownPending.subtracting(stillPending) {
+                let stored = try await api.getApproval(approvalID)
+                guard generation == connectionGeneration, sessionID == selectedSessionID,
+                    runID == runState.activeRunID else { return }
+                runState.mergeApproval(stored)
+            }
         } catch {
+            guard generation == connectionGeneration, sessionID == selectedSessionID,
+                runID == runState.activeRunID else { return }
             present(error)
         }
     }
@@ -2681,6 +2740,7 @@ public final class ChatViewModel: ObservableObject {
                     await self.applyTaskGrantFrame(frame)
                     if frame.event == "approval.requested"
                         || frame.event == "run.waiting_for_approval"
+                        || frame.event == "approval.resolved"
                     {
                         await self.loadApprovalsRequiredByReducer()
                         await self.refreshPendingApprovals()
@@ -2736,12 +2796,22 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    private func hideOperationalSession(_ sessionID: UUID) async throws {
+        try await historyStore.delete(sessionID: sessionID)
+        history = try await historyStore.list()
+        if selectedSessionID == sessionID { resetSelectedSession() }
+    }
+
     private func store(
         session: SessionView,
         lastRunID: UUID?,
         suggestedTitle: String? = nil,
         touchedNow: Bool = false
     ) async throws {
+        guard !session.isOperational else {
+            try await hideOperationalSession(session.id)
+            return
+        }
         let existing = history.first { $0.sessionID == session.id }
         let entry = Self.mergedHistoryEntry(
             session: session,

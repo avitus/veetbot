@@ -1217,13 +1217,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_200_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_205_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 200
+    assert len(qualified_paths) == 205
     # ADR-0155 adds the title pass's five knobs.
     assert {
         "titles/profiles.yaml:generation.enabled",
@@ -1335,7 +1335,7 @@ def test_memory_profiles_knob_paths_match_document() -> None:
     declared = set(SHIPPED_KNOB_PATHS["memory/profiles.yaml"])
 
     assert declared == _leaf_paths(document) - {"schema_version"}
-    assert len(declared) == 39
+    assert len(declared) == 44
 
 
 def _provider_artifact(tmp_path: Path, formation_policy_version: str) -> Path:
@@ -1423,6 +1423,14 @@ def _hosted(**extra: str) -> dict[str, str]:
         "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
         **extra,
     }
+
+
+def test_browser_research_permission_defaults_on_and_can_be_disabled() -> None:
+    """The deployment flag restores approvals when disabled and rejects ambiguous values."""
+    assert load_settings(_hosted()).browser_research_enabled is True
+    assert load_settings(_hosted(BROWSER_RESEARCH_ENABLED="0")).browser_research_enabled is False
+    with pytest.raises(ConfigurationError, match="BROWSER_RESEARCH_ENABLED"):
+        load_settings(_hosted(BROWSER_RESEARCH_ENABLED="yes"))
 
 
 def test_task_grant_scopes_parse_and_refuse() -> None:

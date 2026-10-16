@@ -1018,7 +1018,7 @@ class InMemorySessionDeletionRepository:
         for key in self._memories._erasure_pending - self._memories._records.keys():
             self._memories._transaction.discard(self._memories._erasure_pending, key)
         retained_history = {
-            key: [(at, record) for at, record in value if record.source_session_id != session_id]
+            key: [revision for revision in value if revision[1].source_session_id != session_id]
             for key, value in self._memories._history.items()
             if key in self._memories._records
         }

@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 import socket
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -54,6 +54,7 @@ from agent_core.adapters.determinism import (
     SequenceIdFactory,
     SystemClock,
     UUID7RequestIdFactory,
+    elapsed_time,
 )
 from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
@@ -166,6 +167,8 @@ from agent_core.adapters.persistence.projections import (
 )
 from agent_core.adapters.persistence.queue import PostgresRunQueue
 from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
+from agent_core.adapters.persistence.reliability_monitor import check_reliability
+from agent_core.adapters.persistence.reliability_report import reliability_report
 from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
@@ -270,6 +273,7 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.browser_research import BrowserResearchAuthorizer
 from agent_core.application.browser_startup import BrowserStartupRecovery
 from agent_core.application.browser_task_grants import (
     BrowserTaskGrantAuthorizer,
@@ -443,12 +447,16 @@ from agent_core.domain.execution import (
     EgressPolicy,
     ResourceLimits,
 )
+from agent_core.domain.failures import log_failure
+from agent_core.domain.local_embeddings import LocalEmbeddingConfig
 from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
     Capability,
     FakeModelScript,
+    ModelAttempt,
     ModelEvent,
+    ModelRequest,
     ReasoningDeltaEvent,
     ReasoningEffort,
     ResolvedModel,
@@ -466,7 +474,12 @@ from agent_core.domain.model_settings import (
     default_chat_effort,
 )
 from agent_core.domain.persistence import WorkerLease
-from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
+from agent_core.domain.policies import (
+    LoadedRuleset,
+    PolicyCondition,
+    PolicyDecisionType,
+    PolicyProfileRecord,
+)
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     CancelReason,
@@ -544,6 +557,7 @@ from agent_core.memory.provider_extraction import (
     ProviderAssistedCandidateExtractor,
     provider_extraction_evidence_matches,
 )
+from agent_core.memory.recall_preparation import SemanticRecallPreparation
 from agent_core.memory.reconsolidation_evidence import bind_evidence
 from agent_core.memory.reconsolidation_policy import local_egress_policy
 from agent_core.memory.reconsolidation_worker import ReconsolidationPass
@@ -552,12 +566,18 @@ from agent_core.memory.retrieval import (
     EventEpisodeSearch,
     HybridMemoryRetriever,
 )
-from agent_core.memory.semantic_deployment import compose_indexing
+from agent_core.memory.semantic_deployment import (
+    SemanticCompositionInputs,
+    SemanticServices,
+    compose_indexing,
+    configuration_digest,
+)
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
 from agent_core.observability.logging import configure_logging
 from agent_core.observability.policy import AdvisoryMetrics
+from agent_core.observability.reliability import ReliabilityReport, ReliabilityThresholds
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
 from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
@@ -578,6 +598,7 @@ from agent_core.ports.browser_upload import BrowserImageUploader
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
+from agent_core.ports.embeddings import LocalEmbeddingProvider as LocalEmbeddingPort
 from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
@@ -694,6 +715,8 @@ from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
+POST_RUN_HOOK_TIMEOUT_SECONDS = 15.0
+
 logger = logging.getLogger(__name__)
 LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
 
@@ -798,9 +821,11 @@ class Composition:
     people_erasure: PeopleErasureService
     memory_retriever: HybridMemoryRetriever
     memory_profiles: MemoryProfiles
+    recall_composition: SemanticCompositionInputs
     folder_profiles: FolderProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
+    semantic_services: SemanticServices | None = None
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
     judgment_provider: JudgmentProvider | None = None
@@ -808,6 +833,10 @@ class Composition:
     people_repair: PeopleDirectoryRepair | None = None
     # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
     latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
+    reliability_report: Callable[[datetime, datetime], Awaitable[ReliabilityReport]] | None = None
+    reliability_check: (
+        Callable[[int, ReliabilityThresholds], Awaitable[ReliabilityReport]] | None
+    ) = None
 
     def start_mcp_discovery_warmup(self) -> asyncio.Task[None]:
         """Remember this tenant's MCP catalogs in the background (ADR-0131).
@@ -1082,6 +1111,66 @@ def random_ids() -> IdFactory:
     return RandomIdFactory()
 
 
+async def operator_reliability(
+    hours: int, notify: bool, thresholds: ReliabilityThresholds
+) -> ReliabilityReport:
+    """Observe only the database; do not seed agents, tools, providers or artifacts."""
+    if not 1 <= hours <= 2160:
+        raise ValueError("Reliability windows must be between one hour and ninety days.")
+    settings = load_settings()
+    if notify and not settings.notification_dispatch_enabled:
+        raise ConfigurationError("Reliability alerts require enabled notifications.")
+    principal = Principal(
+        tenant_id="local" if settings.auth_mode.value == "dev" else settings.auth_tenant_id,
+        principal_id=(
+            "local-user" if settings.auth_mode.value == "dev" else settings.auth_principal_id
+        ),
+    )
+    clock = system_clock()
+    engine = create_engine(settings.database_url)
+    try:
+        async with asyncio.timeout(60):
+            await assert_schema_revision(engine)
+            sessions = create_session_factory(engine)
+            if notify:
+                return await check_reliability(
+                    sessions,
+                    hours,
+                    thresholds,
+                    principal=principal,
+                    outbox_factory=lambda session: PostgresNotificationOutbox(session, clock),
+                    events_factory=PostgresProcessEventRepository,
+                    clock=clock,
+                    ids=random_ids(),
+                    release_id=settings.release_id,
+                )
+            until = clock.now()
+            return await reliability_report(
+                sessions, until - timedelta(hours=hours), until, principal=principal
+            )
+    finally:
+        await engine.dispose()
+
+
+def fixed_clock(at: datetime) -> FixedClock:
+    return FixedClock(at)
+
+
+def sequence_ids(values: Iterable[UUID]) -> SequenceIdFactory:
+    return SequenceIdFactory(values)
+
+
+def scripted_provider(script: FakeModelScript, clock: Clock) -> ModelProvider:
+    return FakeModelProvider(script, clock)
+
+
+def local_embedding_provider(path: Path, config: LocalEmbeddingConfig) -> LocalEmbeddingPort:
+    # Disabled deployments never import or initialize the native runtime.
+    from agent_core.adapters.models.local_embeddings import LocalEmbeddingProvider
+
+    return LocalEmbeddingProvider(path, config)
+
+
 def default_fake_script() -> FakeModelScript:
     return FakeModelScript(
         turns=[
@@ -1125,6 +1214,7 @@ def _memory_uow_repositories(
     )
     mcp_servers = mcp_servers or InMemoryMCPServerRepository()
     memories = memories or InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction()))
+    events.bind_memory_sources(memories._reconsolidation_index)
     episodes = episodes or InMemoryIntegratedEpisodeStore()
     people = InMemoryPeopleStore(
         clock,
@@ -1132,6 +1222,7 @@ def _memory_uow_repositories(
         memory_guard=memories._transaction.owner,
         memory_index=memories._reconsolidation_index,
     )
+    memories.bind_people(people)
     reconsolidation = InMemoryReconsolidationStore(
         memories,
         RandomIdFactory(),
@@ -1264,6 +1355,7 @@ def _postgres_repository_factory(
         memories = PostgresMemoryStore(session, clock)
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
+        memories.bind_people(people)
         reconsolidation = PostgresReconsolidationStore(
             session,
             ids,
@@ -1705,7 +1797,7 @@ def _configure_service_logging(settings: Settings, *, enabled: bool) -> None:
     """
 
     if enabled:
-        configure_logging(settings.deployment_mode)
+        configure_logging(settings.deployment_mode, release_id=settings.release_id)
 
 
 @asynccontextmanager
@@ -2420,6 +2512,7 @@ async def build_surface_worker(
 async def _compose(
     *,
     storage: Literal["memory", "postgres"],
+    recall_schema_sha256: str | None,
     settings: Settings,
     agent: AgentSpec,
     email_budget_limits: EmailBudgetLimits,
@@ -2488,6 +2581,7 @@ async def _compose(
     device_invocation_poll_seconds: float,
     device_ingest_daily_cap: int,
     surface_limits: SurfaceLimits,
+    recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -2621,9 +2715,6 @@ async def _compose(
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
-    query_former = DeterministicQueryFormer(
-        principal, candidate_selection=memory_profiles.retrieval.candidate_selection
-    )
     schedule_service = ScheduleService(
         uow_factory=uow_factory,
         clock=clock,
@@ -3334,28 +3425,76 @@ async def _compose(
             egress_policy=local_egress_policy(settings.memory_reconsolidation_residency_provider),
             owner_review=True,
         )
+
+    registry_identity = {
+        "policies": model_router.registry.policies.model_dump(mode="json"),
+        "profiles": {
+            name: {
+                "profile_hash": profile.profile_hash,
+                "registry_version": profile.registry_version,
+                "models": [
+                    {
+                        "id": model.model_id,
+                        "aliases": model.aliases,
+                        "limits": model.limits.model_dump(mode="json"),
+                        "pricing": model.pricing.model_dump(mode="json"),
+                        "reasoning_efforts": list(model.reasoning_efforts),
+                    }
+                    for model in profile.models
+                ],
+            }
+            for name, profile in model_router.registry.profiles.items()
+        },
+    }
+    recall_composition = SemanticCompositionInputs(
+        configuration={
+            "policy_version": ruleset.policy_version,
+            "agent": agent.model_dump(mode="json"),
+            "principal": {
+                "tenant": principal.tenant_id,
+                "owner": principal.principal_id,
+                "scopes": sorted(principal.scopes),
+                "roles": sorted(principal.roles),
+            },
+            "context": dict(context_config),
+            "memory": memory_profiles.model_dump(mode="json"),
+            "storage": storage,
+            "schema_sha256": recall_schema_sha256,
+            "people_enabled": settings.people_enabled,
+            "reviewed_dreaming": settings.memory_dreaming_review_enabled,
+            "unattended_dreaming": settings.memory_reconsolidation_enabled,
+            "query_authority": "local-reviewed-reader@1;remote-withheld",
+            "query_preparation": "explicit-runtime@1",
+        },
+        formation={
+            "policy": memory_policy_version,
+            "profiles": memory_profiles.formation.model_dump(mode="json"),
+            "registry": registry_identity,
+            "default": memory_default_choice.model_dump(mode="json"),
+            "alternatives": [
+                option.model_dump(mode="json") for option in memory_alternative_options
+            ],
+            "upstream_build": evidence_build_ref,
+            "upstream_corpus": evidence_corpus_sha256,
+        },
+        reader={
+            "registry": registry_identity,
+            "catalog": model_settings_catalog.model_dump(mode="json"),
+        },
+    )
+    if recall_capture is not None:
+        try:
+            recall_capture(recall_composition)
+            raise ConfigurationError("Recall capture callback must stop composition")
+        finally:
+            # The complete-graph cleanup below has not been entered yet.
+            with suppress(BaseException):
+                await sandbox_manager.close()
+            for provider in effective_providers.values():
+                with suppress(BaseException):
+                    await provider.close()
     semantic_index_pass = None
     if settings.memory_semantic_index_enabled:
-        registry_identity = {
-            "policies": model_router.registry.policies.model_dump(mode="json"),
-            "profiles": {
-                name: {
-                    "profile_hash": profile.profile_hash,
-                    "registry_version": profile.registry_version,
-                    "models": [
-                        {
-                            "id": model.model_id,
-                            "aliases": model.aliases,
-                            "limits": model.limits.model_dump(mode="json"),
-                            "pricing": model.pricing.model_dump(mode="json"),
-                            "reasoning_efforts": list(model.reasoning_efforts),
-                        }
-                        for model in profile.models
-                    ],
-                }
-                for name, profile in model_router.registry.profiles.items()
-            },
-        }
         semantic_index_pass = await compose_indexing(
             root=REPOSITORY_ROOT,
             settings=settings,
@@ -3363,46 +3502,23 @@ async def _compose(
             factory=uow_factory,
             clock=clock,
             credentials=credential_resolver,
-            configuration={
-                "policy_version": ruleset.policy_version,
-                "agent": agent.model_dump(mode="json"),
-                "principal": {
-                    "tenant": principal.tenant_id,
-                    "owner": principal.principal_id,
-                    "scopes": sorted(principal.scopes),
-                    "roles": sorted(principal.roles),
-                },
-                "context": dict(context_config),
-                "memory": memory_profiles.model_dump(mode="json"),
-                "storage": storage,
-                "people_enabled": settings.people_enabled,
-                "reviewed_dreaming": settings.memory_dreaming_review_enabled,
-                "unattended_dreaming": settings.memory_reconsolidation_enabled,
-                "query_authority": "withheld",
-                "query_preparation": "disabled",
-            },
-            formation={
-                "policy": memory_policy_version,
-                "profiles": memory_profiles.formation.model_dump(mode="json"),
-                "registry": registry_identity,
-                "default": memory_default_choice.model_dump(mode="json"),
-                "alternatives": [
-                    option.model_dump(mode="json") for option in memory_alternative_options
-                ],
-                "upstream_build": evidence_build_ref,
-                "upstream_corpus": evidence_corpus_sha256,
-            },
-            reader={
-                "registry": registry_identity,
-                "catalog": model_settings_catalog.model_dump(mode="json"),
-            },
+            configuration=recall_composition.configuration,
+            formation=recall_composition.formation,
+            reader=recall_composition.reader,
             provider_factory=OpenAIEmbeddingProvider,
+            local_provider_factory=local_embedding_provider,
         )
 
     async def sweep_semantic_index() -> int:
         assert semantic_index_pass is not None
-        return (await semantic_index_pass.run_slice()).indexed
+        return (await semantic_index_pass.index.run_slice()).indexed
 
+    query_former = DeterministicQueryFormer(
+        principal,
+        candidate_selection=memory_profiles.retrieval.candidate_selection,
+        planning=memory_profiles.retrieval.query_planning,
+        admitted=None if semantic_index_pass is None else semantic_index_pass.admitted,
+    )
     memory_retriever = HybridMemoryRetriever(
         uow_factory,
         clock,
@@ -3412,8 +3528,26 @@ async def _compose(
         trace_retention=memory_profiles.traces,
         reconsolidation_enabled=True if settings.memory_dreaming_review_enabled else recon_admitted,
         reconsolidation_owner_approved_only=settings.memory_dreaming_review_enabled,
+        runtime_semantic_queries=None
+        if semantic_index_pass is None
+        else semantic_index_pass.queries,
+        source_recovery=None
+        if semantic_index_pass is None
+        else semantic_index_pass.source_recovery,
+        reranking_admitted=None if semantic_index_pass is None else semantic_index_pass.admitted,
     )
     registry.register(MemorySearchTool(memory_retriever))
+    people_context = (
+        PeopleContextService(uow_factory, memory_retriever) if settings.people_enabled else None
+    )
+    registry.register(
+        MemorySearchTool(
+            memory_retriever,
+            model_planning=True,
+            factory=uow_factory,
+            people_context=people_context,
+        )
+    )
     people_erasure = PeopleErasureService(uow_factory, clock)
     people_identity = PeopleIdentityService(uow_factory, clock, ids)
     people_duplicates = (
@@ -3502,7 +3636,7 @@ async def _compose(
         )
     people_retriever = None
     if people_service is not None:
-        people_context = PeopleContextService(uow_factory, memory_retriever)
+        assert people_context is not None
         people_retriever = PeopleAwareMemoryRetriever(people_context, principal)
         registry.register(PeopleSearchTool(uow_factory, clock))
         registry.register(PeopleContextTool(people_context))
@@ -3766,6 +3900,21 @@ async def _compose(
                     now=clock.now,
                 )
             )
+            if settings.browser_research_enabled and any(
+                rule.tool_name == "browser.act"
+                and rule.condition is PolicyCondition.BOUNDED_BROWSER_SCROLL
+                and rule.decision is PolicyDecisionType.ALLOW
+                and rule.otherwise is PolicyDecisionType.REQUIRE_APPROVAL
+                for rule in ruleset.tool_rules
+            ):
+                standing_authorizers.append(
+                    BrowserResearchAuthorizer(
+                        provider=browser_provider,
+                        uow_factory=uow_factory,
+                        policy=deterministic_engine,
+                        now=clock.now,
+                    )
+                )
         if settings.browser_grant_id is not None:
             if browser_provider is None or settings.browser_profile_id is None:
                 raise ConfigurationError("standing browser grant composition is incomplete")
@@ -3883,58 +4032,67 @@ async def _compose(
 
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
             try:
-                async with uow_factory() as uow:
-                    finished = await uow.runs.get(run_id, principal)
-                await mcp_runtime.release_session_transports(finished.session_id)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    async with uow_factory() as uow:
+                        finished = await uow.runs.get(run_id, principal)
+                    await mcp_runtime.release_session_transports(finished.session_id)
             except Exception:
                 logger.exception("mcp_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:
-                await public_services.email.settle(principal, run_id)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    await public_services.email.settle(principal, run_id)
             except Exception:
                 logger.exception("email_run_accounting_failed", extra={"run_id": str(run_id)})
             try:
-                await sandbox_manager.release_run(run_id, lease_epoch)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
             if browser_provider is not None:
                 try:
-                    await release_browser_lease_if_done(
-                        browser_provider, uow_factory, principal, run_id
-                    )
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        await release_browser_lease_if_done(
+                            browser_provider, uow_factory, principal, run_id
+                        )
                 except Exception:
                     logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:
-                await schedule_accountant.account(run_id)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    await schedule_accountant.account(run_id)
             except Exception:
                 logger.exception("schedule_run_accounting_failed", extra={"run_id": str(run_id)})
             completed: Run | None = None
             try:
-                async with uow_factory() as uow:
-                    run = await uow.runs.get(run_id, principal)
-                    if run.status not in TERMINAL_RUN_STATUSES:
-                        return
-                    completed = run
-                    await uow.events.append(
-                        NewEvent(
-                            session_id=run.session_id,
-                            run_id=run.id,
-                            event_type="memory.formation.requested",
-                            actor_type="runtime",
-                            payload={
-                                "trigger": "run_terminal",
-                                "terminal_status": run.status.value,
-                                "not_before": (
-                                    clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
-                                ).isoformat(),
-                            },
-                            derivation_key=f"memory.formation.requested:{run.id}",
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    async with uow_factory() as uow:
+                        run = await uow.runs.get(run_id, principal)
+                        if run.status not in TERMINAL_RUN_STATUSES:
+                            return
+                        completed = run
+                        await uow.events.append(
+                            NewEvent(
+                                session_id=run.session_id,
+                                run_id=run.id,
+                                event_type="memory.formation.requested",
+                                actor_type="runtime",
+                                payload={
+                                    "trigger": "run_terminal",
+                                    "terminal_status": run.status.value,
+                                    "not_before": (
+                                        clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
+                                    ).isoformat(),
+                                },
+                                derivation_key=f"memory.formation.requested:{run.id}",
+                            )
                         )
-                    )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
             if completed is not None:
                 try:
-                    await request_title_after_run(uow_factory, principal, completed, clock.now())
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        await request_title_after_run(
+                            uow_factory, principal, completed, clock.now()
+                        )
                 except Exception:
                     logger.exception("title_request_failed", extra={"run_id": str(run_id)})
             # What the answer cited is only knowable once the answer exists, so
@@ -3946,22 +4104,43 @@ async def _compose(
                 and completed.final_message
             ):
                 try:
-                    plan = await context_planner.current(completed.session_id)
-                    await memory_service.record_usage(
-                        session_id=completed.session_id,
-                        run_id=completed.id,
-                        final_text=completed.final_message,
-                        snapshot_trace_id=None if plan is None else plan.snapshot_id,
-                    )
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        plan = await context_planner.current(completed.session_id)
+                        await memory_service.record_usage(
+                            session_id=completed.session_id,
+                            run_id=completed.id,
+                            final_text=completed.final_message,
+                            snapshot_trace_id=None if plan is None else plan.snapshot_id,
+                        )
                 except Exception:
                     logger.exception("memory_usage_feedback_failed", extra={"run_id": str(run_id)})
+            hooks: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+            if skill_reviews is not None:
+                hooks.append(("skill_review", partial(skill_reviews.after_run, run_id)))
+            if people_import_runner is not None:
+                hooks.append(
+                    ("people_import", partial(people_import_runner.after_run, run_id, principal))
+                )
+            hooks.append(("people_erasure", partial(people_erasure.resume_pending, principal)))
+            for name, hook in hooks:
+                try:
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        await hook()
+                except Exception as exc:
+                    log_failure(
+                        logger,
+                        "post_run_hook_failed",
+                        exc,
+                        phase=name,
+                        diagnostic_id=str(ids.new_id()),
+                        run_id=str(run_id),
+                        release_id=settings.release_id,
+                    )
+
+            # Joining can execute a resumed parent in-process. Its own run budget,
+            # cancellation and lease govern that work, not the optional-hook timeout.
             if delegation_joins is not None:
                 await delegation_joins.after_run(run_id)
-            if skill_reviews is not None:
-                await skill_reviews.after_run(run_id)
-            if people_import_runner is not None:
-                await people_import_runner.after_run(run_id, principal)
-            await people_erasure.resume_pending(principal)
 
         def email_semantics(context: RunContext) -> EmailSemanticFormationService:
             from agent_core.memory.email_people import EmailPeopleFormationService
@@ -4160,6 +4339,7 @@ async def _compose(
 
         executor = RunExecutor(
             principal=principal,
+            release_id=settings.release_id,
             principals=principal_resolver,
             uow_factory=uow_factory,
             context_builder=context_builder,
@@ -4172,6 +4352,7 @@ async def _compose(
             model_providers=effective_providers,
             budget_factory=lambda lease: UnitOfWorkBudgetLedger(uow_factory, clock, lease),
             clock=clock,
+            recall_elapsed_time=elapsed_time,
             ids=ids,
             dispatch_tools=pipeline.dispatch,
             add_open_question=working_state.add_question,
@@ -4192,6 +4373,11 @@ async def _compose(
             typed_task=is_email_task,
             validate_browser_binding=_scheduled_browser_binding_validator(browser_provider),
             model_settings=model_settings_catalog,
+            prepare_recall=(
+                SemanticRecallPreparation(uow_factory, principal, memory_retriever, query_former)
+                if semantic_index_pass is not None and semantic_index_pass.queries is not None
+                else None
+            ),
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -4816,6 +5002,8 @@ async def _compose(
                 memory=memory_service,
                 people_erasure=people_erasure,
                 memory_retriever=memory_retriever,
+                semantic_services=semantic_index_pass,
+                recall_composition=recall_composition,
                 memory_profiles=memory_profiles,
                 folder_profiles=folder_profiles,
                 folder_proposals=folder_proposal_pass,
@@ -4828,6 +5016,9 @@ async def _compose(
             list(effective_providers.values()),
         )
     except BaseException:
+        if semantic_index_pass is not None:
+            with suppress(BaseException):
+                await semantic_index_pass.close()
         if mcp_runtime is not None:
             with suppress(BaseException):
                 await mcp_runtime.close()
@@ -4850,10 +5041,27 @@ def _sdk_mcp_clients(http_proxy_url: str | None = None) -> MCPClientFactory:
     return SDKMCPClientFactory(http_proxy_url=http_proxy_url)
 
 
+class _ModelProviderDescription:
+    """Availability metadata for a configuration capture; never a callable backend."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def stream(
+        self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+    ) -> AsyncIterator[ModelEvent]:
+        raise ConfigurationError("Metadata-only composition cannot execute model requests")
+
+    async def close(self) -> None:
+        return
+
+
 def _provider_adapters(
     settings: Settings,
     registry: ProviderRegistry,
     attachment_resolver: AttachmentResolver | None = None,
+    *,
+    describe_only: bool = False,
 ) -> dict[str, ModelProvider]:
     # A provider SDK loads only in a role that constructs model providers, not
     # in every service that starts by importing this module.
@@ -4861,6 +5069,19 @@ def _provider_adapters(
     for profile_name, loaded in registry.profiles.items():
         profile = loaded.document
         credential = settings.credentials.get(profile_name)
+        if describe_only:
+            if profile.adapter not in {"openai", "anthropic", "chat_completions"}:
+                raise ConfigurationError(f"adapter {profile.adapter!r} is not constructible")
+            if profile.adapter in providers:
+                raise ConfigurationError(
+                    f"multiple enabled profiles select adapter {profile.adapter!r}"
+                )
+            providers[profile.adapter] = (
+                MissingCredentialProvider(profile.adapter)
+                if credential is None and profile.adapter in {"openai", "anthropic"}
+                else _ModelProviderDescription(profile.adapter)
+            )
+            continue
         api_key = None if credential is None else credential.get_secret_value()
         if profile.adapter == "openai":
             from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
@@ -5204,6 +5425,8 @@ async def build(
     memory_people_evaluation_mode: bool = False,
     memory_legacy_retrieval_control: bool = False,
     memory_reasoning_effort: ReasoningEffort | None = None,
+    model_metadata_only: bool = False,
+    recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
     service_logging: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
@@ -5212,6 +5435,8 @@ async def build(
     effective_settings = settings or load_settings()
     _configure_service_logging(effective_settings, enabled=service_logging)
     validate_settings(effective_settings)
+    if recall_capture is not None and not model_metadata_only:
+        raise ConfigurationError("Recall capture requires model metadata-only mode")
     if (
         (
             memory_provider_evaluation_mode
@@ -5595,6 +5820,7 @@ async def build(
             update={"version": _content_addressed_agent_version(agent)}, deep=True
         )
     engine = None
+    recall_schema_sha256 = None
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
     media_provider: MediaGenerationProvider | None = None
@@ -5661,6 +5887,10 @@ async def build(
             )
             engine = create_engine(effective_settings.database_url)
             await assert_schema_revision(engine)
+            if effective_settings.memory_semantic_index_enabled or model_metadata_only:
+                from agent_core.adapters.persistence.recall_schema import capture_recall_schema
+
+                recall_schema_sha256 = configuration_digest(await capture_recall_schema(engine))
             uow_factory = cast(
                 UnitOfWorkFactory,
                 PostgresUnitOfWorkFactory(
@@ -5688,8 +5918,10 @@ async def build(
             principal=effective_principal,
             clock=effective_clock,
         )
-        provider_adapters = _provider_adapters(
-            effective_settings, provider_registry, attachment_resolver
+        provider_adapters = (
+            _provider_adapters(effective_settings, provider_registry, describe_only=True)
+            if model_metadata_only
+            else _provider_adapters(effective_settings, provider_registry, attachment_resolver)
         )
         effective_credential_resolver = credential_resolver or MappingCredentialResolver(
             {
@@ -5817,6 +6049,7 @@ async def build(
                 one_click_transport = HttpOneClickTransport(unsubscribe_proxy.url)
         composition, model_providers = await _compose(
             storage=storage,
+            recall_schema_sha256=recall_schema_sha256,
             settings=effective_settings,
             agent=agent,
             email_budget_limits=email_budget_limits,
@@ -5889,10 +6122,36 @@ async def build(
             device_invocation_poll_seconds=float(device_config["invocation_poll_seconds"]),
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
             surface_limits=surface_limits,
+            recall_capture=recall_capture,
         )
         composition = replace(
             composition,
             attachment_resolver=attachment_resolver,
+            reliability_check=(
+                None
+                if engine is None or not effective_settings.notification_dispatch_enabled
+                else partial(
+                    check_reliability,
+                    create_session_factory(engine),
+                    outbox_factory=lambda session: PostgresNotificationOutbox(
+                        session, effective_clock
+                    ),
+                    events_factory=PostgresProcessEventRepository,
+                    principal=effective_principal,
+                    clock=effective_clock,
+                    ids=effective_ids,
+                    release_id=effective_settings.release_id,
+                )
+            ),
+            reliability_report=(
+                None
+                if engine is None
+                else partial(
+                    reliability_report,
+                    create_session_factory(engine),
+                    principal=effective_principal,
+                )
+            ),
             latency_report=(
                 None
                 if engine is None
@@ -5906,6 +6165,13 @@ async def build(
         yield composition
     finally:
         if composition is not None:
+            if composition.semantic_services is not None:
+                try:
+                    await composition.semantic_services.close()
+                except Exception as exc:
+                    logger.warning(
+                        "semantic_close_failed", extra={"error_class": type(exc).__name__}
+                    )
             for import_task in tuple(composition.local_import_tasks):
                 import_task.cancel()
             await asyncio.gather(*composition.local_import_tasks, return_exceptions=True)

@@ -2,9 +2,10 @@
 
 import asyncio
 import hashlib
+import inspect
 import json
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -12,12 +13,16 @@ from uuid import UUID
 from pydantic import Field
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.local_embeddings import LocalEmbeddingConfig, local_execution
 from agent_core.domain.memory import RecallQuery, Sensitivity
 from agent_core.domain.runs import Run, RunCheckpoint, RunStatus
-from agent_core.domain.semantic_memory import SemanticQueryVector
 from agent_core.domain.semantic_work import EmbeddingConfig, SemanticValue
 from agent_core.domain.sessions import Session, SessionStatus
-from agent_core.memory.semantic_queries import SemanticQueryContext, SemanticQueryPreparation
+from agent_core.memory.semantic_queries import (
+    CachedSemanticQuery,
+    SemanticQueryContext,
+    SemanticQueryPreparation,
+)
 from agent_core.ports.determinism import Clock
 from agent_core.ports.embeddings import EmbeddingProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -55,16 +60,22 @@ class RunSemanticQueries:
         config: EmbeddingConfig,
         *,
         admitted: Callable[[], bool],
-        authority: Callable[[Run, Session, RunCheckpoint], SemanticQueryAuthority | None],
+        local: LocalEmbeddingConfig | None = None,
+        authority: Callable[
+            [Run, Session, RunCheckpoint],
+            SemanticQueryAuthority | Awaitable[SemanticQueryAuthority | None] | None,
+        ],
     ) -> None:
         self._factory, self._clock = factory, clock
         self._principal = principal.model_copy(deep=True)
         self._provider = provider
         self._config = EmbeddingConfig.model_validate(config.model_dump())
+        self._local = local_execution(self._config, local)
+        self._local_config = local
         self._admitted, self._authority = admitted, authority
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
         # A single 128-vector cap across all run contexts, not 128 per run.
-        self._vectors: OrderedDict[str, tuple[datetime, SemanticQueryVector]] = OrderedDict()
+        self._vectors: OrderedDict[str, CachedSemanticQuery] = OrderedDict()
 
     def _enabled(self) -> bool:
         try:
@@ -78,7 +89,7 @@ class RunSemanticQueries:
         return True
 
     async def _context(
-        self, session_id: UUID, run_id: UUID, surface_id: str
+        self, session_id: UUID, run_id: UUID, surface_id: str, *, require_search_budget: bool = True
     ) -> tuple[SemanticQueryContext, datetime] | None:
         if not self._enabled():
             return None
@@ -102,10 +113,45 @@ class RunSemanticQueries:
             or not run.principal_scopes <= self._principal.scopes
             or checkpoint is None
             or checkpoint.run_id != run.id
+            or (
+                require_search_budget
+                and checkpoint.recall_work is not None
+                and checkpoint.recall_work.deadline_at <= now
+            )
         ):
             return None
         authority = self._authority(run, session, checkpoint)
-        if authority is None:
+        if inspect.isawaitable(authority):
+            authority = await authority
+            # Authority may need source I/O. Cancellation, fencing or a changed
+            # task during that await must not return an earlier cached handle.
+            async with self._factory() as uow:
+                current_run = await uow.runs.get(run_id, self._principal)
+                current_session = await uow.sessions.get(session_id, self._principal)
+                current_checkpoint = await uow.checkpoints.latest(run_id)
+            changing_counters = {
+                "lease_expires_at",
+                "updated_at",
+                "usage",
+                "model_call_count",
+                "tool_call_count",
+            }
+            if (
+                run.model_dump(exclude=changing_counters)
+                != current_run.model_dump(exclude=changing_counters)
+                or session.model_dump(exclude={"updated_at"})
+                != current_session.model_dump(exclude={"updated_at"})
+                or checkpoint != current_checkpoint
+            ):
+                return None
+            run = current_run
+        now = self._clock.now()
+        if (
+            authority is None
+            or run.lease_expires_at is None
+            or run.lease_expires_at <= now
+            or (run.deadline_at is not None and run.deadline_at <= now)
+        ):
             return None
         authority = SemanticQueryAuthority.model_validate(authority.model_dump())
         if authority.surface_id != surface_id or not self._enabled():
@@ -151,6 +197,8 @@ class RunSemanticQueries:
         expires = min(now + timedelta(seconds=300), run.lease_expires_at)
         if run.deadline_at is not None:
             expires = min(expires, run.deadline_at)
+        if require_search_budget and checkpoint.recall_work is not None:
+            expires = min(expires, checkpoint.recall_work.deadline_at)
         return SemanticQueryContext(**authority.model_dump(), task_sha256=digest), expires
 
     def _prune(self, run_id: UUID, key: str | None) -> None:
@@ -179,6 +227,14 @@ class RunSemanticQueries:
             if binding is None or context is None or key is None
             else (context, key, binding[1])
         )
+
+    async def validate_authority(self, *, session_id: UUID, run_id: UUID, surface_id: str) -> bool:
+        """Current read authority without reviving a vector or reserving search work."""
+        async with asyncio.timeout(1):
+            return (
+                await self._context(session_id, run_id, surface_id, require_search_budget=False)
+                is not None
+            )
 
     async def bind(
         self, *, session_id: UUID, run_id: UUID, surface_id: str
@@ -229,6 +285,7 @@ class RunSemanticQueries:
                         context=lambda: context,
                         refresh=refresh,
                         cache=self._vectors,
+                        local=self._local_config,
                     )
                     self._entries[key] = _Entry(run_id, expires, lookup)
                     while len(self._entries) > 32:

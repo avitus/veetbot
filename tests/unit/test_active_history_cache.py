@@ -74,7 +74,7 @@ async def test_active_history_survives_fresh_step_context(
     )
     tick = 0
 
-    async def recall(*args: object) -> _RecallBundle:
+    async def recall(*args: object, **kwargs: object) -> _RecallBundle:
         if volatile == "recall_shape":
             return _RecallBundle(
                 base="New memory" if tick % 2 else None, delta="New delta" if tick % 3 else None

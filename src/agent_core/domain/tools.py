@@ -12,7 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, PlainSerializer, model_validator
 
 from agent_core.domain.browser import BrowserDispatchConstraint
-from agent_core.domain.messages import ContentPart, ToolResultItem
+from agent_core.domain.messages import ContentPart, MemoryRecallUsage, ToolResultItem
 from agent_core.domain.policies import (
     ExecutionTarget,
     IdempotencyClass,
@@ -98,6 +98,7 @@ class ToolResult(BaseModel):
     content: list[ContentPart]
     # Set only by the pipeline, never accepted from an upstream tool.
     context_content: list[ContentPart] | None = Field(default=None, exclude=True)
+    memory_recall: MemoryRecallUsage | None = Field(default=None, exclude=True)
     structured: dict[str, Any] | None = None
     artifacts: list[Any] = Field(default_factory=list)
     failure: ToolFailure | None = None

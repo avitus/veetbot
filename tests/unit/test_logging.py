@@ -177,7 +177,7 @@ def test_no_log_call_names_a_field_the_log_record_reserves() -> None:
 
 
 @pytest.mark.usefixtures("restored_logging")
-def test_a_traceback_is_rendered_as_text_and_passes_redaction(
+def test_a_traceback_keeps_safe_diagnostics_without_rendering_text(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     configure_logging(DeploymentMode.PRODUCTION)
@@ -190,10 +190,11 @@ def test_a_traceback_is_rendered_as_text_and_passes_redaction(
 
     (line,) = _lines(capsys)
     assert "exc_info" not in line
-    rendered = line["exception"]
-    assert isinstance(rendered, str)
-    assert "Traceback (most recent call last)" in rendered
-    assert "RuntimeError: refused [REDACTED]" in rendered
+    assert "exception" not in line
+    assert line["error_class"] == "RuntimeError"
+    assert line["error_causes"] == ["RuntimeError"]
+    assert line["error_fingerprint"]
+    assert "refused" not in json.dumps(line)
     assert provider_value not in json.dumps(line)
 
 
@@ -209,3 +210,37 @@ def test_review_session_cookies_are_redacted() -> None:
         },
     )
     assert "synthetic-private-session" not in str(event)
+
+
+@pytest.mark.usefixtures("restored_logging")
+def test_background_tracebacks_never_emit_private_exception_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(DeploymentMode.PRODUCTION)
+    try:
+        raise RuntimeError("PRIVATE_MAIL_CANARY_NOT_A_CREDENTIAL")
+    except RuntimeError:
+        logging.getLogger("agent_core.background").exception("background_failed")
+    [record] = _lines(capsys)
+    assert "PRIVATE_MAIL_CANARY_NOT_A_CREDENTIAL" not in json.dumps(record)
+    assert record["error_class"] == "RuntimeError"
+    assert record["error_fingerprint"]
+
+
+@pytest.mark.usefixtures("restored_logging")
+def test_domain_context_reaches_service_logs_and_restores_the_parent(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_core.domain.failures import log_context
+
+    configure_logging(DeploymentMode.PRODUCTION, release_id="test-release")
+    with log_context(run_id="parent"):
+        with log_context(run_id="child", tool_invocation_id="invocation"):
+            logging.getLogger("agent_core.context").info("child")
+        logging.getLogger("agent_core.context").info("parent")
+    logging.getLogger("agent_core.context").info("outside")
+    child, parent, outside = _lines(capsys)
+    assert child["run_id"] == "child" and child["tool_invocation_id"] == "invocation"
+    assert parent["run_id"] == "parent" and "tool_invocation_id" not in parent
+    assert "run_id" not in outside
+    assert all(row["release_id"] == "test-release" for row in (child, parent, outside))

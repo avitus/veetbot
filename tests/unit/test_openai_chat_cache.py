@@ -183,13 +183,13 @@ async def test_volatile_state_and_clock_leave_carried_history_unchanged(
         [*_history(), UserMessage(content=[TextPart(text="Continue")], source_event_sequence=3)],
     )
 
-    async def recall(*args: object) -> _RecallBundle:
+    async def recall(*args: object, **kwargs: object) -> _RecallBundle:
         return _RecallBundle(base='<memory as_of="today">A fact</memory>')
 
     monkeypatch.setattr(builder, "_recall_once", recall)
     first = await builder.build(active, cp, agent(), principal())
 
-    async def changed_recall(*args: object) -> _RecallBundle:
+    async def changed_recall(*args: object, **kwargs: object) -> _RecallBundle:
         return _RecallBundle(base='<memory as_of="tomorrow">A corrected fact</memory>')
 
     monkeypatch.setattr(builder, "_recall_once", changed_recall)

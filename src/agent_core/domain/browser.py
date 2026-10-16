@@ -845,7 +845,7 @@ class BrowserDispatchConstraint(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    grant_kind: Literal["task", "standing", "follow"]
+    grant_kind: Literal["task", "standing", "follow", "research"]
     origins: tuple[str, ...] = Field(min_length=1, max_length=64)
     path_prefix: str | None = None
     not_after: AwareDatetime
@@ -868,6 +868,7 @@ class BrowserDispatchConstraint(BaseModel):
 
     @model_validator(mode="after")
     def fields_match_grant_kind(self) -> BrowserDispatchConstraint:
+        """Reject dispatch constraints whose fields widen the named authorization kind."""
         if self.grant_kind == "follow":
             valid = (
                 self.origins == ("https://x.com",)
@@ -875,6 +876,13 @@ class BrowserDispatchConstraint(BaseModel):
                 and self.path_prefix == f"/{self.follow_handle}"
                 and self.consequence_ceiling == "unknown"
                 and self.max_text_characters is None
+            )
+        elif self.grant_kind == "research":
+            valid = (
+                self.consequence_ceiling == "unknown"
+                and self.max_text_characters == 256
+                and self.path_prefix is None
+                and len(self.origins) == 1
             )
         elif self.grant_kind == "task":
             valid = (

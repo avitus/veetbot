@@ -12,6 +12,13 @@ from uuid import UUID
 
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.history import select_history, validate_tool_pairs
+from agent_core.context.recall_budget import (
+    FULL_ALLOWANCE,
+    RecallAllowance,
+    context_ranking,
+    ranking_block,
+    select_current_search_results,
+)
 from agent_core.context.rendering import (
     build_prefix,
     envelope_items,
@@ -31,6 +38,7 @@ from agent_core.domain.messages import (
     FileReferencePart,
     ModelRequest,
     ProviderReasoningItem,
+    RecallRankingBlock,
     SystemMessage,
     TextPart,
     ToolCallItem,
@@ -38,6 +46,7 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.domain.tool_output import content_bytes, context_view, output_excerpt
 from agent_core.domain.tools import ToolSpec
@@ -69,9 +78,10 @@ class _RecallBundle:
     base: str | None = None
     delta: str | None = None
     corrections: tuple[MemoryCorrection, ...] = ()
+    rankings: tuple[RecallRankingBlock | None, ...] = ()
 
 
-def _current_user_text(items: list[ConversationItem]) -> str | None:
+def current_user_text(items: list[ConversationItem]) -> str | None:
     for item in reversed(items):
         if isinstance(item, UserMessage) and item.trust is TrustLevel.USER:
             text = "\n".join(
@@ -374,6 +384,11 @@ class BudgetedContextBuilder:
             else:
                 active.append(context_view(item))
         active = _insert_provider_continuation(active, checkpoint)
+        history_count = len(history)
+        shared, recall_allowance, searches_omitted = await select_current_search_results(
+            [*history, *active], self._memory_retriever, session_id=run.session_id, run_id=run.id
+        )
+        history, active = shared[:history_count], shared[history_count:]
         # Old sessions predate admission-time excerpts. Their event is the
         # immutable source, so every assembly selects the same bounded bytes.
         legacy_excerpted = False
@@ -445,7 +460,9 @@ class BudgetedContextBuilder:
         )
         recall_items: list[ConversationItem] = []
         correction_items: list[ConversationItem] = []
-        recalled = await self._recall_once(run, checkpoint, state, active, plan, principal)
+        recalled = await self._recall_once(
+            run, checkpoint, state, active, plan, principal, allowance=recall_allowance
+        )
         for block in (recalled.base, recalled.delta):
             if block is not None:
                 recall_items.append(
@@ -505,6 +522,8 @@ class BudgetedContextBuilder:
         validate_tool_pairs(retained_conversation)
 
         yield_steps: list[str] = ["legacy_tool_excerpts"] if legacy_excerpted else []
+        if searches_omitted:
+            yield_steps.append("memory_searches")
         if tool_truncated:
             yield_steps.append("tool_results")
         if cut:
@@ -594,6 +613,7 @@ class BudgetedContextBuilder:
         request = ModelRequest(
             model_policy=agent.model_policy,
             conversation=[*prefix, *rendered_body],
+            recall_ranking=context_ranking(body, () if recall_dropped else recalled.rankings),
             tools=[spec.model_copy(deep=True) for spec in plan.tool_specs],
             response_schema=None,
             temperature=0,
@@ -637,10 +657,12 @@ class BudgetedContextBuilder:
         active: list[ConversationItem],
         plan: ContextPlan,
         principal: Principal,
+        *,
+        allowance: RecallAllowance = FULL_ALLOWANCE,
     ) -> _RecallBundle:
         if self._memory_retriever is None or self._query_former is None:
             return _RecallBundle()
-        message = _current_user_text(active)
+        message = current_user_text(active)
         if message is None:
             return _RecallBundle()
         # A checkpoint identifies a question, not the continued validity of its
@@ -667,6 +689,7 @@ class BudgetedContextBuilder:
                 message,
                 snapshot_id=plan.snapshot_id,
                 snapshot_watermark=plan.snapshot_watermark,
+                allowance=allowance,
             )
         checkpoint_identity = hashlib.sha256(
             _canonical_json(
@@ -685,6 +708,7 @@ class BudgetedContextBuilder:
                     "snapshot_id": None if plan.snapshot_id is None else str(plan.snapshot_id),
                     "snapshot_watermark": plan.snapshot_watermark,
                     "recall_revision": revision,
+                    "recall_allowance": (allowance.tokens, allowance.items),
                 }
             )
         ).hexdigest()
@@ -698,6 +722,7 @@ class BudgetedContextBuilder:
                     message,
                     snapshot_id=plan.snapshot_id,
                     snapshot_watermark=plan.snapshot_watermark,
+                    allowance=allowance,
                 )
             )
             self._recall_tasks[key] = task
@@ -718,6 +743,7 @@ class BudgetedContextBuilder:
         *,
         snapshot_id: UUID | None,
         snapshot_watermark: int,
+        allowance: RecallAllowance = FULL_ALLOWANCE,
     ) -> _RecallBundle:
         """Take the turn's base recall, and over a frozen snapshot its delta.
 
@@ -743,9 +769,20 @@ class BudgetedContextBuilder:
             scope = (
                 None if self._session_scope is None else await self._session_scope(run.session_id)
             )
-            queries = self._query_former.form(run, state, message, current_scope=scope)
+            queries = [
+                bounded
+                for query in self._query_former.form(run, state, message, current_scope=scope)
+                if (bounded := allowance.bound(query)) is not None
+            ]
             if not queries:
-                return _RecallBundle()
+                exhausted_corrections = (
+                    []
+                    if snapshot_id is None
+                    else await self._memory_retriever.corrections(
+                        snapshot_id=snapshot_id, watermark=snapshot_watermark
+                    )
+                )
+                return _RecallBundle(corrections=tuple(exhausted_corrections))
             base = await self._memory_retriever.recall(
                 queries[0],
                 session_id=run.session_id,
@@ -753,6 +790,23 @@ class BudgetedContextBuilder:
                 turn_id=run.id,
                 moment="in_turn",
             )
+        except RecallBudgetExceededError:
+            # Optional search exhaustion cannot hide mandatory frozen corrections.
+            try:
+                exhausted_corrections = (
+                    []
+                    if snapshot_id is None
+                    else await self._memory_retriever.corrections(
+                        snapshot_id=snapshot_id, watermark=snapshot_watermark
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "context_memory_recall_failed",
+                    extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+                )
+                return _RecallBundle(base=EXHAUSTED)
+            return _RecallBundle(base=EXHAUSTED, corrections=tuple(exhausted_corrections))
         except Exception as exc:
             logger.warning(
                 "context_memory_recall_failed",
@@ -760,6 +814,7 @@ class BudgetedContextBuilder:
             )
             return _RecallBundle()
         rendered_base = base.rendered if base.items or base.people else None
+        base_rankings = () if rendered_base is None else (ranking_block(base),)
         # One instant governs the turn's memory, the way it governs one recall:
         # a historical query stamps both blocks with the moment it asks about.
         instant = queries[0].as_of or self._clock.now()
@@ -769,7 +824,7 @@ class BudgetedContextBuilder:
             # Ordinary atom closures take a new position. Membership-aware
             # recall additionally validates elapsed dependency expiry even when
             # maintenance has not yet written an invalidation position.
-            return _RecallBundle(base=rendered_base)
+            return _RecallBundle(base=rendered_base, rankings=base_rankings)
         # The two blocks share one budget class. In-turn recall is capped once
         # in the context engine's Region B table, not once per block, so the
         # delta is issued for what the base block left of it and is not issued
@@ -777,6 +832,8 @@ class BudgetedContextBuilder:
         # this: they are unbudgeted, never yield, and are the trust-critical
         # half of the pair.
         remaining = queries[0].budget_tokens - base.tokens
+        remaining_items = queries[0].max_items - len(base.items) - len(base.people)
+        carried = {item.belief_id for item in base.items}
         corrections: list[MemoryCorrection] = []
         try:
             # Membership can expire without a source write. Validate frozen
@@ -787,7 +844,7 @@ class BudgetedContextBuilder:
             )
             delta = (
                 None
-                if remaining <= 0
+                if remaining <= 0 or remaining_items <= 0
                 else await self._memory_retriever.recall(
                     queries[0].model_copy(
                         update={
@@ -798,6 +855,8 @@ class BudgetedContextBuilder:
                             "include_owned_resources": False,
                             "min_store_position": snapshot_watermark,
                             "budget_tokens": remaining,
+                            "max_items": remaining_items,
+                            "exclude_ids": tuple(sorted(set(queries[0].exclude_ids) | carried)),
                         }
                     ),
                     session_id=run.session_id,
@@ -812,17 +871,35 @@ class BudgetedContextBuilder:
                 extra={"run_id": str(run.id), "error_class": type(exc).__name__},
             )
             # Corrections already fetched remain authoritative if optional delta recall fails.
-            return _RecallBundle(base=rendered_base, corrections=tuple(corrections))
+            return _RecallBundle(
+                base=rendered_base, corrections=tuple(corrections), rankings=base_rankings
+            )
         # A belief the base recall already carries is not news, however new its
         # position is: stating it twice in one turn is two voices on one fact.
-        carried = {item.belief_id for item in base.items}
         fresh = (
             [] if delta is None else [item for item in delta.items if item.belief_id not in carried]
         )
+        # Preserve the actual retriever block when its exclusions already did
+        # the deduplication. Re-rendering changed its instant and policy stamp,
+        # preventing the runtime observation from identifying visible evidence.
+        unchanged_delta = delta is not None and fresh == delta.items and not delta.people
+        rendered_delta = (
+            delta.rendered
+            if fresh and unchanged_delta and delta is not None
+            else render_memory(fresh, as_of=instant)
+            if fresh
+            else None
+        )
+        delta_rankings = (
+            ()
+            if rendered_delta is None
+            else (ranking_block(delta) if unchanged_delta and delta is not None else None,)
+        )
         return _RecallBundle(
             base=rendered_base,
-            delta=render_memory(fresh, as_of=instant) if fresh else None,
+            delta=rendered_delta,
             corrections=tuple(corrections),
+            rankings=(*base_rankings, *delta_rankings),
         )
 
     def _truncate_tool_results(

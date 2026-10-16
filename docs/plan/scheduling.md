@@ -397,8 +397,9 @@ ownership, READY state and current authority. The model cannot supply a profile
 UUID or arbitrary scopes. Version 1.1.1 remains for already pinned runs.
 Browser actions retain their existing approval rules,
 including ADR-0168's bounded-scroll permission in the default policy. Scheduled
-feed reads can scroll without an interactive grant; other actions still require
-their ordinary approval or an applicable standing grant.
+feed reads can scroll without an interactive grant. ADR-0209 also permits
+constrained ordinary interactions in the selected profile, based on the durable
+scheduler seed. Other actions require ordinary approval or an applicable grant.
 The native schedule detail offers that update as its Website access picker
 (ADR-0154).
 

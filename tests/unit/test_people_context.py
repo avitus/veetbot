@@ -5,13 +5,127 @@ from uuid import uuid4
 
 import pytest
 
+from agent_core.adapters.determinism import FixedClock
 from agent_core.application.people_context import PeopleContextService
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import PeopleQuery, PeopleRecord, Person, PersonMemoryLink
 from agent_core.memory.retrieval import HybridMemoryRetriever
+from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.memory_fixtures import memory, recall_query
 from tests.contract.people_fixtures import PeopleFields
 from tests.contract.support import NOW, SESSION_ID, ids, memory_uow_factory, principal
+
+
+@pytest.mark.parametrize("role", ["father", "accountant", "coach", "emergency contact"])
+@pytest.mark.parametrize(
+    "restriction",
+    [None, "ambiguous", "private", "expired", "unresolved", "indirect", "excluded", "permission"],
+)
+async def test_relationship_reference_retrieves_linked_facts_without_a_name(
+    role: str, restriction: str | None
+) -> None:
+    clock, factory = await memory_uow_factory()
+    await relationship_recall_contract(clock, factory, role, restriction)
+
+
+async def test_relationship_links_survive_more_recent_topical_distractors() -> None:
+    clock, factory = await memory_uow_factory()
+    await relationship_recall_contract(clock, factory, "coach", None, distractors=256)
+
+
+async def relationship_recall_contract(
+    clock: FixedClock,
+    factory: UnitOfWorkFactory,
+    role: str,
+    restriction: str | None,
+    *,
+    distractors: int = 0,
+) -> None:
+    from agent_core.domain.memory import BeliefType
+    from agent_core.domain.people import PeopleEndpoint, RelationshipAssertion
+    from agent_core.memory.profiles import DEFAULT_RETRIEVAL_PROFILE
+
+    owner = principal().model_copy(
+        update={"scopes": set() if restriction == "permission" else {"people.read"}}
+    )
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Quinn", **common)
+    other = Person(id=uuid4(), display_name="Morgan", **common)
+    relationship = memory(belief_id=901, statement=f"Quinn is the user's {role}.").model_copy(
+        update={"subject": "Quinn", "belief_type": BeliefType.RELATIONSHIP}
+    )
+    interest = memory(belief_id=902, statement="Quinn enjoys botanical illustration.").model_copy(
+        update={"subject": "Quinn", "belief_type": BeliefType.USER_MODEL_ATTR, "store_position": 2}
+    )
+    async with factory() as uow:
+        await uow.people.put(person, expected_revision=0)
+        await uow.people.put(other, expected_revision=0)
+        for index in range(distractors):
+            await uow.memories.upsert_belief(
+                memory(
+                    belief_id=1000 + index, statement=f"Exhibition logistics for venue {index}."
+                ).model_copy(update={"store_position": index + 3, "subject": f"Venue {index}"})
+            )
+        for belief in (relationship, interest):
+            await uow.memories.upsert_belief(belief)
+            await uow.people.put(
+                PersonMemoryLink(id=uuid4(), person_id=person.id, belief_id=belief.id, **common),
+                expected_revision=0,
+            )
+        edge = RelationshipAssertion(
+            id=uuid4(),
+            subject=PeopleEndpoint(kind="person", id=person.id),
+            object=PeopleEndpoint(kind="person", id=other.id)
+            if restriction == "indirect"
+            else PeopleEndpoint(kind="owner"),
+            predicate="other",
+            qualifier=role,
+            belief_id=relationship.id,
+            unresolved=restriction == "unresolved",
+            valid_to=NOW if restriction == "expired" else None,
+            **common,
+        )
+        if restriction == "private":
+            edge = edge.model_copy(update={"sensitivity": Sensitivity.RESTRICTED})
+        await uow.people.put(edge, expected_revision=0)
+        if restriction == "ambiguous":
+            await uow.people.put(
+                edge.model_copy(
+                    update={"id": uuid4(), "subject": PeopleEndpoint(kind="person", id=other.id)}
+                ),
+                expected_revision=0,
+            )
+    profile = DEFAULT_RETRIEVAL_PROFILE.model_copy(
+        update={"candidate_selection": "relevance", "reranking": "relevance"}
+    )
+    service = PeopleContextService(
+        factory,
+        HybridMemoryRetriever(
+            factory, clock, ids(), owner, profile=profile, reranking_admitted=lambda: True
+        ),
+    )
+    query = recall_query(
+        text=f"Choose an exhibition for my {role}.", budget_tokens=2000
+    ).model_copy(
+        update={
+            "candidate_selection": "relevance",
+            "exclude_ids": (relationship.id,) if restriction == "excluded" else (),
+        }
+    )
+    result = await service.automatic_recall(owner, query, session_id=SESSION_ID)
+    if restriction:
+        assert interest.id not in {item.belief_id for item in result.items}
+        assert result.people == []
+        return
+    assert interest.id in {item.belief_id for item in result.items}
+    assert any(item.kind == "person" and item.person_ids == [person.id] for item in result.people)
+    assert "botanical illustration" in result.rendered
+    assert result.tokens <= 2000 and len(result.items) + len(result.people) <= 20
 
 
 async def test_ordinary_recall_registers_influence_before_forget_can_commit(

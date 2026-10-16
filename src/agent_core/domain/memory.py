@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 from agent_core.domain.events import EventEnvelope, ProcessEvent
+from agent_core.domain.memory_sources import RecalledSource, SourceRecoveryObservation
 from agent_core.domain.messages import ReasoningEffort
 from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
 
@@ -1003,6 +1004,7 @@ class RecalledBelief(BaseModel):
     conflict_with: list[UUID] = Field(default_factory=list)
     blocked: bool = False
     source_event_ids: list[int] = Field(default_factory=list)
+    sources: tuple[RecalledSource, ...] = Field(default=(), max_length=3)
     # Identity-only grouping metadata; citations still address this original atom.
     merge_id: UUID | None = None
     merge_revision: PositiveInt | None = None
@@ -1077,6 +1079,15 @@ class TracedPersonContext(BaseModel):
     source_ids: list[UUID] = Field(default_factory=list, max_length=256)
 
 
+class PeopleRecallDependencies(BaseModel):
+    """Owner-fenced revisions and the evidence used for role discovery."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    people_revision: int = Field(ge=0)
+    memory_revision: int = Field(ge=0)
+    selection_belief_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)
+
+
 class RecallTrace(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1105,6 +1116,7 @@ class RecallTrace(BaseModel):
     beliefs: list[RecalledItem] = Field(default_factory=list)
     passages: list[TracedPassage] = Field(default_factory=list)
     people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)
+    people_dependencies: PeopleRecallDependencies | None = None
     retrieval_policy_version: str
     created_at: datetime
     operator_fields_expire_at: datetime
@@ -1154,8 +1166,20 @@ class RecallTraceView(BaseModel):
     as_of: datetime
 
 
+class RecallStages(BaseModel):
+    """Transient IDs for mechanical evaluation, never a model-visible context block."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    candidate_ids: tuple[UUID, ...]
+    ranked_ids: tuple[UUID, ...]
+    dense_ids: tuple[UUID, ...] = ()
+    source_candidates: tuple[SourceRecoveryObservation, ...] = Field(default=(), max_length=3)
+
+
 class RecallResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stages: RecallStages | None = Field(default=None, exclude=True, repr=False)
 
     items: list[RecalledItem]
     people: list[TracedPersonContext] = Field(default_factory=list, max_length=20)

@@ -1,0 +1,19 @@
+{
+  "version": "m33-exploratory-budgets@1",
+  "registered_at": "2026-10-12T20:06:31.711875+00:00",
+  "activation_evidence": false,
+  "purpose": "Paired task-context variants on updated implementation; these variants do not increase the independent scenario count.",
+  "corpus_file": "evals/capability/general-recall/pilot.task-context.v1.jsonl",
+  "corpus_file_sha256": "077fcde26acbf45fe2818b95f689e6180d9267331b95d3ede746d373407b4140",
+  "context_tokens": 2000,
+  "p95_latency_ms": 5000,
+  "maximum_case_usd": 0.12,
+  "maximum_experiment_usd": 5,
+  "ceilings_from": "evals/observations/general-memory-recall/20261012-postgres-baselines/exploratory-budgets-v1.json",
+  "limitations": [
+    "Ten development scenarios reused as task-state variants, not independent new cases.",
+    "The working-state objective contains the original task, never expected labels or which option is correct.",
+    "No holdout execution or release admission.",
+    "Reader-planned multi-search orders remain uncertifiable without a runtime combined order."
+  ]
+}

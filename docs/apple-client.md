@@ -251,6 +251,8 @@ without serializing a large history into one request per round trip. Confirmed
 pruning also clears the process-local artifact cache. People audit and import
 sessions are not conversations: the sidebar skips them and prunes cached copies
 without deleting them on the server, because they carry People evidence.
+Pruning a cached operational row preserves any focused approval or question the
+owner has opened, including when its selection races with the history refresh.
 Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.
@@ -649,3 +651,13 @@ in `EmailArchiveModelTests` and `EmailViewModelTests`, and verifies each case
 reported passing. It needs full Xcode but no simulator, database or live
 mailbox, and an unavailable Apple lane is skipped by pytest and remains an
 unpassed active gate in the gate report.
+
+## Approval feedback and deadline outcomes
+
+Approval cards retain the first stored resolution when an older pending read
+arrives. A resolution event, or a card disappearing from the pending list,
+refreshes the stored decision across devices. After a successful decision the
+client reads the run state, displaying a completed or failed outcome instead of
+leaving a stale wait. Reads cannot update a different selected conversation or
+connection. Historical cancellation events whose reason is `deadline` show the
+same actionable deadline explanation as new failed runs (ADR-0209).

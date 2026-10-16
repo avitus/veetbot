@@ -695,70 +695,70 @@
   kind: structural
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Corpus independence** — at least 400 independent scenarios span eight families, with disjoint development/holdout lineage; variants do not inflate the count."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[1]
 - id: gate.memory.general_relevance_before_limits
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Relevance before limits** — older stronger matches survive newer weak matches in both adapters, including historical selection and independent arm budgets."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[2]
 - id: gate.memory.general_visibility_parity
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Visibility parity** — every channel preserves principal, lifecycle, sensitivity, portability, explicit exclusions, corrections and erasure before result limits."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[3]
 - id: gate.memory.general_shared_recall
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Shared recall** — automatic and deliberate retrieval use the same search semantics and retain known-incident regressions without snapshot promotion."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[4]
 - id: gate.memory.general_query_planning_bounds
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Query planning bounds** — assisted search is causally blind to labels, bounded, cache-safe and cancellation-safe, with no new uncached fast-path model call."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[5]
 - id: gate.memory.general_semantic_index_lifecycle
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Semantic index lifecycle** — derived entries bind source/model revisions; correction, restriction, deletion and stale backfills cannot expose old content."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[6]
 - id: gate.memory.general_grounded_recovery
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Grounded recovery** — bounded source expansion preserves provenance, trust and deletion/correction fences without re-extraction or unauthorized history access."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[7]
 - id: gate.memory.general_stage_attribution
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Stage attribution** — observations distinguish formation, candidate, rank, context-budget and evidence-use failures, with deterministic mechanical scoring."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[8]
 - id: gate.memory.general_comparative_quality
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Comparative quality** — all incident, recall, implicit-use, category-regression and hard-boundary thresholds pass on the frozen held-out inputs and budgets."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[9]
 - id: gate.memory.general_operational_budget
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Operational budget** — numerical preregistered cost/latency ceilings, finite retries, shared deadlines, partial failure and cancellation are enforced."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[10]
 - id: gate.memory.general_frozen_compatibility
   milestone: 33
   kind: structural
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Frozen compatibility** — old control artifacts remain byte-identical and reproduce under their explicit legacy policy; new evidence is independently versioned."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[11]
 - id: gate.memory.general_activation_evidence
   milestone: 33
   kind: case
   spec: docs/plan/general-memory-recall.md#hard-gates
   statement: "**Activation evidence** — only matching complete passing evidence admits optional channels; rollback preserves originals and never enables unattended dreaming."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/general_memory_recall_m33.py::test_reviewed_release[12]

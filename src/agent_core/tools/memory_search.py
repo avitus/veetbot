@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+from copy import deepcopy
 from typing import Any
 
+from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
 from agent_core.domain.memory import (
     BeliefType,
     RecallMoment,
@@ -11,10 +14,19 @@ from agent_core.domain.memory import (
     RecallQuery,
     Sensitivity,
 )
-from agent_core.domain.messages import TextPart
+from agent_core.domain.messages import MemoryRecallUsage, TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
+from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
+from agent_core.domain.sessions import project_scope
+from agent_core.domain.tools import (
+    ToolExecutionContext,
+    ToolFailure,
+    ToolFailureKind,
+    ToolResult,
+    ToolSpec,
+)
 from agent_core.memory.retrieval import HybridMemoryRetriever, recalls_owned_resources
+from agent_core.ports.persistence import UnitOfWorkFactory
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -68,23 +80,74 @@ class MemorySearchTool:
         output_trust=TrustLevel.MEMORY,
     )
 
-    def __init__(self, retriever: HybridMemoryRetriever) -> None:
+    def __init__(
+        self,
+        retriever: HybridMemoryRetriever,
+        *,
+        model_planning: bool = False,
+        factory: UnitOfWorkFactory | None = None,
+        people_context: PeopleContextService | None = None,
+    ) -> None:
         self._retriever = retriever
+        self._model_planning = model_planning
+        self._factory = factory
+        self._people_context = people_context
+        if model_planning:
+            schema = deepcopy(INPUT_SCHEMA)
+            schema["required"] = ["text"]
+            kinds = schema["properties"].pop("belief_types")
+            kinds["description"] = "Optional relevance hints; never exclude other stored types."
+            schema["properties"]["type_hints"] = kinds
+            schema["properties"]["as_of"]["description"] = "Requested time when facts were true."
+            schema["properties"]["known_at"] = {
+                "type": "string",
+                "format": "date-time",
+                "description": "Requested cutoff for recorded evidence.",
+            }
+            self.spec = self.spec.model_copy(
+                update={
+                    "version": "2.1.0",
+                    "input_schema": schema,
+                    "description": (
+                        "Recall context before asking again. Omit scope/dates unless requested; "
+                        "scope defaults to this session. Type hints rank, never filter. Tenant, "
+                        "principal, sensitivity and local-memory scope limits apply."
+                    ),
+                }
+            )
 
-    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
-        query = RecallQuery.model_validate(
+    def query(
+        self,
+        arguments: dict[str, Any],
+        *,
+        tenant_id: str,
+        principal_id: str,
+        current_scope: str | None = None,
+    ) -> RecallQuery:
+        if self._model_planning and "belief_types" in arguments:
+            raise ValueError("Planned memory.search accepts type_hints, not hard belief_types")
+        scope = arguments.get("scope") if self._model_planning else arguments["scope"]
+        if scope is None:
+            scope = current_scope
+        if scope is None:
+            raise ValueError("Memory search requires a trusted session scope")
+        return RecallQuery.model_validate(
             {
-                "tenant_id": context.tenant_id,
-                "principal_id": context.principal.principal_id,
-                "current_scope": arguments["scope"],
+                "tenant_id": tenant_id,
+                "principal_id": principal_id,
+                "current_scope": scope,
                 "text": arguments["text"],
                 "candidate_selection": self._retriever.retrieval_profile.candidate_selection,
                 "subjects": arguments.get("subjects", []),
                 "include_owned_resources": recalls_owned_resources(
                     arguments["text"], deliberate=True
                 ),
-                "belief_types": arguments.get("belief_types", []),
+                "belief_types": [] if self._model_planning else arguments.get("belief_types", []),
+                "structured_belief_types": arguments.get("type_hints", [])
+                if self._model_planning
+                else [],
                 "as_of": arguments.get("as_of"),
+                "known_at": arguments.get("known_at") if self._model_planning else None,
                 "profile": RecallProfile.DEEP,
                 "budget_tokens": 2_000,
                 "max_items": 20,
@@ -92,16 +155,49 @@ class MemorySearchTool:
                 "sensitivity_ceiling": Sensitivity.RESTRICTED,
             }
         )
-        result = await self._retriever.recall(
-            query,
-            session_id=context.session_id,
-            run_id=context.run_id,
-            # The turn is the run: a belief this search surfaced is part of
-            # what the answer had in front of it, so usage feedback and the
-            # user's recall trace must both see it.
-            turn_id=context.run_id,
-            moment=RecallMoment.IN_TURN.value,
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        scope: str | None = None
+        if self._model_planning and "scope" not in arguments:
+            if self._factory is None:
+                raise ValueError("Memory search requires a trusted session scope")
+            async with self._factory() as uow:
+                session = await uow.sessions.get(context.session_id, context.principal)
+            scope = project_scope(session.metadata)
+        query = self.query(
+            arguments,
+            tenant_id=context.tenant_id,
+            principal_id=context.principal.principal_id,
+            current_scope=scope,
         )
+        try:
+            retriever = (
+                PeopleAwareMemoryRetriever(self._people_context, context.principal)
+                if self._model_planning and self._people_context is not None
+                else self._retriever
+            )
+            result = await retriever.recall(
+                query,
+                session_id=context.session_id,
+                run_id=context.run_id,
+                # The turn is the run: a belief this search surfaced is part of
+                # what the answer had in front of it, so usage feedback and the
+                # user's recall trace must both see it.
+                turn_id=context.run_id,
+                moment=RecallMoment.IN_TURN.value,
+            )
+        except RecallBudgetExceededError:
+            return ToolResult(
+                ok=False,
+                content=[TextPart(text=EXHAUSTED)],
+                failure=ToolFailure(
+                    kind=ToolFailureKind.PERMISSION,
+                    reason_code="memory_recall_budget_exhausted",
+                    detail=EXHAUSTED,
+                    retryable=False,
+                ),
+                output_trust=TrustLevel.MEMORY,
+            )
         structured = {
             "trace_id": str(result.trace_id),
             "belief_ids": [str(item.belief_id) for item in result.items],
@@ -112,4 +208,11 @@ class MemorySearchTool:
             content=[TextPart(text=result.rendered)],
             structured=structured,
             output_trust=TrustLevel.MEMORY,
+            memory_recall=MemoryRecallUsage(
+                trace_id=result.trace_id,
+                tokens=result.tokens,
+                items=len(result.items) + len(result.people),
+                content_sha256=hashlib.sha256(result.rendered.encode()).hexdigest(),
+                ranked_ids=None if result.stages is None else result.stages.ranked_ids[:20],
+            ),
         )

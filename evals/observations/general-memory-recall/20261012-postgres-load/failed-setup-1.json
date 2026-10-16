@@ -1,0 +1,17 @@
+{
+  "version": "recall-postgres-load@1",
+  "activation_evidence": false,
+  "registered_at": "2026-10-12T21:37:17.111341+00:00",
+  "implementation_sha256": "5085547f2a51b0d302b1e321b2bd05c8a2b961395600677559289ad92bf23d4c",
+  "measurement_sha256": "0b1997369ea5cacf3dc75c1fb50cd7107d9042adb204cbc41bb899b424cb9ff8",
+  "system": "Linux-6.1.158+-x86_64-with-glibc2.39",
+  "cpu": "x86_64",
+  "vector_dimensions": 384,
+  "provider_calls": 0,
+  "state": "failed",
+  "measurements": [],
+  "limitations": "Read-only retrieval measurements after bulk seeding an opted-in scratch clone.\n\nRepeated fabricated distractors and fixed 384-dimensional vectors isolate database\nand retriever load. This does not measure encoding, formation, answer quality,\nindexing throughput, deployment admission or production end-to-end latency.\n",
+  "error_class": "IntegrityError",
+  "wall_seconds": 2.5644988499998362,
+  "finished_at": "2026-10-12T21:37:19.678272+00:00"
+}

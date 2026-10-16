@@ -351,3 +351,97 @@ async def semantic_excluded_canonical(factory: UnitOfWorkFactory) -> None:
 
 
 SCENARIOS.extend([semantic_canonical, semantic_excluded_canonical])
+
+
+async def people_identity_precedes_dense_limit(
+    factory: UnitOfWorkFactory, *, historical: bool = False
+) -> None:
+    from agent_core.domain.people import Person, PersonMemoryLink
+
+    owner = principal()
+    common: dict[str, Any] = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    focal, other = UUID(int=9000), UUID(int=9001)
+    records = []
+    async with factory() as uow:
+        for key in (focal, other):
+            await uow.people.put(Person(id=key, display_name="Alex", **common), expected_revision=0)
+        for i in range(71):
+            record = await uow.memories.upsert_belief(
+                memory(belief_id=500 + i, statement=f"Alex preference {i}").model_copy(
+                    update={"store_position": i + 1}
+                )
+            )
+            records.append(record)
+            await uow.people.put(
+                PersonMemoryLink(
+                    id=UUID(int=9100 + i),
+                    person_id=focal if i == 0 else other,
+                    belief_id=record.id,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        # Identity attribution changes source versions. Index only after every
+        # link exists so this test measures filtering, not stale-vector refusal.
+        for i, record in enumerate(records):
+            source = await uow.semantic_memory.capture(owner, record.id, SPACE)
+            assert source is not None
+            if historical:
+                source = await uow.semantic_memory.capture_revision(owner, source.source, SPACE)
+                assert source is not None
+            assert await uow.semantic_memory.put(
+                owner, source, (0.8, 0.6, 0.0) if i == 0 else VECTOR
+            )
+        query = recall_query(text="Alex preference").model_copy(
+            update={
+                "people_scope": (focal,),
+                "sensitivity_ceiling": Sensitivity.SENSITIVE,
+                "as_of": NOW if historical else None,
+                "known_at": NOW if historical else None,
+            }
+        )
+        assert await uow.semantic_memory.search(
+            query.model_copy(update={"people_scope": None}), SPACE, VECTOR, limit=1
+        ), "The fixture must have current indexed candidates before testing identity selection"
+        hits = await uow.semantic_memory.search(query, SPACE, VECTOR, limit=1)
+        assert [hit.record.id for hit in hits] == [UUID(int=500)], (
+            "Closer vectors about another identity must not consume the focal person's limit"
+        )
+        sparse = await uow.memories.query(query)
+        assert [record.id for record in sparse] == [UUID(int=500)], (
+            "Sparse candidate selection must apply the same identity restriction before limits"
+        )
+        link = await uow.people.get(owner, UUID(int=9100), ceiling=Sensitivity.RESTRICTED)
+        assert isinstance(link, PersonMemoryLink)
+        changes: tuple[dict[str, Any], ...] = (
+            {"sensitivity": Sensitivity.RESTRICTED},
+            {"sensitivity": Sensitivity.SENSITIVE, "unresolved": True},
+        )
+        for revision, update in enumerate(changes, 2):
+            link = link.model_copy(update={**update, "revision": revision})
+            await uow.people.put(link, expected_revision=revision - 1)
+            for i, record in enumerate(records):
+                source = await uow.semantic_memory.capture(owner, record.id, SPACE)
+                assert source is not None
+                if historical:
+                    source = await uow.semantic_memory.capture_revision(owner, source.source, SPACE)
+                    assert source is not None
+                assert await uow.semantic_memory.put(
+                    owner, source, (0.8, 0.6, 0.0) if i == 0 else VECTOR
+                )
+            assert await uow.semantic_memory.search(query, SPACE, VECTOR, limit=1) == []
+            assert await uow.memories.query(query) == []
+        assert (
+            await uow.semantic_memory.search(
+                query.model_copy(update={"principal_id": "foreign"}), SPACE, VECTOR, limit=1
+            )
+            == []
+        )
+
+
+SCENARIOS.append(people_identity_precedes_dense_limit)

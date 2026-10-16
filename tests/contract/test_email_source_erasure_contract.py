@@ -1,6 +1,7 @@
 """The same selective erasure contract runs against memory and PostgreSQL."""
 
 import json
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -15,7 +16,8 @@ from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.persistence import UnitOfWorkFactory
-from tests.contract.memory_fixtures import recalled, trace
+from tests.contract.memory_fixtures import memory, recalled, trace
+from tests.contract.semantic_memory_cases import SPACE
 from tests.contract.support import NOW, principal, run, session
 from tests.integration.m2_support import memory_settings
 
@@ -87,6 +89,13 @@ async def assert_email_source_erasure(factory: UnitOfWorkFactory) -> None:
                 payload={"content": "Keep the owner's original note"},
             )
         )
+        retained = await uow.memories.upsert_belief(
+            memory(statement="Keep the owner's original note").model_copy(
+                update={"source_session_id": sid, "source_event_ids": [owner.sequence]}
+            )
+        )
+        retained_source = await uow.semantic_memory.capture(principal(), retained.id, SPACE)
+        assert retained_source is not None
         await uow.invocations.create(
             ToolInvocation(
                 id=iid,
@@ -297,6 +306,16 @@ async def assert_email_source_erasure(factory: UnitOfWorkFactory) -> None:
             "pending_artifacts": 1,
         }
     async with factory() as uow:
+        assert (
+            await uow.memories.get_at(
+                retained.id, principal(), known_at=datetime.max.replace(tzinfo=UTC)
+            )
+            == retained
+        )
+        historical_source = await uow.semantic_memory.capture_revision(
+            principal(), retained_source.source, SPACE
+        )
+        assert historical_source is not None and historical_source.record == retained
         events = await uow.events.list_after(sid, 0, principal())
         redacted = next(event for event in events if event.id == source.id)
         assert "Sensitive selected source" not in json.dumps(redacted.payload)

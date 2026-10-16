@@ -477,6 +477,17 @@ the gateway's own validator raises `ModelProtocolError` when it sees one.
    criterion "No API keys or raw authorization headers enter logs or events"
    is satisfied here or nowhere.
 
+When the shared credential-shape check refuses an event, its protocol failure
+also carries a closed detector-family label, normalized event kind and bounded
+schema field path. These labels reach the durable run failure; arbitrary mapping
+keys become placeholders. No matched bytes, snippets, hashes, provider bodies or
+reasoning text enter the diagnostic. Malformed diagnostic labels are discarded.
+Known provider continuation fields may be named in the path, but remain subject
+to the same whole-event check. A credential-shaped match alone does not establish
+actual credential leakage or identify opaque ciphertext as a false positive.
+The original event is not retained for diagnosis, no retry is added, and opaque
+continuation bytes are neither rewritten nor exempted by this diagnostic repair.
+
 ### Assembling a turn from a stream
 
 The gateway ships one assembler, shared by every adapter, that folds an event
@@ -1090,7 +1101,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:855` because it answers the
+`policy_version` at `policy-and-approvals.md:866` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1589,7 +1600,7 @@ renames are.
 
 `engineering-plan.md:722` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:1056-1085` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:1071-1100` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.

@@ -11,6 +11,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import AuthenticationError
+from agent_core.domain.failures import log_context
 from agent_core.model.attachments import UPLOAD_MAX_BYTES
 
 MAX_BODY_BYTES = 1024 * 1024
@@ -56,6 +57,17 @@ class RequestBoundaryMiddleware:
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         supplied = headers.get(b"x-request-id", b"").decode("ascii", errors="ignore")
         request_id = supplied if REQUEST_ID.fullmatch(supplied) else self._new_request_id()
+        with log_context(request_id=request_id):
+            await self._http(scope, receive, send, request_id, headers)
+
+    async def _http(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        request_id: str,
+        headers: dict[bytes, bytes],
+    ) -> None:
         state = scope.setdefault("state", {})
         state["request_id"] = request_id
 

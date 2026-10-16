@@ -12,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_core.adapters.persistence.memory_repositories import _memory
 from agent_core.adapters.persistence.reconsolidation_sources import append_change, lock_owner
 from agent_core.adapters.persistence.sqlalchemy_models import (
+    EventRow,
     MemoryRevisionRow,
     MemoryRow,
     PeopleHeadRow,
     PeopleLinkRow,
+    SessionRow,
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.reconsolidation_attribution import AttributionFootprint, attribution_targets
@@ -117,6 +119,31 @@ async def advance_attribution_revisions(
         )
         .table_valued("session_id", "event_sequence")
         .render_derived("attribution_events")
+    )
+    # Attribution can change before formation has produced a MemoryRow. Fence
+    # the exact admitted event independently of the reverse original index.
+    await session.execute(
+        update(EventRow)
+        .where(
+            ~EventRow.memory_source_blocked,
+            EventRow.session_id.in_(
+                select(SessionRow.id).where(
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+            ),
+            true()
+            if all_originals
+            else exists(
+                select(1)
+                .select_from(event_rows)
+                .where(
+                    EventRow.session_id == event_rows.c.session_id,
+                    EventRow.sequence == event_rows.c.event_sequence,
+                )
+            ),
+        )
+        .values(memory_source_blocked=True)
     )
     predicate = or_(
         MemoryRow.id

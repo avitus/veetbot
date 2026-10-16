@@ -24,6 +24,7 @@ from agent_core.domain.errors import (
     WorkerFencedError,
 )
 from agent_core.domain.events import NewEvent, ProcessEvent
+from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.messages import (
     AssistantMessage,
     ConversationItem,
@@ -35,6 +36,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.model_settings import ModelSettingsCatalog, chat_reasoning_effort
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.recall_execution import recall_phase
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     CancelReason,
@@ -70,6 +72,7 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.loop import (
     AddOpenQuestion,
     ModelEventCallback,
+    RecallPreparation,
     RunContext,
     ToolDispatch,
     _fit_tool_batch,
@@ -80,6 +83,7 @@ from agent_core.runtime.loop import (
     checkpoint,
     guard_tool_turn,
     prepare_browser_connection_question,
+    prepare_recall,
     recover_browser_failure,
     run_loop,
 )
@@ -312,6 +316,7 @@ class RunExecutor:
         seed_checkpoint: CheckpointSeeder,
         on_token: TokenCallback | None = None,
         on_token_complete: TokenCompleteCallback | None = None,
+        release_id: str | None = None,
         on_run_complete: RunCompleteCallback | None = None,
         on_child_suspension: ChildSuspensionCallback | None = None,
         on_model_event: ModelEventCallback | None = None,
@@ -325,8 +330,13 @@ class RunExecutor:
         identical_denial_threshold: int = 3,
         max_compactions_per_step: int = 2,
         model_settings: ModelSettingsCatalog | None = None,
+        prepare_recall: RecallPreparation | None = None,
+        recall_elapsed_time: Callable[[], float] | None = None,
     ) -> None:
+        self._prepare_recall = prepare_recall
+        self._recall_elapsed_time = recall_elapsed_time
         self._model_settings = model_settings
+        self._release_id = release_id
         self._principal = principal
         self._principals = principals
         self._uow_factory = uow_factory
@@ -587,10 +597,16 @@ class RunExecutor:
                     payload={"attempt": run.attempts + 1},
                 )
             )
-        try:
-            await self._execute_running(run, lease=None)
-        finally:
-            await self._complete_run(run.id, None)
+        with log_context(
+            run_id=str(run.id),
+            session_id=str(run.session_id),
+            tenant_id=run.tenant_id,
+            release_id=self._release_id,
+        ):
+            try:
+                await self._execute_running(run, lease=None)
+            finally:
+                await self._complete_run(run.id, None)
 
     async def execute_claimed(
         self,
@@ -600,10 +616,16 @@ class RunExecutor:
     ) -> None:
         """Resume a run that a durable worker claimed and already marked running."""
 
-        try:
-            await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
-        finally:
-            await self._complete_run(claimed.run.id, claimed.lease.lease_epoch)
+        with log_context(
+            run_id=str(claimed.run.id),
+            session_id=str(claimed.run.session_id),
+            tenant_id=claimed.run.tenant_id,
+            release_id=self._release_id,
+        ):
+            try:
+                await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
+            finally:
+                await self._complete_run(claimed.run.id, claimed.lease.lease_epoch)
 
     async def _complete_run(self, run_id: UUID, lease_epoch: int | None) -> None:
         try:
@@ -850,6 +872,8 @@ class RunExecutor:
                     else chat_reasoning_effort(chat_choice, resolved_model.reasoning_efforts)
                 ),
                 reasoning_summary=not typed and chat_choice is not None,
+                prepare_recall=self._prepare_recall,
+                recall_elapsed_time=self._recall_elapsed_time,
             )
             if pin_created:
                 await checkpoint(context, "provider_pinned")
@@ -989,11 +1013,17 @@ class RunExecutor:
             )
         except Exception as exc:
             # Validation errors can embed private model inputs in their traceback.
-            logger.error(
+            details = log_failure(
+                logger,
                 "run_execution_failed",
-                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+                exc,
+                phase="run",
+                diagnostic_id=str(self._ids.new_id()),
+                run_id=str(run.id),
             )
             outcome = self._internal_failure(run, exc)
+            assert outcome.failure is not None
+            outcome.failure.details.update(details)
         try:
             await finalize(context or finalization, outcome)
         except WorkerFencedError:
@@ -1142,6 +1172,7 @@ class RunExecutor:
             if missing > 0:
                 await context.budgets.record_tool_usage(context.run, missing, step=step)
         unrecorded_batch: int | None = None
+        pending_batch_budget: dict[str, int] | None = None
         if any(isinstance(item, (AssistantMessage, ToolCallItem)) for item in adopted):
             # The log holds a turn the checkpoint never saw. Its own batch
             # returned before that turn, whose continuation was never
@@ -1194,6 +1225,7 @@ class RunExecutor:
             # later one, so the batch keeps the step its checkpoint recorded.
             proposed_at = restored.budget_state.get("step_count")
             step_number = proposed_at if isinstance(proposed_at, int) else context.run.step_count
+            pending_batch_budget = {"step_count": step_number, "tool_call_count": baseline}
         restored.pending_tool_calls = [call.model_dump(mode="json") for call in calls]
         step = Step(
             run_id=context.run.id,
@@ -1203,16 +1235,18 @@ class RunExecutor:
         # The queued generation is revalidating the persisted calls. Any approval
         # raised below becomes the sole pending suspension for the next generation.
         restored.pending_approval_ids = []
-        results = await context.dispatch_tools(
-            run=context.run,
-            checkpoint=restored,
-            tool_calls=calls,
-            principal=context.principal,
-            step=step,
-            agent=context.agent,
-            token=context.token,
-            lease=context.lease,
-        )
+        await prepare_recall(context, pending_batch_budget=pending_batch_budget)
+        with recall_phase(context.recall_permit):
+            results = await context.dispatch_tools(
+                run=context.run,
+                checkpoint=restored,
+                tool_calls=calls,
+                principal=context.principal,
+                step=step,
+                agent=context.agent,
+                token=context.token,
+                lease=context.lease,
+            )
         step.tool_call_count = len(results)
         if unrecorded_batch is not None:
             await context.budgets.record_tool_usage(context.run, unrecorded_batch, step=step)
@@ -1237,7 +1271,7 @@ class RunExecutor:
             failure=RunFailure(
                 reason=FailureReason.INTERNAL_ERROR,
                 error_class=type(exc).__name__,
-                message="an unexpected internal error ended the run",
+                message="An unexpected internal error ended the run",
                 step_number=run.step_count or None,
                 occurred_at=self._clock.now(),
             ),
@@ -1253,6 +1287,24 @@ def _message_text(message: AssistantMessage | None) -> str | None:
 async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
     """Commit one terminal transaction, falling back to FAILED on local errors."""
 
+    if (
+        outcome.kind is OutcomeKind.CANCELLED
+        and context.token.reason is CancelReason.DEADLINE
+        and context.run.parent_run_id is None
+    ):
+        outcome = RunOutcome(
+            kind=OutcomeKind.FAILED,
+            failure=RunFailure(
+                reason=FailureReason.DEADLINE_EXCEEDED,
+                error_class="RunDeadlineExceeded",
+                message=(
+                    "The run ran out of time before producing an answer. "
+                    "Retry the request to continue."
+                ),
+                step_number=context.run.step_count or None,
+                occurred_at=context.clock.now(),
+            ),
+        )
     original_checkpoint = context.checkpoint.model_copy(deep=True)
     try:
         await _finalize_once(context, outcome)
@@ -1260,14 +1312,19 @@ async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutco
         raise
     except Exception as exc:
         context.checkpoint = original_checkpoint
-        logger.exception(
+        details = log_failure(
+            logger,
             "run_finalization_failed",
-            extra={"run_id": str(context.run.id), "error_class": type(exc).__name__},
+            exc,
+            phase="finalization",
+            diagnostic_id=str(context.ids.new_id()),
+            run_id=str(context.run.id),
         )
         failure = RunFailure(
             reason=FailureReason.INTERNAL_ERROR,
             error_class=type(exc).__name__,
-            message="an unexpected finalization error ended the run",
+            message="An unexpected finalization error ended the run",
+            details=details,
             step_number=context.run.step_count or None,
             occurred_at=context.clock.now(),
         )

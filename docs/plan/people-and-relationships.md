@@ -447,6 +447,22 @@ Provider work stays outside database transactions. Invalid candidates fail
 individually; source-wide structural failures take the existing audited fallback
 and bounded retry path. Corrections win races with imports and background work.
 
+Formation@11 accepts a named statement subject from an exact source-backed subject
+mention and the candidate's own evidence quote. It preserves that name in the fact;
+it does not rewrite another person's claim as an owner claim. The existing hazard,
+hedging, vacuity and transient-event checks still apply. A shared person subject
+does not make two relationship or preference claims equivalent: People candidates
+use whole-statement comparison before deduplication. Formation@9 keeps its existing
+owner-subject rule. This repairs dropped named facts under the existing formation
+contract; it neither admits new identities nor re-extracts old sources.
+
+For these exact named subjects, an explicit “no longer” predicate is a correction
+even when the verb is in third person. It must remain a negated retraction, never
+a new positive assertion. The frozen owner-only policy is unchanged. Invalid
+interaction proposals are rejected individually without discarding independently
+valid atomic claims; original proposal counts still enforce every segment bound,
+and malformed claim/coverage structures still refuse the response.
+
 ### Versioning, cost, and capacity
 
 Do not modify evaluated `formation@9`, `formation@10`, or `email-semantic@1`
@@ -501,6 +517,12 @@ labels. It cannot combine both people's private contexts into one speculative
 profile. A selected email correspondent supplies task identity but never
 rewrites verified reply recipients.
 
+[ADR-0208](../adr/0208-grounded-relationship-discovery.md) connects relevance-based
+role discovery to existing linked facts: bounded eligible relationship beliefs
+select only an unambiguous visible direct owner relationship. No role dictionary
+or inferred graph path is used. Name ambiguity never falls back to role selection.
+Automatic and planned deliberate recall share this People context mechanism.
+
 Disconnected source accounts make live source navigation unavailable; they do
 not automatically erase independently permitted shared memories. Explicit source
 exclusion/clear-learning decisions remove derived eligibility. Distinguish those
@@ -523,6 +545,13 @@ entire directory in Region A. Cache keys include owner, requested ceiling,
 person/identity revisions, source exclusions, query/time filters, and policy
 versions. A deletion invalidates caches and blocks future injection; previously
 delivered text follows existing session/source erasure semantics.
+
+Retained deliberate People evidence binds to the People and memory revisions
+captured under the owner fence. Before another model request, bounded dependency
+reads check those revisions, visibility and temporal validity, including role
+selection evidence omitted from the rendered budget. Any owner mutation
+conservatively invalidates the receipt; legacy receipts without those dependencies
+remain withheld. These checks add no new search or model request.
 
 ### Agent tools
 

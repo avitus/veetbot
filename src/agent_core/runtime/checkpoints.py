@@ -6,7 +6,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.context import TaskStatus, WorkingState
 from agent_core.domain.events import NewEvent
 from agent_core.domain.persistence import WorkerLease
-from agent_core.domain.runs import Run, RunCheckpoint
+from agent_core.domain.runs import RecallWorkBudget, Run, RunCheckpoint
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, ScheduleUnitOfWork
 
@@ -24,6 +24,7 @@ class DurableCheckpointSeeder:
         principal: Principal,
     ) -> RunCheckpoint:
         history = await uow.history.catch_up(run.session_id)
+        event_head = history.through_sequence
         through = history.through_sequence if through_sequence is None else through_sequence
         history = await uow.history.read(run.session_id, through)
         state = WorkingState()
@@ -51,12 +52,25 @@ class DurableCheckpointSeeder:
         working_container: dict[str, object] = {}
         if carried != WorkingState():
             working_container["context"] = carried.model_dump(mode="json")
+        reservation = await uow.events.latest_before(
+            run.session_id,
+            event_head + 1,
+            "run.checkpointed",
+            principal,
+            run_id=run.id,
+        )
+        recall_work = (
+            None
+            if reservation is None or reservation.payload.get("recall_work") is None
+            else RecallWorkBudget.model_validate(reservation.payload["recall_work"])
+        )
         checkpoint = RunCheckpoint(
             run_id=run.id,
             version=1,
             status=run.status,
             conversation=[item.model_copy(deep=True) for item in history.items],
             working_state=working_container,
+            recall_work=recall_work,
             budget_state={
                 "step_count": run.step_count,
                 "model_call_count": run.model_call_count,
@@ -71,7 +85,14 @@ class DurableCheckpointSeeder:
                 run_id=run.id,
                 event_type="run.checkpointed",
                 actor_type="runtime" if lease is not None else "application",
-                payload={"version": 1, "trigger": "seed", "full": True},
+                payload={
+                    "version": 1,
+                    "trigger": "seed",
+                    "full": True,
+                    "recall_work": None
+                    if recall_work is None
+                    else recall_work.model_dump(mode="json"),
+                },
             ),
             lease=lease,
         )

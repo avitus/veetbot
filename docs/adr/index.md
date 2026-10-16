@@ -212,7 +212,36 @@ implementation without one.
 
 - [ADR-0187 — Semantic index production composition (Accepted mechanism; activation gated)](0187-semantic-index-production-composition.md)
 
+- [ADR-0188 — Local semantic embeddings (Accepted mechanism; activation gated)](0188-local-semantic-embeddings.md)
+- [ADR-0189 — Governed memory source recovery (Implementation in progress; activation gated)](0189-governed-memory-source-recovery.md)
+
+- [ADR-0190 — Durable run recall preparation budget (Implementation in progress; activation gated)](0190-run-recall-work-budget.md)
+
+- [ADR-0191: Separately admitted relevance reranking](0191-experimental-relevance-reranking.md)
+
+- [ADR-0192: Distinguish recovered source evidence from formed facts](0192-recovered-source-evaluation.md)
+
+- [ADR-0193: Bounded task-context query planning](0193-bounded-task-context-query.md)
+- [ADR-0194: Paired formation response banks](0194-paired-formation-response-banks.md)
+- [ADR-0195: Shared recall context budget](0195-shared-recall-context-budget.md)
+- [ADR-0196: Run recall execution budget](0196-run-recall-execution-budget.md)
+- [ADR-0197: People semantic query narrowing](0197-people-semantic-query-narrowing.md)
+- [ADR-0198: Planned recall type hints](0198-planned-recall-type-hints.md)
+- [ADR-0199: Recall evidence release binding](0199-recall-evidence-release-binding.md)
+
+- [ADR-0200: Historical semantic revisions](0200-historical-semantic-revisions.md)
+
+- [ADR-0201: Foundation signing evidence](0201-foundation-signing-evidence.md)
+
+- [ADR-0202: Forward-only dreaming](0202-forward-only-dreaming.md)
+
+- [ADR-0205: Safe failure diagnostics and bounded recovery](0205-reliability-diagnostics-and-recovery.md)
 - [ADR-0203: Email junk first pass](0203-email-junk-first-pass.md)
 - [ADR-0204: Owner-reviewed email junk pilot](0204-owner-reviewed-email-junk-pilot.md)
 
-- [ADR-0202: Forward-only dreaming](0202-forward-only-dreaming.md)
+- [ADR-0206 — Default deliberate memory search to the trusted session](0206-session-default-memory-search.md)
+
+- [ADR-0207: Bounded confirmation concurrency](0207-bounded-confirmation-concurrency.md)
+- [ADR-0208: Grounded relationship discovery](0208-grounded-relationship-discovery.md)
+
+- [ADR-0209: Uninterrupted browser research and visible deadlines](0209-uninterrupted-browser-research.md)
