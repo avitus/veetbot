@@ -1426,6 +1426,7 @@ def _hosted(**extra: str) -> dict[str, str]:
 
 
 def test_browser_research_permission_defaults_on_and_can_be_disabled() -> None:
+    """The deployment flag restores approvals when disabled and rejects ambiguous values."""
     assert load_settings(_hosted()).browser_research_enabled is True
     assert load_settings(_hosted(BROWSER_RESEARCH_ENABLED="0")).browser_research_enabled is False
     with pytest.raises(ConfigurationError, match="BROWSER_RESEARCH_ENABLED"):

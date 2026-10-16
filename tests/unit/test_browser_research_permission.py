@@ -23,6 +23,7 @@ from tests.scheduled_run_support import submit_scheduled_seed
 async def test_owner_browsing_finishes_without_an_approval(
     tmp_path: Path, scheduled: bool, element: int, value: str | None
 ) -> None:
+    """Owner chat and scheduler seeds share permission for ordinary profile interactions."""
     async with pipeline(
         tmp_path, [navigate(), act(1, element, value=value), FINAL], research=True
     ) as harness:
@@ -46,6 +47,7 @@ async def test_owner_browsing_finishes_without_an_approval(
 
 
 async def test_named_consequences_still_require_approval(tmp_path: Path) -> None:
+    """Research permission cannot authorize a visibly destructive control."""
     async with pipeline(tmp_path, [navigate(), act(1, DELETE), FINAL], research=True) as harness:
         run_id = await harness.submit("Research the account.")
         assert (await harness.settled(run_id)).status is RunStatus.WAITING_FOR_APPROVAL

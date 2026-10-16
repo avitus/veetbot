@@ -157,6 +157,7 @@ class LeasedService:
     async def click(
         self, page: dict[str, Any], name: str, *, sequence: int, constrained: bool
     ) -> httpx.Response:
+        """Send a constrained click through the real isolated service lease."""
         element = next(item for item in page["elements"] if item["name"] == name)
         body: dict[str, Any] = {
             "lease_ref": self.lease_ref,
@@ -276,6 +277,7 @@ def _assert_refused(response: httpx.Response) -> None:
 async def test_the_live_page_decides_whether_a_task_grant_covers_an_act(
     tmp_path: Path, grant_kind: str
 ) -> None:
+    """Both grant and research authority must reject changed live controls before effects."""
     require_real_browser()
     lessons = LessonSite()
     async with (

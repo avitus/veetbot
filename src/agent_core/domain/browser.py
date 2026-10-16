@@ -868,6 +868,7 @@ class BrowserDispatchConstraint(BaseModel):
 
     @model_validator(mode="after")
     def fields_match_grant_kind(self) -> BrowserDispatchConstraint:
+        """Reject dispatch constraints whose fields widen the named authorization kind."""
         if self.grant_kind == "follow":
             valid = (
                 self.origins == ("https://x.com",)

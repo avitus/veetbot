@@ -534,6 +534,7 @@ def _origin_of(url: str) -> str | None:
 
 
 def _target_inside(target: BrowserTargetFacts, path_prefix: str | None) -> bool:
+    """Check a target against the origin fence and optional task-path restriction."""
     return (
         target.same_origin
         and (path_prefix is None or target.first_segment == path_prefix[1:])

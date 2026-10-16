@@ -52,6 +52,7 @@ class BrowserResearchAuthorizer:
         policy: PolicyEngine,
         now: Callable[[], datetime],
     ) -> None:
+        """Bind trusted profile, policy, snapshot and clock dependencies for each authorization."""
         self._provider = provider
         self._uow_factory = uow_factory
         self._policy = policy
@@ -68,6 +69,7 @@ class BrowserResearchAuthorizer:
         action_deadline: datetime,
         turn: AuthorizationTurn | None = None,
     ) -> StandingAuthorization:
+        """Authorize an ordinary owner-origin action only with current profile and page evidence."""
         refused = StandingAuthorization(allowed=False, reason_code="browser.research.not_covered")
         if not (
             action.kind is ActionKind.TOOL_CALL

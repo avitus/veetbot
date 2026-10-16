@@ -1004,6 +1004,7 @@ class ToolPipeline:
                         invocation,
                         decision,
                         lease,
+                        token=token,
                         turn=_active_turn_facts(checkpoint),
                         standing=standing_authorization,
                     )
@@ -1738,12 +1739,14 @@ class ToolPipeline:
         decision: PolicyDecision,
         lease: WorkerLease | None,
         *,
+        token: CancellationToken,
         turn: AuthorizationTurn | None = None,
         standing: StandingAuthorization | None = None,
     ) -> ApprovalRequest:
+        """Persist a decision card only while the run can still accept a response."""
         if invocation.normalized_arguments is None or invocation.normalized_arguments_hash is None:
             raise ConflictError("approval action has no normalized arguments")
-        now = self._clock.now()
+        token.raise_if_cancelled()
         action_summary = f"Run {tool.spec.name} with validated arguments."
         approval_arguments = dict(invocation.normalized_arguments)
         offer: BrowserTaskGrantOffer | None = None
@@ -1781,6 +1784,8 @@ class ToolPipeline:
             action_summary = f"Run {tool.spec.name} with validated arguments."
             approval_arguments = dict(invocation.normalized_arguments)
             offer = None
+        token.raise_if_cancelled()
+        now = self._clock.now()
         approval = ApprovalRequest(
             id=self._ids.new_id(),
             tenant_id=run.tenant_id,

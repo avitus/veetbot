@@ -498,6 +498,7 @@ async def pipeline(
     storage: Literal["memory", "postgres"] = "memory",
     research: bool = False,
 ) -> AsyncIterator[Pipeline]:
+    """Compose an isolated owner-profile run with explicitly selected research permission."""
     settings = settings or task_grant_settings()
     settings = replace(settings, browser_research_enabled=research)
     clock = FixedClock(NOW) if storage == "memory" else HeldClock(NOW)
@@ -1127,6 +1128,7 @@ async def test_allowed_task_on_postgresql(tmp_path: Path) -> None:
 
 
 async def test_scheduled_research_on_postgresql(tmp_path: Path) -> None:
+    """Persist scheduler provenance, completion and the research receipt without an approval."""
     from tests.scheduled_run_support import submit_scheduled_seed
 
     database_url = disposable_database_url()

@@ -56,6 +56,7 @@ from tests.unit.test_browser_task_grant_authorizer import (
     ],
 )
 async def test_research_permission_boundaries(problem: str | None) -> None:
+    """Allow trusted ordinary controls while each missing authority or live fact fails closed."""
     page = snapshot()
     profile_update: dict[str, Any] = {}
     metadata = None
