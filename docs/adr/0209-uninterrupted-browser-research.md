@@ -38,9 +38,11 @@ revision fences, effect accounting and uncertain-write non-replay remain intact.
 
 Deadline-bound runs with synthesis reserves begin a tool-free answer phase with
 the last fifth of their time remaining, capped at sixty seconds. This takes time
-from the existing budget, never extends it. If the deadline still expires, the
-terminal outcome is FAILED with deadline_exceeded and an actionable explanation,
-including when a worker resumes after an approval. Approval expiry cannot exceed
+from the existing budget, never extends it. If a top-level run's deadline still
+expires, its terminal outcome is FAILED with deadline_exceeded and an actionable
+explanation, including when a worker resumes after an approval. Child runs retain
+their cancellation outcome so the existing join reports a tool error to the
+parent. Approval expiry cannot exceed
 the run deadline, so maintenance can end an abandoned wait promptly.
 
 Native approval state is monotonic: a delayed pending read cannot replace a
