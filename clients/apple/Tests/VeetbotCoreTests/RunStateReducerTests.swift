@@ -6,6 +6,38 @@ import Testing
 @MainActor
 @Suite struct RunStateReducerTests {
     @Test
+    func aStalePendingReadCannotUndoAnApproval() throws {
+        let reducer = RunStateReducer()
+        let pending = try WireModelsTests.contractApproval("offered")
+        var object = try WireModelsTests.contractExample("approval_views", "offered", key: "approval")
+        object["status"] = "APPROVED"
+        object["decision"] = "approve_once"
+        let resolved = try JSONDecoder.server.decode(
+            ApprovalView.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+        reducer.mergeApproval(resolved)
+        reducer.mergeApproval(pending)
+        #expect(reducer.approvals.first?.status == .approved)
+        #expect(!reducer.needsApprovalIDs.contains(pending.id))
+    }
+
+    @Test
+    func historicalDeadlineCancellationExplainsWhyThereIsNoAnswer() throws {
+        let reducer = RunStateReducer()
+        let run = try JSONDecoder.server.decode(RunView.self, from: Data(
+            #"{"id":"00000000-0000-0000-0000-000000000002","session_id":"00000000-0000-0000-0000-000000000001","parent_run_id":null,"status":"CANCELLED","step_count":1,"model_call_count":2,"tool_call_count":3,"usage":{"input_tokens":10,"output_tokens":4,"cost_usd":"0.01"},"limits":{"max_steps":12,"deadline_at":null,"max_cost_usd":"1.00"},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-12T12:00:00Z","updated_at":"2026-08-12T12:00:01Z"}"#.utf8
+        ))
+        reducer.seed(run: run)
+        reducer.reduce(SSEFrame(id: 1, event: "run.cancelled", data: ["reason": .string("deadline")]))
+        // A later point read of an old record has no failure field; preserve
+        // the explanation reconstructed from its terminal event.
+        reducer.seed(run: run)
+        #expect(reducer.runStatus == .cancelled)
+        #expect(reducer.failure?.reason == .deadlineExceeded)
+        #expect(reducer.failure?.userFacingMessage.isEmpty == false)
+    }
+
+    @Test
     func testBrowserActivityKeepsUncertainOutcomeAheadOfAnInnerReadFailure() {
         let reducer = RunStateReducer()
         func phase(_ failure: String) -> JSONValue {

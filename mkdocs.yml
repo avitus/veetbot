@@ -339,4 +339,5 @@ nav:
       - ADR-0171 Owner-confirmed real-data fixtures for offline memory evaluation: adr/0171-owner-confirmed-offline-memory-fixtures.md
       - ADR-0203 Email junk first pass: adr/0203-email-junk-first-pass.md
       - ADR-0204 Owner-reviewed email junk pilot (Proposed): adr/0204-owner-reviewed-email-junk-pilot.md
+      - ADR-0209 Uninterrupted browser research: adr/0209-uninterrupted-browser-research.md
   - Changelog: changelog.md

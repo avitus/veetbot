@@ -1790,7 +1790,10 @@ class ToolPipeline:
             policy_reason=decision.reason_code,
             policy_decision=decision,
             policy_version=decision.policy_version,
-            expires_at=now + timedelta(seconds=self._approval_expiry_seconds[tool.spec.risk]),
+            expires_at=min(
+                now + timedelta(seconds=self._approval_expiry_seconds[tool.spec.risk]),
+                run.deadline_at or datetime.max.replace(tzinfo=now.tzinfo),
+            ),
             created_at=now,
             task_grant_offer=offer,
             task_grant_not_covered=not_covered,

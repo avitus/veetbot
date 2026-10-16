@@ -533,9 +533,11 @@ def _origin_of(url: str) -> str | None:
         return None
 
 
-def _target_inside(target: BrowserTargetFacts, path_prefix: str) -> bool:
+def _target_inside(target: BrowserTargetFacts, path_prefix: str | None) -> bool:
     return (
-        target.same_origin and target.first_segment == path_prefix[1:] and not target.sensitive_path
+        target.same_origin
+        and (path_prefix is None or target.first_segment == path_prefix[1:])
+        and not target.sensitive_path
     )
 
 
@@ -548,10 +550,13 @@ def task_grant_coverage(
     facts: BrowserElementFacts | None,
     option_texts: Sequence[str],
     origin: str,
-    path_prefix: str,
+    path_prefix: str | None,
     disabled: bool,
 ) -> BrowserCoverage:
     """Whether a task grant for ``origin`` and ``path_prefix`` covers ``action``.
+
+    Research authorization uses ``None`` for the prefix, retaining the same
+    origin, sensitive-path and consequence exclusions across ordinary pages.
 
     Rules run in the design's order and the first that fails names the reason.
     The worker and the isolated runtime run the same rules. ``disabled`` is
@@ -570,7 +575,7 @@ def task_grant_coverage(
     if _origin_of(page_url) != origin:
         return _refused(consequence, "outside_origin")
     path = urlsplit(page_url).path
-    if not path_is_within_prefix(path, path_prefix):
+    if path_prefix is not None and not path_is_within_prefix(path, path_prefix):
         return _refused(consequence, "outside_prefix")
     if path_is_sensitive(path):
         return _refused(consequence, "sensitive_path")
@@ -694,7 +699,9 @@ def dispatch_constraint_coverage(
             consequence=C.PUBLICATION,
             reason=None if covered else "different_follow_target",
         )
-    if constraint.grant_kind == "task" and constraint.path_prefix is not None:
+    if constraint.grant_kind == "research" or (
+        constraint.grant_kind == "task" and constraint.path_prefix is not None
+    ):
         return task_grant_coverage(
             action=action,
             page_url=page_url,

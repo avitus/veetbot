@@ -23,7 +23,7 @@ import hashlib
 import itertools
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -496,7 +496,10 @@ async def pipeline(
     *,
     settings: Settings | None = None,
     storage: Literal["memory", "postgres"] = "memory",
+    research: bool = False,
 ) -> AsyncIterator[Pipeline]:
+    settings = settings or task_grant_settings()
+    settings = replace(settings, browser_research_enabled=research)
     clock = FixedClock(NOW) if storage == "memory" else HeldClock(NOW)
     owner = contract_principal().model_copy(update={"scopes": set(PLATFORM_SCOPES)})
     store = FilesystemEncryptedProfileStore(
@@ -1121,6 +1124,32 @@ async def test_allowed_task_on_postgresql(tmp_path: Path) -> None:
 
     assert [payload["authorization_use"] for payload in authorizations] == [1, 2]
     assert grant.actions_used == 2
+
+
+async def test_scheduled_research_on_postgresql(tmp_path: Path) -> None:
+    from tests.scheduled_run_support import submit_scheduled_seed
+
+    database_url = disposable_database_url()
+    await truncate_application_tables()
+    settings = task_grant_settings(DATABASE_URL=database_url)
+    async with pipeline(
+        tmp_path,
+        [navigate(), act(1, CONTINUE), FINAL],
+        settings=settings,
+        storage="postgres",
+        research=True,
+    ) as harness:
+        session_id = await harness.scheduled_session()
+        run_id = await submit_scheduled_seed(
+            harness.composition, session_id, "Research an account to recommend."
+        )
+        await harness.drain()
+        result = await harness.settled(run_id)
+        assert result.status is RunStatus.COMPLETED
+        assert result.final_message == FINAL.text
+        assert await harness.composition.approvals.list_pending(run_id=run_id) == []
+        [authorization] = await harness.authorizations(run_id, session_id)
+        assert authorization["authorization_kind"] == "browser_research"
 
 
 async def test_saved_site_makes_an_offer_without_rebuilding_the_worker(tmp_path: Path) -> None:

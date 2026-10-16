@@ -656,7 +656,17 @@ first and are unaffected, so a credential-shaped body is still refused before
 anything reaches the device. Two entries for one tool name, like a missing
 side-effect row, are unclassifiable and deny.
 
-ADR-0168 adds `browser.act` with the `bounded_browser_scroll` condition, allowing
+ADR-0209 adds an application authorization when `BROWSER_RESEARCH_ENABLED=1`
+(the default) and the bounded-scroll rule is present. The pure evaluator is
+unchanged: other actions remain
+`REQUIRE_APPROVAL` until the application verifies owner/scheduler provenance,
+the selected profile, current policy and observation, and supplies a live-page
+constraint. The isolated browser repeats ordinary-interaction checks before
+sending an effect. Named consequences, untrusted inputs and denials remain
+excluded. The authorization receipt is independent of compiled policy, like
+existing standing grants; setting the flag to `0` restores ordinary approvals.
+
+ADR-0168's `bounded_browser_scroll` condition remains available, allowing
 only a validated bounded scroll through the isolated browser provider and
 requiring approval otherwise. It checks the exact tool name, action kind,
 conservative write classification, bounds and closed argument fields; optional
@@ -680,7 +690,8 @@ it admits only the origins the trust table below marks as able to authorize
 (`PLATFORM`, `TRUSTED_CONFIGURATION`, `USER`), so `MEMORY` and `KNOWLEDGE`
 escalate exactly as `EXTERNAL_UNTRUSTED` does.
 
-The successful `bounded_browser_scroll` condition has its own narrow exception:
+A successful bounded-scroll check under either browser condition has its own
+narrow exception:
 page-derived references do not re-escalate that explicitly permitted gesture.
 `ProposedAction.newest_user_trust` is an optional trusted pipeline fact from the
 newest user message, independent of tool-result taint. Only for this matched
@@ -957,7 +968,9 @@ guarded update identical in shape to the one above, marks the tool invocation
 `DENIED`, emits `approval.resolved` with an expiry resolution — the plan
 specifies this event, so no new event type is introduced — and completes or
 fails the run deterministically. Default expiry by risk: 24 hours for `LOW` and
-`MEDIUM`, 4 hours for `HIGH`, 1 hour for `CRITICAL`. An expired approval is
+`MEDIUM`, 4 hours for `HIGH`, 1 hour for `CRITICAL`, capped by the run deadline
+when present (ADR-0209). Resumption after that deadline fails visibly with
+`deadline_exceeded`. An expired approval is
 never auto-approved, in any profile, at any risk level.
 
 **Cancellation** of a `QUEUED` or `WAITING_FOR_APPROVAL` run transitions

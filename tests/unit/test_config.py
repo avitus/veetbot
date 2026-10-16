@@ -1425,6 +1425,13 @@ def _hosted(**extra: str) -> dict[str, str]:
     }
 
 
+def test_browser_research_permission_defaults_on_and_can_be_disabled() -> None:
+    assert load_settings(_hosted()).browser_research_enabled is True
+    assert load_settings(_hosted(BROWSER_RESEARCH_ENABLED="0")).browser_research_enabled is False
+    with pytest.raises(ConfigurationError, match="BROWSER_RESEARCH_ENABLED"):
+        load_settings(_hosted(BROWSER_RESEARCH_ENABLED="yes"))
+
+
 def test_task_grant_scopes_parse_and_refuse() -> None:
     """ADR-0129 D2/D20: exact origin-and-segment scopes behind a hosted-only flag."""
 

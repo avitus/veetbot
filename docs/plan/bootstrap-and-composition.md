@@ -1652,3 +1652,15 @@ Enabling it requires local semantic query authority and the same release-bound
 reviewed reader. It supplies bounded private, restricted, current-project source
 quotes under [ADR-0189](../adr/0189-governed-memory-source-recovery.md). An absent
 runtime binding or withdrawn evidence leaves ordinary fact recall available.
+
+## ADR-0209 browser research composition
+
+`BROWSER_RESEARCH_ENABLED` defaults to `1` and accepts only `0` or `1`. With a
+browser provider and the default bounded-scroll policy rule (allow scroll,
+require approval otherwise), composition inserts the research authorizer after
+specific follow consent and before standing/task grants. It requires a trusted
+owner or scheduler seed, an owner-selected READY profile and fresh observation,
+and supplies a live dispatch constraint. Setting `0` omits it. Custom
+unconditional approval and deny rules do not compose this permission. No
+versioned policy rule or memory evaluation tuple changes. The detailed contract
+is [browser-automation.md](browser-automation.md).

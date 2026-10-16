@@ -275,9 +275,12 @@ public final class RunStateReducer: ObservableObject {
     }
 
     public func seed(run: RunView) {
+        let historicalDeadline = activeRunID == run.id && runStatus == .cancelled
+            && run.status == .cancelled && failure?.reason == .deadlineExceeded
+            && run.failure == nil
         activeRunID = run.id
         runStatus = run.status
-        failure = run.failure
+        if !historicalDeadline { failure = run.failure }
         if run.status != .waitingForUser { clarifyingQuestion = nil }
     }
 
@@ -380,6 +383,13 @@ public final class RunStateReducer: ObservableObject {
             failure = frame.data["failure"].flatMap { decode(RunFailureView.self, from: $0) }
             transitionToTerminal(.failed)
         case "run.cancelled":
+            if frame.data["reason"]?.stringValue == "deadline" {
+                failure = decode(RunFailureView.self, from: .object([
+                    "reason": .string("deadline_exceeded"),
+                    "message": .string("The run ran out of time before producing an answer. Retry the request to continue."),
+                    "occurred_at": .string(ISO8601DateFormatter().string(from: Date())),
+                ]))
+            }
             transitionToTerminal(.cancelled)
         default:
             break
@@ -388,6 +398,9 @@ public final class RunStateReducer: ObservableObject {
 
     public func mergeApproval(_ approval: ApprovalView) {
         if let index = approvals.firstIndex(where: { $0.id == approval.id }) {
+            // First resolution wins on the server. An older in-flight read must
+            // not restore the controls after the owner has already decided.
+            if !approvals[index].status.isPending && approval.status.isPending { return }
             approvals[index] = approval
         } else {
             approvals.append(approval)
