@@ -216,3 +216,5 @@ implementation without one.
 - [ADR-0204: Owner-reviewed email junk pilot](0204-owner-reviewed-email-junk-pilot.md)
 
 - [ADR-0202: Forward-only dreaming](0202-forward-only-dreaming.md)
+
+- [ADR-0209: Uninterrupted browser research and visible deadlines](0209-uninterrupted-browser-research.md)

@@ -413,6 +413,7 @@ def apply_tool_evidence(working_state: dict[str, Any], calls: Sequence[ToolCallI
 def _synthesis_reserve_dimension(
     run: Run,
     *,
+    now: datetime | None = None,
     step_in_progress: bool = False,
     before_model_attempt: bool = False,
 ) -> str | None:
@@ -431,6 +432,11 @@ def _synthesis_reserve_dimension(
         or limits.synthesis_reserve_cost
     ):
         return None
+    if now is not None and run.deadline_at is not None:
+        duration = (run.deadline_at - run.created_at).total_seconds()
+        reserve = min(60.0, max(0.0, duration / 5))
+        if (run.deadline_at - now).total_seconds() <= reserve:
+            return "time"
     remaining_steps = limits.max_steps - run.step_count + int(step_in_progress)
     if remaining_steps <= limits.synthesis_reserve_steps:
         return "steps"
@@ -509,7 +515,7 @@ def _synthesis_only_request(
 
 
 def _fit_tool_batch(
-    run: Run, calls: list[ToolCallItem], *, used: int | None = None
+    run: Run, calls: list[ToolCallItem], *, used: int | None = None, now: datetime | None = None
 ) -> tuple[list[ToolCallItem], list[tuple[ToolCallItem, ToolResultItem]]]:
     """Split a batch into the calls that fit the tool-call budget and refusals.
 
@@ -521,6 +527,9 @@ def _fit_tool_batch(
 
     count = run.tool_call_count if used is None else used
     remaining = max(0, run.limits.max_tool_calls - count)
+    time_reserved = _synthesis_reserve_dimension(run, now=now) == "time"
+    if time_reserved:
+        remaining = 0
     fitted = calls[:remaining]
     refused: list[tuple[ToolCallItem, ToolResultItem]] = []
     for call in calls[remaining:]:
@@ -529,7 +538,10 @@ def _fit_tool_batch(
             action=call.name,
             reason_code="tool.budget_exhausted",
             message=(
-                "Not performed. The run's tool-call budget is exhausted; "
+                "Not performed. The remaining time is reserved for the final answer; "
+                "answer from the evidence already gathered."
+                if time_reserved
+                else "Not performed. The run's tool-call budget is exhausted; "
                 "answer from the evidence already gathered."
             ),
             retryable=False,
@@ -890,6 +902,7 @@ async def _invoke_model(
         context.budgets.check(context.run, BudgetScope.ATTEMPT)
         synthesis_reserve = initial_synthesis_reserve or _synthesis_reserve_dimension(
             context.run,
+            now=context.clock.now(),
             step_in_progress=True,
             before_model_attempt=True,
         )
@@ -1095,6 +1108,18 @@ async def _invoke_model(
             stop_reason=terminal.stop_reason,
         )
         _reconcile_context_estimate(context, attempt_request, terminal.turn.usage)
+        if synthesis_reserve == "time" and terminal.turn.tool_calls:
+            return _failure(
+                context,
+                FailureReason.BUDGET_EXCEEDED,
+                "SynthesisReserveViolation",
+                (
+                    "The model requested another tool while the remaining time "
+                    "was reserved for its answer."
+                ),
+                step,
+                {"synthesis_reserve": "time"},
+            )
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
         ):
@@ -1188,7 +1213,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
         synthesis_reserve = (
             "browser_workflow"
             if context.checkpoint.working_state.get("browser_workflow_report_only")
-            else _synthesis_reserve_dimension(context.run)
+            else _synthesis_reserve_dimension(context.run, now=context.clock.now())
         )
         context.budgets.check(context.run, BudgetScope.STEP)
         context.run.step_count += 1
@@ -1253,7 +1278,9 @@ async def run_loop(context: RunContext) -> RunOutcome:
         # join the log and the conversation now, so a resumed step re-dispatches
         # only the calls that fit and the model still receives a result for
         # every call.
-        fitted_calls, refusals = _fit_tool_batch(context.run, turn.tool_calls)
+        fitted_calls, refusals = _fit_tool_batch(
+            context.run, turn.tool_calls, now=context.clock.now()
+        )
         await _record_refusals(context, refusals)
         context.checkpoint.pending_tool_calls = [
             call.model_dump(mode="json") for call in fitted_calls

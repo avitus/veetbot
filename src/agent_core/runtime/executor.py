@@ -1253,6 +1253,20 @@ def _message_text(message: AssistantMessage | None) -> str | None:
 async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
     """Commit one terminal transaction, falling back to FAILED on local errors."""
 
+    if outcome.kind is OutcomeKind.CANCELLED and context.token.reason is CancelReason.DEADLINE:
+        outcome = RunOutcome(
+            kind=OutcomeKind.FAILED,
+            failure=RunFailure(
+                reason=FailureReason.DEADLINE_EXCEEDED,
+                error_class="RunDeadlineExceeded",
+                message=(
+                    "The run ran out of time before producing an answer. "
+                    "Retry the request to continue."
+                ),
+                step_number=context.run.step_count or None,
+                occurred_at=context.clock.now(),
+            ),
+        )
     original_checkpoint = context.checkpoint.model_copy(deep=True)
     try:
         await _finalize_once(context, outcome)

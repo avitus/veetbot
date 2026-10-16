@@ -1632,3 +1632,15 @@ require recomposition and matching evidence; source originals remain authoritati
 This flag activates indexing only. It grants no query egress authority and leaves
 the production semantic recall channel absent until its separate integration and
 release evidence are complete.
+
+## ADR-0209 browser research composition
+
+`BROWSER_RESEARCH_ENABLED` defaults to `1` and accepts only `0` or `1`. With a
+browser provider and the default bounded-scroll policy rule (allow scroll,
+require approval otherwise), composition inserts the research authorizer after
+specific follow consent and before standing/task grants. It requires a trusted
+owner or scheduler seed, an owner-selected READY profile and fresh observation,
+and supplies a live dispatch constraint. Setting `0` omits it. Custom
+unconditional approval and deny rules do not compose this permission. No
+versioned policy rule or memory evaluation tuple changes. The detailed contract
+is [browser-automation.md](browser-automation.md).
