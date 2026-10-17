@@ -13,6 +13,32 @@ import Testing
         "POST veetbot.test /v1/approvals/\(approvalID.uuidString)/resolve"
 
     @Test
+    func aLateApprovalRefreshDoesNotLoadCardsIntoANewConversation() async throws {
+        let approvalRoute = "GET veetbot.test /v1/approvals"
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                guard Self.route(request) == approvalRoute else { return nil }
+                let approval = try WireModelsTests.contractExample(
+                    "approval_views", "offered", key: "approval"
+                )
+                let body = try JSONSerialization.data(
+                    withJSONObject: ["items": [approval], "next_cursor": NSNull()]
+                )
+                return (200, String(decoding: body, as: UTF8.self))
+            }()
+        }
+        let model = try await openedModel(server)
+        let requestsBeforeReset = server.routes.filter { $0 == approvalRoute }.count
+        model.newSession()
+
+        await model.refreshPendingApprovals()
+
+        #expect(model.selectedSessionID == nil)
+        #expect(model.runState.approvals.isEmpty)
+        #expect(server.routes.filter { $0 == approvalRoute }.count == requestsBeforeReset)
+    }
+
+    @Test
     func anApprovalResolvedOnAnotherDeviceIsRefreshedWhenItLeavesThePendingList() async throws {
         let server = DeviceFlowServer { request in
             try Self.conversationRoutes(request) ?? {

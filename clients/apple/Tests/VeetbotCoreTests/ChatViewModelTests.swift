@@ -1253,10 +1253,18 @@ import UserNotifications
 
     @Test
     func testPendingApprovalPaginationHasNoArbitraryPageCap() async throws {
+        let sessionID = UUID()
         let lock = NSLock()
         var approvalRequests = 0
         let model = try configuredModel { request in
-            if request.url?.path == "/v1/sessions" {
+            if request.url?.path == "/v1/sessions/\(sessionID.uuidString)" {
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Approvals","metadata":{},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":null}
+                    """)
+            }
+            if request.url?.path == "/v1/sessions"
+                || request.url?.path == "/v1/sessions/\(sessionID.uuidString)/messages"
+            {
                 return try response(
                     for: request,
                     statusCode: 200,
@@ -1264,6 +1272,8 @@ import UserNotifications
                 )
             }
             #expect(request.url?.path == "/v1/approvals")
+            let query = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?.queryItems
+            #expect(query?.first { $0.name == "session_id" }?.value == sessionID.uuidString)
             let cursor = URLComponents(
                 url: try #require(request.url),
                 resolvingAgainstBaseURL: false
@@ -1284,6 +1294,8 @@ import UserNotifications
             )
         )
 
+        await model.openSharedSession(sessionID)
+        #expect(model.selectedSessionID == sessionID)
         await model.refreshPendingApprovals()
 
         #expect(lock.withLock { approvalRequests } == 21)
@@ -1292,10 +1304,18 @@ import UserNotifications
 
     @Test
     func testPendingApprovalPaginationRejectsRepeatedCursor() async throws {
+        let sessionID = UUID()
         let lock = NSLock()
         var approvalRequests = 0
         let model = try configuredModel { request in
-            if request.url?.path == "/v1/sessions" {
+            if request.url?.path == "/v1/sessions/\(sessionID.uuidString)" {
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Approvals","metadata":{},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":null,"last_run_id":null}
+                    """)
+            }
+            if request.url?.path == "/v1/sessions"
+                || request.url?.path == "/v1/sessions/\(sessionID.uuidString)/messages"
+            {
                 return try response(
                     for: request,
                     statusCode: 200,
@@ -1303,6 +1323,8 @@ import UserNotifications
                 )
             }
             #expect(request.url?.path == "/v1/approvals")
+            let query = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?.queryItems
+            #expect(query?.first { $0.name == "session_id" }?.value == sessionID.uuidString)
             lock.withLock { approvalRequests += 1 }
             return try response(
                 for: request,
@@ -1317,6 +1339,8 @@ import UserNotifications
             )
         )
 
+        await model.openSharedSession(sessionID)
+        #expect(model.selectedSessionID == sessionID)
         await model.refreshPendingApprovals()
 
         #expect(lock.withLock { approvalRequests } == 2)

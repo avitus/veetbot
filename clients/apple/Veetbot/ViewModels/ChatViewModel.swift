@@ -1820,9 +1820,8 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func refreshPendingApprovals() async {
-        guard let api else { return }
+        guard let api, let sessionID = selectedSessionID else { return }
         let generation = connectionGeneration
-        let sessionID = selectedSessionID
         let runID = runState.activeRunID
         let knownPending = Set(runState.approvals.filter { $0.status.isPending }.map(\.id))
         do {
