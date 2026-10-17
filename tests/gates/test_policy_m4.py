@@ -934,6 +934,7 @@ async def test_approval_compensation_preserves_the_transition_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Discard a pending card without masking the invocation transition failure."""
     script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
     tool = _SchedulingTool(
         name="demo.compensation",
@@ -1007,6 +1008,7 @@ async def test_approval_compensation_preserves_the_transition_failure(
                 invocation,
                 decision,
                 None,
+                token=RunCancellationToken(app.clock, active_run.deadline_at),
             )
 
         assert await app.approvals.list_pending(run_id=run_id) == []
@@ -1015,6 +1017,7 @@ async def test_approval_compensation_preserves_the_transition_failure(
 async def test_approval_presentation_failure_falls_back_and_still_waits(
     tmp_path: Path,
 ) -> None:
+    """A presentation failure still permits an unexpired run to await its ordinary card."""
     script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
     tool = _FailingApprovalViewTool(
         name="demo.approval_fallback",
@@ -1076,6 +1079,7 @@ async def test_approval_presentation_failure_falls_back_and_still_waits(
             invocation,
             decision,
             None,
+            token=RunCancellationToken(app.clock, active_run.deadline_at),
         )
         async with app.uow_factory() as uow:
             waiting = (await uow.invocations.list_for_run(run_id, app.principal))[0]

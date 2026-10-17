@@ -631,7 +631,9 @@ class PythonPlaywrightRuntime:
         if _origin_or_none(url) != origin:
             return False
         path = urlsplit(url).path
-        return path_is_within_prefix(path, path_prefix) and not path_is_sensitive(path)
+        return (
+            path_prefix == "/" or path_is_within_prefix(path, path_prefix)
+        ) and not path_is_sensitive(path)
 
     async def _dismiss_dialog(self, dialog: Dialog) -> None:
         """Dismiss browser dialogs while recording unsaved-draft navigation cancellation."""
@@ -1138,6 +1140,7 @@ class PythonPlaywrightRuntime:
         constraint: BrowserDispatchConstraint | None = None,
         now: datetime | None = None,
     ) -> BrowserObservation:
+        """Revalidate the live control and dispatch within the research or grant constraint."""
         page = self._current_page()
         if constraint is not None and (
             now is None
@@ -1200,6 +1203,8 @@ class PythonPlaywrightRuntime:
         self._fence_refused_page = False
         if constraint is not None and constraint.path_prefix is not None:
             self._document_fence = (constraint.origins[0], constraint.path_prefix)
+        elif constraint is not None and constraint.grant_kind == "research":
+            self._document_fence = (constraint.origins[0], "/")
         draft_binding = None
         if approved_editable:
             # Chromium can split inherited editable descendants while typing newlines.

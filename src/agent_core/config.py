@@ -195,6 +195,7 @@ class Settings:
     browser_allowed_origins: tuple[str, ...] = ()
     # ADR-0129: task grants from the browser.act approval card, and the exact
     # site scopes an owner may allow; environment-layer deployment controls.
+    browser_research_enabled: bool = True
     browser_task_grants_enabled: bool = False
     browser_feed_workflow_enabled: bool = False
     browser_task_grant_scopes: tuple[BrowserTaskGrantScope, ...] = ()
@@ -661,8 +662,9 @@ def _parse_web_provider_allocations(
     return tuple(allocations)
 
 
-def _parse_flag(values: Mapping[str, str], name: str) -> bool:
-    raw = values.get(name, "0").strip()
+def _parse_flag(values: Mapping[str, str], name: str, *, default: bool = False) -> bool:
+    """Parse a strict deployment boolean, preserving the feature-specific default."""
+    raw = values.get(name, "1" if default else "0").strip()
     if raw not in {"0", "1"}:
         raise ConfigurationError(f"{name} must be 0 or 1")
     return raw == "1"
@@ -2070,6 +2072,7 @@ def _load_settings(
         browser_provider=browser_provider,
         judgment_provider=judgment_provider,
         browser_allowed_origins=browser_allowed_origins,
+        browser_research_enabled=_parse_flag(values, "BROWSER_RESEARCH_ENABLED", default=True),
         browser_task_grants_enabled=browser_task_grants_enabled,
         browser_feed_workflow_enabled=_parse_flag(values, "BROWSER_FEED_WORKFLOW_ENABLED"),
         browser_task_grant_scopes=browser_task_grant_scopes,

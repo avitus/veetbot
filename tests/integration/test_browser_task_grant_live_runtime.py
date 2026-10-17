@@ -125,6 +125,7 @@ class LeasedService:
     site: LocalHttpsSite
     http: httpx.AsyncClient
     lease_ref: str
+    grant_kind: str = "task"
 
     def _headers(self, operation: str) -> dict[str, str]:
         headers = {"Authorization": f"Bearer {SERVICE_AUTH}"}
@@ -156,6 +157,7 @@ class LeasedService:
     async def click(
         self, page: dict[str, Any], name: str, *, sequence: int, constrained: bool
     ) -> httpx.Response:
+        """Send a constrained click through the real isolated service lease."""
         element = next(item for item in page["elements"] if item["name"] == name)
         body: dict[str, Any] = {
             "lease_ref": self.lease_ref,
@@ -168,9 +170,9 @@ class LeasedService:
         }
         if constrained:
             body["constraint"] = {
-                "grant_kind": "task",
+                "grant_kind": self.grant_kind,
                 "origins": [self.site.origin],
-                "path_prefix": "/lesson",
+                "path_prefix": "/lesson" if self.grant_kind == "task" else None,
                 "not_after": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
                 "consequence_ceiling": "unknown",
                 "max_text_characters": 256,
@@ -271,13 +273,18 @@ def _assert_refused(response: httpx.Response) -> None:
     )
 
 
-async def test_the_live_page_decides_whether_a_task_grant_covers_an_act(tmp_path: Path) -> None:
+@pytest.mark.parametrize("grant_kind", ["task", "research"])
+async def test_the_live_page_decides_whether_a_task_grant_covers_an_act(
+    tmp_path: Path, grant_kind: str
+) -> None:
+    """Both grant and research authority must reject changed live controls before effects."""
     require_real_browser()
     lessons = LessonSite()
     async with (
         local_https_site(lessons.app()) as site,
         leased_service(site, tmp_path / "profiles") as service,
     ):
+        service.grant_kind = grant_kind
         start = await service.navigate("/lesson/start")
         covered = await service.click(start, "Continue", sequence=1, constrained=True)
         clicks_after_covered = list(lessons.clicks)

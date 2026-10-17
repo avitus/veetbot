@@ -651,3 +651,17 @@ in `EmailArchiveModelTests` and `EmailViewModelTests`, and verifies each case
 reported passing. It needs full Xcode but no simulator, database or live
 mailbox, and an unavailable Apple lane is skipped by pytest and remains an
 unpassed active gate in the gate report.
+
+## Approval feedback and deadline outcomes
+
+Approval cards retain the first stored resolution when an older pending read
+arrives. A resolution event, or a card disappearing from the pending list,
+refreshes the stored decision across devices. After a successful decision the
+client reads the run state, displaying a completed or failed outcome instead of
+leaving a stale wait. Reads cannot update a different selected conversation or
+connection. Pending approvals load only for a selected conversation; a late refresh
+after starting a new conversation cannot fetch account-wide cards.
+Historical cancellation events whose reason is `deadline` show the
+same actionable deadline explanation as new failed runs (ADR-0209). These locally
+reconstructed failures carry no diagnostic reference; authoritative server failures
+retain their validated references.

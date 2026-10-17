@@ -1577,6 +1577,8 @@ public final class ChatViewModel: ObservableObject {
         taskGrant: TaskGrantEcho? = nil
     ) async {
         guard let api, approvalsInFlight[approval.id] == nil else { return }
+        let generation = connectionGeneration
+        let sessionID = selectedSessionID
         approvalsInFlight[approval.id] = decision
         defer { approvalsInFlight[approval.id] = nil }
         do {
@@ -1586,11 +1588,27 @@ public final class ChatViewModel: ObservableObject {
                 reason: reason,
                 taskGrant: taskGrant
             )
+            guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
             runState.mergeApproval(stored)
             if decision == .approveForTask {
                 await loadTaskGrant()
             }
+            if runState.activeRunID == stored.runID {
+                do {
+                    let run = try await api.getRun(stored.runID)
+                    guard generation == connectionGeneration, sessionID == selectedSessionID,
+                        runState.activeRunID == stored.runID else { return }
+                    // A slower point read cannot roll a terminal stream event back.
+                    if !(runState.runStatus?.isTerminal ?? false) || run.status.isTerminal {
+                        runState.seed(run: run)
+                    }
+                } catch {
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
+                    errorMessage = "Your decision was saved, but progress could not be refreshed. Reopen the conversation to check the result."
+                }
+            }
         } catch {
+            guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
             if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 let reason = apiError.details.reason,
@@ -1598,9 +1616,12 @@ public final class ChatViewModel: ObservableObject {
             {
                 // The offer is gone or changed: show the card as it is now.
                 do {
-                    runState.mergeApproval(try await api.getApproval(approval.id))
+                    let stored = try await api.getApproval(approval.id)
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
+                    runState.mergeApproval(stored)
                     errorMessage = "Task permission is no longer available. Allow once or Deny."
                 } catch {
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     present(error)
                 }
             } else if let apiError = apiError(from: error),
@@ -1608,10 +1629,13 @@ public final class ChatViewModel: ObservableObject {
                 apiError.details.reason == "approval_already_resolved"
             {
                 do {
-                    runState.mergeApproval(try await api.getApproval(approval.id))
+                    let stored = try await api.getApproval(approval.id)
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
+                    runState.mergeApproval(stored)
                     errorMessage =
                         "This approval was already resolved; the first decision is shown."
                 } catch {
+                    guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     present(error)
                 }
             } else {
@@ -1796,23 +1820,40 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func refreshPendingApprovals() async {
-        guard let api else { return }
+        guard let api, let sessionID = selectedSessionID else { return }
+        let generation = connectionGeneration
+        let runID = runState.activeRunID
+        let knownPending = Set(runState.approvals.filter { $0.status.isPending }.map(\.id))
         do {
             var cursor: String?
             var seenCursors: Set<String> = []
+            var stillPending: Set<UUID> = []
             repeat {
                 let page = try await api.listPendingApprovals(
-                    runID: runState.activeRunID,
-                    sessionID: selectedSessionID,
+                    runID: runID,
+                    sessionID: sessionID,
                     cursor: cursor
                 )
+                guard generation == connectionGeneration, sessionID == selectedSessionID,
+                    runID == runState.activeRunID else { return }
                 for approval in page.items {
+                    stillPending.insert(approval.id)
                     loadedApprovalIDs.insert(approval.id)
                     runState.mergeApproval(approval)
                 }
                 cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             } while cursor != nil
+            // A resolved card disappears from this list. Read its stored decision
+            // so every device updates even if the resolution stream was missed.
+            for approvalID in knownPending.subtracting(stillPending) {
+                let stored = try await api.getApproval(approvalID)
+                guard generation == connectionGeneration, sessionID == selectedSessionID,
+                    runID == runState.activeRunID else { return }
+                runState.mergeApproval(stored)
+            }
         } catch {
+            guard generation == connectionGeneration, sessionID == selectedSessionID,
+                runID == runState.activeRunID else { return }
             present(error)
         }
     }
@@ -2701,6 +2742,7 @@ public final class ChatViewModel: ObservableObject {
                     await self.applyTaskGrantFrame(frame)
                     if frame.event == "approval.requested"
                         || frame.event == "run.waiting_for_approval"
+                        || frame.event == "approval.resolved"
                     {
                         await self.loadApprovalsRequiredByReducer()
                         await self.refreshPendingApprovals()

@@ -272,6 +272,7 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.browser_research import BrowserResearchAuthorizer
 from agent_core.application.browser_startup import BrowserStartupRecovery
 from agent_core.application.browser_task_grants import (
     BrowserTaskGrantAuthorizer,
@@ -469,7 +470,12 @@ from agent_core.domain.model_settings import (
     default_chat_effort,
 )
 from agent_core.domain.persistence import WorkerLease
-from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
+from agent_core.domain.policies import (
+    LoadedRuleset,
+    PolicyCondition,
+    PolicyDecisionType,
+    PolicyProfileRecord,
+)
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     CancelReason,
@@ -3817,6 +3823,21 @@ async def _compose(
                     now=clock.now,
                 )
             )
+            if settings.browser_research_enabled and any(
+                rule.tool_name == "browser.act"
+                and rule.condition is PolicyCondition.BOUNDED_BROWSER_SCROLL
+                and rule.decision is PolicyDecisionType.ALLOW
+                and rule.otherwise is PolicyDecisionType.REQUIRE_APPROVAL
+                for rule in ruleset.tool_rules
+            ):
+                standing_authorizers.append(
+                    BrowserResearchAuthorizer(
+                        provider=browser_provider,
+                        uow_factory=uow_factory,
+                        policy=deterministic_engine,
+                        now=clock.now,
+                    )
+                )
         if settings.browser_grant_id is not None:
             if browser_provider is None or settings.browser_profile_id is None:
                 raise ConfigurationError("standing browser grant composition is incomplete")

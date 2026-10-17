@@ -133,7 +133,8 @@ The write classification is deliberately conservative. A click that appears
 local can submit a form, mark a message read, accept terms, or mutate an
 account. `browser.act` therefore follows the external-write approval path even
 when a provider predicts that one action is harmless, except for the owner's
-explicitly permitted bounded scroll gesture (ADR-0168). Separate read-only tools
+explicitly permitted bounded scroll gesture (ADR-0168) or constrained ordinary
+interaction (ADR-0209). Separate read-only tools
 keep observation available without granting mutation.
 
 The model never selects a tenant, principal, profile, device, provider, cookie
@@ -1022,8 +1023,8 @@ trusted `browser_provider`, their exact tool classification matches this
 document, and the provider binding enforces the origin policy. Otherwise they
 are denied.
 
-`browser.act` requires an ordinary approval by default, with one narrow
-exception under ADR-0168: the default policy permits a validated scroll of
+`browser.act` retains its external-write classification. In addition to the
+ADR-0209 ordinary-interaction permission below, ADR-0168 permits scrolling: the default policy permits a validated scroll of
 1–2,000 pixels in either direction through the isolated browser provider.
 Only revision, reference, integer delta and an optional validated observation
 postcondition are admitted. Other action kinds, unknown fields and classification
@@ -1036,9 +1037,24 @@ non-idempotent recovery and run budgets remain in force. A scroll may invoke
 site JavaScript; this is explicit authority for the gesture, not proof of no
 website side effects. A custom policy may keep requiring approval or deny it.
 
-Two durable grants can
-stand in for it, and neither is ever created through conversation text or page
-content. Unattended operation requires a standing `BrowserGrant` created
+ADR-0209 adds `BROWSER_RESEARCH_ENABLED` (default `1`) as an application
+authorization for ordinary interactions; set it to `0` to retain approvals.
+Scrolls retain the permission above. Other ordinary actions use an application
+check of the persisted owner or scheduler seed, owner-selected READY profile,
+current policy and fresh observation. The isolated browser repeats the existing
+task-grant label, field, text, same-origin and consequence checks on the live
+page, without the single-path restriction. It also confines document requests to
+that origin and nonsensitive paths. Unknown ordinary controls are permitted;
+named consequences still need approval. Each action records `browser_research`
+authority and a profile/generation/source reference, with a deadline-bound
+`research` dispatch constraint. No grant is created. Child runs and untrusted
+inputs cannot use this permission; profile, revision, effect and budget checks
+remain. Composition requires the default bounded-scroll rule with approval
+otherwise; custom unconditional approval or deny rules retain their behavior.
+
+Two durable grants can also
+stand in for approval, and neither is ever created through conversation text or
+page content. Other unattended operation requires a standing `BrowserGrant` created
 through an explicit approval surface. An interactive task may use a
 `BrowserTaskGrant` that the owner creates from a `browser.act` approval card,
 only inside a site scope the owner configured (ADR-0129, accepted by the owner
@@ -1366,8 +1382,9 @@ retains its existing lease-operation serialization.
 - Every redirect and action remains within the provider-bound origin policy;
   private-network, non-HTTPS, popup, download, upload, clipboard, and device
   access fail closed unless a later explicit contract authorizes them.
-- Mutating actions require an approval, a matching unexpired standing grant,
-  or a matching unexpired, unexhausted task grant inside an owner-configured
+- Mutating actions require explicit bounded-gesture permission (ADR-0168), a
+  constrained ordinary-interaction permission (ADR-0209), an approval, a matching
+  unexpired standing grant, or an unexpired, unexhausted task grant inside an owner-configured
   scope; named consequences always require fresh approval or remain denied,
   and a task grant's origin, path prefix, expiry, and exclusions are rechecked
   against the live page before dispatch.
@@ -1397,7 +1414,8 @@ retains its existing lease-operation serialization.
    hidden value, header, cookie, storage item, or provider diagnostic. **M10.**
 5. **Action authorization.** Every `browser.act` is a serial high-risk,
    non-idempotent external write and reaches dispatch only after a valid
-   approval, an exact standing grant, or an exact task grant. **M10.**
+   approval, an exact standing grant, an exact task grant, or explicit bounded
+   interaction permission under ADR-0168/ADR-0209. **M10.**
 6. **Revision binding.** An action can target only the stable element handle
    from its exact observation revision; stale or mismatched references fail
    before browser dispatch. **M10.**

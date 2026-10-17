@@ -218,4 +218,5 @@ implementation without one.
 - [ADR-0202: Forward-only dreaming](0202-forward-only-dreaming.md)
 
 - [ADR-0205: Reliability diagnostics and recovery](0205-reliability-diagnostics-and-recovery.md)
+- [ADR-0209: Uninterrupted browser research and visible deadlines](0209-uninterrupted-browser-research.md)
 - [ADR-0210: OpenAI opaque credential boundary](0210-openai-opaque-credential-boundary.md)

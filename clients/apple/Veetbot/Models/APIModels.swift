@@ -361,6 +361,23 @@ public struct RunFailureView: Codable, Sendable {
     public let attemptNumber: Int?
     public let occurredAt: Date
 
+    /// Construct local failure feedback without inventing a server diagnostic reference.
+    public init(
+        reason: FailureReason,
+        message: String,
+        stepNumber: Int?,
+        attemptNumber: Int?,
+        occurredAt: Date,
+        diagnosticID: UUID? = nil
+    ) {
+        self.reason = reason
+        self.message = message
+        self.stepNumber = stepNumber
+        self.attemptNumber = attemptNumber
+        self.occurredAt = occurredAt
+        self.diagnosticID = diagnosticID
+    }
+
     public var userFacingMessage: String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

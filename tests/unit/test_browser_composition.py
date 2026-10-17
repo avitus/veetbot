@@ -1288,10 +1288,13 @@ def _task_grant_paths(composition: Composition) -> set[str]:
     return {path for path in app.openapi()["paths"] if "browser-task-grants" in path}
 
 
-async def test_task_grants_flag_off_composes_nothing() -> None:
-    """ADR-0129 D20: off by default; no authorizer, offer, resolver or route."""
+@pytest.mark.parametrize("research", [False, True])
+async def test_task_grants_flag_off_composes_nothing(research: bool) -> None:
+    """ADR-0129 D20: no task-grant authorizer, offer, resolver or route."""
 
-    async with build(settings=task_grant_settings()) as composition:
+    async with build(
+        settings=task_grant_settings(BROWSER_RESEARCH_ENABLED="1" if research else "0")
+    ) as composition:
         registered = cast(RegisteredTool, composition.tool_pipeline._registry.get("browser.act"))
         act = cast(BrowserActTool, registered.implementation)
         paths = _task_grant_paths(composition)
@@ -1299,10 +1302,13 @@ async def test_task_grants_flag_off_composes_nothing() -> None:
 
     # ADR-0172 adds specific owner-action consent independently of task grants.
     from agent_core.application.browser_follow_consent import BrowserFollowConsentAuthorizer
+    from agent_core.application.browser_research import BrowserResearchAuthorizer
 
     assert isinstance(standing, CompositeStandingAuthorizer)
-    assert len(standing._authorizers) == 1
+    assert len(standing._authorizers) == 1 + int(research)
     assert isinstance(standing._authorizers[0], BrowserFollowConsentAuthorizer)
+    if research:
+        assert isinstance(standing._authorizers[1], BrowserResearchAuthorizer)
     assert act._presenter._enabled is False
     assert composition.services.browser_task_grants is None
     assert composition.services.approvals._task_grants is None  # type: ignore[attr-defined]

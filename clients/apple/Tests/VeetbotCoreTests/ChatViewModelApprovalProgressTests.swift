@@ -13,6 +13,53 @@ import Testing
         "POST veetbot.test /v1/approvals/\(approvalID.uuidString)/resolve"
 
     @Test
+    func aLateApprovalRefreshDoesNotLoadCardsIntoANewConversation() async throws {
+        let approvalRoute = "GET veetbot.test /v1/approvals"
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                guard Self.route(request) == approvalRoute else { return nil }
+                let approval = try WireModelsTests.contractExample(
+                    "approval_views", "offered", key: "approval"
+                )
+                let body = try JSONSerialization.data(
+                    withJSONObject: ["items": [approval], "next_cursor": NSNull()]
+                )
+                return (200, String(decoding: body, as: UTF8.self))
+            }()
+        }
+        let model = try await openedModel(server)
+        let requestsBeforeReset = server.routes.filter { $0 == approvalRoute }.count
+        model.newSession()
+
+        await model.refreshPendingApprovals()
+
+        #expect(model.selectedSessionID == nil)
+        #expect(model.runState.approvals.isEmpty)
+        #expect(server.routes.filter { $0 == approvalRoute }.count == requestsBeforeReset)
+    }
+
+    @Test
+    func anApprovalResolvedOnAnotherDeviceIsRefreshedWhenItLeavesThePendingList() async throws {
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/approvals":
+                    return (200, #"{"items":[],"next_cursor":null}"#)
+                case "GET veetbot.test /v1/approvals/\(Self.approvalID.uuidString)":
+                    return (200, try Self.approval(resolvedWith: "approve_once"))
+                default: return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        let approval = try WireModelsTests.contractApproval("offered")
+        model.runState.mergeApproval(approval)
+        await model.refreshPendingApprovals()
+        #expect(model.runState.approvals.first?.status == .approved)
+        #expect(!model.awaitingOwnerApproval)
+    }
+
+    @Test
     func aDecisionOnItsWayIsShownAndSentOnlyOnce() async throws {
         let server = DeviceFlowServer { request in
             try Self.conversationRoutes(request) ?? {
@@ -141,6 +188,8 @@ import Testing
             return (200, #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Lesson","metadata":{},"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:00:00Z","active_run_id":null,"last_run_id":null}"#)
         case "GET veetbot.test /v1/sessions/\(sessionID.uuidString)/messages":
             return (200, #"{"items":[],"next_cursor":null}"#)
+        case "GET veetbot.test /v1/runs/6A1C3F0E-2B4D-4C8E-9F10-000000000002":
+            return (200, #"{"id":"6a1c3f0e-2b4d-4c8e-9f10-000000000002","session_id":"\#(sessionID.uuidString)","parent_run_id":null,"status":"RUNNING","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:01:00Z"}"#)
         default:
             return nil
         }
