@@ -86,7 +86,7 @@ private struct PeopleProfile: View {
             }
         }
         .task { await model.reload() }
-        .onChange(of: scenePhase) { phase in if phase == .active && !model.isSaving && !model.canRetrySave && model.preview == nil && !model.isForgotten { Task { await model.reload() } } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active && !model.isSaving && !model.canRetrySave && model.preview == nil && !model.isForgotten { Task { await model.reload() } } }
         .sheet(item: $editingFact) { fact in PeopleFactEditor(model: model, fact: fact, sessionID: sessionID) }
         .sheet(isPresented: $showingAlias) { PeopleAliasEditor(model: model, sessionID: sessionID) }
         .sheet(isPresented: $showingIdentity) { PeopleIdentityRepairView(model: model, sessionID: sessionID) }

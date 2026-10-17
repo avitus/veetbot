@@ -19,9 +19,10 @@ struct BrowserActionApprovalCard: View {
         VStack(alignment: .leading, spacing: 8) {
             AttentionCardLabel(title: "Needs your approval")
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                (Text(presentation.verb).fontWeight(.semibold)
-                    + Text(verbatim: presentation.detail.map { " " + $0 } ?? "")
-                        .foregroundColor(AppTheme.inkSoft))
+                Text("""
+                    \(Text(presentation.verb).fontWeight(.semibold))\
+                    \(Text(verbatim: presentation.detail.map { " " + $0 } ?? "").foregroundColor(AppTheme.inkSoft))
+                    """)
                     .appFont(.body)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
@@ -242,7 +243,7 @@ struct WebsiteQuote: View {
         GeometryReader { proxy in
             Color.clear
                 .onAppear { let height = proxy.size.height; DispatchQueue.main.async { update(height) } }
-                .onChange(of: proxy.size.height) { height in DispatchQueue.main.async { update(height) } }
+                .onChange(of: proxy.size.height) { _, height in DispatchQueue.main.async { update(height) } }
         }
     }
 }

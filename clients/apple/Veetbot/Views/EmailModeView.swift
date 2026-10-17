@@ -84,16 +84,16 @@ public struct EmailModeView: View {
             EmailSubscriptionsScreen(model: model.subscriptions, accounts: model.accounts)
         }
         // A server that stops advertising support must not leave the surface open.
-        .onChange(of: model.unsubscribeAvailable) { available in
+        .onChange(of: model.unsubscribeAvailable) { _, available in
             if !available { showingSubscriptions = false }
         }
         .onAppear {
             if let id = model.selectedThreadID, navigationPath.last != id { navigationPath = [id] }
         }
-        .onChange(of: model.selectedThreadID) { id in
+        .onChange(of: model.selectedThreadID) { _, id in
             if let id, navigationPath.last != id { navigationPath = [id] } else if id == nil { navigationPath = [] }
         }
-        .onChange(of: navigationPath) { path in
+        .onChange(of: navigationPath) { _, path in
             if path.isEmpty, !directSelection, model.selectedThreadID != nil { model.clearSelection() }
         }
     }
@@ -834,7 +834,7 @@ private struct EmailThreadScreen: View {
             Picker("Apply to", selection: $target) {
                 ForEach(EmailFeedbackTarget.allCases, id: \.self) { value in Text(value.title).tag(value) }
             }.pickerStyle(.menu).accessibilityIdentifier("email.feedback-target")
-                .onChange(of: target) { _ in targetValue = "" }
+                .onChange(of: target) { targetValue = "" }
             if target == .person {
                 Picker("Person", selection: $targetValue) {
                     Text("Choose a person").tag("")
@@ -848,7 +848,7 @@ private struct EmailThreadScreen: View {
                     ForEach(topics, id: \.self) { topic in Text(topic).tag(topic) }
                 }
                 .accessibilityIdentifier("email.feedback-topic")
-                .onChange(of: topics) { values in
+                .onChange(of: topics) { _, values in
                     if !values.contains(targetValue) { targetValue = "" }
                 }
                 if topics.isEmpty {
@@ -991,8 +991,8 @@ private struct EmailThreadScreen: View {
                 }.appFont(.callout).foregroundColor(AppTheme.inkSoft)
             }
             .onAppear { showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
-            .onChange(of: draft.id) { _ in showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
-            .onChange(of: draft.canEdit) { canEdit in if !canEdit { focusedField = nil } }
+            .onChange(of: draft.id) { showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
+            .onChange(of: draft.canEdit) { _, canEdit in if !canEdit { focusedField = nil } }
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Your reply").appFont(.caption, weight: .semibold).foregroundColor(AppTheme.inkSoft)
@@ -1121,7 +1121,7 @@ private struct EmailReadingView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: message.id) { _ in showingOriginal = false }
+        .onChange(of: message.id) { showingOriginal = false }
     }
 
     private var original: some View {

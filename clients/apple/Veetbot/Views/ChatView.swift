@@ -79,8 +79,8 @@ public struct ChatView: View {
         return covered
     }
 
-    /// An `onChange` action is the closure built for the previous body, so the
-    /// environment it reads still holds the old mode: callers pass the new value.
+    /// `onChange` callers pass the changed mode from the action's `newValue`, so
+    /// the result never depends on which render's environment the closure read.
     private func updateNotificationVisibility(mode: ClientMode? = nil, covered: Bool? = nil) {
         model.notificationTranscriptVisible = (mode ?? activeMode) == .chat && !(covered ?? notificationCovered)
         if model.notificationTranscriptVisible { Task { await model.synchronizeNotifications() } }
@@ -107,7 +107,7 @@ public struct ChatView: View {
                                     GeometryReader { geometry in
                                         Color.clear
                                             .onAppear { transcriptProbe.contentHeight = geometry.size.height }
-                                            .onChange(of: geometry.size.height) { transcriptProbe.contentHeight = $0 }
+                                            .onChange(of: geometry.size.height) { _, height in transcriptProbe.contentHeight = height }
                                     }
                                 )
                         }
@@ -122,7 +122,7 @@ public struct ChatView: View {
                         GeometryReader { geometry in
                             Color.clear
                                 .onAppear { transcriptProbe.viewportHeight = geometry.size.height }
-                                .onChange(of: geometry.size.height) { transcriptProbe.viewportHeight = $0 }
+                                .onChange(of: geometry.size.height) { _, height in transcriptProbe.viewportHeight = height }
                         }
                     )
                     bottomDock(maxCardHeight: pane.size.height * 0.55)
@@ -134,15 +134,15 @@ public struct ChatView: View {
                 }
             }
             .onPreferenceChange(DockHeightKey.self) { dockHeight = $0 }
-            .onChange(of: scrollChangeToken) { _ in
+            .onChange(of: scrollChangeToken) {
                 scroll(proxy)
             }
             // A dock that just grew would otherwise cover the end of the
             // transcript; the clearance below the anchor has to be laid out first.
-            .onChange(of: dockHeight) { _ in
+            .onChange(of: dockHeight) {
                 DispatchQueue.main.async { scroll(proxy) }
             }
-            .onChange(of: model.notificationFocus) { _ in
+            .onChange(of: model.notificationFocus) {
                 scroll(proxy)
             }
             .onAppear {
@@ -152,8 +152,8 @@ public struct ChatView: View {
         .background(AppTheme.paper.ignoresSafeArea())
         .onAppear { updateNotificationVisibility() }
         .onDisappear { model.notificationTranscriptVisible = false }
-        .onChange(of: notificationCovered) { covered in updateNotificationVisibility(covered: covered) }
-        .onChange(of: activeMode) { mode in updateNotificationVisibility(mode: mode) }
+        .onChange(of: notificationCovered) { _, covered in updateNotificationVisibility(covered: covered) }
+        .onChange(of: activeMode) { _, mode in updateNotificationVisibility(mode: mode) }
         // While the conversation is on screen, its task permission is re-read
         // every 30 seconds; a revoke or sweep elsewhere reaches no run stream.
         // One diagnostic line per opened conversation once its load settles:
@@ -244,7 +244,7 @@ public struct ChatView: View {
             PeopleLookupSheet(lookup: PeopleLookup(), sessionID: model.selectedSessionID)
         }
         #endif
-        .onChange(of: model.connectionGeneration) { _ in model.isPeopleLookupPresented = false }
+        .onChange(of: model.connectionGeneration) { model.isPeopleLookupPresented = false }
     }
 
     // MARK: - Header

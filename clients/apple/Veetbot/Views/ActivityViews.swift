@@ -258,8 +258,8 @@ struct ApprovalCardView: View {
                 details
             }
         }
-        .onChange(of: approval.status) { _ in expanded = false }
-        .onChange(of: approval.id) { _ in expanded = false }
+        .onChange(of: approval.status) { expanded = false }
+        .onChange(of: approval.id) { expanded = false }
     }
 
     @ViewBuilder

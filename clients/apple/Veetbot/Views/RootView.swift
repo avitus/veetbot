@@ -97,24 +97,24 @@ public struct RootView: View {
         .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
         .sheet(isPresented: $showingGlobalSchedules) { ScheduleBrowserView(model: globalSchedules) }
-        .onChange(of: coordinator.mode) { _ in updateEmailActivity() }
-        .onChange(of: model.isConfigured) { _ in updateEmailActivity() }
-        .onChange(of: model.connectionGeneration) { _ in
+        .onChange(of: coordinator.mode) { updateEmailActivity() }
+        .onChange(of: model.isConfigured) { updateEmailActivity() }
+        .onChange(of: model.connectionGeneration) {
             showingGlobalMemory = false
             NotificationCenter.default.post(name: .peopleConnectionChanged, object: nil)
             updateEmailActivity()
         }
-        .onChange(of: model.isReconfiguring) { _ in updateEmailActivity() }
-        .onChange(of: model.errorMessage) { _ in updateEmailActivity() }
-        .onChange(of: scenePhase) { phase in updateEmailActivity(scenePhase: phase) }
+        .onChange(of: model.isReconfiguring) { updateEmailActivity() }
+        .onChange(of: model.errorMessage) { updateEmailActivity() }
+        .onChange(of: scenePhase) { _, phase in updateEmailActivity(scenePhase: phase) }
         .onAppear { updateEmailActivity() }
-        .onChange(of: showingGlobalMemory) { _ in updateEmailActivity() }
-        .onChange(of: showingGlobalPersona) { _ in updateEmailActivity() }
-        .onChange(of: showingGlobalSchedules) { _ in updateEmailActivity() }
+        .onChange(of: showingGlobalMemory) { updateEmailActivity() }
+        .onChange(of: showingGlobalPersona) { updateEmailActivity() }
+        .onChange(of: showingGlobalSchedules) { updateEmailActivity() }
         #if os(macOS)
-        .onChange(of: controlActiveState) { state in updateEmailActivity(keyWindow: state == .key) }
+        .onChange(of: controlActiveState) { _, state in updateEmailActivity(keyWindow: state == .key) }
         #else
-        .onChange(of: showingSettings) { _ in updateEmailActivity() }
+        .onChange(of: showingSettings) { updateEmailActivity() }
         #endif
         .task(id: "\(model.connectionGeneration)-\(model.isConfigured)-\(scenePhase == .active)") {
             guard model.isConfigured, scenePhase == .active else { return }
@@ -137,16 +137,16 @@ public struct RootView: View {
             }
             .ignoresSafeArea()
         }
-        .onChange(of: model.pendingSmsInvocation) { _ in presentNextSmsInvocation() }
+        .onChange(of: model.pendingSmsInvocation) { presentNextSmsInvocation() }
         .task(id: smsRecoveryKey) {
             guard scenePhase == .active, smsIntegration.integrationEnabled else { return }
             await model.refreshPendingSmsInvocations()
         }
         #endif
-        .onChange(of: model.requiresReauthentication) { required in
+        .onChange(of: model.requiresReauthentication) { _, required in
             if required { presentSettings() }
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 Task { await model.clearCachedArtifacts() }
             }
@@ -283,14 +283,14 @@ public struct RootView: View {
         .sheet(isPresented: $showingEmailSubscriptions) {
             EmailSubscriptionsScreen(model: coordinator.email.subscriptions, accounts: coordinator.email.accounts)
         }
-        .onChange(of: coordinator.email.unsubscribeAvailable) { available in
+        .onChange(of: coordinator.email.unsubscribeAvailable) { _, available in
             if !available { showingEmailSubscriptions = false }
         }
         #endif
     }
 
-    /// An `onChange` action is the closure built for the previous body, so the
-    /// environment it reads still holds the old phase: callers pass the new value.
+    /// `onChange` callers pass the changed phase from the action's `newValue`, so
+    /// the result never depends on which render's environment the closure read.
     private func updateEmailActivity(scenePhase newPhase: ScenePhase? = nil, keyWindow: Bool? = nil) {
         let active = (newPhase ?? scenePhase) == .active
         model.notificationSyncActive = model.isConfigured && active
@@ -384,7 +384,7 @@ public struct RootView: View {
         }
         // A notification's conversation is already selected; showing it means
         // getting the list out of the way.
-        .onChange(of: model.notificationNavigationID) { id in
+        .onChange(of: model.notificationNavigationID) { _, id in
             guard id != nil else { return }
             withAnimation(.easeOut(duration: 0.22)) { chatListPresented = false }
             model.acknowledgeNotificationNavigation()
@@ -583,13 +583,13 @@ private struct SessionSidebar: View {
         } message: { _ in
             Text("The conversations in this folder return to History. Nothing is deleted.")
         }
-        .onChange(of: showingMemoryBrowser || showingPersonaEditor || showingScheduleBrowser || folderEditor != nil) { covered in
+        .onChange(of: showingMemoryBrowser || showingPersonaEditor || showingScheduleBrowser || folderEditor != nil) { _, covered in
             model.notificationOverlayPresented = covered
         }
         .sheet(item: $folderEditor) { request in
             FolderNameSheet(request: request, model: model)
         }
-        .onChange(of: model.folders.map(\.id)) { folderIDs in
+        .onChange(of: model.folders.map(\.id)) { _, folderIDs in
             guard model.foldersAvailable else { return }
             folderSidebar.expansion.retain(only: Set(folderIDs))
         }
@@ -603,7 +603,7 @@ private struct SessionSidebar: View {
         .sheet(isPresented: $showingMemoryBrowser) {
             MemoryBrowserView(model: memoryViewModel, sessionID: model.selectedSessionID)
         }
-        .onChange(of: model.connectionGeneration) { _ in showingMemoryBrowser = false }
+        .onChange(of: model.connectionGeneration) { showingMemoryBrowser = false }
         .sheet(isPresented: $showingPersonaEditor) {
             PersonaEditorView(model: personaViewModel)
         }
@@ -740,8 +740,7 @@ private struct SessionSidebar: View {
                         HStack(spacing: 8) {
                             AttentionDot(kind: row.kind)
                                 .frame(width: 16)
-                            (Text(row.label).fontWeight(.medium)
-                                + Text(" · \(row.entry.title)").foregroundColor(AppTheme.inkSoft))
+                            Text("\(Text(row.label).fontWeight(.medium))\(Text(verbatim: " · \(row.entry.title)").foregroundColor(AppTheme.inkSoft))")
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                         }

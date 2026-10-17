@@ -105,7 +105,7 @@ public struct ConnectionSettingsView: View {
         }
         // A remote sign-in finished in the web browser is read back when the
         // app returns, without polling (ADR-0128 D16).
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task {
                     await model.refreshOpenRemoteAuthentication()
@@ -520,7 +520,7 @@ public struct ConnectionSettingsView: View {
                     )
                     .labelsHidden()
                     .accessibilityIdentifier("sms-integration.enabled")
-                    .onChange(of: smsIntegration.integrationEnabled) { _ in
+                    .onChange(of: smsIntegration.integrationEnabled) {
                         model.requestDeviceCapabilityRegistration()
                     }
                 }
