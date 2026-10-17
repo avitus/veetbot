@@ -22,18 +22,19 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
 State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
 runs as release `20260928-202932-e55551f`; Milestone 14's completion was
 recorded on 2026-10-09. With Milestone 32 authorized, twenty-two of thirty-three milestones are complete; ten
-are in progress and one is authorized but not started.
+were in progress and one was authorized but not started at that review.
+The reliability repair now begins Milestone 15 under ADR-0205.
 Milestone 32 has implemented components and registered gates;
 comparative quality and complete runtime/release evidence remain pending.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
-| 15 Operational hardening | Not started | All sixteen gates | Engineering, then owner |
+| 15 Operational hardening | In progress | All sixteen gates; supplemental reliability diagnostics implemented | Engineering, then owner |
 | 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
 | 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | Physical-iPhone verification | Owner |
 | 25 WhatsApp | In progress | Meta ceremony, live smoke | Owner |
-| 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance; expired-body drafting | Owner with engineering |
+| 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance | Owner with engineering |
 | 27 Bland calling | In progress | Dashboard and live checks; final-head review | Owner; engineering |
 | 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
 | 30 Advisory approval | In progress | Threshold calibration and enforce decision; final-head review | Owner; engineering |
@@ -89,6 +90,20 @@ up; their status was recorded on 2026-09-28 from the pull requests' review and
 hosted-CI records.
 
 ## In progress
+
+### Milestone 15 — Operational hardening
+
+ADR-0205 implements safe root-cause diagnostics, bounded recovery and a scoped
+application reliability report with optional alerts. Synthetic fault-injection
+and PostgreSQL tests cover these repairs. All sixteen milestone gates remain
+open, including host monitoring, independent outage alerts, backups and restore
+rehearsal. Production delivery and activation are separate operator steps.
+
+- [ ] Complete all sixteen Milestone 15 gates and reviewed production delivery
+- [ ] Implement encrypted off-host backups and verify restore rehearsals
+- [ ] Complete host health probes, cooldown reminders and an independent outage channel
+- [ ] Verify firewall, SSH, proxy, rollback and worker watchdog hardening
+- [ ] Validate production reliability baselines and explicitly activate reviewed monitoring
 
 ### Milestone 25 — WhatsApp business surface
 
@@ -195,7 +210,6 @@ verified ceiling. Remaining:
 - [ ] Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
 - [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
 - [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
-- [ ] Make reply drafting refetch a thread whose retained body has expired, as email-experience.md requires; today the draft run fails as internal_error (EmailToolError) before any model request, so tests/unit/test_email_scan_cost.py::test_draft_generation_never_receives_an_expired_body passes vacuously
 
 ### Milestone 27 — Bland calling and public reception
 
@@ -318,15 +332,25 @@ current query policy. ADR-0183 refreshes current evidence on every production
 context assembly. ADR-0185 adds exact-version release-bundle validation and
 recomputes quality/budget admission. Source indexing has default-off maintenance
 composition and configuration bound to reviewed release dependencies (ADR-0187).
-Trusted query authority, semantic recall composition, query scheduling,
-historical/People semantic parity and comparative activation evidence remain open.
+Offline model verification, restricted local query authority and shared run preparation
+are implemented (ADR-0188), alongside governed source recovery (ADR-0189), durable
+preparation budgets (ADR-0190) and a separately admitted relevance reranker (ADR-0191).
+The runtime evaluator separates stored atoms from recovered source evidence
+(ADR-0192), and its PostgreSQL mode exercises actual workers and reader authority.
+The owner approved the 400-scenario corpus on 2026-10-13; difficult-failure review
+remains required. Current People narrowing has shared
+PostgreSQL coverage; a six-arm task-context comparison retains all 120 development
+observations. Reader-planned search answers 16/20, with four failures caused by
+guessed hard type filters. ADR-0198 replaces that model-facing argument with soft
+relevance hints while preserving explicit legacy filters. Historical semantic
+parity, confirmatory configuration binding and reviewed release evidence remain open.
 
 Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).
 The staged implementation is in progress; optional channels remain evidence-gated.
 
-- [ ] complete the staged implementation and comparative activation evidence
-- [ ] authorized PR review, hosted CI and separately authorized production delivery
+- [ ] Complete the staged implementation and comparative activation evidence
+- [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 ## Outside a milestone
 
@@ -354,14 +378,7 @@ succeeded on merge `a9b81420` (`outside_milestone_evidence` in the state file).
 
 ## Authorized
 
-Specified, gated, and authorized, with implementation not yet begun.
-
-- **Milestone 15 — Operational hardening** — sixteen gates; the next
-  sequential milestone now that Milestone 14 is complete. Its backup tranche
-  depends on none of the milestones before it.
-
-
-
+No authorized milestone remains unstarted.
 
 ## Deferred
 

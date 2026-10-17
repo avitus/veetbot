@@ -978,16 +978,30 @@ key in the owner's protected credential store only if certificate recovery is
 required; never place the PKCS#12, password, or decoded key in the repository,
 a project variable, cache, workspace, artifact, or log.
 
+For this release only, [ADR-0211](adr/0211-commit-scoped-reliability-signing.md)
+records explicit owner approval to admit the final reviewed `reliability`
+revision. The designated operator may add this alternative inside the branch
+parentheses: `(pipeline.git.branch == "reliability" and pipeline.git.revision
+== "FINAL_REVIEWED_COMMIT_SHA")`, substituting the actual reviewed commit.
+Preserve project/group restrictions and the non-SSH/non-API-configuration clauses.
+Retain the original readback; add and verify the replacement expression before
+removing the original. After the verification attempt ends, including failure or
+cancellation, add and verify the original expression before removing the temporary
+one. Keep restoration evidence with the pipeline receipt. Never leave a generic
+`reliability` grant or an interval without an expression restriction. This
+workflow selector does not itself authorize credentials for another revision.
+
 The `apple-signing-smoke` job proves this complete signing path in the
-requested `dev` pipeline that precedes a merge to `main` (ADR-0107). It runs the same
+requested `dev` pipeline, or the exact admitted `reliability` pipeline under
+ADR-0211, that precedes a merge to `main` (ADR-0107). It runs the same
 repository-owned archive and package script as `apple-testflight`, including
 the archived identity checks, application-signature verification,
 `productbuild`, and `pkgutil` verification. It receives neither the
 `veetbot-apple-testflight` context nor an App Store Connect API key, does not
 invoke `altool`, persists no artifact, and therefore cannot publish its package.
-It does receive `veetbot-apple-signing`, so access to `dev` and changes to the
+It does receive `veetbot-apple-signing`, so admitted branch writes and changes to the
 CircleCI workflow are nevertheless release-signing security boundaries. Keep
-`dev` restricted to trusted maintainers and require the smoke job to pass on the
+the admitted branches restricted to trusted maintainers and require the smoke job to pass on the
 exact revision proposed for `main`.
 
 Second, create a restricted context named `veetbot-apple-testflight` with:
@@ -1035,7 +1049,8 @@ itself; such a branch is verified on the sidecar and, before it is proposed for
 verification jobs are required status checks, so a pull request cannot merge
 until a requested run reports them green on its head commit; the owner retains
 an admin override. A requested `dev` pipeline also
-runs the non-publishing Apple signing smoke described above. On `main`, a
+runs the non-publishing Apple signing smoke described above; ADR-0211 permits
+the same job on the separately admitted exact `reliability` revision. On `main`, a
 verification job other than `public-site` whose source tree already passed it,
 normally in that requested run, reports success without rerunning; a merge
 commit whose tree nothing verified is verified in full (ADR-0114). After all
@@ -1575,3 +1590,54 @@ The next daily run may legitimately report no change until enough suitable new
 evidence exists. Keep supervised review enabled and unattended application off;
 new proposals still require individual approval. Never remove an activated
 boundary or replace unknown legacy attribution with empty metadata to unblock work.
+
+### Application reliability diagnostics and optional alerts (ADR-0205)
+
+After deploying the reliability changes, use the existing protected owner
+operator environment to run `agent run reliability --hours 24 --json`.
+It reports durable run outcomes, failure groups and current queue health without
+selecting prompts, drafts, exception messages or tool result bodies. It does not
+count API requests that failed before creating a run. A missing completion rate
+means no observed outcomes, and completion latency includes approval waiting.
+
+For a failed task, copy its native diagnostic reference and correlate it with
+`diagnostic_id` in the appropriate service journal. API errors retain their
+request ID; search journal `request_id` to find their diagnostic. First-party
+locations, bounded cause classes, `error_fingerprint`, run/session/tool IDs and
+`release_id` identify the failing code without recording exception text or local
+variables. Group recurring errors by fingerprint within a release; compare code
+locations across releases, since source movement can change fingerprints.
+Keep journal access restricted to authorized operators.
+
+To activate the optional application alarm after review and deployment:
+
+1. Verify the PostgreSQL schema is current and the existing notification
+   dispatcher and approved delivery destination work. Run the read-only report.
+2. Install `deploy/systemd/veetbot-reliability.service` and
+   `deploy/systemd/veetbot-reliability.timer` in `/etc/systemd/system/` as root.
+   These are operator-managed host units; delivery does not enable them.
+3. Install `deploy/ops/reliability.env.example` as
+   `/etc/veetbot/reliability.env`, owned by root and mode `0600`. Review its
+   one-hour window, minimum ten outcomes, twenty-percent failure rate, three
+   internal errors and 120-second ready-queue threshold. Set
+   `AGENT_RELIABILITY_MONITOR_ENABLED=1` only when ready for notifications.
+4. Run `sudo systemctl daemon-reload`, then
+   `sudo systemctl start veetbot-reliability.service`. Inspect the journal and
+   outbox delivery. Exit 0 means no current threshold breach, 2 means a degraded
+   observation was recorded, and 1 means the check could not complete. The unit
+   accepts 2 as a successful measurement; timeouts remain failures.
+5. Enable recurrence with
+   `sudo systemctl enable --now veetbot-reliability.timer`. Disable it with
+   `sudo systemctl disable --now veetbot-reliability.timer` and reset the flag
+   to `0` before rolling back to a release without this command.
+
+`--check` alone is read-only. Adding `--notify` requires enabled notification
+configuration and writes only alarm transitions and outbox records. Concurrent
+checks do not duplicate alerts; recovery and a later new episode each produce
+one transition. Quiet traffic does not clear an error-rate alarm. Threshold
+changes apply at the next observation; review them as operational changes.
+
+This monitor cannot deliver when PostgreSQL, the host or the notification path
+is down. Retain an independent external uptime/dead-man channel and complete
+Milestone 15's backup/restore and host-hardening work. Deployment and activation
+are separate from branch implementation; neither is implied by passing tests.

@@ -14,6 +14,7 @@ import sys
 from dataclasses import replace
 from types import MappingProxyType
 
+import pytest
 from pydantic import SecretStr
 
 from agent_core import bootstrap
@@ -63,3 +64,42 @@ def test_a_credentialed_profile_still_builds_its_sdk_adapter() -> None:
     assert type(built["anthropic"]).__name__ == "AnthropicMessagesProvider"
     assert isinstance(missing["openai"], MissingCredentialProvider)
     assert isinstance(missing["anthropic"], MissingCredentialProvider)
+
+
+async def test_dependency_capture_describes_availability_without_constructing_adapters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
+    from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
+
+    created = []
+
+    def constructor(*args: object, **kwargs: object) -> None:
+        created.append(True)
+
+    monkeypatch.setattr(OpenAIResponsesProvider, "__init__", constructor)
+    monkeypatch.setattr(AnthropicMessagesProvider, "__init__", constructor)
+    registry = ProviderRegistry.load(
+        PACKAGE_ROOT / "models", adapters=ADAPTER_DEFINITIONS, overlay_root=None
+    )
+    credentialed = replace(
+        memory_settings(),
+        credentials=MappingProxyType(
+            {"openai": SecretStr("synthetic-openai"), "anthropic": SecretStr("synthetic-anthropic")}
+        ),
+    )
+    described = bootstrap._provider_adapters(credentialed, registry, describe_only=True)
+    assert not created, "Resolving dependencies must precede external adapter construction"
+    assert not any(
+        isinstance(provider, MissingCredentialProvider) for provider in described.values()
+    )
+    absent = bootstrap._provider_adapters(memory_settings(), registry, describe_only=True)
+    assert isinstance(absent["openai"], MissingCredentialProvider)
+    assert isinstance(absent["anthropic"], MissingCredentialProvider)
+    from agent_core.config import ConfigurationError
+    from tests.contract.test_model_gateway_contract import ATTEMPT, request, resolved
+
+    for name, provider in described.items():
+        with pytest.raises(ConfigurationError, match="Metadata-only"):
+            provider.stream(request(), resolved(name), ATTEMPT)
+        await provider.close()

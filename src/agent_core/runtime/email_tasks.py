@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -53,6 +54,7 @@ from agent_core.domain.errors import (
     ToolValidationError,
 )
 from agent_core.domain.events import NewEvent
+from agent_core.domain.failures import log_failure
 from agent_core.domain.messages import (
     AssistantMessage,
     CacheHints,
@@ -61,7 +63,14 @@ from agent_core.domain.messages import (
     ToolCallItem,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.runs import BudgetScope, OutcomeKind, RunOutcome, Step
+from agent_core.domain.runs import (
+    BudgetScope,
+    FailureReason,
+    OutcomeKind,
+    RunFailure,
+    RunOutcome,
+    Step,
+)
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus, ToolSource, ToolSpec
 from agent_core.ports.email import EmailContextRenderer, EmailRuntimeServices, EmailSemanticPort
 from agent_core.ports.persistence import RepositoryUnitOfWork
@@ -97,6 +106,10 @@ type ServerPreparation = Callable[[UUID, Principal, frozenset[str]], Awaitable[N
 
 class EmailToolError(Exception):
     """A normalized unavailable/denied read; never contains provider content."""
+
+
+class EmailSourceUnavailableError(EmailToolError):
+    """A bounded source refresh could not establish complete evidence for drafting."""
 
 
 class EmailModelResultError(EmailToolError):
@@ -191,7 +204,8 @@ class EmailTaskRunner:
             self.service,
             semantics,
             self.render_context,
-            self.junk_filter,
+            prepare_servers=self.prepare_servers,
+            junk_filter=self.junk_filter,
         )
         try:
             await io.recover_reads()
@@ -212,6 +226,29 @@ class EmailTaskRunner:
             return await io.send()
         except _ModelOutcomeError as exc:
             return exc.outcome
+        except EmailSourceUnavailableError as exc:
+            details = log_failure(
+                logging.getLogger(__name__),
+                "email_source_unavailable",
+                exc,
+                phase="email_source",
+                diagnostic_id=str(context.ids.new_id()),
+                run_id=str(context.run.id),
+            )
+            return RunOutcome(
+                kind=OutcomeKind.FAILED,
+                failure=RunFailure(
+                    reason=FailureReason.DEPENDENCY_UNAVAILABLE,
+                    error_class=type(exc).__name__,
+                    message=(
+                        "The mailbox conversation could not be refreshed completely. "
+                        "Your existing draft is preserved. Check account access and try again."
+                    ),
+                    details={**details, "reason_code": "email.source_unavailable"},
+                    occurred_at=context.clock.now(),
+                    step_number=context.run.step_count,
+                ),
+            )
 
 
 class _TaskIO:
@@ -223,9 +260,11 @@ class _TaskIO:
         service: EmailRuntimeServices,
         semantics: EmailSemanticPort,
         render_context: EmailContextRenderer,
+        prepare_servers: ServerPreparation | None = None,
         junk_filter: EmailJunkFilter | None = None,
     ) -> None:
         """Keep this bounded slice's task state, provider interfaces and recovery context."""
+        self.prepare_servers = prepare_servers
         self.context = context
         self.task = task
         self.registry = registry
@@ -1850,8 +1889,64 @@ class _TaskIO:
         c = self.context
         async with c.uow_factory() as uow:
             thread = await self.service._thread(uow.email, c.principal, thread_id)
-        if not thread.complete:
-            raise EmailToolError("The complete conversation is required before generating a reply.")
+        try:
+            if not thread.complete:
+                if self.prepare_servers is None:
+                    raise EmailToolError(
+                        "The complete conversation is required before generating a reply."
+                    )
+                server = self.service.account_servers[thread.account_id]["read"]
+                await self.prepare_servers(c.run.session_id, c.principal, frozenset({server}))
+                profile = await self.call(thread.account_id, "get_profile", {})
+                async with c.uow_factory() as uow:
+                    account = await read_value(
+                        uow.email, c.principal, "account", thread.account_id, EmailAccount
+                    )
+                if (
+                    account is None
+                    or not account.email_address
+                    or account.email_address.casefold()
+                    != str(profile.get("email_address", "")).casefold()
+                ):
+                    raise EmailToolError("The mailbox identity cannot be verified.")
+                observed, pending = await self.read_thread(
+                    thread.account_id, thread.provider_thread_id, fresh=True
+                )
+                while (
+                    observed is not None
+                    and pending
+                    and self.full_reads.get(thread.account_id, 0) < 10
+                ):
+                    observed, pending = await self.read_thread(
+                        thread.account_id,
+                        thread.provider_thread_id,
+                        fresh=True,
+                        progress_override=observed,
+                    )
+                if (
+                    observed is None
+                    or pending
+                    or not observed.get("complete")
+                    or observed.get("thread_id") != thread.provider_thread_id
+                ):
+                    raise EmailToolError(
+                        "A complete fresh conversation could not be retrieved. "
+                        "The existing draft is preserved."
+                    )
+                thread = await self.service.import_thread(
+                    c.principal,
+                    thread.account_id,
+                    observed,
+                    c.run.session_id,
+                    run=c.run,
+                    lease=c.lease,
+                )
+                if not thread.complete:
+                    raise EmailToolError(
+                        "The complete conversation is required before generating a reply."
+                    )
+        except EmailToolError as exc:
+            raise EmailSourceUnavailableError("Draft source recovery is unavailable.") from exc
         learning = await self.service.learning_context(c.principal, thread)
         draft = await self.model(
             "Draft a reply for owner review using the shared writing style and complete "

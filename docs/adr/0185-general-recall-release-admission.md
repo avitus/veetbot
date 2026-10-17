@@ -86,3 +86,49 @@ Production configuration and trusted dependency/authority resolution, query and
 index scheduling, actual runner/publication integration, historical/People parity,
 task-aware planning/recovery and reviewed held-out observations remain open.
 No M33 gate is completed and no running deployment's recall fix is claimed here.
+
+## Offline publication implementation (2026-10-12)
+
+`agent_core.evals.general_recall_publication` compiles a complete version-two bundle
+after independently supplied reviews and test reports are present. It requires a
+clean committed implementation, the independently resolved deployment identity,
+an independence review covering every scenario before preregistration, and a
+difficult-failure review bound to all observations. Failures include missing
+evidence at any stage as well as unsuccessful answers, across controls and candidate
+arms. Reviewer attribution remains an operator responsibility; the compiler never
+creates or supplies a human judgment.
+
+Every one of the eleven gate report files must match its receipt, identify the
+same dependency tuple and contain distinct named checks whose outcomes recompute
+the receipt counts. The compiler recomputes the quality gates, rereads every input
+to detect changes during scoring, and rechecks the implementation before creating
+a new output directory. Existing and partially written outputs are never replaced.
+The admission bundle is written last, after its identity, report and provenance.
+Publication changes no production setting and does not itself approve deployment.
+
+The CLI accepts `--bundle`, `--identity`, `--independence-review`,
+`--failure-review`, `--collection-manifest`, eleven repeated `--gate-report` paths
+and a new `--output` directory. The collection manifest binds the original corpus,
+runtime observations, formation replay banks and provider reservation journal.
+Paths must stay inside its directory; every input is a bounded regular file with
+a matching digest. The collector derives the scenario manifest from the corpus,
+requires every scenario/path/pipeline/channel combination exactly once, and
+recomputes each observation from original runtime results. Every measurement must
+follow preregistration. The canonical bundle must exactly match this compilation.
+
+Cost reconciliation matches every fresh provider completion to a settled original
+reservation, retaining repeated requests and enforcing the shared monetary ceiling
+throughout the journal. Missing, duplicated, uncertain, unobserved and excess
+charges refuse publication. Replayed formation contributes its original usage to
+each case, while its actual provider charge occurs once. The compiler verifies
+the original bank bytes before accepting replayed usage. The publisher rereads
+all source artifacts before writing and records both attributed observation cost
+and actual journal cost; neither can replace the other.
+
+These mechanisms do not convert earlier development measurements into release
+evidence. A confirmatory runner must still resolve and bind the actual effective
+deployment, formation, reader, index and frozen-control dependencies before any
+holdout execution. Independent human reviews and actual passing inputs remain
+open. The unit collection fixtures deliberately substitute fabricated projections
+to test completeness and provenance; runtime projection has separate execution
+tests. Neither fixture supplies a human review or activation evidence.

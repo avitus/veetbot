@@ -128,6 +128,7 @@ async def postgres_stores(history_clock: FixedClock) -> AsyncIterator[Factory]:
             memories = PostgresMemoryStore(connection, clock)
             events = PostgresEventRepository(connection, clock, EventUpcasterRegistry())
             people = PostgresPeopleStore(connection, clock)
+            memories.bind_people(people)
             reconsolidation = PostgresReconsolidationStore(
                 connection,
                 RandomIdFactory(),

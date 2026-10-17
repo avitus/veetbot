@@ -49,6 +49,30 @@ async def test_prepared_query_is_available_without_provider_io_in_lookup() -> No
     assert len(provider.calls) == 1
 
 
+@pytest.mark.parametrize(
+    "text,subjects,expected",
+    [
+        ("Suggest breakfast options", [], "Suggest breakfast options"),
+        ("Meet Alex for breakfast", ["Alex", "BREAKFAST"], "Meet Alex for breakfast"),
+        (
+            "Find the plan we agreed on",
+            ["Workshop", "workshop", "May launch"],
+            "Find the plan we agreed on\nRelevant subjects: Workshop; May launch",
+        ),
+        ("Find cafe options", ["Café"], "Find cafe options\nRelevant subjects: Café"),
+    ],
+)
+async def test_query_encoding_preserves_natural_task_and_only_adds_missing_subjects(
+    text: str, subjects: list[str], expected: str
+) -> None:
+    _, _, provider, _, lookup = await setup_lookup()
+    scoped = query(text).model_copy(update={"subjects": subjects})
+    assert (await lookup.prepare([scoped])).prepared == 1
+    assert provider.calls[0].texts == (expected,)
+    assert lookup.lookup(scoped) is not None
+    assert lookup.lookup(scoped.model_copy(update={"subjects": ["other context"]})) is None
+
+
 def query(text: str = "Suggest breakfast options") -> RecallQuery:
     return recall_query(text=text).model_copy(update={"candidate_selection": "relevance"})
 

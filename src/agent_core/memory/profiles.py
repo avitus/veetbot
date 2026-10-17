@@ -89,6 +89,11 @@ class RetrievalProfile(_ProfileModel):
     """Ranking, fusion, and snapshot-composition knobs for the read path."""
 
     semantic_enabled: bool = False
+    semantic_channel: Literal["hybrid", "dense"] = "hybrid"
+    semantic_fusion_weight: float = Field(default=0.2, ge=0.0, le=1.0)
+    reranking: Literal["baseline", "relevance"] = "baseline"
+    query_planning: Literal["baseline", "task_context"] = "baseline"
+    source_recovery_enabled: bool = False
     candidate_selection: Literal["recent", "relevance"] = "relevance"
     reciprocal_rank_fusion_k: int = Field(default=60, ge=1)
     durable_item_share: float = Field(default=0.6666666667, ge=0.0, le=1.0)

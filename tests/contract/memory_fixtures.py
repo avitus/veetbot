@@ -48,6 +48,7 @@ from agent_core.memory.email_semantics import (
 )
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION, HybridMemoryRetriever
+from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.support import (
     NOW,
     PRINCIPAL_ID,
@@ -87,7 +88,7 @@ async def formation_stack() -> tuple[
     )
 
 
-async def user_event(factory: MemoryUnitOfWorkFactory, text: str) -> int:
+async def user_event(factory: UnitOfWorkFactory, text: str) -> int:
     """Append one user episode and return its sequence for provenance."""
 
     async with factory() as uow:

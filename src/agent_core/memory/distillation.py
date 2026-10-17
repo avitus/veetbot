@@ -47,6 +47,7 @@ from agent_core.domain.messages import (
     TextPart,
     UserMessage,
 )
+from agent_core.domain.people import is_group_or_service_name, is_non_person_reference
 from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.equivalence import (
@@ -626,6 +627,8 @@ _SCHEDULED_OCCASION = re.compile(
 def _canonical_provider_statement(
     statement: str,
     derivation: MemoryDerivation,
+    *,
+    named_subjects: Sequence[str] = (),
 ) -> str:
     """Accept a canonical third-person statement whose hedging matches its derivation.
 
@@ -640,16 +643,28 @@ def _canonical_provider_statement(
     compact = re.sub(r"^the\s+user(?=\s)", "User", compact, flags=re.IGNORECASE)
     compact = re.sub(r"^the\s+user's(?=\s)", "The user's", compact, flags=re.IGNORECASE)
     compact = re.sub(r"^user(?=['\s])", "User", compact, flags=re.IGNORECASE)
+    checked = compact
     if _CANONICAL_USER_STATEMENT.match(compact) is None:
-        raise ValueError("provider statement has no canonical user subject")
+        # Formation@11 may name the person the source actually describes. Use
+        # the legacy subject only to apply the same content/hedging rules; the
+        # stored statement must keep the named subject, never become an owner fact.
+        for name in sorted(named_subjects, key=len, reverse=True):
+            if compact.startswith(name + " "):
+                checked = "User" + compact[len(name) :]
+                break
+            if compact.startswith((name + "'s ", name + "\u2019s ")):
+                checked = "User's " + compact[len(name) + 3 :]
+                break
+        else:
+            raise ValueError("provider statement has no canonical user subject")
     # A statement with no object ("an unspecified activity") or a completed
     # one-off event ("did the dishes for an hour") says nothing recallable
     # about the user; both are counted as rejections, never stored.
-    if _VACUOUS_STATEMENT.search(compact) is not None:
+    if _VACUOUS_STATEMENT.search(checked) is not None:
         raise ValueError("provider statement has no recallable content")
     if derivation is MemoryDerivation.DIRECT and (
-        _TRANSIENT_EVENT.match(compact) is not None
-        or _SCHEDULED_OCCASION.match(compact) is not None
+        _TRANSIENT_EVENT.match(checked) is not None
+        or _SCHEDULED_OCCASION.match(checked) is not None
     ):
         raise ValueError("provider statement records a transient event")
     hedged = _UNCERTAINTY_LANGUAGE.search(compact) is not None
@@ -665,6 +680,7 @@ def _normalize_provider_candidate(
     *,
     by_sequence: dict[int, EventEnvelope],
     scope: str,
+    named_subjects: Sequence[str] = (),
 ) -> MemoryCandidate:
     """Apply formation policy locally to one grounded semantic proposal.
 
@@ -685,7 +701,15 @@ def _normalize_provider_candidate(
         )
         or (
             any(
-                contains_automatic_memory_correction(span.text) for span in candidate.evidence_spans
+                contains_automatic_memory_correction(span.text)
+                or any(
+                    re.search(
+                        rf"(?<!\w){re.escape(name)}\s+(?:(?:is|are|was|were)\s+)?no\s+longer\s+\w",
+                        span.text,
+                    )
+                    for name in named_subjects
+                )
+                for span in candidate.evidence_spans
             )
             is not (candidate.polarity is Polarity.RETRACT)
         )
@@ -699,7 +723,9 @@ def _normalize_provider_candidate(
         # would still say "User drives their BMW".
         raise ValueError("distilled candidate failed local validation")
 
-    statement = _canonical_provider_statement(candidate.statement, candidate.derivation)
+    statement = _canonical_provider_statement(
+        candidate.statement, candidate.derivation, named_subjects=named_subjects
+    )
     if (
         candidate.derivation is MemoryDerivation.DIRECT
         and candidate.claim_kind is MemoryClaimKind.HABIT
@@ -747,6 +773,7 @@ def _normalize_distilled_candidate(
     *,
     by_sequence: dict[int, EventEnvelope],
     scope: str,
+    named_subjects: Sequence[str] = (),
 ) -> MemoryCandidate:
     belief_type = _BELIEF_TYPE_BY_CLAIM_KIND[candidate.claim_kind]
     return _normalize_provider_candidate(
@@ -767,6 +794,7 @@ def _normalize_distilled_candidate(
         ),
         by_sequence=by_sequence,
         scope=scope,
+        named_subjects=named_subjects,
     )
 
 
@@ -1072,6 +1100,12 @@ def _candidates_semantically_duplicate(
         return True
     if not statements_compatible(left.statement, right.statement):
         return False
+    if left.people is not None or right.people is not None:
+        # A person is the subject of many independent claims. The older
+        # owner-only shortcut treats a relationship/preference key as the claim
+        # itself, which would discard a spouse after retaining a sibling fact.
+        # People proposals must satisfy the existing whole-statement comparison.
+        return _statements_agree_across_kinds(left.statement, right.statement)
     normalized_left_subject = re.sub(
         r"^(?:the\s+)?users?['\u2019]s?\s+",
         "",
@@ -1409,7 +1443,9 @@ class NemoriAssistedCandidateExtractor:
                 provider_failure = provider_failure or failure
                 failures["prediction_error_distillation"] = failure.failure_kind
             try:
-                distilled, segment_interactions = self._parse_distillation(distilled_raw or "")
+                distilled, segment_interactions, rejected_interactions = self._parse_distillation(
+                    distilled_raw or ""
+                )
                 validation = _validate_coverage(
                     distilled,
                     coverage_units(segment),
@@ -1448,7 +1484,11 @@ class NemoriAssistedCandidateExtractor:
                 for decision, count in validation.counts.items():
                     coverage_counts[decision] = coverage_counts.get(decision, 0) + count
                 coverage_dispositions.update(validation.dispositions)
-                if segment_rejections or validation.represented_unverified:
+                if rejected_interactions:
+                    stage_metrics[stage_key("prediction_error_distillation")][
+                        "rejected_interactions"
+                    ] = rejected_interactions
+                if segment_rejections or validation.represented_unverified or rejected_interactions:
                     stage_metrics[stage_key("prediction_error_distillation")]["outcome"] = (
                         "partial_validation"
                     )
@@ -1572,8 +1612,10 @@ class NemoriAssistedCandidateExtractor:
         return _DistillationResponse.model_json_schema()
 
     @staticmethod
-    def _parse_distillation(raw: str) -> tuple[_DistillationResponse, list[InteractionEvidence]]:
-        return _DistillationResponse.model_validate_json(raw), []
+    def _parse_distillation(
+        raw: str,
+    ) -> tuple[_DistillationResponse, list[InteractionEvidence], int]:
+        return _DistillationResponse.model_validate_json(raw), [], 0
 
     @staticmethod
     def _normalize_candidate(
@@ -1928,17 +1970,71 @@ class PeopleAssistedCandidateExtractor(NemoriAssistedCandidateExtractor):
         return _PeopleDistillationResponse.model_json_schema()
 
     @staticmethod
-    def _parse_distillation(raw: str) -> tuple[_DistillationResponse, list[InteractionEvidence]]:
-        response = _PeopleDistillationResponse.model_validate_json(raw)
-        return _DistillationResponse(
-            candidates=list(response.candidates), coverage=response.coverage
-        ), response.interactions
+    def _parse_distillation(
+        raw: str,
+    ) -> tuple[_DistillationResponse, list[InteractionEvidence], int]:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or not isinstance(data.get("interactions"), list):
+            raise ValueError("People distillation requires an interaction list")
+        proposed = data["interactions"]
+        if len(proposed) > 32:
+            raise ValueError("People segment exceeds 32 interactions")
+        # The claim/coverage ledger is independent of the interaction proposals.
+        # Reject a malformed interaction without discarding valid grounded claims.
+        # Original proposal counts still enforce every segment-wide bound.
+        response = _PeopleDistillationResponse.model_validate({**data, "interactions": []})
+        mention_count = sum(
+            len(candidate.people.mentions) + len(candidate.people.organizations)
+            for candidate in response.candidates
+            if candidate.people is not None
+        ) + sum(
+            len(item["mentions"])
+            for item in proposed
+            if isinstance(item, dict) and isinstance(item.get("mentions"), list)
+        )
+        if mention_count > 64:
+            raise ValueError("People segment exceeds 64 evidence mentions")
+        interactions = []
+        rejected = 0
+        for item in proposed:
+            try:
+                interactions.append(InteractionEvidence.model_validate(item))
+            except ValueError:
+                rejected += 1
+        return (
+            _DistillationResponse(candidates=list(response.candidates), coverage=response.coverage),
+            interactions,
+            rejected,
+        )
 
     @staticmethod
     def _normalize_candidate(
         candidate: _DistilledCandidate, *, by_sequence: dict[int, EventEnvelope], scope: str
     ) -> MemoryCandidate:
-        result = _normalize_distilled_candidate(candidate, by_sequence=by_sequence, scope=scope)
+        names = []
+        if isinstance(candidate, _PeopleDistilledCandidate) and candidate.people is not None:
+            for mention in candidate.people.mentions:
+                source = by_sequence.get(mention.source_event_id)
+                if (
+                    source is not None
+                    and mention.source_event_id in candidate.source_event_ids
+                    and mention.role == "subject"
+                    and mention.identifier_kind == "name"
+                    and mention.identifier_value == mention.display_name
+                    and _event_text(source)[mention.start : mention.end] == mention.text
+                    and re.search(rf"(?<!\w){re.escape(mention.display_name)}(?!\w)", mention.text)
+                    and any(
+                        span.source_event_id == mention.source_event_id
+                        and re.search(rf"(?<!\w){re.escape(mention.display_name)}(?!\w)", span.text)
+                        for span in candidate.evidence_spans
+                    )
+                    and not is_non_person_reference(mention.display_name)
+                    and not is_group_or_service_name(mention.display_name)
+                ):
+                    names.append(mention.display_name)
+        result = _normalize_distilled_candidate(
+            candidate, by_sequence=by_sequence, scope=scope, named_subjects=names
+        )
         if isinstance(candidate, _PeopleDistilledCandidate):
             result = result.model_copy(update={"people": candidate.people})
         return result
@@ -1951,6 +2047,9 @@ class PeopleAssistedCandidateExtractor(NemoriAssistedCandidateExtractor):
         return instructions + (
             " For formation@11, preserve useful facts about named people, their "
             "relationships, and past interactions. "
+            "A statement about a named person may begin with that exact source name "
+            "or its possessive when its People mention has role subject. Keep that "
+            "person as the subject; never reassign their claim to the user. "
             "Attach source-local people evidence to those atomic candidates, and null "
             "to other candidates. "
             "Use only exact source spans with zero-based Unicode character start/end "

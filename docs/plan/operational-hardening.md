@@ -19,7 +19,7 @@ architectural decisions; ADR-0061 records the authorization.
 The deployment page states the risk plainly: the single-server failure domain
 has "no required cloud firewall, off-host database, backup, restore rehearsal,
 monitoring, load balancer, rolling deployment, or high availability. Loss of
-the Droplet may mean unrecoverable data loss" (deployment.md:1426-1429). ADR-0046
+the Droplet may mean unrecoverable data loss" (deployment.md:1441-1444). ADR-0046
 accepted that at launch as an explicit decision, not a claim that the controls
 lack value. Milestone 15 converts "unrecoverable" into "recoverable within the
 backup window" and makes the owner aware when production degrades, and it
@@ -527,3 +527,36 @@ Metrics carry no secret, path, or environment value.
    outbox makes a second destination a configuration change.
 5. Whether an OTLP exporter is ever worth a credential for a single-owner
    host.
+
+## Supplemental application reliability signals (ADR-0205)
+
+The owner-authorized reliability repair adds `agent run reliability`, a scoped
+operator view over durable runs, model calls and tool invocations. Its default
+read is a consistent read-only snapshot with a maximum ninety-day window and
+per-statement timeout. The operator command uses database-only startup, without
+provider initialization or application seeding, and a sixty-second overall bound.
+Completion rate divides completed runs by completed plus
+failed runs; cancellations and parked work are reported separately. A null rate
+means no outcomes. The completion latency includes queueing and approval waits.
+Failure groups contain only validated classes, fingerprints and release IDs.
+The current queue signal excludes future scheduled work from ready-queue age.
+Recovered tool/model failures remain visible even when the run completes.
+
+The explicit `--check --notify` mode evaluates four supplementary application
+signals: run failure rate, internal-error count, ready-queue age and expired
+running leases. It serializes checks per tenant/principal and commits each
+transition and notification atomically. An unchanged episode emits no repeat;
+a recovery emits once, and a subsequent failure opens a new episode. A quiet
+window cannot recover an outcome alarm. This episode-only supplement is separate
+from the host-health cooldown and reminder mechanism specified above; it does
+not satisfy or replace any Milestone 15 acceptance gate.
+
+`veetbot-reliability.service` and `.timer` are optional operator-managed host
+units, outside application release/restart lists. They are disabled by default,
+run every five minutes when installed and enabled, and use a separate root-owned
+configuration file. The service bounds the entire check to ninety seconds.
+A database or configuration failure exits unsuccessfully rather than producing a
+healthy report. The supplemental check depends on the application database and
+notification dispatcher; it is not the independent outage channel. Backups,
+restore rehearsal, host probes, cooldown reminders and watchdog activation
+remain governed by the full milestone requirements above.

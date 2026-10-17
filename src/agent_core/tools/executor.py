@@ -50,6 +50,7 @@ from agent_core.domain.errors import (
     WorkspaceEscape,
 )
 from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, NewEvent
+from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.messages import (
     ContentPart,
     FileReferencePart,
@@ -104,7 +105,11 @@ from agent_core.tools.delegate_run import DELEGATE_RUN_TOOL_NAME
 from agent_core.tools.messages import message_for
 from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME
 from agent_core.tools.skill_manage import SKILL_MANAGE_TOOL_NAME
-from agent_core.tools.tool_call import TOOL_CALL_INPUT_SCHEMA, TOOL_CALL_TOOL_NAME
+from agent_core.tools.tool_call import (
+    TOOL_CALL_INPUT_SCHEMA,
+    TOOL_CALL_TOOL_NAME,
+    resolve_deferred_target,
+)
 from agent_core.tools.validation import validate_and_normalize, validate_output
 
 logger = logging.getLogger(__name__)
@@ -242,35 +247,6 @@ def _outcome_item(
         content=content,
         is_error=outcome.status is not ToolOutcomeStatus.SUCCEEDED,
         trust=trust,
-    )
-
-
-def _deferred_target(call: ToolCallItem, checkpoint: RunCheckpoint) -> ToolCallItem | str:
-    """Unwrap a tool.call into the pinned tool it names, or return a refusal reason.
-
-    The unwrapped call keeps the model's call id, so its events, approval and
-    result pair with the tool.call the provider replays (ADR-0123).
-    """
-
-    try:
-        wrapper, _rendered, _hash = validate_and_normalize(call.arguments, TOOL_CALL_INPUT_SCHEMA)
-    except ToolValidationError:
-        return "tool.arguments_invalid"
-    name = wrapper["name"]
-    pinned = checkpoint.pinned_tool_specs.get(name)
-    if pinned is None or pinned.kind is ToolKind.CONTROL:
-        return "tool.not_found.not_offered"
-    arguments = wrapper.get("arguments", {})
-    return call.model_copy(
-        update={
-            "name": name,
-            "arguments": arguments,
-            "raw_arguments": json.dumps(
-                arguments, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-            ),
-            "parse_error": None,
-        },
-        deep=True,
     )
 
 
@@ -614,7 +590,7 @@ class ToolPipeline:
         progress: list[int] = []
         through_index = False
         if _unwraps_deferred_call(call, agent):
-            target = _deferred_target(call, checkpoint)
+            target = resolve_deferred_target(call, checkpoint)
             if isinstance(target, str):
                 return await self._refusal(
                     run,
@@ -1333,7 +1309,15 @@ class ToolPipeline:
             "browser.act",
             "browser.upload",
         }
-        with collect_browser_diagnostics(clock=loop.time, enabled=browser_operation) as diagnostics:
+        with (
+            log_context(
+                run_id=str(run.id),
+                session_id=str(run.session_id),
+                tenant_id=run.tenant_id,
+                tool_invocation_id=str(invocation.id),
+            ),
+            collect_browser_diagnostics(clock=loop.time, enabled=browser_operation) as diagnostics,
+        ):
             try:
                 if effective_timeout <= 0:
                     raise TimeoutError
@@ -1440,12 +1424,16 @@ class ToolPipeline:
             # Tool implementation failures are deliberately normalized at this boundary.
             except Exception as exc:
                 # Exception text may contain private upstream bodies or credentials.
-                logger.error(
+                log_failure(
+                    logger,
                     "tool_execution_failed",
-                    extra={
-                        "tool_name": tool.spec.name,
-                        "error_class": type(exc).__name__,
-                    },
+                    exc,
+                    phase="tool",
+                    diagnostic_id=str(self._ids.new_id()),
+                    tool_name=tool.spec.name,
+                    run_id=str(run.id),
+                    session_id=str(run.session_id),
+                    tool_invocation_id=str(invocation.id),
                 )
                 result = ToolResult(
                     ok=False,
@@ -1966,7 +1954,7 @@ class ToolPipeline:
         for wrapped in calls:
             call = wrapped
             if _unwraps_deferred_call(wrapped, agent):
-                target = _deferred_target(wrapped, checkpoint)
+                target = resolve_deferred_target(wrapped, checkpoint)
                 if isinstance(target, str):
                     return False
                 call = target
@@ -2177,6 +2165,7 @@ class ToolPipeline:
                 call_id=call.call_id,
                 content=result.content,
                 context_content=result.context_content,
+                memory_recall=result.memory_recall if tool.spec.name == "memory.search" else None,
                 trust=trust,
             )
         else:

@@ -24,6 +24,7 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    true,
     tuple_,
     update,
 )
@@ -32,6 +33,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql import ColumnElement
 
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
 from agent_core.adapters.persistence.people_attribution import (
@@ -51,7 +53,12 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import ForwardDreamingBoundary
 from agent_core.domain.errors import ConflictError, NotFoundError
-from agent_core.domain.memory import LIVE_MEMORY_STATUSES, SENSITIVITY_ORDER, Sensitivity
+from agent_core.domain.memory import (
+    LIVE_MEMORY_STATUSES,
+    SENSITIVITY_ORDER,
+    RecallQuery,
+    Sensitivity,
+)
 from agent_core.domain.people import (
     OWNER_RELATIONSHIP_GROUPS,
     PEOPLE_RECORD,
@@ -352,7 +359,10 @@ class InMemoryPeopleStore:
             tenant_id=query.tenant_id, principal_id=query.principal_id, roles=set(), scopes=set()
         )
         relationship_matches: set[UUID] = set()
-        if query.relationship is not None and self._memories is not None:
+        owner_relationship = (
+            query.relationship is not None or query.owner_relationship_belief_ids is not None
+        )
+        if owner_relationship and self._memories is not None:
             instant = query.as_of or self._clock.now()
             for key in self._records:
                 if key[:2] != (owner.tenant_id, owner.principal_id):
@@ -364,7 +374,14 @@ class InMemoryPeopleStore:
                     not isinstance(edge, RelationshipAssertion)
                     or edge.unresolved
                     or (
-                        edge.predicate not in OWNER_RELATIONSHIP_GROUPS[query.relationship]
+                        (
+                            query.relationship is not None
+                            and edge.predicate not in OWNER_RELATIONSHIP_GROUPS[query.relationship]
+                        )
+                        or (
+                            query.owner_relationship_belief_ids is not None
+                            and edge.belief_id not in query.owner_relationship_belief_ids
+                        )
                         or not any(
                             endpoint.kind == "owner" for endpoint in (edge.subject, edge.object)
                         )
@@ -468,7 +485,7 @@ class InMemoryPeopleStore:
                 not isinstance(record, PeopleErasure) or record.parent_id is not None
             ):
                 continue
-            if query.relationship is not None and record.id not in relationship_matches:
+            if owner_relationship and record.id not in relationship_matches:
                 continue
             if query.states is not None and getattr(record, "state", None) not in query.states:
                 continue
@@ -952,7 +969,11 @@ class InMemoryPeopleStore:
             self._memory_index.attribution_changed(
                 owner,
                 {key for key, value in self._memory_index.owners.items() if value == owner},
-                set(),
+                {
+                    (session_id, sequence)
+                    for tenant, person, session_id, sequence in self._memory_index.source_permits
+                    if (tenant, person) == owner
+                },
             )
         for key in owned:
             del self._records[key]
@@ -981,6 +1002,85 @@ class PostgresPeopleStore:
         # these bounded OLTP reads. Limit this setting to the current transaction;
         # it does not change the connection's or server's persistent defaults.
         await self._session.execute(text("SET LOCAL jit = off"))
+
+    def memory_identity_predicate(self, query: RecallQuery) -> ColumnElement[bool]:
+        """Apply the shared identity rule in SQL before a dense candidate limit.
+
+        Both link sets reuse ordinary People visibility, including dependency
+        privacy. The restricted set detects assignments hidden at the requested
+        ceiling; a hidden or unresolved assignment cannot become an unlinked fact.
+        Temporal selection retains the People store's current privacy checks.
+        """
+        if query.people_scope is None:
+            raise ValueError("Identity filtering requires a People scope")
+        owner = Principal(
+            tenant_id=query.tenant_id, principal_id=query.principal_id, roles=set(), scopes=set()
+        )
+        kinds = ("memory_link", "relationship", "commitment")
+        temporal = []
+        if query.as_of is not None:
+            payload = PeopleRevisionRow.payload
+            temporal = [
+                or_(
+                    payload["valid_from"].astext.is_(None),
+                    cast(payload["valid_from"].astext, DateTime(timezone=True)) <= query.as_of,
+                ),
+                or_(
+                    payload["valid_to"].astext.is_(None),
+                    cast(payload["valid_to"].astext, DateTime(timezone=True)) > query.as_of,
+                ),
+            ]
+        links = (
+            self._query(owner, Sensitivity.RESTRICTED, query.known_at)
+            .where(
+                PeopleRevisionRow.kind.in_(kinds),
+                *temporal,
+                PeopleRevisionRow.payload["superseded_by"].astext.is_(None),
+            )
+            .subquery("recall_identity_links")
+        )
+        visible = (
+            self._query(owner, query.sensitivity_ceiling, query.known_at)
+            .where(
+                PeopleRevisionRow.kind.in_(kinds),
+                *temporal,
+                PeopleRevisionRow.payload["superseded_by"].astext.is_(None),
+            )
+            .subquery("recall_visible_links")
+        )
+        assigned = (
+            select(1)
+            .select_from(links)
+            .where(links.c.payload["belief_id"].astext == cast(MemoryRow.id, Text))
+            .correlate(MemoryRow)
+        )
+        permitted = select(visible.c.entity_id)
+        invalid = assigned.where(
+            or_(
+                links.c.payload["unresolved"].astext == "true",
+                ~links.c.entity_id.in_(permitted),
+            )
+        )
+        focal = (
+            select(1)
+            .select_from(links)
+            .join(
+                PeopleLinkRow,
+                and_(
+                    PeopleLinkRow.tenant_id == links.c.tenant_id,
+                    PeopleLinkRow.principal_id == links.c.principal_id,
+                    PeopleLinkRow.entity_id == links.c.entity_id,
+                    PeopleLinkRow.revision == links.c.revision,
+                ),
+            )
+            .where(
+                links.c.payload["belief_id"].astext == cast(MemoryRow.id, Text),
+                PeopleLinkRow.role == "person",
+                PeopleLinkRow.target_id.in_(query.people_scope),
+            )
+            .correlate(MemoryRow)
+        )
+        return or_(~exists(assigned), and_(~exists(invalid), exists(focal)))
 
     @asynccontextmanager
     async def lock(self, principal: Principal) -> AsyncIterator[None]:
@@ -1287,7 +1387,7 @@ class PostgresPeopleStore:
         statement = self._query(owner, query.sensitivity_ceiling, query.known_at).where(
             PeopleRevisionRow.kind.in_(query.kinds)
         )
-        if query.relationship is not None:
+        if query.relationship is not None or query.owner_relationship_belief_ids is not None:
             instant = query.as_of or self._clock.now()
             edges = (
                 self._query(owner, query.sensitivity_ceiling, query.known_at)
@@ -1295,7 +1395,14 @@ class PostgresPeopleStore:
                     PeopleRevisionRow.kind == "relationship",
                     PeopleRevisionRow.payload["predicate"].astext.in_(
                         OWNER_RELATIONSHIP_GROUPS[query.relationship]
-                    ),
+                    )
+                    if query.relationship is not None
+                    else true(),
+                    PeopleRevisionRow.payload["belief_id"].astext.in_(
+                        [str(key) for key in query.owner_relationship_belief_ids]
+                    )
+                    if query.owner_relationship_belief_ids is not None
+                    else true(),
                     PeopleRevisionRow.payload["unresolved"].astext == "false",
                     or_(
                         PeopleRevisionRow.payload["subject"]["kind"].astext == "owner",

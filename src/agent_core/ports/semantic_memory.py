@@ -6,6 +6,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.memory import RecallQuery
+from agent_core.domain.reconsolidation import SourceVersion
 from agent_core.domain.semantic_memory import (
     EmbeddingSpace,
     SemanticBounds,
@@ -17,6 +18,12 @@ from agent_core.domain.semantic_memory import (
 
 
 class SemanticMemoryIndex(Protocol):
+    async def capture_revision(
+        self, principal: Principal, source: SourceVersion, space: EmbeddingSpace
+    ) -> SemanticSource | None:
+        """Capture a historical original under its current source/visibility fence."""
+        ...
+
     async def capture(
         self, principal: Principal, belief_id: UUID, space: EmbeddingSpace
     ) -> SemanticSource | None:
@@ -24,7 +31,7 @@ class SemanticMemoryIndex(Protocol):
         ...
 
     async def indexed(self, principal: Principal, source: SemanticSource) -> bool:
-        """Whether this exact source/space already has a current vector."""
+        """Whether this exact source/space already has a valid fenced vector."""
         ...
 
     async def put(
@@ -36,19 +43,27 @@ class SemanticMemoryIndex(Protocol):
     async def search(
         self, query: RecallQuery, space: EmbeddingSpace, vector: tuple[float, ...], *, limit: int
     ) -> list[SemanticHit]:
-        """Exact current-source search with hard predicates before the bounded limit.
+        """Exact original-source search with hard predicates before the bounded limit.
 
-        Historical queries return no dense results until historical vectors are
-        separately admitted; callers retain their existing historical sparse path.
+        Dated queries use separately indexed historical revisions, selected before
+        similarity. Current vectors never stand in for historical evidence.
         """
         ...
 
-    async def bounds(self, principal: Principal) -> SemanticBounds: ...
+    async def bounds(
+        self, principal: Principal, *, include_history: bool = False
+    ) -> SemanticBounds: ...
 
     async def inventory(
-        self, principal: Principal, *, after: int, through: int, limit: int = 64
+        self,
+        principal: Principal,
+        *,
+        after: int,
+        through: int,
+        limit: int = 64,
+        include_history: bool = False,
     ) -> SemanticPage:
-        """Finite insertion-order sweep. Cursor advances over deleted/ineligible rows."""
+        """Finite creation or historical change sweep; deleted/ineligible rows advance it."""
         ...
 
     async def changes(
@@ -70,6 +85,10 @@ class SemanticQueryLookup(Protocol):
 
 
 class RuntimeSemanticQueries(Protocol):
+    async def validate_authority(self, *, session_id: UUID, run_id: UUID, surface_id: str) -> bool:
+        """Revalidate saved evidence's read authority; never revive query work."""
+        ...
+
     async def bind(
         self, *, session_id: UUID, run_id: UUID, surface_id: str
     ) -> SemanticQueryLookup | None:

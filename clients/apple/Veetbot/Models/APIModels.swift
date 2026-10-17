@@ -80,6 +80,7 @@ public enum FailureReason: Hashable, Sendable {
     case authorizationError
     case childRunFailed
     case internalError
+    case dependencyUnavailable
     case unknown(String)
 
     public init(rawValue: String) {
@@ -98,6 +99,7 @@ public enum FailureReason: Hashable, Sendable {
         case "authorization_error": self = .authorizationError
         case "child_run_failed": self = .childRunFailed
         case "internal_error": self = .internalError
+        case "dependency_unavailable": self = .dependencyUnavailable
         default: self = .unknown(rawValue)
         }
     }
@@ -118,6 +120,7 @@ public enum FailureReason: Hashable, Sendable {
         case .authorizationError: return "authorization_error"
         case .childRunFailed: return "child_run_failed"
         case .internalError: return "internal_error"
+        case .dependencyUnavailable: return "dependency_unavailable"
         case .unknown(let value): return value
         }
     }
@@ -208,14 +211,15 @@ public struct SessionView: Codable, Identifiable, Sendable {
         folderSupported = container.contains(.folderID)
     }
 
-    /// People audit anchors and import workers are sessions, not conversations.
     /// The schedule that materialized this session, when its metadata names one.
     /// A value that is not a UUID string is treated as absent.
     public var scheduleID: UUID? {
         metadata["schedule_id"]?.stringValue.flatMap(UUID.init(uuidString:))
     }
 
-    var isPeopleOperational: Bool {
+    /// Internal Email and People work must never become a Chat conversation.
+    var isOperational: Bool {
+        if metadata["email_operational"]?.boolValue == true { return true }
         guard let purpose = metadata["purpose"]?.stringValue else { return false }
         return purpose == "people-management" || purpose == "people-import"
     }
@@ -347,6 +351,7 @@ public struct RunLimitsView: Codable, Sendable {
 }
 
 public struct RunFailureView: Codable, Sendable {
+    public let diagnosticID: UUID?
     public let reason: FailureReason
     public let message: String
     public let stepNumber: Int?
@@ -365,11 +370,32 @@ public struct RunFailureView: Codable, Sendable {
         var parts = [reason.displayName]
         if let stepNumber { parts.append("Step \(stepNumber)") }
         if let attemptNumber { parts.append("Attempt \(attemptNumber)") }
+        if let diagnosticID { parts.append("Reference \(diagnosticID.uuidString)") }
         return parts.joined(separator: " · ")
+    }
+
+    private struct Diagnostics: Decodable {
+        let diagnosticID: UUID?
+        enum CodingKeys: String, CodingKey { case diagnosticID = "diagnostic_id" }
+    }
+
+    private enum AdditionalKeys: String, CodingKey { case details }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        reason = try values.decode(FailureReason.self, forKey: .reason)
+        message = try values.decode(String.self, forKey: .message)
+        stepNumber = try values.decodeIfPresent(Int.self, forKey: .stepNumber)
+        attemptNumber = try values.decodeIfPresent(Int.self, forKey: .attemptNumber)
+        occurredAt = try values.decode(Date.self, forKey: .occurredAt)
+        let additional = try decoder.container(keyedBy: AdditionalKeys.self)
+        let details = try? additional.decodeIfPresent(Diagnostics.self, forKey: .details)
+        diagnosticID = (try? values.decodeIfPresent(UUID.self, forKey: .diagnosticID)) ?? details?.diagnosticID
     }
 
     enum CodingKeys: String, CodingKey {
         case reason, message
+        case diagnosticID = "diagnostic_id"
         case stepNumber = "step_number"
         case attemptNumber = "attempt_number"
         case occurredAt = "occurred_at"
@@ -393,6 +419,7 @@ private extension FailureReason {
         case .authorizationError: "Authorization error"
         case .childRunFailed: "Child run failed"
         case .internalError: "Internal error"
+        case .dependencyUnavailable: "Dependency unavailable"
         case .unknown(let value):
             sentenceCase(value.replacingOccurrences(of: "_", with: " "))
         }

@@ -1,0 +1,12 @@
+{
+  "configurations": [
+    "evals/capability/general-recall/experiments/postgres-paired-v6-sparse.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v6-dense.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v6-hybrid.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v6-reranking.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v6-task-context.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v6-reader-planning.json"
+  ],
+  "output": "/tmp/veetbot-m33-paired-v6-matrix",
+  "maximum_cost_usd": "5"
+}

@@ -1217,13 +1217,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_200_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_205_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 200
+    assert len(qualified_paths) == 205
     # ADR-0155 adds the title pass's five knobs.
     assert {
         "titles/profiles.yaml:generation.enabled",
@@ -1335,7 +1335,7 @@ def test_memory_profiles_knob_paths_match_document() -> None:
     declared = set(SHIPPED_KNOB_PATHS["memory/profiles.yaml"])
 
     assert declared == _leaf_paths(document) - {"schema_version"}
-    assert len(declared) == 39
+    assert len(declared) == 44
 
 
 def _provider_artifact(tmp_path: Path, formation_policy_version: str) -> Path:

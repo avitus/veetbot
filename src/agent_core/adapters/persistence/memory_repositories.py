@@ -5,8 +5,11 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from agent_core.adapters.persistence.people import PostgresPeopleStore
 
 from sqlalchemy import (
     DateTime,
@@ -31,6 +34,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import Subquery
 
 from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
@@ -428,6 +432,13 @@ class PostgresMemoryStore:
     def __init__(self, session: AsyncSession, clock: Clock) -> None:
         self._session = session
         self._clock = clock
+        self._people: PostgresPeopleStore | None = None
+
+    def bind_people(self, people: PostgresPeopleStore) -> None:
+        """Complete the same-UOW identity filter before any candidate selection."""
+        if self._people is not None and self._people is not people:
+            raise ValueError("Memory identity filtering is already bound")
+        self._people = people
 
     async def _remember_revision(self, record: MemoryRecord) -> None:
         row = await self._session.scalar(
@@ -552,6 +563,10 @@ class PostgresMemoryStore:
             or_(MemoryRow.expires_at.is_(None), MemoryRow.expires_at > as_of),
             MemoryRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
         ]
+        if query.people_scope is not None:
+            predicates.append(
+                false() if self._people is None else self._people.memory_identity_predicate(query)
+            )
         if query.include_ids is not None:
             predicates.append(MemoryRow.id.in_(query.include_ids))
         if query.exclude_ids:
@@ -625,6 +640,8 @@ class PostgresMemoryStore:
         return predicates
 
     async def query(self, query: RecallQuery) -> list[MemoryRecord]:
+        if query.people_scope is not None:
+            await self._session.execute(text("SET LOCAL jit = off"))
         if query.known_at is not None:
             return await self._query_at(query)
         predicates = self.current_predicates(query)
@@ -690,8 +707,8 @@ class PostgresMemoryStore:
         )
         return [_memory(row) for row in rows]
 
-    async def _query_at(self, query: RecallQuery) -> list[MemoryRecord]:
-        """Select the original revision before applying relevance or result limits."""
+    def historical_predicates(self, query: RecallQuery) -> tuple[Subquery, list[Any]]:
+        """Select the original revision and all hard restrictions before ranking."""
         latest = (
             select(MemoryRevisionRow)
             .where(
@@ -750,6 +767,17 @@ class PostgresMemoryStore:
             )
         if not query.include_provisional:
             predicates.append(payload["status"].astext != MemoryStatus.PROVISIONAL.value)
+        if query.people_scope is not None:
+            predicates.append(
+                false() if self._people is None else self._people.memory_identity_predicate(query)
+            )
+        return latest, predicates
+
+    async def _query_at(self, query: RecallQuery) -> list[MemoryRecord]:
+        """Select the original revision before applying relevance or result limits."""
+        latest, predicates = self.historical_predicates(query)
+        payload = latest.c.payload
+        subjects = tuple(item.casefold() for item in query.subjects)
         terms = recall_query_terms(query.text)
         owned_resource = (
             _owned_resource_sql(

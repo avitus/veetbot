@@ -8,6 +8,7 @@ from datetime import datetime
 from agent_core.domain.agents import Principal
 from agent_core.domain.embeddings import EmbeddingRequest, EmbeddingResponse
 from agent_core.domain.errors import ConflictError
+from agent_core.domain.local_embeddings import LocalEmbeddingConfig, local_execution
 from agent_core.domain.memory import PROVIDER_EGRESS_SENSITIVITIES, SENSITIVITY_ORDER
 from agent_core.domain.messages import ResolvedModel
 from agent_core.domain.reconsolidation_inputs import EgressSubject
@@ -50,10 +51,14 @@ class SemanticIndexingPass:
         config: EmbeddingConfig,
         *,
         admitted: Callable[[], bool],
+        local: LocalEmbeddingConfig | None = None,
     ) -> None:
         self._factory, self._clock, self._principal = factory, clock, principal
         self._provider = provider
         self._config = EmbeddingConfig.model_validate(config.model_dump())
+        self._local = local_execution(self._config, local)
+        if self._config.historical_indexing and not self._local:
+            raise ValueError("Historical indexing requires the verified local encoder")
         self._admitted = admitted
         self._policy = local_egress_policy(self._config.residency_provider)
 
@@ -62,6 +67,10 @@ class SemanticIndexingPass:
             raise ConflictError("semantic admission withdrawn")
 
     def _permitted(self, source: SemanticSource, now: datetime) -> bool:
+        if self._local:
+            # No source leaves this process. Capture/search still enforce the
+            # current original, owner and visibility predicates independently.
+            return True
         record = source.record
         if unsafe_provider_text(record.subject + "\n" + record.statement):
             return False
@@ -108,7 +117,11 @@ class SemanticIndexingPass:
                 self._principal, job.lease_token, self._clock.now()
             )
             full = await uow.semantic_memory.inventory(
-                self._principal, after=job.full_cursor, through=job.full_bound, limit=16
+                self._principal,
+                after=job.full_cursor,
+                through=job.full_bound,
+                limit=16,
+                include_history=self._config.historical_indexing,
             )
             changes = await uow.semantic_memory.changes(
                 self._principal, after=job.change_cursor, through=job.change_bound, limit=16
@@ -116,7 +129,7 @@ class SemanticIndexingPass:
             inspected = full.cursor - job.full_cursor + changes.cursor - job.change_cursor
             ids = dict.fromkeys(
                 [
-                    *(s.belief_id for s in full.sources),
+                    *(s.belief_id for s in full.sources if not self._config.historical_indexing),
                     *(s.source.belief_id for s in changes.changes),
                 ]
             )
@@ -124,8 +137,23 @@ class SemanticIndexingPass:
             texts = []
             deferred = 0
             total = 0
-            for key in ids:
-                source = await uow.semantic_memory.capture(self._principal, key, self._config.space)
+            candidates = (
+                [
+                    await uow.semantic_memory.capture_revision(
+                        self._principal, version, self._config.space
+                    )
+                    for version in dict.fromkeys(full.sources)
+                ]
+                if self._config.historical_indexing
+                else []
+            )
+            candidates.extend(
+                [
+                    await uow.semantic_memory.capture(self._principal, key, self._config.space)
+                    for key in ids
+                ]
+            )
+            for source in candidates:
                 if source is None or await uow.semantic_memory.indexed(self._principal, source):
                     continue
                 if not self._permitted(source, self._clock.now()):
@@ -234,7 +262,9 @@ class SemanticIndexingPass:
             async with asyncio.timeout(60):
                 async with self._factory() as uow, uow.people.lock(self._principal):
                     self._check()
-                    bounds = await uow.semantic_memory.bounds(self._principal)
+                    bounds = await uow.semantic_memory.bounds(
+                        self._principal, include_history=self._config.historical_indexing
+                    )
                     job = await uow.semantic_work.claim(
                         self._principal, self._config, bounds, self._clock.now()
                     )

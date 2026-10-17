@@ -1,0 +1,11 @@
+{
+  "configurations": [
+    "evals/capability/general-recall/experiments/postgres-paired-v5-sparse.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v5-hybrid.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v5-reranking.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v5-recovery.json",
+    "evals/capability/general-recall/experiments/postgres-paired-v5-combined.json"
+  ],
+  "output": "/tmp/veetbot-m33-paired-v5-matrix",
+  "maximum_cost_usd": "5"
+}

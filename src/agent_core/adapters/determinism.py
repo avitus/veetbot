@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from uuid import UUID, uuid4
 
 from agent_core.ports.determinism import Clock, IdFactory
+
+
+def elapsed_time() -> float:
+    """Monotonic worker time, injected alongside the wall clock where needed."""
+    return monotonic()
 
 
 class SystemClock:

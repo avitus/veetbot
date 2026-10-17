@@ -119,3 +119,66 @@ def test_integration_directory_resets_only_through_the_guard() -> None:
                 f"{name}: replaces isolate_postgres_case but runs {match.group(0).strip()!r}"
             )
     assert violations == []
+
+
+async def test_recall_clone_refuses_before_connecting_without_the_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.delenv(disposable.DISPOSABLE_FLAG, raising=False)
+    monkeypatch.setattr(disposable, "create_engine", _refuse_connection)
+    with pytest.raises(pytest.skip.Exception, match="VEETBOT_TEST_DATABASE_DISPOSABLE=1"):
+        async with disposable.clone_recall_database():
+            pytest.fail("An unmarked database must never be cloned")
+
+
+async def test_recall_clone_cleanup_terminates_only_its_own_leftover_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from typing import Any
+
+    statements: list[str] = []
+    disposed: list[bool] = []
+
+    class Connection:
+        async def execution_options(self, **_: Any) -> Connection:
+            return self
+
+        async def execute(self, statement: Any) -> None:
+            statements.append(str(statement))
+
+    class Engine:
+        dialect = SimpleNamespace(
+            identifier_preparer=SimpleNamespace(quote_identifier=lambda name: f'"{name}"')
+        )
+
+        @asynccontextmanager
+        async def connect(self) -> Any:
+            yield Connection()
+
+        async def dispose(self) -> None:
+            disposed.append(True)
+
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.setenv(disposable.DISPOSABLE_FLAG, "1")
+    monkeypatch.setattr(disposable, "create_engine", lambda _: Engine())
+    with pytest.raises(ValueError, match="Synthetic aborted test"):
+        async with disposable.clone_recall_database() as url:
+            from dataclasses import replace
+
+            from agent_core.evals.general_recall_database import validate_evaluation_database
+            from tests.integration.m2_support import memory_settings
+
+            validate_evaluation_database(
+                replace(memory_settings(), database_url=url), authorized=True
+            )
+            name = url.rsplit("/", 1)[1]
+            raise ValueError("Synthetic aborted test")
+    assert statements == [
+        f'CREATE DATABASE "{name}" TEMPLATE "agent"',
+        f'DROP DATABASE "{name}" WITH (FORCE)',
+    ], "Cleanup must terminate leaked connections only in the clone this invocation created"
+    assert re.fullmatch(r"veetbot_m33_eval_\d{10}_[0-9a-f]{20}", name)
+    assert disposed == [True]

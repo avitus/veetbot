@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -59,9 +60,16 @@ def _opts_in(call: ast.Call) -> bool:
 async def test_a_service_composition_configures_logging_and_a_one_shot_does_not(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    configured: list[DeploymentMode] = []
-    monkeypatch.setattr(bootstrap, "configure_logging", configured.append, raising=False)
-    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+    configured: list[tuple[DeploymentMode, str | None]] = []
+
+    def configure(mode: DeploymentMode, *, release_id: str | None = None) -> None:
+        configured.append((mode, release_id))
+
+    monkeypatch.setattr(bootstrap, "configure_logging", configure)
+    settings = replace(
+        load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        release_id="20261014-000000-abcdef0",
+    )
 
     async with build(settings=settings):
         pass
@@ -69,7 +77,7 @@ async def test_a_service_composition_configures_logging_and_a_one_shot_does_not(
 
     async with build(settings=settings, service_logging=True):
         pass
-    assert configured == [DeploymentMode.DEVELOPMENT]
+    assert configured == [(DeploymentMode.DEVELOPMENT, "20261014-000000-abcdef0")]
 
 
 def test_every_composition_root_configures_logging_behind_the_flag() -> None:

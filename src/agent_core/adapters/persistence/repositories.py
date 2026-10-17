@@ -45,6 +45,7 @@ from agent_core.adapters.persistence.people_erasure import (
     lock_run_erasure,
     redact,
 )
+from agent_core.adapters.persistence.reconsolidation_sources import lock_owner
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
     ApprovalRow,
@@ -64,6 +65,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ExportConsentRow,
     IdempotencyKeyRow,
     KnowledgeDocumentRow,
+    MemoryRow,
     ModelCallRow,
     PolicyProfileRow,
     ProcessEventRow,
@@ -124,6 +126,12 @@ from agent_core.domain.events import (
     NewEvent,
     ProcessEvent,
     advances_session_activity,
+)
+from agent_core.domain.memory import LIVE_MEMORY_STATUSES, Sensitivity
+from agent_core.domain.memory_sources import (
+    OwnerSourceExcerpt,
+    admitted_excerpt,
+    source_admission_digest,
 )
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
@@ -848,6 +856,63 @@ class PostgresEventRepository:
         await self._session.execute(text("LOCK TABLE events IN SHARE MODE"))
         return int(await self._session.scalar(select(func.coalesce(func.max(EventRow.id), 0))) or 0)
 
+    async def memory_source(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        surface_id: str,
+        ceiling: Sensitivity,
+    ) -> OwnerSourceExcerpt | None:
+        if surface_id != "private" or ceiling is not Sensitivity.RESTRICTED:
+            return None
+        permitted = await self._session.scalar(
+            select(SessionRow.id).where(
+                SessionRow.id == session_id,
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+            )
+        )
+        if permitted is None:
+            return None
+        await lock_owner(self._session, principal)
+        row = await self._session.scalar(
+            select(EventRow)
+            .where(
+                EventRow.session_id == session_id,
+                EventRow.sequence == sequence,
+                EventRow.memory_source_sha256.is_not(None),
+                ~EventRow.memory_source_blocked,
+                ~EventRow.erasure_pending,
+                ~EventRow.people_erased,
+                ~select(MemoryRow.id)
+                .where(
+                    MemoryRow.tenant_id == principal.tenant_id,
+                    MemoryRow.principal_id == principal.principal_id,
+                    MemoryRow.source_session_id == session_id,
+                    MemoryRow.source_event_ids.contains([sequence]),
+                    or_(
+                        MemoryRow.status.not_in([status.value for status in LIVE_MEMORY_STATUSES]),
+                        MemoryRow.expires_at <= self._clock.now(),
+                        MemoryRow.valid_to <= self._clock.now(),
+                        MemoryRow.erasure_pending,
+                    ),
+                )
+                .exists(),
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (
+            None
+            if row is None
+            else admitted_excerpt(
+                event_to_domain(row, self._upcasters),
+                principal.principal_id,
+                row.memory_source_sha256,
+            )
+        )
+
     def __init__(
         self, session: AsyncSession, clock: Clock, upcasters: EventUpcasterRegistry
     ) -> None:
@@ -903,9 +968,19 @@ class PostgresEventRepository:
         sequence = (await self._session.execute(allocation)).scalar_one_or_none()
         if sequence is None:
             raise NotFoundError("session not found")
+        digest = None
+        if event.event_type == "user.message.created" and event.actor_type == "principal":
+            owner = await self._session.scalar(
+                select(SessionRow.principal_id).where(SessionRow.id == event.session_id)
+            )
+            digest = None if owner is None else source_admission_digest(event, owner)
         statement = (
             pg_insert(EventRow)
-            .values(**event_values(event, sequence=sequence, created_at=occurred_at))
+            .values(
+                **event_values(event, sequence=sequence, created_at=occurred_at),
+                memory_source_sha256=digest,
+                memory_source_blocked=digest is None,
+            )
             .returning(EventRow)
         )
         row = (await self._session.scalars(statement)).one()

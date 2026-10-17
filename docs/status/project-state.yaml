@@ -10,6 +10,9 @@ project:
   # hosted CI and a clean CodeRabbit review on its final head; the completion
   # and the ceiling's advance to Milestone 14 (289 gates) were recorded on
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
+  # ADR-0205 authorizes safe diagnostics, bounded recovery, failure isolation and
+  # operational reliability reporting on the owner-requested reliability branch.
+  # Production activation and the verified milestone ceiling are unchanged.
   current_milestone: 14
   active_milestone: 15
   # ADR-0178 authorizes parallel Milestone 33 on 2026-10-11: general recall,
@@ -270,6 +273,24 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Independent supervised dreaming delivery and cutover (2026-10-15, ADR-0202)
+      outcome: delivered_supervised_cutover_verified
+      detail: >-
+        PR 165 merged as 0c7b0d748082118aed1a57104558ba8540e59656 after clean
+        CodeRabbit review and ten passing hosted checks. Delivery pipeline 1141
+        passed every job, including application, documentation, website and
+        TestFlight. Public API, documentation and website identify release
+        20261015-185949-0c7b0d7; production schema is ea3210a1b00d. The authorized
+        forward cutover activated at 2026-10-15T19:05:44.185661Z with no blockers.
+        All 469 unknown erased heads and five historical run receipts remain
+        retained; schedule revision 6 and its next opportunity at
+        2026-10-16T01:31:49.837090Z are unchanged. Supervised review is enabled
+        and unattended application remains disabled. HTTPS cookie-only review
+        access passes with thirty-day Secure, HttpOnly and SameSite persistence.
+        These operational checks do not advance comparative quality, independent
+        review or unattended activation gates; original failed observations remain.
+      evidence_links:
+      - https://github.com/avitus/veetbot/pull/165
     - check: Independent supervised dreaming release authorization (2026-10-15)
       outcome: authorized_pending_delivery
       detail: >-
@@ -1424,7 +1445,7 @@ milestones:
       - device-scoped tools, presence routing, hand-off, media intake
   "15":
     title: Operational hardening
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-20
     design: docs/plan/operational-hardening.md
     adr: docs/adr/0065-milestone-15-operational-hardening.md
@@ -1437,6 +1458,12 @@ milestones:
     deferred_scope:
       - high availability, off-host database, load balancer, rolling deploys
       - Kubernetes, microservices, a second queue
+    open_items:
+      - Complete all sixteen Milestone 15 gates and reviewed production delivery
+      - Implement encrypted off-host backups and verify restore rehearsals
+      - Complete host health probes, cooldown reminders and an independent outage channel
+      - Verify firewall, SSH, proxy, rollback and worker watchdog hardening
+      - Validate production reliability baselines and explicitly activate reviewed monitoring
   "16":
     title: Memory evaluation and lifecycle
     status: complete
@@ -2215,21 +2242,15 @@ milestones:
       - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
       - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
-      - Make reply drafting refetch a thread whose retained body has expired, as email-experience.md requires; today the draft run fails as internal_error (EmailToolError) before any model request, so tests/unit/test_email_scan_cost.py::test_draft_generation_never_receives_an_expired_body passes vacuously
     evidence:
       - check: reply drafting after the retained body expires
-        outcome: gap_found
+        outcome: passed_on_sidecar
         detail: >-
-          On 2026-09-28 a probe built from tests/unit/test_email_scan_cost.py::t
-          est_draft_generation_never_receives_an_expired_body seeded a draft,
-          expired the thread's retained body, and submitted a draft task: the
-          run ended FAILED with reason internal_error and error class
-          EmailToolError after zero model requests. email-experience.md keeps
-          full bodies for a thirty-day last-access window and says to refetch
-          older mail as needed, so drafting should refetch rather than fail. The
-          test only asserts that no model request carries the expired body,
-          which a run that never calls the model satisfies, so it passes
-          vacuously. Found in the 2026-09-28 test audit.
+          ADR-0205 repairs the 2026-09-28 audit gap. The strengthened regression
+          requires a completed draft and a model request containing newly fetched
+          provider evidence, excluding the expired body. Unavailable, partial and
+          wrong-account source regressions require dependency_unavailable with no
+          model request or draft revision change. Production delivery is pending.
       - check: uv run pytest tests/unit/test_email_importance_replay.py tests/gates/test_email_privacy_m26.py
         outcome: pass
         detail: >-
@@ -2550,20 +2571,82 @@ milestones:
     design: docs/plan/general-memory-recall.md
     adr: docs/adr/0178-general-memory-recall.md
     gates_registered: 12
-    implementation_status: source_index_maintenance_composed
+    implementation_status: authorized_cross_category_recovery_and_combined_release_in_progress
     implementation_evidence:
       - tests/contract/test_runtime_semantic_queries_contract.py
       - tests/contract/test_context_recall_freshness.py
       - tests/unit/test_context_recall_cache.py
       - tests/unit/test_general_recall_release.py
       - tests/unit/test_semantic_index_composition.py
+      - tests/unit/test_local_semantic_composition.py
+      - tests/contract/test_local_query_authority.py
+      - tests/integration/test_local_semantic_composition_postgres.py
       - tests/integration/test_semantic_index_composition_postgres.py
       - tests/integration/test_semantic_runtime_postgres.py
+      - tests/contract/test_bounded_source_recovery.py
+      - tests/contract/test_memory_source_recovery.py
+      - tests/integration/test_memory_source_recovery_postgres.py
+      - tests/unit/test_general_recall_corpus.py
+      - tests/unit/test_general_recall_execution.py
+      - tests/unit/test_runtime_recall_preparation.py
+      - tests/contract/test_semantic_recall.py
+      - tests/unit/test_general_recall_stages.py
+      - tests/unit/test_general_recall_source_scoring.py
+      - tests/contract/test_recall_stage_observation.py
+      - tests/integration/test_general_recall_runtime_postgres.py
+      - tests/unit/test_general_recall_database.py
+      - tests/unit/test_task_context_query.py
+      - tests/unit/test_general_recall_formation_bank.py
+      - tests/unit/test_general_recall_experiment.py
+      - tests/unit/test_people_named_distillation.py
+      - tests/unit/test_context_memory_budget.py
+      - tests/contract/test_retained_recall.py
+      - tests/contract/test_retained_people.py
+      - tests/unit/test_run_recall_execution_budget.py
+      - tests/unit/test_general_recall_publication.py
+      - tests/unit/test_general_recall_collection.py
+      - tests/unit/test_general_recall_confirmation.py
+      - tests/unit/test_general_recall_preflight.py
+      - tests/unit/test_general_recall_capture.py
+      - tests/unit/test_general_recall_confirmatory.py
+      - tests/integration/test_general_recall_capture_postgres.py
+      - tests/unit/test_general_recall_journal.py
+      - tests/contract/test_people_semantic_queries.py
+      - tests/unit/test_recall_release_binding.py
+      - tests/contract/test_historical_semantic_recall.py
+      - tests/integration/test_historical_semantic_postgres.py
+      - tests/unit/test_openai_opaque_credential_boundary.py
+      - tests/contract/test_openai_opaque_continuation.py
     diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
+    retained_measurements:
+      - evals/observations/general-memory-recall/20261013-production-baseline-v2/
+      - evals/observations/general-memory-recall/20261013-native-postgres-load/
+      - evals/observations/general-memory-recall/20261013-confirmation-v1/
     limitations:
-      - seeded retrieval is not formation, answer-use or held-out release evidence
-      - semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
-      - trusted query authority, semantic recall composition, query scheduling, historical/People parity and real release observations/publication remain open
+      - Seeded retrieval is not formation, answer-use or held-out release evidence
+      - PostgreSQL development comparisons retain 100 original observations and 120 task-context variants; reader-planned search answers 16 of 20 but predates the type-hint repair and cannot certify release
+      - The owner approved the exact 400-scenario corpus on 2026-10-13; its independence receipt is retained under evals/observations/general-memory-recall/20261013-corpus-review/
+      - Semantic candidate recall reaches 97 percent; index contracts do not certify answer-use quality
+      - Historical semantic revisions, verified-input release binding and confirmatory dependency capture have mechanism checks; comparative People evidence, end-to-end load budgets and reviewed release observations/publication remain open
+      - The initial USD 100 cap governed the first confirmation, stopped at 34 of 4800 observations because the required M32 fixture correction changes the ADR-0199 input manifest
+      - The interrupted attempt retains all original records and failed status; prior reported and held cost is USD 5.45365250, included in the owner-approved USD 300 aggregate cap for one replacement after final review and CI; its run allocation is USD 290
+      - The replacement passed review and all eleven exact-head CI1105 checks on 7214a8df but failed at 4 of 4800 observations; deliberate evaluation incorrectly reserved disabled automatic work before a slow reader response; the isolation repair preserves production budget limits
+      - Replacement originals remain under evals/observations/general-memory-recall/20261014-confirmation-v2/; its historical aggregate reported and held cost was USD 5.62063000
+      - V3 on 74b14815 failed after 1217 observations; original archive and scratch database are retained, a mandatory incident failed, and aggregate reported/held cost is USD 55.913546
+      - The owner requested completion before merging PR163 on 2026-10-15; ADR-0206 repairs session-default search and provider diagnostics, with a fresh full confirmation capped at USD 240 after ledger reconciliation and final review/CI/signing
+      - No v3 observation or original load measurement can certify changed evaluated inputs; independent review and all quality/budget gates remain required
+      - Partial development results exposed formation, relationship retrieval and evidence-use failures; the owner authorized broad recovery before any fresh confirmation, with all gates unchanged
+      - Bounded two-worker collection uses separate scratch databases and one shared ledger (ADR-0207); release requires final combined input verification and complete fresh evidence, not reused partial observations
+      - V4 on f55c597c stopped after 771 observations at a normalized-stream credential rejection; the triggering field remains unknown, and all originals and both scratch databases are retained
+      - V4 development incident checks pass but 37 relationship rows fail semantic certification; the evaluator left People semantic binding on its original retriever, requiring a measured-instance wiring repair and fresh evidence
+      - Historical aggregate reported and held cost after v4 was USD 83.96363625, leaving USD 216.03636375 under the unchanged USD 300 cap
+      - V5 on f837ed3c stopped at 124 observations with a provider-key detector match in OpenAI reasoning.encrypted_content; original bytes were not retained, so the meaning remains unproven; all originals and both databases are immutable
+      - The owner approved the narrow OpenAI repair on 2026-10-16 (ADR-0210); embedded opaque collisions may pass with provider/API/type binding while standalone credentials, other detectors, other fields and other providers remain rejected
+      - Seven original ledgers total USD 88.371792 including USD 5.64272 uncertain reservations; USD 211.628208 remains under the unchanged USD 300 cap, no paid attempt is active, and fresh reviewed full quality evidence remains required
+      - ADR-0211 records separate owner approval for ordinary signing on the final reviewed reliability commit only, with temporary exact-revision context access and restoration afterward; deferred dev work stays separate and all release gates remain required
+      - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
+      - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; the owner authorized coordination with reliability PR163 for one combined release, final review, exact-head CI and production delivery
+      - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder
     authorized_scope:
       - cross-category retrieval and implicit-use evaluation with frozen controls
       - relevance before candidate limits with persistence parity
@@ -2574,8 +2657,8 @@ milestones:
       - external memory services, arbitrary graph inference, training and RL
       - automatic historical re-extraction and unattended dreaming activation
     open_items:
-      - complete the staged implementation and comparative activation evidence
-      - authorized PR review, hosted CI and separately authorized production delivery
+      - Complete the staged implementation and comparative activation evidence
+      - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 # Open work that no active milestone owns: owner-only steps of non-milestone
 # ADRs, and specification-versus-code gaps found in completed milestones.

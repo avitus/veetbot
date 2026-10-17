@@ -353,7 +353,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 200 knobs live, at the values the
+    module that owns it. This is where all 205 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -431,7 +431,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 200. Schema versions, profile names, rule identifiers,
+and asserts the total is 205. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -442,10 +442,10 @@ or invariants rather than knobs and are not counted.
 | `context/plan.yaml` | 30 |
 | `tools/limits.yaml` | 25 |
 | `runtime/limits.yaml` | 65 |
-| `memory/profiles.yaml` | 39 |
+| `memory/profiles.yaml` | 44 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
-| **Total** | **200** |
+| **Total** | **205** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -1334,7 +1334,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 200 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 205 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1614,10 +1614,16 @@ source indexer to maintenance through `AGENT_MEMORY_SEMANTIC_INDEX_ENABLED` (def
 `AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE`. The paths identify an independently reviewed
 release identity and its measured passing bundle. They contain no credentials.
 The existing release identity must be configured, and production requires PostgreSQL.
+The manifest path may instead contain ADR-0199's `recall-deployment-binding@1`
+receipt, preserving the measured identity while separately naming the deployed
+commit. Composition verifies its complete input commitment and original evidence
+before provider construction. An ordinary identity file retains the exact-commit
+rule; this adds no deployment setting or activation default.
 
 The checked-in `memory/semantic-index.yaml` catalog ships with `schema_version: 1`
 and an empty `configurations` list. Its operator overlay must contain exactly one
-entry with `credential_ref` and the complete `EmbeddingConfig` under `embedding`.
+entry with the complete `EmbeddingConfig` under `embedding`. A remote tuple also
+requires `credential_ref`.
 The credential reference names the existing worker credential broker entry, such
 as `openai`; the provider's existing secret-loading path supplies its value. Model,
 revision, dimensions, price/revision, egress revision, residency and request/day
@@ -1629,6 +1635,20 @@ catalog and embedding identities with the independent manifest, then invokes the
 complete release scorer before accessing credentials. Both files remain revocable.
 Disabling the flag skips evidence and credential access. Configuration changes
 require recomposition and matching evidence; source originals remain authoritative.
-This flag activates indexing only. It grants no query egress authority and leaves
-the production semantic recall channel absent until its separate integration and
-release evidence are complete.
+[ADR-0188](../adr/0188-local-semantic-embeddings.md) also admits an explicitly local
+tuple: `local` contains model/tokenizer SHA-256, dimensions, token capacity and
+CPU thread limit; `model_directory` is an absolute directory containing verified
+regular `model.onnx` and `tokenizer.json` files. It has no credential reference,
+uses local residency, `local-embedding@1` execution and zero provider price. No
+model download occurs at runtime. Model installation and matching release evidence
+must precede activation. Enabling the existing `retrieval.semantic_enabled` profile
+also requires an explicit reviewed `reader_sha256`; a run's actual selected reader
+must match it. Composition then supplies run-bound local lookup and explicit
+preparation before assembly and pending tool batches, with sparse fallback.
+Both evidence files remain mandatory. Remote tuples still receive no query egress
+authority. The checked-in catalog and retrieval flag remain disabled.
+The separate `retrieval.source_recovery_enabled` flag also defaults to false.
+Enabling it requires local semantic query authority and the same release-bound
+reviewed reader. It supplies bounded private, restricted, current-project source
+quotes under [ADR-0189](../adr/0189-governed-memory-source-recovery.md). An absent
+runtime binding or withdrawn evidence leaves ordinary fact recall available.

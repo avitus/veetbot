@@ -1140,7 +1140,7 @@ def test_ci_has_the_required_partitions() -> None:
     assert verify["jobs"][6] == {
         "apple-signing-smoke": {
             "context": "veetbot-apple-signing",
-            "filters": {"branches": {"only": "dev"}},
+            "filters": {"branches": {"only": ["dev", "reliability"]}},
         }
     }
     assert verify["jobs"][7:10] == [
@@ -1229,15 +1229,16 @@ def test_hosted_verification_is_automatic_only_on_main() -> None:
         ]
     }
 
-    # No job narrows the rule further: the signing smoke stays dev-only and
-    # delivery stays main-only, exactly as before.
+    # ADR-0211 adds only the reviewed release branch to the smoke selector.
+    # External context access still requires separate exact-commit admission;
+    # delivery remains main-only.
     filtered = {
         next(iter(job)): next(iter(job.values()))["filters"]
         for job in verify["jobs"]
         if isinstance(job, dict) and "filters" in next(iter(job.values()))
     }
     assert filtered == {
-        "apple-signing-smoke": {"branches": {"only": "dev"}},
+        "apple-signing-smoke": {"branches": {"only": ["dev", "reliability"]}},
         "package-release": {"branches": {"only": "main"}},
         "deploy-app": {"branches": {"only": "main"}},
         "deploy-nginx": {"branches": {"only": "main"}},
@@ -1492,7 +1493,7 @@ def test_testflight_upload_builds_package_directly_before_using_altool() -> None
     assert "--verbose" in upload_command
 
 
-def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> None:
+def test_release_signing_smoke_exercises_shared_package_script_without_upload() -> None:
     config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
     jobs = config["jobs"]
     smoke_job = jobs["apple-signing-smoke"]
@@ -1521,7 +1522,7 @@ def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> N
     )
     assert smoke_invocation == {
         "context": "veetbot-apple-signing",
-        "filters": {"branches": {"only": "dev"}},
+        "filters": {"branches": {"only": ["dev", "reliability"]}},
     }
     assert "Diagnose the managed signing handoff" not in {
         step["run"]["name"]

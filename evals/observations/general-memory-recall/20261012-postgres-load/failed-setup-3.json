@@ -1,0 +1,120 @@
+{
+  "version": "recall-postgres-load@1",
+  "activation_evidence": false,
+  "registered_at": "2026-10-12T21:38:15.658672+00:00",
+  "implementation_sha256": "5085547f2a51b0d302b1e321b2bd05c8a2b961395600677559289ad92bf23d4c",
+  "measurement_sha256": "41bb5cb3df6da06c53ca8828bd7b40839061e2a9061ad6971fb003e33336e322",
+  "system": "Linux-6.1.158+-x86_64-with-glibc2.39",
+  "cpu": "x86_64",
+  "vector_dimensions": 384,
+  "provider_calls": 0,
+  "state": "failed",
+  "measurements": [
+    {
+      "competing_records": 100,
+      "channel": "sparse",
+      "path": "automatic",
+      "bulk_fixture_seconds": 0.020823117999952956,
+      "p50_ms": 44.76437299990721,
+      "p95_ms": 61.76768900013485,
+      "samples": [
+        {
+          "repeat": 0,
+          "elapsed_ms": 61.76768900013485,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 1,
+          "elapsed_ms": 45.48602100021526,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 2,
+          "elapsed_ms": 42.85158000038791,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 3,
+          "elapsed_ms": 45.03929100019377,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 4,
+          "elapsed_ms": 44.76437299990721,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 5,
+          "elapsed_ms": 47.923957999955746,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 6,
+          "elapsed_ms": 41.808180999851174,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 7,
+          "elapsed_ms": 37.27887200011537,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 8,
+          "elapsed_ms": 38.51051199990252,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        },
+        {
+          "repeat": 9,
+          "elapsed_ms": 45.69249899986971,
+          "candidate_count": 101,
+          "target_rank": 1,
+          "target_rendered": true,
+          "tokens": 71,
+          "items": 2
+        }
+      ]
+    }
+  ],
+  "limitations": "Retrieval measurements after bulk seeding an opted-in scratch clone.\n\nRepeated fabricated distractors and fixed 384-dimensional vectors isolate database\nand retriever load. This does not measure encoding, formation, answer quality,\nindexing throughput, deployment admission or production end-to-end latency.\n",
+  "postgres": "PostgreSQL 16.15 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "pgvector": "0.8.7",
+  "error_class": "IntegrityError",
+  "wall_seconds": 3.019199870000193,
+  "finished_at": "2026-10-12T21:38:18.679822+00:00"
+}
