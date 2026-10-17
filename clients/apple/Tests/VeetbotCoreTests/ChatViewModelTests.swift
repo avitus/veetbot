@@ -243,6 +243,7 @@ import UserNotifications
         #expect(model.errorMessage != nil)
     }
 
+    /// Keep the exact approval focused while excluding internal sessions from history.
     @Test(arguments: ["{}", #"{"email_operational":true}"#, #"{"purpose":"people-management"}"#])
     func testNotificationTapRestoresTranscriptAttachesExactRunAndFocusesApproval(metadata: String) async throws {
         let sessionID = try #require(
@@ -344,6 +345,7 @@ import UserNotifications
         #expect(model.history.isEmpty == (metadata != "{}"))
     }
 
+    /// Keep operational email failures out of Chat for ordinary links and notification taps.
     @Test(arguments: [false, true], [false, true])
     func testOperationalEmailSessionCannotEnterChatThroughDeepLinks(
         notification: Bool, emailHandlerInstalled: Bool
@@ -1114,6 +1116,7 @@ import UserNotifications
         #expect(await store.list().map(\.sessionID) == [sessionID])
     }
 
+    /// Preserve a newly focused approval when an earlier history refresh finishes.
     @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
     func testReconciliationPreservesNewlyFocusedOperationalApproval(metadata: String) async throws {
         let sessionID = UUID(), runID = UUID(), approvalID = UUID()
@@ -1188,6 +1191,7 @@ import UserNotifications
         model.newSession()
     }
 
+    /// Remove cached internal-session rows while preserving their server audit records.
     @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
     func testSynchronizationPrunesCachedOperationalSessions(metadata: String) async throws {
         let conversationID = UUID()
@@ -3279,6 +3283,7 @@ import UserNotifications
         }
     }
 
+    /// Build an isolated model with controlled network responses and request concurrency.
     private func configuredModel(
         titleRefreshDelay: TimeInterval = 10,
         concurrentRequests: Bool = false,
@@ -3297,6 +3302,7 @@ import UserNotifications
         )
     }
 
+    /// Route ephemeral test requests through their own registered response handler.
     private func urlSession(
         concurrentRequests: Bool = false,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
@@ -3437,6 +3443,7 @@ private final class ChatViewModelURLProtocol: URLProtocol {
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// Dispatch the fixture response synchronously unless the test requests a real race.
     override func startLoading() {
         if request.value(forHTTPHeaderField: "X-Veetbot-Test-Concurrent") == "true" {
             DispatchQueue.global().async { [self] in completeRequest() }
@@ -3445,6 +3452,7 @@ private final class ChatViewModelURLProtocol: URLProtocol {
         }
     }
 
+    /// Deliver the registered response or error through the URL protocol callbacks.
     private func completeRequest() {
         guard
             let handlerID = request.value(forHTTPHeaderField: Self.handlerHeader),

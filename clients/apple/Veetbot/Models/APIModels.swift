@@ -83,6 +83,7 @@ public enum FailureReason: Hashable, Sendable {
     case dependencyUnavailable
     case unknown(String)
 
+    /// Decode known failure reasons while preserving future server values for older clients.
     public init(rawValue: String) {
         switch rawValue {
         case "max_attempts_exceeded": self = .maxAttemptsExceeded
@@ -218,6 +219,7 @@ public struct SessionView: Codable, Identifiable, Sendable {
     }
 
     /// Internal Email and People work must never become a Chat conversation.
+    /// Identify internal audit sessions that should not appear as ordinary conversations.
     var isOperational: Bool {
         if metadata["email_operational"]?.boolValue == true { return true }
         guard let purpose = metadata["purpose"]?.stringValue else { return false }
@@ -351,6 +353,7 @@ public struct RunLimitsView: Codable, Sendable {
 }
 
 public struct RunFailureView: Codable, Sendable {
+    /// The validated opaque support reference, without private exception details.
     public let diagnosticID: UUID?
     public let reason: FailureReason
     public let message: String
@@ -366,6 +369,7 @@ public struct RunFailureView: Codable, Sendable {
         return trimmed
     }
 
+    /// Summarize the safe failure reason, counters and optional support reference.
     public var diagnosticSummary: String {
         var parts = [reason.displayName]
         if let stepNumber { parts.append("Step \(stepNumber)") }
@@ -381,6 +385,7 @@ public struct RunFailureView: Codable, Sendable {
 
     private enum AdditionalKeys: String, CodingKey { case details }
 
+    /// Decode failure state and a valid optional reference from either supported wire location.
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         reason = try values.decode(FailureReason.self, forKey: .reason)

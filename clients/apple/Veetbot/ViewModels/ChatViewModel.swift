@@ -934,6 +934,7 @@ public final class ChatViewModel: ObservableObject {
         } catch { present(error) }
     }
 
+    /// Clear selection, attention focus and in-flight observation state together.
     private func resetSelectedSession() {
         selectionRequestID = nil
         operationalAttentionSessionID = nil
@@ -952,6 +953,7 @@ public final class ChatViewModel: ObservableObject {
         runState.reset()
     }
 
+    /// Restore one conversation while retaining explicit attention to a hidden operational run.
     public func selectSession(
         _ entry: SessionHistoryEntry,
         preferredRunID: UUID? = nil,
@@ -1116,6 +1118,7 @@ public final class ChatViewModel: ObservableObject {
         try? await reconcileHistory()
     }
 
+    /// Refresh paginated history without overriding newer selections or restoring internal rows.
     private func reconcileHistory() async throws {
         guard let api else { return }
         let reconciliationID = UUID()
@@ -2753,12 +2756,14 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Remove an internal session from local Chat history without deleting its server record.
     private func hideOperationalSession(_ sessionID: UUID) async throws {
         try await historyStore.delete(sessionID: sessionID)
         history = try await historyStore.list()
         if selectedSessionID == sessionID { resetSelectedSession() }
     }
 
+    /// Persist ordinary history entries and remove operational sessions from the local index.
     private func store(
         session: SessionView,
         lastRunID: UUID?,

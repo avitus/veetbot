@@ -4,6 +4,7 @@ import Testing
 
 @testable import VeetbotCore
 
+/// Decode the same safe failure reference from a snapshot or streamed details.
 @Suite struct WireModelsTests {
     @Test(arguments: ["diagnostic_id", "details"])
     func testFailureDiagnosticReferenceSurvivesSnapshotAndStream(field: String) throws {
