@@ -262,6 +262,52 @@ async def test_event_after_terminal_is_a_model_protocol_failure(
 
 
 @pytest.mark.asyncio
+async def test_credential_failure_diagnostics_reach_durable_run_without_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the refused surface, never the refused model content, in run failure."""
+
+    private_text = "sk-" + "synthetic123456"
+
+    async def invalid_stream(
+        provider: FakeModelProvider,
+        request: ModelRequest,
+        resolved: ResolvedModel,
+        attempt: ModelAttempt,
+    ) -> AsyncIterator[ModelEvent]:
+        """Yield a synthetic credential violation to exercise durable failure diagnostics."""
+        yield TextDeltaEvent(
+            attempt_id=attempt.attempt_id,
+            run_id=attempt.run_id,
+            step_number=attempt.step_number,
+            sequence=0,
+            item_index=0,
+            text=private_text,
+        )
+
+    monkeypatch.setattr(FakeModelProvider, "stream", invalid_stream)
+    async with build(
+        settings=_development_settings(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+    ) as composition:
+        run_id = await composition.runs.submit("reject unsafe model output")
+        failed = await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.failure is not None
+    assert failed.failure.reason is FailureReason.MODEL_PERMANENT_ERROR
+    assert failed.failure.details == {
+        "protocol_detail": "normalized event carried credential-shaped content",
+        "protocol_event_kind": "text_delta",
+        "protocol_field_path": "text",
+        "protocol_detector": "provider_key",
+    }
+    assert private_text not in failed.model_dump_json()
+    assert all(private_text not in event.model_dump_json() for event in events)
+
+
+@pytest.mark.asyncio
 async def test_provider_failure_diagnostics_reach_the_terminal_event_safely() -> None:
     permanent = ModelPermanentError(
         provider="fake",

@@ -251,6 +251,8 @@ without serializing a large history into one request per round trip. Confirmed
 pruning also clears the process-local artifact cache. People audit and import
 sessions are not conversations: the sidebar skips them and prunes cached copies
 without deleting them on the server, because they carry People evidence.
+Pruning a cached operational row preserves any focused approval or question the
+owner has opened, including when its selection races with the history refresh.
 Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.

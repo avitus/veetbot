@@ -11,6 +11,8 @@ project:
   # and the ceiling's advance to Milestone 14 (289 gates) were recorded on
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   current_milestone: 14
+  # ADR-0205: independently authorized existing-app reliability repair; no M33
+  # source, evaluation, migration or activation changes are included.
   active_milestone: 15
   # ADR-0178 authorizes parallel Milestone 33 on 2026-10-11: general recall,
   # measured semantic search and bounded source recovery; activation needs evidence.
@@ -1424,7 +1426,7 @@ milestones:
       - device-scoped tools, presence routing, hand-off, media intake
   "15":
     title: Operational hardening
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-20
     design: docs/plan/operational-hardening.md
     adr: docs/adr/0065-milestone-15-operational-hardening.md
@@ -1437,6 +1439,12 @@ milestones:
     deferred_scope:
       - high availability, off-host database, load balancer, rolling deploys
       - Kubernetes, microservices, a second queue
+    open_items:
+      - Complete all sixteen Milestone 15 gates and reviewed production delivery
+      - Implement encrypted off-host backups and verify restore rehearsals
+      - Complete host health probes and an independent outage alert channel
+      - Verify firewall, SSH, proxy, rollback and worker watchdog hardening
+      - Measure production reliability and explicitly activate reviewed monitoring
   "16":
     title: Memory evaluation and lifecycle
     status: complete
@@ -2215,21 +2223,17 @@ milestones:
       - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
       - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
-      - Make reply drafting refetch a thread whose retained body has expired, as email-experience.md requires; today the draft run fails as internal_error (EmailToolError) before any model request, so tests/unit/test_email_scan_cost.py::test_draft_generation_never_receives_an_expired_body passes vacuously
+      - Deliver the independently verified expired-source drafting repair (ADR-0205)
     evidence:
       - check: reply drafting after the retained body expires
-        outcome: gap_found
+        outcome: passed_on_sidecar
         detail: >-
-          On 2026-09-28 a probe built from tests/unit/test_email_scan_cost.py::t
-          est_draft_generation_never_receives_an_expired_body seeded a draft,
-          expired the thread's retained body, and submitted a draft task: the
-          run ended FAILED with reason internal_error and error class
-          EmailToolError after zero model requests. email-experience.md keeps
-          full bodies for a thirty-day last-access window and says to refetch
-          older mail as needed, so drafting should refetch rather than fail. The
-          test only asserts that no model request carries the expired body,
-          which a run that never calls the model satisfies, so it passes
-          vacuously. Found in the 2026-09-28 test audit.
+          The independent ADR-0205 regression first failed on production main
+          with internal_error before any model request, then passed with bounded
+          fresh reads and a completed draft. Three unavailable, partial and
+          wrong-account cases preserve edits and return dependency_unavailable.
+          The reliability partition passed 61 tests on the sidecar. Production
+          delivery remains pending; no memory quality gate is claimed.
       - check: uv run pytest tests/unit/test_email_importance_replay.py tests/gates/test_email_privacy_m26.py
         outcome: pass
         detail: >-

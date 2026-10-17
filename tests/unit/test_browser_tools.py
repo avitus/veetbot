@@ -756,3 +756,61 @@ async def test_focus_validation_refuses_malformed_or_mixed_modes(arguments: dict
     assert not result.ok and result.failure is not None
     assert result.failure.kind is ToolFailureKind.INVALID_ARGUMENTS
     assert not provider.execution_contexts
+
+
+async def test_postcondition_does_not_start_a_capture_that_exceeds_its_remaining_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unmet predicate must not trigger a predictably over-budget final capture."""
+    from collections.abc import AsyncIterator
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    import agent_core.tools.browser_conditions as conditions
+
+    elapsed = 0.0
+
+    async def sleep(seconds: float) -> None:
+        """Advance the deterministic polling clock."""
+        nonlocal elapsed
+        elapsed += seconds
+
+    @asynccontextmanager
+    async def timeout_at(deadline: float) -> AsyncIterator[None]:
+        """Model cancellation when the deterministic capture reaches its deadline."""
+        yield
+        if elapsed >= deadline:
+            raise TimeoutError
+
+    monkeypatch.setattr(
+        conditions,
+        "asyncio",
+        SimpleNamespace(
+            get_running_loop=lambda: SimpleNamespace(time=lambda: elapsed),
+            sleep=sleep,
+            timeout_at=timeout_at,
+        ),
+    )
+
+    class MeasuredProvider(FakeBrowserProvider):
+        async def observe(self) -> BrowserObservation:
+            """Advance the synthetic clock by a known capture cost before returning evidence."""
+            nonlocal elapsed
+            elapsed += 0.2
+            return await super().observe()
+
+    provider = MeasuredProvider()
+    result = await BrowserActTool(provider).execute(
+        {
+            "kind": "click",
+            "expected_revision": "revision-1",
+            "ref": "element-1",
+            "postcondition": {"role": "button", "name": "Not ready", "timeout_ms": 1200},
+        },
+        tool_context(),
+    )
+    assert result.ok and result.structured is not None
+    assert result.structured["condition"]["status"] == "not_observed"
+    assert len(provider.actions) == 1
+    assert provider.observation_count == 2
+    assert elapsed <= 1.2

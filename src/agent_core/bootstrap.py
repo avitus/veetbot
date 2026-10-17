@@ -166,6 +166,8 @@ from agent_core.adapters.persistence.projections import (
 )
 from agent_core.adapters.persistence.queue import PostgresRunQueue
 from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
+from agent_core.adapters.persistence.reliability_monitor import check_reliability
+from agent_core.adapters.persistence.reliability_report import reliability_report
 from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
@@ -443,6 +445,7 @@ from agent_core.domain.execution import (
     EgressPolicy,
     ResourceLimits,
 )
+from agent_core.domain.failures import log_failure
 from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
@@ -558,6 +561,7 @@ from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
 from agent_core.observability.logging import configure_logging
 from agent_core.observability.policy import AdvisoryMetrics
+from agent_core.observability.reliability import ReliabilityReport, ReliabilityThresholds
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
 from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
@@ -694,6 +698,8 @@ from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
+POST_RUN_HOOK_TIMEOUT_SECONDS = 15.0
+
 logger = logging.getLogger(__name__)
 LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
 
@@ -808,6 +814,10 @@ class Composition:
     people_repair: PeopleDirectoryRepair | None = None
     # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
     latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
+    reliability_report: Callable[[datetime, datetime], Awaitable[ReliabilityReport]] | None = None
+    reliability_check: (
+        Callable[[int, ReliabilityThresholds], Awaitable[ReliabilityReport]] | None
+    ) = None
 
     def start_mcp_discovery_warmup(self) -> asyncio.Task[None]:
         """Remember this tenant's MCP catalogs in the background (ADR-0131).
@@ -1080,6 +1090,47 @@ def system_clock() -> Clock:
 def random_ids() -> IdFactory:
     """Supply opaque identities to offline commands without a full composition."""
     return RandomIdFactory()
+
+
+async def operator_reliability(
+    hours: int, notify: bool, thresholds: ReliabilityThresholds
+) -> ReliabilityReport:
+    """Observe only the database; do not seed agents, tools, providers or artifacts."""
+    if not 1 <= hours <= 2160:
+        raise ValueError("Reliability windows must be between one hour and ninety days.")
+    settings = load_settings()
+    if notify and not settings.notification_dispatch_enabled:
+        raise ConfigurationError("Reliability alerts require enabled notifications.")
+    principal = Principal(
+        tenant_id="local" if settings.auth_mode.value == "dev" else settings.auth_tenant_id,
+        principal_id=(
+            "local-user" if settings.auth_mode.value == "dev" else settings.auth_principal_id
+        ),
+    )
+    clock = system_clock()
+    engine = create_engine(settings.database_url)
+    try:
+        async with asyncio.timeout(60):
+            await assert_schema_revision(engine)
+            sessions = create_session_factory(engine)
+            if notify:
+                return await check_reliability(
+                    sessions,
+                    hours,
+                    thresholds,
+                    principal=principal,
+                    outbox_factory=lambda session: PostgresNotificationOutbox(session, clock),
+                    events_factory=PostgresProcessEventRepository,
+                    clock=clock,
+                    ids=random_ids(),
+                    release_id=settings.release_id,
+                )
+            until = clock.now()
+            return await reliability_report(
+                sessions, until - timedelta(hours=hours), until, principal=principal
+            )
+    finally:
+        await engine.dispose()
 
 
 def default_fake_script() -> FakeModelScript:
@@ -1705,7 +1756,7 @@ def _configure_service_logging(settings: Settings, *, enabled: bool) -> None:
     """
 
     if enabled:
-        configure_logging(settings.deployment_mode)
+        configure_logging(settings.deployment_mode, release_id=settings.release_id)
 
 
 @asynccontextmanager
@@ -3882,59 +3933,71 @@ async def _compose(
                     logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
 
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
+            """Bound independent cleanup hooks while leaving parent continuation under its
+            run budget.
+            """
             try:
-                async with uow_factory() as uow:
-                    finished = await uow.runs.get(run_id, principal)
-                await mcp_runtime.release_session_transports(finished.session_id)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    async with uow_factory() as uow:
+                        finished = await uow.runs.get(run_id, principal)
+                    await mcp_runtime.release_session_transports(finished.session_id)
             except Exception:
                 logger.exception("mcp_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:
-                await public_services.email.settle(principal, run_id)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    await public_services.email.settle(principal, run_id)
             except Exception:
                 logger.exception("email_run_accounting_failed", extra={"run_id": str(run_id)})
             try:
-                await sandbox_manager.release_run(run_id, lease_epoch)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
             if browser_provider is not None:
                 try:
-                    await release_browser_lease_if_done(
-                        browser_provider, uow_factory, principal, run_id
-                    )
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        await release_browser_lease_if_done(
+                            browser_provider, uow_factory, principal, run_id
+                        )
                 except Exception:
                     logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
             try:
-                await schedule_accountant.account(run_id)
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    await schedule_accountant.account(run_id)
             except Exception:
                 logger.exception("schedule_run_accounting_failed", extra={"run_id": str(run_id)})
             completed: Run | None = None
             try:
-                async with uow_factory() as uow:
-                    run = await uow.runs.get(run_id, principal)
-                    if run.status not in TERMINAL_RUN_STATUSES:
-                        return
-                    completed = run
-                    await uow.events.append(
-                        NewEvent(
-                            session_id=run.session_id,
-                            run_id=run.id,
-                            event_type="memory.formation.requested",
-                            actor_type="runtime",
-                            payload={
-                                "trigger": "run_terminal",
-                                "terminal_status": run.status.value,
-                                "not_before": (
-                                    clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
-                                ).isoformat(),
-                            },
-                            derivation_key=f"memory.formation.requested:{run.id}",
+                async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                    async with uow_factory() as uow:
+                        run = await uow.runs.get(run_id, principal)
+                        if run.status not in TERMINAL_RUN_STATUSES:
+                            return
+                        completed = run
+                        await uow.events.append(
+                            NewEvent(
+                                session_id=run.session_id,
+                                run_id=run.id,
+                                event_type="memory.formation.requested",
+                                actor_type="runtime",
+                                payload={
+                                    "trigger": "run_terminal",
+                                    "terminal_status": run.status.value,
+                                    "not_before": (
+                                        clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
+                                    ).isoformat(),
+                                },
+                                derivation_key=f"memory.formation.requested:{run.id}",
+                            )
                         )
-                    )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
             if completed is not None:
                 try:
-                    await request_title_after_run(uow_factory, principal, completed, clock.now())
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        await request_title_after_run(
+                            uow_factory, principal, completed, clock.now()
+                        )
                 except Exception:
                     logger.exception("title_request_failed", extra={"run_id": str(run_id)})
             # What the answer cited is only knowable once the answer exists, so
@@ -3946,22 +4009,43 @@ async def _compose(
                 and completed.final_message
             ):
                 try:
-                    plan = await context_planner.current(completed.session_id)
-                    await memory_service.record_usage(
-                        session_id=completed.session_id,
-                        run_id=completed.id,
-                        final_text=completed.final_message,
-                        snapshot_trace_id=None if plan is None else plan.snapshot_id,
-                    )
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        plan = await context_planner.current(completed.session_id)
+                        await memory_service.record_usage(
+                            session_id=completed.session_id,
+                            run_id=completed.id,
+                            final_text=completed.final_message,
+                            snapshot_trace_id=None if plan is None else plan.snapshot_id,
+                        )
                 except Exception:
                     logger.exception("memory_usage_feedback_failed", extra={"run_id": str(run_id)})
+            hooks: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+            if skill_reviews is not None:
+                hooks.append(("skill_review", partial(skill_reviews.after_run, run_id)))
+            if people_import_runner is not None:
+                hooks.append(
+                    ("people_import", partial(people_import_runner.after_run, run_id, principal))
+                )
+            hooks.append(("people_erasure", partial(people_erasure.resume_pending, principal)))
+            for name, hook in hooks:
+                try:
+                    async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
+                        await hook()
+                except Exception as exc:
+                    log_failure(
+                        logger,
+                        "post_run_hook_failed",
+                        exc,
+                        phase=name,
+                        diagnostic_id=str(ids.new_id()),
+                        run_id=str(run_id),
+                        release_id=settings.release_id,
+                    )
+
+            # Joining can execute a resumed parent in-process. Its own run budget,
+            # cancellation and lease govern that work, not the optional-hook timeout.
             if delegation_joins is not None:
                 await delegation_joins.after_run(run_id)
-            if skill_reviews is not None:
-                await skill_reviews.after_run(run_id)
-            if people_import_runner is not None:
-                await people_import_runner.after_run(run_id, principal)
-            await people_erasure.resume_pending(principal)
 
         def email_semantics(context: RunContext) -> EmailSemanticFormationService:
             from agent_core.memory.email_people import EmailPeopleFormationService
@@ -4160,6 +4244,7 @@ async def _compose(
 
         executor = RunExecutor(
             principal=principal,
+            release_id=settings.release_id,
             principals=principal_resolver,
             uow_factory=uow_factory,
             context_builder=context_builder,
@@ -5893,6 +5978,31 @@ async def build(
         composition = replace(
             composition,
             attachment_resolver=attachment_resolver,
+            reliability_check=(
+                None
+                if engine is None or not effective_settings.notification_dispatch_enabled
+                else partial(
+                    check_reliability,
+                    create_session_factory(engine),
+                    outbox_factory=lambda session: PostgresNotificationOutbox(
+                        session, effective_clock
+                    ),
+                    events_factory=PostgresProcessEventRepository,
+                    principal=effective_principal,
+                    clock=effective_clock,
+                    ids=effective_ids,
+                    release_id=effective_settings.release_id,
+                )
+            ),
+            reliability_report=(
+                None
+                if engine is None
+                else partial(
+                    reliability_report,
+                    create_session_factory(engine),
+                    principal=effective_principal,
+                )
+            ),
             latency_report=(
                 None
                 if engine is None
