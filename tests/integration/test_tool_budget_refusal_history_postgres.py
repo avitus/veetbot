@@ -367,7 +367,10 @@ async def test_answered_recovered_batch_is_counted_exactly_once(
 
 
 @pytest.mark.parametrize("lost", [0, 1])
-@pytest.mark.parametrize("interrupted_at", ["model_response", "partial_batch", "budget_refusal"])
+@pytest.mark.parametrize(
+    "interrupted_at",
+    ["model_response", "partial_batch", "budget_refusal", "tool_pending", "pending_partial"],
+)
 async def test_recovered_batch_keeps_the_answer_time_reserve(
     monkeypatch: pytest.MonkeyPatch, lost: int, interrupted_at: str
 ) -> None:
@@ -376,11 +379,12 @@ async def test_recovered_batch_keeps_the_answer_time_reserve(
 
     original = runtime_loop.checkpoint
     original_refusals = runtime_loop._record_refusals
+    partial = interrupted_at in {"partial_batch", "pending_partial"}
 
     async def interrupt(context: Any, trigger: str) -> None:
         """Stop after recording the model turn, before its batch has been fitted."""
         await original(context, trigger)
-        if trigger == "model_response":
+        if trigger == ("tool_pending" if interrupted_at == "tool_pending" else "model_response"):
             if interrupted_at == "budget_refusal":
                 clock.advance(timedelta(minutes=4))
                 return
@@ -420,7 +424,7 @@ async def test_recovered_batch_keeps_the_answer_time_reserve(
                 await original_dispatch(**{**kwargs, "tool_calls": kwargs["tool_calls"][:1]})
                 raise _InjectedWorkerCrash
 
-            if interrupted_at != "partial_batch":
+            if not partial:
                 monkeypatch.setattr(runtime_loop, "checkpoint", interrupt)
             else:
                 monkeypatch.setattr(composition.executor, "_dispatch_tools", interrupt_dispatch)
@@ -460,7 +464,7 @@ async def test_recovered_batch_keeps_the_answer_time_reserve(
             assert provider.requests[-1].tool_choice == "none"
         assert run.status is RunStatus.COMPLETED, run.failure
         assert run.final_message == "Answer from the evidence already gathered."
-        expected_calls = int(interrupted_at == "partial_batch")
+        expected_calls = int(partial)
         assert run.tool_call_count == run.usage.tool_calls == expected_calls
         assert executed == expected_calls
         validate_tool_pairs(history.items)

@@ -1095,7 +1095,7 @@ class RunExecutor:
         used: int,
         answered: set[str],
     ) -> list[ToolCallItem]:
-        """Fit a batch rebuilt from history to the budget it was proposed under.
+        """Refit a saved or rebuilt batch to its original tool budget and current time.
 
         A batch recorded as pending was fitted before it was checkpointed; one
         rebuilt from the conversation is the model's whole turn (ADR-0115). A
@@ -1219,10 +1219,13 @@ class RunExecutor:
                 # was fitted to. A fitted call that already ran is dispatched
                 # again so the batch is counted whole.
                 calls = await self._fit_resumed_batch(context, turn, baseline, answered)
+            elif calls:
+                calls = await self._fit_resumed_batch(context, calls, baseline, answered)
             # Reconcile the two representations before the loop assembles a
             # request: the calls are durable in the conversation either way, so
             # the pipeline re-enters at step 6 and the effect still happens once.
             if not calls:
+                restored.pending_tool_calls = []
                 return None
             # Every invocation's idempotency key carries the step that proposed
             # it, and an attempt the checkpoint never saw may have started a
