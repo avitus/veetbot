@@ -1149,7 +1149,12 @@ def guard_tool_turn(
     *,
     loop_synthesis: bool | None = None,
 ) -> RunOutcome | None:
-    """Apply the same pre-dispatch guards to fresh and recovered model turns."""
+    """Apply the same pre-dispatch guards to fresh and recovered model turns.
+
+    Batch fitting checks elapsed time after the request, including on recovery,
+    and records refusals so the model can still answer. A response that ignored
+    an explicit time-synthesis instruction is rejected by `_query_model`.
+    """
 
     if loop_synthesis is None:
         loop_synthesis = _loop_synthesis_needed(context)

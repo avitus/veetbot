@@ -11,6 +11,7 @@ in-memory gate stores conversations inline and could not see it.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import Any
 
@@ -361,6 +362,110 @@ async def test_answered_recovered_batch_is_counted_exactly_once(
         assert run.tool_call_count == run.usage.tool_calls == 1
         assert executed == 1
         validate_tool_pairs(history.items)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("lost", [0, 1])
+@pytest.mark.parametrize("interrupted_at", ["model_response", "partial_batch", "budget_refusal"])
+async def test_recovered_batch_keeps_the_answer_time_reserve(
+    monkeypatch: pytest.MonkeyPatch, lost: int, interrupted_at: str
+) -> None:
+    """A crash before batch fitting cannot spend the resumed run's answer time."""
+    from tests.integration.test_event_runtime_m2 import _reclaim_and_resume
+
+    original = runtime_loop.checkpoint
+    original_refusals = runtime_loop._record_refusals
+
+    async def interrupt(context: Any, trigger: str) -> None:
+        """Stop after recording the model turn, before its batch has been fitted."""
+        await original(context, trigger)
+        if trigger == "model_response":
+            if interrupted_at == "budget_refusal":
+                clock.advance(timedelta(minutes=4))
+                return
+            raise _InjectedWorkerCrash
+
+    async def interrupt_refusals(context: Any, refused: Any) -> None:
+        """Lose the checkpoint after time-budget refusals have reached the log."""
+        await original_refusals(context, refused)
+        if refused:
+            raise _InjectedWorkerCrash
+
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    clock = FixedClock(NOW)
+    limits = RunLimits(
+        max_steps=4,
+        max_model_calls=4,
+        max_tool_calls=10,
+        synthesis_reserve_steps=1,
+        deadline_at=NOW + timedelta(minutes=5),
+    )
+    # Heartbeats wait normally; only the test advances the deadline clock.
+    monkeypatch.setattr(clock, "sleep", asyncio.sleep)
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            clock=clock,
+            limits=limits,
+            script=_script("Answer from the evidence already gathered."),
+        ) as composition:
+            run_id = await composition.runs.submit("Research and report before the deadline.")
+            original_dispatch = composition.executor._dispatch_tools
+
+            async def interrupt_dispatch(**kwargs: Any) -> None:
+                """Commit one result, then crash before the rest of the batch runs."""
+                await original_dispatch(**{**kwargs, "tool_calls": kwargs["tool_calls"][:1]})
+                raise _InjectedWorkerCrash
+
+            if interrupted_at != "partial_batch":
+                monkeypatch.setattr(runtime_loop, "checkpoint", interrupt)
+            else:
+                monkeypatch.setattr(composition.executor, "_dispatch_tools", interrupt_dispatch)
+            if interrupted_at == "budget_refusal":
+                monkeypatch.setattr(runtime_loop, "_record_refusals", interrupt_refusals)
+            with pytest.raises(_InjectedWorkerCrash):
+                await _run_worker(composition, clock, "time-reserve-crash")
+            monkeypatch.setattr(runtime_loop, "checkpoint", original)
+            monkeypatch.setattr(runtime_loop, "_record_refusals", original_refusals)
+            monkeypatch.setattr(composition.executor, "_dispatch_tools", original_dispatch)
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                assert newest is not None
+                discard = lost + int(interrupted_at == "partial_batch")
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id, CheckpointRow.version > newest - discard
+                    )
+                )
+            # Lease recovery advances another 33 seconds, reaching the last minute.
+            if interrupted_at != "budget_refusal":
+                clock.advance(timedelta(minutes=3, seconds=27))
+            await _reclaim_and_resume(composition, clock, "time-reserve-recovery")
+            run = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                history = await uow.history.catch_up(run.session_id)
+            async with engine.connect() as connection:
+                executed = await connection.scalar(
+                    select(func.count())
+                    .select_from(ToolInvocationRow)
+                    .where(ToolInvocationRow.run_id == run_id)
+                )
+            provider = composition.executor._model_provider
+            assert isinstance(provider, FakeModelProvider)
+            assert provider.requests[-1].tool_choice == "none"
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert run.final_message == "Answer from the evidence already gathered."
+        expected_calls = int(interrupted_at == "partial_batch")
+        assert run.tool_call_count == run.usage.tool_calls == expected_calls
+        assert executed == expected_calls
+        validate_tool_pairs(history.items)
+        for call_id in (REFUSED,) if expected_calls else (FITTED, REFUSED):
+            assert _reason_codes(history.items, call_id) == ["tool.budget_exhausted"]
     finally:
         await engine.dispose()
 

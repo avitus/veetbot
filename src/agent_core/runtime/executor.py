@@ -1043,6 +1043,29 @@ class RunExecutor:
         answered = {item.call_id for item in conversation[end:] if isinstance(item, ToolResultItem)}
         return calls, answered
 
+    @staticmethod
+    def _budget_refused_calls(conversation: Sequence[ConversationItem]) -> set[str]:
+        """Identify the latest turn's platform refusals that consumed no tool usage."""
+        refused: set[str] = set()
+        for item in reversed(conversation):
+            if not isinstance(item, ToolResultItem):
+                break
+            if item.trust is not TrustLevel.PLATFORM or not item.is_error:
+                continue
+            for part in item.content:
+                if not isinstance(part, TextPart):
+                    continue
+                try:
+                    outcome = ToolOutcome.model_validate_json(part.text)
+                except ValueError:
+                    continue
+                if (
+                    outcome.status is ToolOutcomeStatus.FAILED
+                    and outcome.reason_code == "tool.budget_exhausted"
+                ):
+                    refused.add(item.call_id)
+        return refused
+
     async def _adopt_committed_history(self, context: RunContext) -> list[ConversationItem]:
         """Append what earlier attempts committed after the restored checkpoint.
 
@@ -1076,10 +1099,15 @@ class RunExecutor:
 
         A batch recorded as pending was fitted before it was checkpointed; one
         rebuilt from the conversation is the model's whole turn (ADR-0115). A
-        refusal the log already holds is not recorded again.
+        refusal the log already holds is not recorded again. Recheck the clock
+        for unfinished calls, retaining already executed calls for accounting.
         """
 
-        fitted, refusals = _fit_tool_batch(context.run, turn, used=used)
+        proposed, _ = _fit_tool_batch(context.run, turn, used=used)
+        fitted, refusals = _fit_tool_batch(context.run, turn, used=used, now=context.clock.now())
+        budget_refused = self._budget_refused_calls(context.checkpoint.conversation)
+        eligible = ({call.call_id for call in fitted} | answered) - budget_refused
+        fitted = [call for call in proposed if call.call_id in eligible]
         await _record_refusals(
             context, [(call, result) for call, result in refusals if call.call_id not in answered]
         )
@@ -1113,6 +1141,7 @@ class RunExecutor:
         return baseline if type(baseline) is int and baseline >= 0 else None
 
     async def _resume_pending_tools(self, context: RunContext) -> RunOutcome | None:
+        """Reconcile durable tool results, usage and unfinished calls before resuming."""
         restored = context.checkpoint
         # The checkpoint's own batch: recorded as pending or, for a checkpoint
         # written for the model response, still only in its conversation.
@@ -1138,7 +1167,9 @@ class RunExecutor:
             and all(call.call_id in answered for call in latest)
         ):
             fitted, _ = _fit_tool_batch(context.run, latest, used=durable_baseline)
-            missing = durable_baseline + len(fitted) - context.run.tool_call_count
+            refused = self._budget_refused_calls(restored.conversation)
+            performed = sum(call.call_id not in refused for call in fitted)
+            missing = durable_baseline + performed - context.run.tool_call_count
             if missing > 0:
                 await context.budgets.record_tool_usage(context.run, missing, step=step)
         unrecorded_batch: int | None = None
@@ -1161,7 +1192,12 @@ class RunExecutor:
             )
             fitted = await self._fit_resumed_batch(context, latest, adopted_baseline, answered)
             calls = [call for call in fitted if call.call_id not in answered]
+            unrecorded_batch = max(0, adopted_baseline + len(fitted) - context.run.tool_call_count)
             if not calls:
+                if unrecorded_batch:
+                    await context.budgets.record_tool_usage(
+                        context.run, unrecorded_batch, step=step
+                    )
                 restored.pending_tool_calls = []
                 if isinstance(adopted[-1], AssistantMessage):
                     # Only the final reply is recorded apart from its turn, so
@@ -1169,7 +1205,6 @@ class RunExecutor:
                     return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=adopted[-1])
                 return None
             # This batch was never recorded, though its answered calls ran.
-            unrecorded_batch = max(0, adopted_baseline + len(fitted) - context.run.tool_call_count)
             step_number = context.run.step_count
         else:
             baseline = restored.budget_state.get("tool_call_count", 0)

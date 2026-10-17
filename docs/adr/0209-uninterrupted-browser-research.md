@@ -18,7 +18,8 @@ The application authorizes bounded ordinary interactions in a READY website
 profile selected through trusted composition. This permission includes owner
 chat and owner-created scheduled research. It does not depend on an approval
 card or a task-grant scope. `BROWSER_RESEARCH_ENABLED` defaults to `1`; setting
-it to `0` restores ordinary approvals. Composition requires the existing bounded
+it to `0` omits research permission; existing follow consent and standing/task
+grants still apply. Composition requires the existing bounded
 scroll policy rule, with approval for other interactions; custom allow/deny or
 unconditional approval rules do not acquire this permission. Like existing
 standing grants, this is an application authorization receipt after deterministic
