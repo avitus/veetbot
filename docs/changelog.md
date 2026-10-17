@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-17 — Veetbot for iPhone, iPad and Mac needs iOS 27 or macOS 26
+
+- The app now requires iOS 27 on iPhone and iPad and macOS 26 on the Mac;
+  macOS 27 becomes the floor once hosted CI can run it (ADR-0211). The
+  redesign begun on 2026-10-16 targets the current releases, so the
+  navigation, sheet and People fallbacks for older systems are gone.
+- Conversation history on the device is kept by SwiftData alone. The JSON file
+  that older systems used is no longer written; if the SwiftData store cannot
+  be opened, history stays in memory for that launch and refills from the
+  server.
+
 ## 2026-10-08 — Veetbot flags suspected spam
 
 - While assessing new mail, Veetbot now judges whether a conversation is spam:

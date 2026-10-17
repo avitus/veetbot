@@ -59,27 +59,20 @@ public enum SessionHistoryStoreFactory {
         category: "session-history"
     )
 
+    /// SwiftData keeps the cache. If its container cannot be opened, the
+    /// failure is logged and this launch keeps history in memory; the
+    /// authoritative session index refills it on connect (ADR-0211). Command
+    /// Line Tools builds cannot link SwiftData and use the in-memory store.
     public static func makeDefault() -> any SessionHistoryStore {
         #if XCODE_BUILD
-        if #available(iOS 17.0, macOS 14.0, *) {
-            do {
-                let store = try SwiftDataSessionHistoryStore()
-                return store
-            } catch {
-                logger.error(
-                    "SwiftData history initialization failed: \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
-        #endif
         do {
-            let store = try FileSessionHistoryStore()
-            return store
+            return try SwiftDataSessionHistoryStore()
         } catch {
             logger.error(
-                "File history initialization failed: \(error.localizedDescription, privacy: .public)"
+                "SwiftData history initialization failed: \(error.localizedDescription, privacy: .public)"
             )
         }
+        #endif
         return VolatileSessionHistoryStore()
     }
 }

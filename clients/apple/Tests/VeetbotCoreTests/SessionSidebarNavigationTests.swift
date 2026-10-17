@@ -94,12 +94,12 @@ import SwiftUI
             encoding: .utf8
         )
         let modernListStart = try #require(
-            source.range(of: "private var modernList: some View")
+            source.range(of: "private var sidebarList: some View")
         )
-        let legacyListStart = try #require(
-            source.range(of: "private var legacyList: some View")
+        let navigationListStart = try #require(
+            source.range(of: "private var navigationList: some View")
         )
-        let modernList = source[modernListStart.lowerBound ..< legacyListStart.lowerBound]
+        let modernList = source[modernListStart.lowerBound ..< navigationListStart.lowerBound]
         let macStart = try #require(modernList.range(of: "#if os(macOS)"))
         let macEnd = try #require(
             modernList.range(of: "#else", range: macStart.upperBound ..< modernList.endIndex)
@@ -132,12 +132,12 @@ import SwiftUI
             encoding: .utf8
         )
         let modernListStart = try #require(
-            source.range(of: "private var modernList: some View")
+            source.range(of: "private var sidebarList: some View")
         )
-        let legacyListStart = try #require(
-            source.range(of: "private var legacyList: some View")
+        let navigationListStart = try #require(
+            source.range(of: "private var navigationList: some View")
         )
-        let modernList = source[modernListStart.lowerBound ..< legacyListStart.lowerBound]
+        let modernList = source[modernListStart.lowerBound ..< navigationListStart.lowerBound]
         let iosStart = try #require(modernList.range(of: "#else"))
         let iosEnd = try #require(
             modernList.range(of: "#endif", range: iosStart.upperBound ..< modernList.endIndex)
@@ -164,7 +164,7 @@ import SwiftUI
         )
         let modernProperty = source[modernListStart.lowerBound ..< directListStart.lowerBound]
         let directList = source[directListStart.lowerBound ..< pushingListStart.lowerBound]
-        let pushingList = source[pushingListStart.lowerBound ..< legacyListStart.lowerBound]
+        let pushingList = source[pushingListStart.lowerBound ..< navigationListStart.lowerBound]
         #expect(!modernProperty.contains(".navigationDestination(isPresented:"))
         #expect(!directList.contains(".navigationDestination(isPresented:"))
         #expect(pushingList.contains(".navigationDestination(isPresented:"))

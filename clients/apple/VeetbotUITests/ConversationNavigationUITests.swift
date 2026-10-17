@@ -1242,38 +1242,31 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["chat.people"].waitForExistence(timeout: 5))
         var unlocatedBaseline: [String: Int] = [:]
         #if os(macOS)
-        if #available(macOS 14, *) {
-            try app.performAccessibilityAudit { issue in
-                let attachment = XCTAttachment(string: "\(issue.compactDescription): \(issue.element?.debugDescription ?? "No element")")
-                attachment.name = "Background accessibility baseline"
-                attachment.lifetime = .keepAlways
-                self.add(attachment)
-                if issue.element == nil {
-                    unlocatedBaseline["\(issue.auditType.rawValue):\(issue.compactDescription)", default: 0] += 1
-                }
-                return true
+        try app.performAccessibilityAudit { issue in
+            let attachment = XCTAttachment(string: "\(issue.compactDescription): \(issue.element?.debugDescription ?? "No element")")
+            attachment.name = "Background accessibility baseline"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            if issue.element == nil {
+                unlocatedBaseline["\(issue.auditType.rawValue):\(issue.compactDescription)", default: 0] += 1
             }
+            return true
         }
         #endif
         activate(app.buttons["chat.people"])
         let person = app.descendants(matching: .any)["people.row.00000000-0000-0000-0000-000000000777"]
         let browser = app.descendants(matching: .any)["people.browser"]
         XCTAssertTrue(browser.waitForExistence(timeout: 5))
-        if #available(macOS 14, iOS 17, *) {
-            try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
-            #if !os(macOS)
-            for _ in 0..<10 where !person.exists || !person.isHittable { browser.swipeUp() }
-            #endif
-            XCTAssertTrue(person.waitForExistence(timeout: 5))
-            activate(person)
-            XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
-            try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
-        } else {
-            XCTFail("People accessibility verification requires the platform accessibility auditor")
-        }
+        try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
+        #if !os(macOS)
+        for _ in 0..<10 where !person.exists || !person.isHittable { browser.swipeUp() }
+        #endif
+        XCTAssertTrue(person.waitForExistence(timeout: 5))
+        activate(person)
+        XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
+        try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
     }
 
-    @available(macOS 14, iOS 17, *)
     private func auditPeopleSurface(unlocatedBaseline: [String: Int]) throws {
         #if os(macOS)
         let sheet = app.sheets.firstMatch

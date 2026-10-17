@@ -71,9 +71,11 @@ let commandLineTestingLinkerFlags: [LinkerSetting] =
 
 let package = Package(
     name: "VeetbotAppleClient",
+    // ADR-0211. Spelled as strings: the `.v27` constant needs tools-version
+    // 6.4 (Xcode 27.1), and hosted CI builds with Xcode 27.0.
     platforms: [
-        .iOS(.v15),
-        .macOS(.v12),
+        .iOS("27.0"),
+        .macOS("26.0"),
     ],
     products: [
         .library(name: "VeetbotCore", targets: ["VeetbotCore"])

@@ -28,44 +28,25 @@ public struct EmailModeView: View {
         #endif
     }
 
-    private var showingThread: Binding<Bool> {
-        Binding(get: { model.selectedThreadID != nil }, set: { if !$0 { model.clearSelection() } })
-    }
-
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
             #if os(macOS)
             macSplit
             #else
-            if #available(iOS 16, macOS 13, *) {
-                if directSelection {
-                    NavigationSplitView {
-                        inbox
-                            .frame(height: macColumnHeight)
-                            .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
-                    } detail: {
-                        detail.frame(height: macColumnHeight)
-                    }
-                } else {
-                    NavigationStack(path: $navigationPath) {
-                        inbox.navigationDestination(for: UUID.self) { id in
-                            detail.task { if model.selectedThreadID != id { await model.openThread(id) } }
-                        }
-                    }
+            if directSelection {
+                NavigationSplitView {
+                    inbox
+                        .frame(height: macColumnHeight)
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
+                } detail: {
+                    detail.frame(height: macColumnHeight)
                 }
             } else {
-                NavigationView {
-                    inbox.frame(height: macColumnHeight).background {
-                        if !directSelection {
-                            NavigationLink(isActive: showingThread) {
-                                detail
-                            } label: {
-                                EmptyView()
-                            }.hidden()
-                        }
+                NavigationStack(path: $navigationPath) {
+                    inbox.navigationDestination(for: UUID.self) { id in
+                        detail.task { if model.selectedThreadID != id { await model.openThread(id) } }
                     }
-                    detail.frame(height: macColumnHeight)
                 }
             }
             #endif
@@ -363,14 +344,8 @@ public struct EmailModeView: View {
             } label: {
                 threadLabel(thread)
             }
-        } else if #available(iOS 16, macOS 13, *) {
-            NavigationLink(value: thread.id) { threadLabel(thread) }
         } else {
-            NavigationLink {
-                detail.task { await model.openThread(thread.id) }
-            } label: {
-                threadLabel(thread)
-            }
+            NavigationLink(value: thread.id) { threadLabel(thread) }
         }
     }
 
@@ -993,9 +968,9 @@ enum EmailSurface {
 }
 
 extension View {
-    /// Hides separators for inbox notices only on platforms that support the list modifier.
-    @ViewBuilder func emailHideSeparator() -> some View {
-        if #available(iOS 15, macOS 13, *) { listRowSeparator(.hidden) } else { self }
+    /// Hides separators for inbox notices.
+    func emailHideSeparator() -> some View {
+        listRowSeparator(.hidden)
     }
 
     /// Gives reading sections an adaptive surface and optionally highlights the reply composer.

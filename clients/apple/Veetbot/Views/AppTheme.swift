@@ -239,10 +239,10 @@ extension View {
         modifier(AppCodeFontModifier(textStyle: style))
     }
 
-    /// Frames sheet content so a Mac sheet opens at `idealWidth`. macOS 15
-    /// honors a sheet's ideal size only with fitted presentation sizing;
-    /// earlier releases open the sheet at its minimum, so `macMinWidth` must
-    /// be readable by itself. iOS keeps the compact `minWidth`.
+    /// Frames sheet content so a Mac sheet opens at `idealWidth`: macOS
+    /// honors a sheet's ideal size only with fitted presentation sizing.
+    /// `macMinWidth` is the narrowest the sheet can be resized to. iOS keeps
+    /// the compact `minWidth`.
     @ViewBuilder
     func sheetFrame(
         minWidth: CGFloat,
@@ -258,7 +258,7 @@ extension View {
             minWidth: macMinWidth ?? minWidth, idealWidth: idealWidth, maxWidth: maxWidth,
             minHeight: minHeight, idealHeight: idealHeight, maxHeight: maxHeight
         )
-        if #available(macOS 15, *) { framed.presentationSizing(.fitted) } else { framed }
+        framed.presentationSizing(.fitted)
         #else
         frame(
             minWidth: minWidth, idealWidth: idealWidth, maxWidth: maxWidth,

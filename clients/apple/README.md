@@ -1,6 +1,7 @@
 # Veetbot for Apple platforms
 
-This directory contains the native SwiftUI client for iOS 15+ and macOS 12+.
+This directory contains the native SwiftUI client for iOS 27+ and macOS 26+
+(ADR-0211; macOS 27 becomes the floor once hosted CI can run it).
 It is a transport-only client of the public `/v1` HTTP API; the shared core
 remains authoritative for sessions, runs, approvals, events, and artifacts.
 
@@ -93,8 +94,6 @@ remembers its frame. The main and settings windows persist their sizes and
 positions independently; system text sizing remains the default.
 On Mac, sheets open at readable widths: 640 points for Persona, 600 for email
 draft history and send review, and 540 for call results and email learning.
-Before macOS 15, which ignores a sheet's ideal size, they open at their 480- to
-520-point minimums.
 On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.
@@ -261,8 +260,6 @@ Person-profile empty states use primary text contrast so missing history and
 coverage remain readable at enlarged text sizes.
 On Mac, People sheets open at readable widths: 600 points for short editors and
 760 points for the import history, source conversations, and identity repair.
-Before macOS 15, which ignores a sheet's ideal size, they open at their 560- and
-680-point minimums.
 
 On Mac, Memory's People collection is a split view whose directory selects the
 person the second column shows. Each row is a button that carries the selected
@@ -289,16 +286,13 @@ app's fixed turquoise tint, bordered buttons were unreadable in dark
 appearance. At accessibility sizes the header stacks, row symbols drop out,
 and buttons use rounded rectangles so a wrapped label is not clipped.
 
-SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
-not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
-same `SessionHistoryStore` contract backed by an atomic Application Support JSON
-file. Both carry the optional server-assigned folder and schedule identifiers;
-the SwiftData columns are optional attributes added by automatic lightweight
-migration, and a failed migration falls back to the file store as before.
-Neither store is
-authoritative server state. The app reconciles both from
-the paginated server session index on connect, foreground entry, and a periodic
-poll. The row action is `Delete Everywhere`: it deletes the authoritative
+SwiftData stores local history behind the `SessionHistoryStore` contract. The
+record carries the optional server-assigned folder and schedule identifiers as
+optional attributes added by automatic lightweight migration. If the SwiftData
+container cannot be opened, the app logs the failure and keeps history in
+memory for that launch (ADR-0211). The store is never authoritative server
+state: the app reconciles it from the paginated server session index on
+connect, foreground entry, and a periodic poll. The row action is `Delete Everywhere`: it deletes the authoritative
 session first and removes local state only after the server succeeds. Active
 runs must be stopped before their session can be deleted.
 

@@ -2,7 +2,6 @@
 import Foundation
 import SwiftData
 
-@available(iOS 17.0, macOS 14.0, *)
 @Model
 final class LocalSessionRecord {
     @Attribute(.unique) var sessionID: String
@@ -64,7 +63,6 @@ final class LocalSessionRecord {
     }
 }
 
-@available(iOS 17.0, macOS 14.0, *)
 public actor SwiftDataSessionHistoryStore: SessionHistoryStore {
     private let container: ModelContainer
 

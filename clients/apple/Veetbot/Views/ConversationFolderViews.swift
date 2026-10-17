@@ -210,7 +210,7 @@ struct FolderProposalMembers: View {
 
 /// The create, rename, and accept-under-a-name sheet. A refused or duplicate
 /// name is shown inline, where it was typed, and the sheet stays open; nothing
-/// reaches the global error banner. A text field in an alert needs iOS 16, so
+/// reaches the global error banner. An alert could not keep that inline, so
 /// this is a sheet: a form under a navigation bar on iPhone and iPad, and on
 /// Mac a compact dialog sized to its field, with Cancel and the default action
 /// on the keyboard's Escape and Return.

@@ -88,8 +88,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         #if DEBUG && !SWIFT_PACKAGE
         // macOS 27 floats a Writing Tools affordance window beside the focused
         // composer, over controls that Mac UI tests click and hit-test.
-        if ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument),
-           #available(macOS 15.0, *) {
+        if ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument) {
             textView.writingToolsBehavior = .none
         }
         #endif

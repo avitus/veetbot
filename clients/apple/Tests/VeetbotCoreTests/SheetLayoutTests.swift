@@ -13,7 +13,7 @@ import Testing
 @Suite(.serialized) @MainActor struct SheetLayoutTests {
     @Test func personaEditorOpensAtItsIdealWidth() async throws {
         let width = try await presentedSheetWidth { PersonaEditorView(model: PersonaViewModel(makeAPIClient: { nil })) }
-        #expect(width >= Self.openingWidth(ideal: 640, minimum: 520))
+        #expect(width >= 640)
     }
 
     @Test func callResultOpensWideEnoughToReadTheTranscript() async throws {
@@ -23,25 +23,25 @@ import Testing
             summaryComplete: true, transcriptComplete: true, erased: false
         )
         let width = try await presentedSheetWidth { CallResultSheet(result: result, close: {}, delete: {}) }
-        #expect(width >= Self.openingWidth(ideal: 540, minimum: 480))
+        #expect(width >= 540)
     }
 
     @Test func emailLearningOpensAtItsIdealWidth() async throws {
         let model = EmailViewModel(makeAPIClient: { nil })
         let width = try await presentedSheetWidth { EmailLearningScreen(model: model) }
-        #expect(width >= Self.openingWidth(ideal: 540, minimum: 480))
+        #expect(width >= 540)
     }
 
     @Test func draftHistoryOpensAtItsIdealWidth() async throws {
         let model = EmailViewModel(makeAPIClient: { nil })
         let width = try await presentedSheetWidth { EmailRevisionsScreen(model: model) }
-        #expect(width >= Self.openingWidth(ideal: 600, minimum: 520))
+        #expect(width >= 600)
     }
 
     @Test func sendReviewOpensAtItsIdealWidth() async throws {
         let model = EmailViewModel(makeAPIClient: { nil })
         let width = try await presentedSheetWidth { EmailSendReview(model: model) }
-        #expect(width >= Self.openingWidth(ideal: 600, minimum: 520))
+        #expect(width >= 600)
     }
 
     @Test func artifactViewerOpensAtItsIdealWidth() async throws {
@@ -61,7 +61,7 @@ import Testing
                         "A single artifact must occupy the sheet, not a navigation sidebar.")
             }
         ) { ArtifactViewerView(model: model, artifactID: UUID()) }
-        #expect(width >= Self.openingWidth(ideal: 760, minimum: 680))
+        #expect(width >= 760)
     }
 
     @Test func svgDownloadUsesTheFullDocumentSheet() async throws {
@@ -82,7 +82,7 @@ import Testing
             // Let the mocked metadata/content request and SwiftUI update finish.
             try await Task.sleep(nanoseconds: 300_000_000)
             #expect(!Self.containsSplitView(content))
-            #expect(content.bounds.width >= Self.openingWidth(ideal: 760, minimum: 680))
+            #expect(content.bounds.width >= 760)
 
         }) {
             ArtifactViewerView(model: model, artifactID: ArtifactLayoutURLProtocol.artifactID)
@@ -94,7 +94,7 @@ import Testing
             id: "event-2", rendition: MarkdownRendition(markdown: Self.transcript)
         )
         let width = try await presentedSheetWidth { MessageTextSheet(selection: selection) }
-        #expect(width >= Self.openingWidth(ideal: 680, minimum: 520))
+        #expect(width >= 680)
     }
 
     @Test func aRedrawWithTheSameMessageKeepsTheSelection() throws {
@@ -124,13 +124,6 @@ import Testing
             if let found = textView(in: subview) { return found }
         }
         return nil
-    }
-
-    /// macOS 15 and later open a fitted sheet at its ideal width; earlier
-    /// releases open it at the content's minimum width.
-    private static func openingWidth(ideal: CGFloat, minimum: CGFloat) -> CGFloat {
-        if #available(macOS 15, *) { return ideal }
-        return minimum
     }
 
     private static let transcript = Array(

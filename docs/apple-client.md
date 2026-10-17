@@ -5,7 +5,7 @@ title: Apple Client
 # Apple client
 
 The native Apple client under `clients/apple/` is a SwiftUI application for iOS
-15+ and macOS 12+. It consumes only the versioned HTTP API. It does not import
+27+ and macOS 26+ (ADR-0211). It consumes only the versioned HTTP API. It does not import
 the Python server, run an agent loop, or create a second source of truth.
 
 ## Build and connect
@@ -228,9 +228,9 @@ in the activity indicator instead. People and Stop sit in the window toolbar on
 the Mac and in the navigation bar on iOS.
 
 The sidebar mirrors the server's authoritative, paginated session index.
-SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS
-versions predate SwiftData, so iOS 15–16 and macOS 12–13 use an atomic
-Application Support file behind the same store protocol. Both contain only
+SwiftData stores that cache behind the store protocol; if its container cannot
+be opened, the client logs the failure and keeps the cache in memory for that
+launch, refilled from the index on connect (ADR-0211). The cache contains only
 `session_id`, title, agent identity, timestamps, the last known run ID, the
 server-assigned folder identifier, and a scheduled session's schedule
 identifier. The
