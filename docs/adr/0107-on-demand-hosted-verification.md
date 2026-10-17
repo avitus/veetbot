@@ -54,6 +54,11 @@ satisfies the same criterion as a local run.
    `tests/unit/test_toolchain.py`. No job list is duplicated and no CircleCI
    project setting carries the policy.
 
+ADR-0211 subsequently amends item 5 for the owner-approved PR #163 release:
+the smoke selector also admits `reliability`, with external signing access
+temporarily pinned to the exact reviewed commit and restored after verification.
+The requested workflow and all ordinary exact-head checks remain required.
+
 ## Consequences
 
 - Hosted credits are spent once per promotion and once per `main` push instead

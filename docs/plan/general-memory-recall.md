@@ -499,6 +499,19 @@ that the evaluator substituted measured recall but left People semantic binding
 on the original retriever. Binding must follow the same measured instance; the
 compiler and semantic-channel requirements remain unchanged. Neither this repair
 nor diagnostic improvements authorize reusing the failed attempt's observations.
+V5 on `f837ed3c` subsequently stopped at 124 observations. Its bounded diagnostic
+identifies the provider-key detector in OpenAI `reasoning.encrypted_content`,
+but the original match was not retained and its meaning remains unproven. All
+31 result files, both scratch databases and supervision originals are retained.
+Seven original ledgers total USD 88.371792, including USD 5.64272 uncertain
+reservations, leaving USD 211.628208 under the unchanged USD 300 aggregate cap.
+On 2026-10-16 the owner approved the narrow OpenAI repair in
+[ADR-0210](../adr/0210-openai-opaque-credential-boundary.md). Only embedded
+provider-key collisions in the schema-bound opaque value may pass; standalone
+secrets and all other fields/providers retain rejection. Deterministic stream and
+actual adapter/runtime replay regressions precede fresh reviewed source, native
+measurement and complete confirmation. No failed rows are reused, no quality
+gate is weakened, and neither this prefix nor native load establishes full quality.
 The native historical-index load measurement
 under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
 100,000 competing records. It measures one synthetic information need and cannot

@@ -704,9 +704,10 @@ workflows:
       - apple-ios
       - apple-signing-smoke:
           context: veetbot-apple-signing
+          # ADR-0211: reliability also requires temporary exact-SHA context admission.
           filters:
             branches:
-              only: dev
+              only: [dev, reliability]
       - public-site
       # Production runs x86_64; Playwright installs another Chromium build on arm64.
       - browser-image:

@@ -131,6 +131,17 @@ title: Current Milestone
   review and exact-head CI must precede new paid collection. Reviewed reliability
   and the independent dreaming release are integrated for existing PR #163, with
   migration ancestry ea3310a1b003 → ea3210a1b00d → ea3310a1b004 → ea3310a1b005.
+  The later v5 on `f837ed3c` stopped at 124 observations; its diagnostic identifies
+  a provider-key-shaped match in OpenAI encrypted continuation, whose original
+  meaning remains unknown. The owner approved the narrow ADR-0210 repair on
+  2026-10-16. Standalone secrets and other providers/fields retain rejection;
+  original replay bytes stay unchanged. Failed attempts remain immutable.
+  Aggregate reported and held cost is USD 88.371792 under the unchanged USD 300
+  cap. Source verification and synthetic native load do not establish full quality;
+  the repaired source needs fresh review, ordinary CI/signing and full evidence.
+  ADR-0211 separately authorizes ordinary signing on the final reviewed
+  `reliability` commit with a temporary exact-revision context restriction,
+  preserving deferred `dev` work and restoring the original restriction afterward.
   Complete confirmation, independent failure review and release publication
   remain outstanding.
   Optional-channel activation remains evidence-gated.

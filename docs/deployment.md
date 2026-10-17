@@ -978,16 +978,30 @@ key in the owner's protected credential store only if certificate recovery is
 required; never place the PKCS#12, password, or decoded key in the repository,
 a project variable, cache, workspace, artifact, or log.
 
+For this release only, [ADR-0211](adr/0211-commit-scoped-reliability-signing.md)
+records explicit owner approval to admit the final reviewed `reliability`
+revision. The designated operator may add this alternative inside the branch
+parentheses: `(pipeline.git.branch == "reliability" and pipeline.git.revision
+== "FINAL_REVIEWED_COMMIT_SHA")`, substituting the actual reviewed commit.
+Preserve project/group restrictions and the non-SSH/non-API-configuration clauses.
+Retain the original readback; add and verify the replacement expression before
+removing the original. After the verification attempt ends, including failure or
+cancellation, add and verify the original expression before removing the temporary
+one. Keep restoration evidence with the pipeline receipt. Never leave a generic
+`reliability` grant or an interval without an expression restriction. This
+workflow selector does not itself authorize credentials for another revision.
+
 The `apple-signing-smoke` job proves this complete signing path in the
-requested `dev` pipeline that precedes a merge to `main` (ADR-0107). It runs the same
+requested `dev` pipeline, or the exact admitted `reliability` pipeline under
+ADR-0211, that precedes a merge to `main` (ADR-0107). It runs the same
 repository-owned archive and package script as `apple-testflight`, including
 the archived identity checks, application-signature verification,
 `productbuild`, and `pkgutil` verification. It receives neither the
 `veetbot-apple-testflight` context nor an App Store Connect API key, does not
 invoke `altool`, persists no artifact, and therefore cannot publish its package.
-It does receive `veetbot-apple-signing`, so access to `dev` and changes to the
+It does receive `veetbot-apple-signing`, so admitted branch writes and changes to the
 CircleCI workflow are nevertheless release-signing security boundaries. Keep
-`dev` restricted to trusted maintainers and require the smoke job to pass on the
+the admitted branches restricted to trusted maintainers and require the smoke job to pass on the
 exact revision proposed for `main`.
 
 Second, create a restricted context named `veetbot-apple-testflight` with:
@@ -1035,7 +1049,8 @@ itself; such a branch is verified on the sidecar and, before it is proposed for
 verification jobs are required status checks, so a pull request cannot merge
 until a requested run reports them green on its head commit; the owner retains
 an admin override. A requested `dev` pipeline also
-runs the non-publishing Apple signing smoke described above. On `main`, a
+runs the non-publishing Apple signing smoke described above; ADR-0211 permits
+the same job on the separately admitted exact `reliability` revision. On `main`, a
 verification job other than `public-site` whose source tree already passed it,
 normally in that requested run, reports success without rerunning; a merge
 commit whose tree nothing verified is verified in full (ADR-0114). After all

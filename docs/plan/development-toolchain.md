@@ -459,7 +459,7 @@ job           target invoked         needs     runs on
 6a apple      make test-apple        Xcode     main, on request
               make test-apple-ui-macos
 6b apple-ios  make test-apple-ui-ios Xcode     main, on request
-7 apple-      shared archive and     signing   dev, on request
+7 apple-      shared archive and     signing   dev/reliability, on request
   signing-    package script
   smoke
 8 apple-      shared archive and     signing   main, after deploy-app
@@ -547,7 +547,8 @@ Only the generated `website/out` tree enters the release workspace; the
 application and deployment jobs receive no Node runtime or website credential.
 
 Job 7 is a pre-merge signing smoke, not a verification partition and not part of
-`make check`. On a requested pipeline for trusted `dev` it installs the CircleCI-managed
+`make check`. On a requested pipeline for trusted `dev`, or a separately admitted
+exact `reliability` revision under ADR-0211, it installs the CircleCI-managed
 `veetbot-app-store` application-signing bundle and receives the separately
 restricted `veetbot-apple-signing` installer context. It runs the same
 repository-owned archive, application-signature, installer-package, and
@@ -556,6 +557,11 @@ context, contains no API key handling or `altool` call, and cannot upload the
 package it creates. This job is the live proof that both signing boundaries and
 the headless Apple packaging tools work before a release reaches `main`; the
 package and isolated installer keychain are discarded with the executor.
+ADR-0211 admits the release branch only through an owner-approved, temporary
+external context expression pinned to its final reviewed commit. Project/group,
+non-SSH and committed-configuration restrictions remain; the operator restores
+the original context restriction after the attempt, including failure or
+cancellation. Workflow selection does not grant signing credentials by itself.
 
 Job 8 is delivery, not a verification partition and not part of `make check`.
 After the production API reports the matching tested revision, it installs the
@@ -630,15 +636,17 @@ Three workflow-level facts complete the definition:
       -d '{"branch": "<source-branch>", "parameters": {"run_verify": true}}'
     ```
 
-    A promotion's source branch is `dev`. CircleCI builds the named branch's
-    current head, so a request naming any other branch verifies the wrong
-    commit. The requested pipeline reports its job statuses on that commit, so
+    A promotion normally uses `dev`; the owner-approved PR #163 release uses
+    `reliability` under ADR-0211 without importing deferred `dev` work. CircleCI
+    builds the named branch's current head, so request the actual PR source
+    branch and verify its revision. The pipeline reports statuses on that commit, so
     the pull request shows them; confirm the commit they sit on is the pull
     request's head. A pipeline with `run_live: true` selects the manual live
     workflow instead, and wins when both parameters are set.
     The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
-    runs only on trusted `dev`, and only in a requested pipeline; it does not
-    receive publication credentials.
+    selects only `dev` or `reliability`, and only in a requested pipeline; the
+    latter needs separate exact-revision context admission. It does not receive
+    publication credentials. An ordinary push still requests no verification.
     Production delivery begins only after all eight required verification jobs
     and both browser-image instances pass. On `main`, each verification job
     except `public-site` halts

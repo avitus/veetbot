@@ -2615,6 +2615,8 @@ milestones:
       - tests/unit/test_recall_release_binding.py
       - tests/contract/test_historical_semantic_recall.py
       - tests/integration/test_historical_semantic_postgres.py
+      - tests/unit/test_openai_opaque_credential_boundary.py
+      - tests/contract/test_openai_opaque_continuation.py
     diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
     retained_measurements:
       - evals/observations/general-memory-recall/20261013-production-baseline-v2/
@@ -2637,7 +2639,11 @@ milestones:
       - Bounded two-worker collection uses separate scratch databases and one shared ledger (ADR-0207); release requires final combined input verification and complete fresh evidence, not reused partial observations
       - V4 on f55c597c stopped after 771 observations at a normalized-stream credential rejection; the triggering field remains unknown, and all originals and both scratch databases are retained
       - V4 development incident checks pass but 37 relationship rows fail semantic certification; the evaluator left People semantic binding on its original retriever, requiring a measured-instance wiring repair and fresh evidence
-      - Aggregate reported and held cost after v4 is USD 83.96363625, leaving USD 216.03636375 under the unchanged USD 300 cap; no paid attempt is active and full quality remains unmeasured
+      - Historical aggregate reported and held cost after v4 was USD 83.96363625, leaving USD 216.03636375 under the unchanged USD 300 cap
+      - V5 on f837ed3c stopped at 124 observations with a provider-key detector match in OpenAI reasoning.encrypted_content; original bytes were not retained, so the meaning remains unproven; all originals and both databases are immutable
+      - The owner approved the narrow OpenAI repair on 2026-10-16 (ADR-0210); embedded opaque collisions may pass with provider/API/type binding while standalone credentials, other detectors, other fields and other providers remain rejected
+      - Seven original ledgers total USD 88.371792 including USD 5.64272 uncertain reservations; USD 211.628208 remains under the unchanged USD 300 cap, no paid attempt is active, and fresh reviewed full quality evidence remains required
+      - ADR-0211 records separate owner approval for ordinary signing on the final reviewed reliability commit only, with temporary exact-revision context access and restoration afterward; deferred dev work stays separate and all release gates remain required
       - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
       - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; the owner authorized coordination with reliability PR163 for one combined release, final review, exact-head CI and production delivery
       - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder
