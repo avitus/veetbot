@@ -465,6 +465,7 @@ async def test_sign_in_wait_does_not_spend_the_feed_collection_ceiling() -> None
         signed_out = True
 
         async def navigate(self, url: str) -> BrowserObservation:
+            """Report a signed-out profile once, then behave like the fixture."""
             if self.signed_out:
                 self.signed_out = False
                 raise BrowserProviderError("tool.browser.authentication_required", retryable=False)
@@ -513,12 +514,15 @@ async def test_sign_in_wait_does_not_spend_the_feed_collection_ceiling() -> None
 
 
 def test_feed_report_names_the_reason_collection_stopped() -> None:
+    """A stopped collection tells the briefing why, so the owner need not dig."""
     from agent_core.runtime.browser_feed import feed_report_control
 
     text = feed_report_control({"status": "bounded_stop", "feed": {}})
     assert "Collection outcome: bounded_stop" in text
     assert "ran out of its time or call ceiling" in text
     assert "say why collection stopped" in text
+    partial = feed_report_control({"status": "insufficient_evidence", "feed": {}})
+    assert "without enough linked-post evidence" in partial
     verified = feed_report_control({"status": "verified", "feed": {"post_ids": ["1"] * 6}})
     assert "ran out of" not in verified
 

@@ -207,7 +207,10 @@ async def advance_feed(
 
 STOP_REASONS = {
     "bounded_stop": "collection ran out of its time or call ceiling",
-    "insufficient_evidence": "the feed showed no further new linked posts within its windows",
+    "insufficient_evidence": (
+        "collection stopped without enough linked-post evidence: no new posts, "
+        "an unreadable window, or a page that left the home feed"
+    ),
     "ambiguous_target": "the page offered no single scroll anchor",
     "uncertain_scroll": "a scroll's outcome was unknown, so collection stopped read-only",
     "unverified": "the page could not be verified",
