@@ -188,8 +188,12 @@ stays flat. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
 or credential. It runs `make test-apple-ui-macos` and then
 `make test-apple-ui-ios`; either target runs alone when only one platform
-family changed. Each UI case sets its launch arguments and environment before
-calling `app.launch()` once. Terminate and relaunch only in a case that tests
+family changed. Each simulator is a device on the newest iOS runtime that
+offers one, ties broken by udid. The iPhone pick skips the foldable iPhone Duo
+by its device type, so a renamed Duo is skipped too, and the pick is a standard
+iPhone: the iOS 27.1 runtime offers only the Duo, so it falls to iOS 27.0.
+Each UI case sets its launch arguments and environment before calling
+`app.launch()` once. Terminate and relaunch only in a case that tests
 relaunch behavior.
 Every Mac case also launches with `-ApplePersistenceIgnoreState YES`. XCTest
 ends the app without quitting it, so AppKit would otherwise restore the window
