@@ -1575,3 +1575,54 @@ The next daily run may legitimately report no change until enough suitable new
 evidence exists. Keep supervised review enabled and unattended application off;
 new proposals still require individual approval. Never remove an activated
 boundary or replace unknown legacy attribution with empty metadata to unblock work.
+
+### Application reliability diagnostics and optional alerts (ADR-0205)
+
+After deploying the reliability changes, use the existing protected owner
+operator environment to run `agent run reliability --hours 24 --json`.
+It reports durable run outcomes, failure groups and current queue health without
+selecting prompts, drafts, exception messages or tool result bodies. It does not
+count API requests that failed before creating a run. A missing completion rate
+means no observed outcomes, and completion latency includes approval waiting.
+
+For a failed task, copy its native diagnostic reference and correlate it with
+`diagnostic_id` in the appropriate service journal. API errors retain their
+request ID; search journal `request_id` to find their diagnostic. First-party
+locations, bounded cause classes, `error_fingerprint`, run/session/tool IDs and
+`release_id` identify the failing code without recording exception text or local
+variables. Group recurring errors by fingerprint within a release; compare code
+locations across releases, since source movement can change fingerprints.
+Keep journal access restricted to authorized operators.
+
+To activate the optional application alarm after review and deployment:
+
+1. Verify the PostgreSQL schema is current and the existing notification
+   dispatcher and approved delivery destination work. Run the read-only report.
+2. Install `deploy/systemd/veetbot-reliability.service` and
+   `deploy/systemd/veetbot-reliability.timer` in `/etc/systemd/system/` as root.
+   These are operator-managed host units; delivery does not enable them.
+3. Install `deploy/ops/reliability.env.example` as
+   `/etc/veetbot/reliability.env`, owned by root and mode `0600`. Review its
+   one-hour window, minimum ten outcomes, twenty-percent failure rate, three
+   internal errors and 120-second ready-queue threshold. Set
+   `AGENT_RELIABILITY_MONITOR_ENABLED=1` only when ready for notifications.
+4. Run `sudo systemctl daemon-reload`, then
+   `sudo systemctl start veetbot-reliability.service`. Inspect the journal and
+   outbox delivery. Exit 0 means no current threshold breach, 2 means a degraded
+   observation was recorded, and 1 means the check could not complete. The unit
+   accepts 2 as a successful measurement; timeouts remain failures.
+5. Enable recurrence with
+   `sudo systemctl enable --now veetbot-reliability.timer`. Disable it with
+   `sudo systemctl disable --now veetbot-reliability.timer` and reset the flag
+   to `0` before rolling back to a release without this command.
+
+`--check` alone is read-only. Adding `--notify` requires enabled notification
+configuration and writes only alarm transitions and outbox records. Concurrent
+checks do not duplicate alerts; recovery and a later new episode each produce
+one transition. Quiet traffic does not clear an error-rate alarm. Threshold
+changes apply at the next observation; review them as operational changes.
+
+This monitor cannot deliver when PostgreSQL, the host or the notification path
+is down. Retain an independent external uptime/dead-man channel and complete
+Milestone 15's backup/restore and host-hardening work. Deployment and activation
+are separate from branch implementation; neither is implied by passing tests.

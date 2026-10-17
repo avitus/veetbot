@@ -177,13 +177,23 @@ async def test_draft_generation_never_receives_an_expired_body(
         mcp_client_factory=await _current_mail_factory(),
     ) as app:
         thread, _ = await _seed_draft(app)
-        await expire(app, thread.id)
+        expired_body = "Expired cache content must never reach drafting."
+        await expire(
+            app,
+            thread.id,
+            messages=[
+                message.model_copy(update={"body": expired_body}) for message in thread.messages
+            ],
+        )
         requests = record_model_requests(monkeypatch)
         operation = await app.services.email.submit_task(
             app.principal, kind="draft", thread_id=thread.id
         )
-        await app.runs.get(operation.run_id)
-        assert not any(PROVIDER_BODY in request for request in requests)
+        completed = await app.runs.get(operation.run_id)
+        assert completed.status is RunStatus.COMPLETED, completed.failure
+        assert requests, "A failed run must not pass the expired-content check vacuously."
+        assert not any(expired_body in request for request in requests)
+        assert any(PROVIDER_BODY in request for request in requests)
 
 
 async def test_refresh_refetches_an_expired_body_before_maintenance_runs(

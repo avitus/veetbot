@@ -196,3 +196,51 @@ async def test_sync_rejects_active_and_foreign_runs_before_writing_receipts() ->
     stranger = owner.model_copy(update={"principal_id": "stranger"})
     with pytest.raises(NotFoundError):
         await service.sync(stranger, NotificationSyncRequest(seen_run_ids=[completed.id]))
+
+
+async def test_operational_email_failure_cleanup_preserves_chat_alerts() -> None:
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.adapters.push import FakePushTransport
+    from agent_core.application.device_management import NotificationInboxService
+    from agent_core.application.notification_producer import NotificationProducer
+    from agent_core.domain.notifications import NotificationStatus, NotificationSyncRequest
+    from agent_core.domain.runs import RunStatus
+    from tests.contract.support import memory_uow_factory, run, session
+    from tests.contract.test_device_registry_contract import device
+    from tests.unit.test_notification_dispatcher_m12 import _dispatcher
+
+    clock, factory = await memory_uow_factory()
+    ids = SequenceIdFactory()
+    owner = principal().model_copy(update={"scopes": {"notification.write"}})
+    operational = session().model_copy(
+        update={"id": UUID(int=9401), "metadata": {"email_operational": True}}
+    )
+    hidden_run = run(status=RunStatus.FAILED).model_copy(
+        update={"id": UUID(int=9402), "session_id": operational.id}
+    )
+    chat_run = run(status=RunStatus.FAILED)
+    producer = NotificationProducer(clock=clock, ids=ids)
+    async with factory() as uow:
+        await uow.sessions.create(operational)
+        await uow.devices.upsert(device(), owner)
+        for failed in (hidden_run, chat_run):
+            await uow.runs.create(failed)
+            assert await producer.for_run_transition(
+                uow, run=failed, principal_id=owner.principal_id, status=RunStatus.FAILED
+            )
+        rows = await uow.notification_outbox.list(owner, limit=10)
+    internal = next(row for row in rows if row.run_id == hidden_run.id)
+    chat = next(row for row in rows if row.run_id == chat_run.id)
+    service = NotificationInboxService(uow_factory=factory, clock=clock)
+    response = await service.sync(
+        owner, NotificationSyncRequest(delivered_notification_ids=[internal.id, chat.id])
+    )
+    assert response.obsolete_notification_ids == [internal.id]
+    transport = FakePushTransport()
+    assert await _dispatcher(factory, clock, ids, transport).run_once() == 2
+    assert len(transport.calls) == 1
+    async with factory() as uow:
+        [settled] = await uow.notification_outbox.get_many(owner, (internal.id,))
+        assert settled.status is NotificationStatus.SUPERSEDED
+        assert (await uow.runs.get(hidden_run.id, owner)).status is RunStatus.FAILED
+        assert (await uow.sessions.get(operational.id, owner)).metadata["email_operational"] is True

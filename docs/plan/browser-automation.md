@@ -1563,7 +1563,11 @@ request events queued after DOMContentLoaded enter the set. It does not require 
 `timeout_ms` (0–5,000, default 2,000). Wait and expansion cannot be combined.
 The trusted tool reads the current observation window, with at most twenty
 additional observations spaced at least 250 ms apart. The predicate's deadline
-and existing tool/run deadline bound all reads. A result reports `satisfied`,
+and existing tool/run deadline bound all reads. After each polling delay, the
+checker rechecks the remaining time and avoids starting another capture when
+less time remains than the preceding capture consumed. This measured estimate
+never extends the deadline; a capture that actually times out still invalidates
+prior references. A result reports `satisfied`,
 `ambiguous` or `not_observed`, window scope, observation count and elapsed time.
 It proves only the visible predicate, not the causal effect of an action.
 

@@ -243,8 +243,8 @@ import UserNotifications
         #expect(model.errorMessage != nil)
     }
 
-    @Test
-    func testNotificationTapRestoresTranscriptAttachesExactRunAndFocusesApproval() async throws {
+    @Test(arguments: ["{}", #"{"email_operational":true}"#, #"{"purpose":"people-management"}"#])
+    func testNotificationTapRestoresTranscriptAttachesExactRunAndFocusesApproval(metadata: String) async throws {
         let sessionID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-000000000101")
         )
@@ -258,7 +258,7 @@ import UserNotifications
             UUID(uuidString: "00000000-0000-0000-0000-000000000104")
         )
         let sessionJSON = """
-            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Push target","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Push target","metadata":\(metadata),"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
             """
         let model = try configuredModel { request in
             switch (request.httpMethod, request.url?.path) {
@@ -338,6 +338,61 @@ import UserNotifications
         #expect(model.runState.approvals.map(\.id) == [approvalID])
         #expect(model.notificationFocus == .approval(approvalID))
         #expect(model.notificationNavigationID != nil)
+        #expect(model.history.isEmpty == (metadata != "{}"))
+        await model.synchronizeHistory()
+        #expect(model.selectedSessionID == sessionID)
+        #expect(model.history.isEmpty == (metadata != "{}"))
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func testOperationalEmailSessionCannotEnterChatThroughDeepLinks(
+        notification: Bool, emailHandlerInstalled: Bool
+    ) async throws {
+        let sessionID = UUID()
+        let runID = UUID()
+        let sessionJSON = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"email_operational":true},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let model = try configuredModel { request in
+            switch request.url?.path {
+            case "/v1/sessions":
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case "/v1/sessions/\(sessionID.uuidString)":
+                return try response(for: request, statusCode: 200, body: sessionJSON)
+            case "/v1/sessions/\(sessionID.uuidString)/messages":
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case "/v1/runs/\(runID.uuidString)":
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"FAILED","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                    """)
+            default:
+                Issue.record("unexpected request: \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        var emailListOpened = false
+        if emailHandlerInstalled {
+            model.emailNotificationHandler = { threadID, approvalID in
+                #expect(threadID == nil && approvalID == nil)
+                emailListOpened = true
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "replacement-token"))
+        if notification {
+            let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+                "version": 1, "kind": "run_failed", "title": "Run failed", "status": "FAILED",
+                "session_id": sessionID.uuidString, "run_id": runID.uuidString,
+                "notification_id": UUID().uuidString,
+            ]]))
+            await model.openNotification(payload)
+        } else {
+            await model.openSharedSession(sessionID)
+        }
+        #expect(emailListOpened == (notification && emailHandlerInstalled))
+        #expect(model.history.isEmpty)
+        #expect(model.selectedSessionID == nil)
+        #expect(model.notificationNavigationID == nil)
+        #expect(model.errorMessage == nil)
     }
 
     /// Route draft approvals to Email during startup and active use without replacing Chat.
@@ -490,10 +545,10 @@ import UserNotifications
 
     /// Email has no question card, so a question from the thread's discussion
     /// opens in Chat, where the owner can answer it.
-    @Test
-    func testThreadSessionQuestionOpensTheDiscussionInChat() async throws {
+    @Test(arguments: [false, true])
+    func testThreadSessionQuestionOpensTheDiscussionInChat(operational: Bool) async throws {
         let ids = ThreadSessionIDs()
-        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_USER")
+        let model = try threadSessionModel(ids, runStatus: "WAITING_FOR_USER", operational: operational)
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         let coordinator = AppCoordinator(chat: model)
         coordinator.mode = .email
@@ -510,6 +565,7 @@ import UserNotifications
         #expect(coordinator.email.selectedThreadID == nil)
         #expect(model.selectedSessionID == ids.session)
         #expect(model.notificationFocus == .question(ids.question))
+        #expect(model.history.isEmpty == operational)
     }
 
     /// The Mac window observes the coordinator while account capabilities arrive asynchronously.
@@ -1058,15 +1114,89 @@ import UserNotifications
         #expect(await store.list().map(\.sessionID) == [sessionID])
     }
 
-    @Test
-    func testSynchronizationPrunesCachedPeopleAuditSessions() async throws {
+    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
+    func testReconciliationPreservesNewlyFocusedOperationalApproval(metadata: String) async throws {
+        let sessionID = UUID(), runID = UUID(), approvalID = UUID()
+        let lock = NSLock()
+        let releaseRead = DispatchSemaphore(value: 0)
+        defer { releaseRead.signal() }
+        var operational = false
+        var blockNextRead = false
+        var readStarted = false
+        let legacySession = """
+            {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Cached audit","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let operationalSession = legacySession.replacingOccurrences(of: "\"metadata\":{}", with: "\"metadata\":\(metadata)")
+        let model = try configuredModel(concurrentRequests: true) { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                let items = lock.withLock { operational ? "" : legacySession }
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(items)],\"next_cursor\":null}")
+            case ("GET", "/v1/sessions/\(sessionID)"):
+                let shouldBlock = lock.withLock {
+                    if !blockNextRead { return false }
+                    blockNextRead = false
+                    readStarted = true
+                    return true
+                }
+                if shouldBlock {
+                    #expect(releaseRead.wait(timeout: .now() + 10) == .success)
+                }
+                return try response(for: request, statusCode: 200, body: operationalSession)
+            case ("GET", "/v1/sessions/\(sessionID)/messages"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case ("GET", "/v1/runs/\(runID)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(runID)","session_id":"\(sessionID)","parent_run_id":null,"status":"WAITING_FOR_APPROVAL","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                    """)
+            case ("GET", "/v1/approvals/\(approvalID)"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"id":"\(approvalID)","run_id":"\(runID)","session_id":"\(sessionID)","status":"PENDING","tool_name":"sandbox.run_command","action_summary":"Run command","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-08-14T00:04:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+                    """)
+            case ("GET", "/v1/runs/\(runID)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            default:
+                Issue.record("Unexpected request: \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(model.history.map(\.sessionID) == [sessionID])
+        lock.withLock { operational = true; blockNextRead = true }
+        let reconciliation = Task { await model.synchronizeHistory() }
+        for _ in 0..<5_000 {
+            if lock.withLock({ readStarted }) { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try #require(lock.withLock { readStarted })
+        let payload = try #require(NotificationPushPayload(userInfo: ["veetbot": [
+            "version": 1, "kind": "approval_requested", "title": "Approval needed",
+            "status": "WAITING_FOR_APPROVAL", "tool_name": "sandbox.run_command",
+            "session_id": sessionID.uuidString, "run_id": runID.uuidString,
+            "approval_id": approvalID.uuidString, "notification_id": UUID().uuidString,
+        ]]))
+        await model.openNotification(payload)
+        #expect(model.selectedSessionID == sessionID)
+        #expect(model.runState.approvals.map(\.id) == [approvalID])
+        releaseRead.signal()
+        await reconciliation.value
+        #expect(model.history.isEmpty)
+        #expect(model.selectedSessionID == sessionID)
+        #expect(model.runState.activeRunID == runID)
+        #expect(model.runState.approvals.map(\.id) == [approvalID])
+        #expect(model.notificationFocus == .approval(approvalID))
+        model.newSession()
+    }
+
+    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
+    func testSynchronizationPrunesCachedOperationalSessions(metadata: String) async throws {
         let conversationID = UUID()
         let auditID = UUID()
         let conversationJSON = """
             {"id":"\(conversationID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Keep me","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:01:00Z","active_run_id":null,"last_run_id":null}
             """
         let auditJSON = """
-            {"id":"\(auditID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"purpose":"people-management"},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:02:00Z","active_run_id":null,"last_run_id":null}
+            {"id":"\(auditID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":\(metadata),"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:02:00Z","active_run_id":null,"last_run_id":null}
             """
         let session = urlSession { request in
             switch (request.httpMethod, request.url?.path) {
@@ -1085,7 +1215,7 @@ import UserNotifications
                 return try response(for: request, statusCode: 500, body: "")
             }
         }
-        // An earlier build cached the Add person audit session as a conversation.
+        // An earlier build cached an internal session as a conversation.
         let store = VolatileSessionHistoryStore()
         try await store.upsert(
             SessionHistoryEntry(
@@ -3111,7 +3241,7 @@ import UserNotifications
     /// Serves one thread-bound session whose run waits on the discussion's own
     /// approval or question, while the thread's draft awaits a different approval.
     private func threadSessionModel(
-        _ ids: ThreadSessionIDs, runStatus: String, threadReadFails: Bool = false
+        _ ids: ThreadSessionIDs, runStatus: String, threadReadFails: Bool = false, operational: Bool = false
     ) throws -> ChatViewModel {
         try configuredModel { request in
             switch (request.httpMethod, request.url?.path) {
@@ -3119,7 +3249,7 @@ import UserNotifications
                 return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/sessions/\(ids.session)"):
                 return try response(for: request, statusCode: 200, body: """
-                    {"id":"\(ids.session)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Board discussion","metadata":{"email_thread_id":"\(ids.thread)","email_account_id":"work"},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":"\(ids.run)","last_run_id":"\(ids.run)"}
+                    {"id":"\(ids.session)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Board discussion","metadata":\(operational ? #"{"email_operational":true}"# : "{\"email_thread_id\":\"\(ids.thread)\",\"email_account_id\":\"work\"}"),"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","active_run_id":"\(ids.run)","last_run_id":"\(ids.run)"}
                     """)
             case ("GET", "/v1/sessions/\(ids.session)/messages"):
                 return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
@@ -3151,9 +3281,10 @@ import UserNotifications
 
     private func configuredModel(
         titleRefreshDelay: TimeInterval = 10,
+        concurrentRequests: Bool = false,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
-        let session = urlSession(handler: handler)
+        let session = urlSession(concurrentRequests: concurrentRequests, handler: handler)
         let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
@@ -3167,12 +3298,14 @@ import UserNotifications
     }
 
     private func urlSession(
+        concurrentRequests: Bool = false,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> URLSession {
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         let handlerID = ChatViewModelURLProtocol.register(handler)
         sessionConfiguration.httpAdditionalHeaders = [
-            ChatViewModelURLProtocol.handlerHeader: handlerID
+            ChatViewModelURLProtocol.handlerHeader: handlerID,
+            "X-Veetbot-Test-Concurrent": concurrentRequests ? "true" : "false",
         ]
         sessionConfiguration.protocolClasses = [ChatViewModelURLProtocol.self]
         return URLSession(configuration: sessionConfiguration)
@@ -3305,6 +3438,14 @@ private final class ChatViewModelURLProtocol: URLProtocol {
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        if request.value(forHTTPHeaderField: "X-Veetbot-Test-Concurrent") == "true" {
+            DispatchQueue.global().async { [self] in completeRequest() }
+        } else {
+            completeRequest()
+        }
+    }
+
+    private func completeRequest() {
         guard
             let handlerID = request.value(forHTTPHeaderField: Self.handlerHeader),
             let handler = Self.handlerStore.handler(for: handlerID)

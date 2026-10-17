@@ -13,6 +13,7 @@ from opentelemetry import trace
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 from agent_core.config import DeploymentMode
+from agent_core.domain.failures import failure_context, failure_fields
 
 SENSITIVE_KEY = re.compile(r"secret|token|password|api_?key|authorization|cookie", re.IGNORECASE)
 CONTENT_KEYS = frozenset({"prompt", "messages", "reasoning", "tool_result", "content"})
@@ -99,6 +100,25 @@ def _redaction_processor(prefixes: tuple[str, ...]) -> Processor:
     return processor
 
 
+def safe_exception_fields(_logger: WrappedLogger, _method_name: str, event: EventDict) -> EventDict:
+    """Keep code locations, never traceback source lines, locals or exception messages."""
+
+    info = event.pop("exc_info", None)
+    exception = (
+        info
+        if isinstance(info, BaseException)
+        else info[1]
+        if isinstance(info, tuple) and len(info) == 3
+        else sys.exc_info()[1]
+        if info is True
+        else None
+    )
+    if isinstance(exception, BaseException):
+        for key, value in failure_fields(exception, phase="background").items():
+            event.setdefault(key, value)
+    return event
+
+
 FIRST_PARTY_LOGGER = "agent_core"
 
 
@@ -111,6 +131,7 @@ def configure_logging(
     *,
     level: int = logging.INFO,
     provider_key_prefixes: Iterable[str] = DEFAULT_PROVIDER_PREFIXES,
+    release_id: str | None = None,
 ) -> None:
     """Render every log record as console development or JSON production output.
 
@@ -126,15 +147,26 @@ def configure_logging(
     else:
         renderer = structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty())
 
+    def add_release(_logger: WrappedLogger, _method: str, event: EventDict) -> EventDict:
+        if release_id is not None:
+            event.setdefault("release_id", release_id)
+        return event
+
+    def add_failure_context(_logger: WrappedLogger, _method: str, event: EventDict) -> EventDict:
+        for key, value in failure_context().items():
+            event.setdefault(key, value)
+        return event
+
     shared: list[Processor] = [
+        add_failure_context,
         structlog.contextvars.merge_contextvars,
+        add_release,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.ExtraAdder(),
         structlog.processors.TimeStamper(fmt="iso", utc=True, key="timestamp"),
         add_trace_context,
-        # Before redaction, so a traceback is text the redaction processor reads.
-        structlog.processors.format_exc_info,
+        safe_exception_fields,
         _redaction_processor(tuple(provider_key_prefixes)),
     ]
     handler = _ServiceLogHandler(sys.stdout)

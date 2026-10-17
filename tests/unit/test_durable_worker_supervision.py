@@ -275,3 +275,54 @@ def test_worker_rejects_supervision_settings_that_cannot_keep_a_lease(
 ) -> None:
     with pytest.raises(ValueError):
         _worker("token_then_wait", [], **options)
+
+
+async def test_persistent_worker_failures_back_off_and_success_resets_the_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker, _executor, _queue, _unit, clock = _worker("three_heartbeats", [])
+    attempts = 0
+
+    async def iteration() -> bool:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 5:
+            return True
+        if attempts == 7:
+            worker.stop()
+            return True
+        raise ConnectionError("Synthetic unavailable database")
+
+    monkeypatch.setattr(worker, "run_once", iteration)
+    await worker.run_forever()
+    assert clock.sleeps == [0.25, 0.5, 1.0, 2.0, 0.25]
+
+
+async def test_stopping_during_failure_backoff_wakes_the_worker_promptly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker, _executor, _queue, _unit, clock = _worker("three_heartbeats", [])
+    sleeping = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def sleep(_seconds: float) -> None:
+        sleeping.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def unavailable() -> bool:
+        raise ConnectionError("Synthetic database outage")
+
+    monkeypatch.setattr(clock, "sleep", sleep)
+    monkeypatch.setattr(worker, "run_once", unavailable)
+    task = asyncio.create_task(worker.run_forever())
+    try:
+        await asyncio.wait_for(sleeping.wait(), 1)
+        worker.stop()
+        await asyncio.wait_for(task, 0.2)
+        assert cancelled.is_set()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

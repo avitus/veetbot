@@ -1921,3 +1921,19 @@ and checkpoint usage watermark; a completed action is neither resent nor charged
 twice. Uncertain outcomes permit observation only. Changed definitions or stale
 pending action generations cannot authorize a new effect. A bounded stop forces
 a tool-free report of the evidence and remaining gap.
+
+## Reliability recovery (ADR-0205)
+
+Consecutive infrastructure failures in the durable worker back off exponentially
+from the poll interval to a thirty-second ceiling. A successful iteration resets
+the allowance. Cancellation propagates immediately. Post-run resource cleanup
+and enrichment have separate bounded error scopes; an unavailable optional hook
+cannot prevent later cleanup or change a committed terminal outcome. No such
+recovery retries an external action or consumes a run's crash allowance.
+Delegation continuation remains governed by its parent run budget and lease;
+it is not interrupted by the optional enrichment timeout.
+
+The additive `dependency_unavailable` failure reason distinguishes a bounded
+email-source recovery failure from a platform defect. Unexpected failures retain
+a diagnostic UUID, code fingerprint, phase and release in `RunFailure.details`;
+raw exception text stays absent. Public run views expose only the optional UUID.

@@ -31,6 +31,7 @@ from agent_core.bootstrap import (
     build_notification_worker,
     build_schedule_worker,
     build_surface_worker,
+    operator_reliability,
     serve_execution_service,
 )
 from agent_core.cli.people import app as people_app
@@ -49,6 +50,7 @@ from agent_core.domain.errors import (
     PersonaContentError,
 )
 from agent_core.domain.events import EventEnvelope
+from agent_core.domain.failures import failure_fields
 from agent_core.domain.memory import MemoryEdit, MemoryReviewOutcome, Portability, Sensitivity
 from agent_core.domain.messages import AssistantMessage, ReasoningEffort, TextPart
 from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
@@ -63,9 +65,15 @@ from agent_core.domain.views import (
     TextContentBlock,
 )
 from agent_core.observability.latency import ChatLatencyReport, render_latency_report
+from agent_core.observability.reliability import (
+    ReliabilityReport,
+    ReliabilityThresholds,
+    degraded_signals,
+    render_reliability_report,
+)
 from agent_core.ports.dispatch import WorkerService
 
-RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export", "latency"})
+RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export", "latency", "reliability"})
 DEFAULT_RUN_WAIT_TIMEOUT_SECONDS = 300.0
 EVENT_READ_TIMEOUT_SECONDS = 30.0
 API_BIND_HOST = "127.0.0.1"
@@ -649,6 +657,54 @@ def run_export(
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(artifact.model_dump_json() if json_output else str(artifact.id))
+
+
+async def _reliability_report(
+    hours: int, notify: bool, thresholds: ReliabilityThresholds
+) -> ReliabilityReport:
+    return await operator_reliability(hours, notify, thresholds)
+
+
+@run_app.command("reliability")
+def run_reliability(
+    hours: Annotated[int, typer.Option("--hours", min=1, max=2160)] = 24,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    check: Annotated[
+        bool, typer.Option("--check", help="Exit 2 when a reliability threshold is exceeded.")
+    ] = False,
+    notify: Annotated[
+        bool,
+        typer.Option("--notify", help="With --check, enqueue deduplicated alerts and recoveries."),
+    ] = False,
+    minimum_outcomes: Annotated[int, typer.Option("--minimum-outcomes", min=1)] = 10,
+    failure_rate: Annotated[float, typer.Option("--failure-rate", min=0.001, max=1)] = 0.2,
+    internal_errors: Annotated[int, typer.Option("--internal-errors", min=1)] = 3,
+    queue_seconds: Annotated[float, typer.Option("--queue-seconds", min=1)] = 120,
+) -> None:
+    """Report durable task outcomes and current queue health without private content."""
+    if notify and not check:
+        raise typer.BadParameter("--notify requires --check.")
+    thresholds = ReliabilityThresholds(
+        minimum_outcomes=minimum_outcomes,
+        failure_rate=failure_rate,
+        internal_errors=internal_errors,
+        queue_seconds=queue_seconds,
+    )
+    try:
+        report = asyncio.run(_reliability_report(hours, notify, thresholds))
+    except Exception as exc:
+        fields = failure_fields(exc, phase="reliability_report")
+        typer.echo(
+            f"Reliability report unavailable ({fields['error_class']}; "
+            f"{fields['error_fingerprint']}).",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+    typer.echo(
+        report.model_dump_json(indent=2) if json_output else render_reliability_report(report)
+    )
+    if check and degraded_signals(report, thresholds):
+        raise typer.Exit(2)
 
 
 async def _latency_report(days: int) -> ChatLatencyReport | None:

@@ -24,6 +24,7 @@ from agent_core.domain.errors import (
     WorkerFencedError,
 )
 from agent_core.domain.events import NewEvent, ProcessEvent
+from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.messages import (
     AssistantMessage,
     ConversationItem,
@@ -312,6 +313,7 @@ class RunExecutor:
         seed_checkpoint: CheckpointSeeder,
         on_token: TokenCallback | None = None,
         on_token_complete: TokenCompleteCallback | None = None,
+        release_id: str | None = None,
         on_run_complete: RunCompleteCallback | None = None,
         on_child_suspension: ChildSuspensionCallback | None = None,
         on_model_event: ModelEventCallback | None = None,
@@ -327,6 +329,7 @@ class RunExecutor:
         model_settings: ModelSettingsCatalog | None = None,
     ) -> None:
         self._model_settings = model_settings
+        self._release_id = release_id
         self._principal = principal
         self._principals = principals
         self._uow_factory = uow_factory
@@ -587,10 +590,16 @@ class RunExecutor:
                     payload={"attempt": run.attempts + 1},
                 )
             )
-        try:
-            await self._execute_running(run, lease=None)
-        finally:
-            await self._complete_run(run.id, None)
+        with log_context(
+            run_id=str(run.id),
+            session_id=str(run.session_id),
+            tenant_id=run.tenant_id,
+            release_id=self._release_id,
+        ):
+            try:
+                await self._execute_running(run, lease=None)
+            finally:
+                await self._complete_run(run.id, None)
 
     async def execute_claimed(
         self,
@@ -600,10 +609,16 @@ class RunExecutor:
     ) -> None:
         """Resume a run that a durable worker claimed and already marked running."""
 
-        try:
-            await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
-        finally:
-            await self._complete_run(claimed.run.id, claimed.lease.lease_epoch)
+        with log_context(
+            run_id=str(claimed.run.id),
+            session_id=str(claimed.run.session_id),
+            tenant_id=claimed.run.tenant_id,
+            release_id=self._release_id,
+        ):
+            try:
+                await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
+            finally:
+                await self._complete_run(claimed.run.id, claimed.lease.lease_epoch)
 
     async def _complete_run(self, run_id: UUID, lease_epoch: int | None) -> None:
         try:
@@ -989,11 +1004,17 @@ class RunExecutor:
             )
         except Exception as exc:
             # Validation errors can embed private model inputs in their traceback.
-            logger.error(
+            details = log_failure(
+                logger,
                 "run_execution_failed",
-                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+                exc,
+                phase="run",
+                diagnostic_id=str(self._ids.new_id()),
+                run_id=str(run.id),
             )
             outcome = self._internal_failure(run, exc)
+            assert outcome.failure is not None
+            outcome.failure.details.update(details)
         try:
             await finalize(context or finalization, outcome)
         except WorkerFencedError:
@@ -1237,7 +1258,7 @@ class RunExecutor:
             failure=RunFailure(
                 reason=FailureReason.INTERNAL_ERROR,
                 error_class=type(exc).__name__,
-                message="an unexpected internal error ended the run",
+                message="An unexpected internal error ended the run",
                 step_number=run.step_count or None,
                 occurred_at=self._clock.now(),
             ),
@@ -1260,14 +1281,19 @@ async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutco
         raise
     except Exception as exc:
         context.checkpoint = original_checkpoint
-        logger.exception(
+        details = log_failure(
+            logger,
             "run_finalization_failed",
-            extra={"run_id": str(context.run.id), "error_class": type(exc).__name__},
+            exc,
+            phase="finalization",
+            diagnostic_id=str(context.ids.new_id()),
+            run_id=str(context.run.id),
         )
         failure = RunFailure(
             reason=FailureReason.INTERNAL_ERROR,
             error_class=type(exc).__name__,
-            message="an unexpected finalization error ended the run",
+            message="An unexpected finalization error ended the run",
+            details=details,
             step_number=context.run.step_count or None,
             occurred_at=context.clock.now(),
         )
