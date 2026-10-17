@@ -288,7 +288,7 @@ struct EmailUnsubscribeConfirmationSheet: View {
                         isSending = false
                     }
                 }
-                .buttonStyle(.borderedProminent).tint(AppTheme.turquoise).disabled(isSending)
+                .buttonStyle(.borderedProminent).tint(AppTheme.teal).disabled(isSending)
                 .accessibilityIdentifier("email.unsubscribe.confirm")
             }
         }

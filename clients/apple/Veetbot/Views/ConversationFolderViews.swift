@@ -8,18 +8,7 @@ struct RecentChatsHeaderRow: View {
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(spacing: 8) {
-                Label("Recent chats", systemImage: "clock")
-                Spacer()
-                Text("\(count)")
-                    .appFont(.caption)
-                    .foregroundColor(.secondary)
-                Image(systemName: "chevron.right")
-                    .appFont(.caption, weight: .semibold)
-                    .foregroundColor(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            }
-            .contentShape(Rectangle())
+            SidebarDisclosureHeader(title: "Recent", count: count, isExpanded: isExpanded)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Recent chats")
@@ -68,19 +57,7 @@ struct FolderHeaderRow: View {
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(spacing: 8) {
-                Label(folder.name, systemImage: isExpanded ? "folder.fill" : "folder")
-                    .lineLimit(1)
-                Spacer()
-                Text("\(count)")
-                    .appFont(.caption)
-                    .foregroundColor(.secondary)
-                Image(systemName: "chevron.right")
-                    .appFont(.caption, weight: .semibold)
-                    .foregroundColor(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            }
-            .contentShape(Rectangle())
+            SidebarDisclosureHeader(title: folder.name, count: count, isExpanded: isExpanded)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(folder.name)
@@ -110,20 +87,10 @@ struct ScheduleGroupHeaderRow: View {
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(spacing: 8) {
-                Label(group.title, systemImage: "calendar.badge.clock")
-                    .lineLimit(1)
-                if hasUnreadReport { NewReportIndicator() }
-                Spacer()
-                Text("\(group.entries.count)")
-                    .appFont(.caption)
-                    .foregroundColor(.secondary)
-                Image(systemName: "chevron.right")
-                    .appFont(.caption, weight: .semibold)
-                    .foregroundColor(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            }
-            .contentShape(Rectangle())
+            SidebarDisclosureHeader(
+                title: group.title, count: group.entries.count, isExpanded: isExpanded,
+                hasUnreadReport: hasUnreadReport
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(group.title), \(group.entries.count) scheduled conversations\(hasUnreadReport ? ", New report" : "")")
@@ -150,18 +117,18 @@ struct SuggestedFolderRow: View {
                 Button("Accept") {
                     Task { await model.acceptFolderProposal(proposal.id) }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryCapsuleButtonStyle())
                 .accessibilityIdentifier("sidebar.proposal.accept.\(proposal.id.uuidString)")
                 if proposal.kind == .newFolder {
                     Button("Rename…", action: onRename)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
                         .accessibilityHint("Accepts the folder under a name you choose")
                         .accessibilityIdentifier("sidebar.proposal.rename.\(proposal.id.uuidString)")
                 }
                 Button("Decline") {
                     Task { await model.declineFolderProposal(proposal.id) }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(QuietCapsuleButtonStyle())
                 .accessibilityIdentifier("sidebar.proposal.decline.\(proposal.id.uuidString)")
             }
             #if os(macOS)
@@ -186,7 +153,7 @@ struct FolderProposalMembers: View {
                 ForEach(Array(proposal.memberTitles.enumerated()), id: \.offset) { _, title in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: "bubble.left")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppTheme.inkSoft)
                             .accessibilityHidden(true)
                         Text(title)
                             .lineLimit(2)
@@ -201,7 +168,7 @@ struct FolderProposalMembers: View {
                             : "\(proposal.unresolvedMemberCount) more conversations"
                     )
                     .appFont(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
                 }
             }
         }
@@ -244,7 +211,7 @@ struct FolderNameSheet: View {
             if let proposal = acceptedProposal {
                 Text("Files these conversations:")
                     .appFont(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
                 FolderProposalMembers(proposal: proposal)
             }
             HStack {
@@ -371,8 +338,38 @@ struct FolderNameSheet: View {
 struct NewReportIndicator: View {
     var body: some View {
         Circle()
-            .fill(Color.accentColor)
-            .frame(width: 6, height: 6)
+            .fill(AppTheme.teal)
+            .frame(width: 7, height: 7)
             .accessibilityLabel("New report")
+    }
+}
+
+/// A sidebar group's header: a small chevron, the name in the section voice,
+/// and the count in faint ink. Tapping the row opens or closes the group.
+struct SidebarDisclosureHeader: View {
+    let title: String
+    let count: Int
+    let isExpanded: Bool
+    var hasUnreadReport = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(AppTheme.inkSoft)
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                .frame(width: 12)
+            Text(title)
+                .appFont(.caption, weight: .semibold)
+                .foregroundColor(AppTheme.inkSoft)
+                .lineLimit(1)
+            if hasUnreadReport { NewReportIndicator() }
+            Spacer()
+            Text("\(count)")
+                .appFont(.caption)
+                .foregroundColor(AppTheme.inkFaint)
+        }
+        .frame(minHeight: 24)
+        .contentShape(Rectangle())
     }
 }

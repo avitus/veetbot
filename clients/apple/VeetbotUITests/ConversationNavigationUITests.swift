@@ -2767,7 +2767,23 @@ final class ConversationNavigationUITests: XCTestCase {
         }
     }
 
+    /// Brings the chat list back over an open conversation. On a compact
+    /// window the list slides over the conversation and slides away as a
+    /// conversation opens, so a row that is still hittable may be mid-slide:
+    /// the list is reopened from the navigation bar's toggle once the row
+    /// has gone, and left alone if it stays. The pushed list of a window
+    /// without the toggle comes back through the navigation bar's back button.
     private func revealSidebarIfNeeded(for row: XCUIElement) {
+        let toggle = app.buttons["sidebar.toggle"]
+        if toggle.exists {
+            let gone = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "hittable == false"), object: row
+            )
+            guard XCTWaiter().wait(for: [gone], timeout: 1.5) == .completed else { return }
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            toggle.tap()
+            return
+        }
         guard !row.isHittable else { return }
         let backButton = app.navigationBars.buttons.element(boundBy: 0)
         XCTAssertTrue(backButton.waitForExistence(timeout: 5))

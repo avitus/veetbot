@@ -479,7 +479,7 @@ private struct EmailThreadScreen: View {
                                 Label(
                                     model.draft == nil ? "Reply" : "Your reply", systemImage: "arrowshape.turn.up.left")
                             }
-                            .buttonStyle(.borderedProminent).tint(AppTheme.turquoise)
+                            .buttonStyle(.borderedProminent).tint(AppTheme.teal)
                             .accessibilityIdentifier("email.jump-to-reply")
                         }
                         .appFont(.callout, weight: .semibold)
@@ -788,7 +788,7 @@ private struct EmailThreadScreen: View {
                     .appFont(.callout)
                     Spacer(minLength: 0)
                     Button("Review & Send") { Task { await model.prepareSend() } }
-                        .buttonStyle(.borderedProminent).tint(AppTheme.turquoise).controlSize(.large)
+                        .buttonStyle(.borderedProminent).tint(AppTheme.teal).controlSize(.large)
                         .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
                 }
                 // A refused send belongs next to the control that asked for it; above the
@@ -833,7 +833,7 @@ private struct EmailThreadScreen: View {
                     } else {
                         Label("Draft reply", systemImage: "square.and.pencil")
                     }
-                }.buttonStyle(.borderedProminent).tint(AppTheme.turquoise).disabled(model.isPerformingAction)
+                }.buttonStyle(.borderedProminent).tint(AppTheme.teal).disabled(model.isPerformingAction)
                 if let error = model.draftActionMessage {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(.red)
                         .appFont(.callout).accessibilityIdentifier("email.action-error")
@@ -1293,7 +1293,7 @@ struct EmailSendReview: View {
                         Button("Back to editing") { model.closeReview() }
                         Spacer(minLength: 0)
                         Button("Send") { Task { await model.resolveSend(.approveOnce) } }
-                            .buttonStyle(.borderedProminent).tint(AppTheme.turquoise).controlSize(.large)
+                            .buttonStyle(.borderedProminent).tint(AppTheme.teal).controlSize(.large)
                             .disabled(model.isPerformingAction).accessibilityIdentifier("email.approve-send")
                     }
                     Button("Deny this send", role: .destructive) { Task { await model.resolveSend(.deny) } }

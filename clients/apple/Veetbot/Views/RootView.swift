@@ -29,7 +29,7 @@ struct VeetbotSceneRoot: View {
             .environmentObject(smsIntegration)
             .environmentObject(folderSidebar)
             .appTypography(appearance)
-            .tint(AppTheme.turquoise)
+            .tint(AppTheme.teal)
         #if DEBUG && !SWIFT_PACKAGE
             .preferredColorScheme(
                 ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument)
@@ -62,6 +62,7 @@ public struct RootView: View {
     @State private var showingGlobalSchedules = false
     #if !os(macOS)
     @State private var showingSettings = false
+    @State private var chatListPresented = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
     @Environment(\.scenePhase) private var scenePhase
@@ -120,6 +121,7 @@ public struct RootView: View {
             while !Task.isCancelled {
                 await model.refreshScheduledReportHistory()
                 await model.synchronizeNotifications()
+                await model.refreshSessionsAwaitingApproval()
                 do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
             }
         }
@@ -181,17 +183,7 @@ public struct RootView: View {
     private var configuredContent: some View {
         VStack(spacing: 0) {
             HStack {
-                ForEach(ClientMode.allCases) { mode in
-                    Button { coordinator.mode = mode } label: {
-                        Label(mode.title, systemImage: mode.symbol)
-                            .padding(.horizontal, 12).padding(.vertical, 8)
-                            .background(coordinator.mode == mode ? AppTheme.turquoise.opacity(0.17) : Color.clear)
-                            .cornerRadius(8)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("mode.\(mode.rawValue)")
-                    .accessibilityAddTraits(coordinator.mode == mode ? .isSelected : [])
-                }
+                ModeSegment(selected: coordinator.mode) { coordinator.mode = $0 }
                 Spacer()
                 if coordinator.mode == .email {
                     Menu {
@@ -204,8 +196,9 @@ public struct RootView: View {
                     .accessibilityIdentifier("email.more")
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 4)
-            Divider()
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(AppTheme.paperDeep)
+            Rectangle().fill(AppTheme.hairline).frame(height: 1)
             // Keeping each navigation tree mounted preserves compact navigation,
             // scroll position and live Chat rendering across a mode switch.
             GeometryReader { geometry in
@@ -238,7 +231,7 @@ public struct RootView: View {
                 if coordinator.mode == .chat {
                     Button(action: presentSettings) {
                         Image(systemName: "gearshape")
-                            .foregroundColor(AppTheme.orange)
+                            .foregroundColor(AppTheme.inkSoft)
                     }
                     .accessibilityLabel("Settings")
                     .accessibilityIdentifier("sidebar.settings")
@@ -246,7 +239,7 @@ public struct RootView: View {
                         showingGlobalMemory = true
                     } label: {
                         Image(systemName: "brain.head.profile")
-                            .foregroundColor(AppTheme.turquoise)
+                            .foregroundColor(AppTheme.inkSoft)
                     }
                     .accessibilityLabel("Memory")
                     .accessibilityIdentifier("sidebar.memory")
@@ -254,7 +247,7 @@ public struct RootView: View {
                         showingGlobalPersona = true
                     } label: {
                         Image(systemName: "person.crop.circle")
-                            .foregroundColor(AppTheme.turquoise)
+                            .foregroundColor(AppTheme.inkSoft)
                     }
                     .accessibilityLabel("Persona")
                     .accessibilityIdentifier("sidebar.persona")
@@ -262,7 +255,7 @@ public struct RootView: View {
                         showingGlobalSchedules = true
                     } label: {
                         Image(systemName: "calendar")
-                            .foregroundColor(AppTheme.orange)
+                            .foregroundColor(AppTheme.inkSoft)
                     }
                     .accessibilityLabel("Schedules")
                     .accessibilityIdentifier("sidebar.schedules")
@@ -272,7 +265,7 @@ public struct RootView: View {
                     if coordinator.email.unsubscribeAvailable {
                         Button { showingEmailSubscriptions = true } label: {
                             Image(systemName: "tray.full")
-                                .foregroundColor(AppTheme.turquoise)
+                                .foregroundColor(AppTheme.inkSoft)
                         }
                         .accessibilityLabel("Subscriptions").help("Subscriptions")
                         .accessibilityIdentifier("email.subscriptions.open")
@@ -314,7 +307,25 @@ public struct RootView: View {
         coordinator.email.setActive(model.isConfigured && !model.isReconfiguring && active && coordinator.mode == .email)
     }
 
+    @ViewBuilder
     private var chatContent: some View {
+        #if os(iOS)
+        if horizontalSizeClass == .compact {
+            compactChat
+        } else {
+            splitChat
+        }
+        #else
+        splitChat
+        #endif
+    }
+
+    /// The window toolbar sits above the mode bar, not over the split view's
+    /// columns, yet on macOS 26 its glass still draws a soft edge across the
+    /// top of each column and blurs the conversation's title. Hiding the
+    /// toolbar's own background removes that edge; the title bar keeps the
+    /// window's colour.
+    private var splitChat: some View {
         NavigationSplitView {
             SessionSidebar(
                 model: model,
@@ -324,7 +335,62 @@ public struct RootView: View {
         } detail: {
             ChatView(model: model)
         }
+        #if os(macOS)
+        .toolbarBackground(.hidden, for: .windowToolbar)
+        #endif
     }
+
+    #if os(iOS)
+    /// A compact window shows the conversation itself, and the chat list
+    /// slides over it from the leading edge: opened from the navigation bar,
+    /// closed by choosing a conversation, tapping the paper beside it, or
+    /// swiping it away. It opens by itself while no conversation is chosen,
+    /// so the owner lands on their conversations, not on an empty page.
+    private var compactChat: some View {
+        NavigationStack {
+            ChatView(model: model)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.26)) { chatListPresented = true }
+                        } label: {
+                            Image(systemName: "sidebar.leading")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("Chats")
+                        .accessibilityHint("Shows your conversations")
+                        .accessibilityIdentifier("sidebar.toggle")
+                    }
+                }
+        }
+        .overlay {
+            ChatListDrawer(isPresented: $chatListPresented) {
+                SessionSidebar(
+                    model: model,
+                    usesDirectActivation: true,
+                    inDrawer: true,
+                    openSettings: presentSettings,
+                    onActivate: { withAnimation(.easeOut(duration: 0.22)) { chatListPresented = false } }
+                )
+            }
+        }
+        .environment(\.chatListOverlayPresented, chatListPresented)
+        .onAppear {
+            var opensList = model.selectedSessionID == nil
+            #if DEBUG && !SWIFT_PACKAGE
+            if ConversationNavigationUITestFixture.opensSessionAtLaunch { opensList = false }
+            #endif
+            if opensList { chatListPresented = true }
+        }
+        // A notification's conversation is already selected; showing it means
+        // getting the list out of the way.
+        .onChange(of: model.notificationNavigationID) { id in
+            guard id != nil else { return }
+            withAnimation(.easeOut(duration: 0.22)) { chatListPresented = false }
+            model.acknowledgeNotificationNavigation()
+        }
+    }
+    #endif
 
     private func presentSettings() {
         #if os(macOS)
@@ -426,8 +492,16 @@ enum SessionSidebarDestination: Hashable, Sendable {
 private struct SessionSidebar: View {
     @Environment(\.activeClientMode) private var activeMode
     @ObservedObject var model: ChatViewModel
+    /// Observed for the open conversation's pending approvals, which the
+    /// Needs you group reads through `model.sessionsNeedingApproval`.
+    @ObservedObject private var runState: RunStateReducer
     let usesDirectActivation: Bool
+    /// Sliding over the conversation on a compact window, with no navigation
+    /// bar of its own: the overflow menu sits in its header instead.
+    var inDrawer = false
     let openSettings: () -> Void
+    /// Called after a row opens a conversation, so a drawer can close.
+    var onActivate: () -> Void = {}
     @State private var deletionCandidate: SessionHistoryEntry?
     @State private var newConversationDestination =
         SessionSidebarDestination.freshConversation()
@@ -442,10 +516,32 @@ private struct SessionSidebar: View {
     @State private var folderEditor: FolderEditorRequest?
     @State private var folderDeletionCandidate: FolderView?
 
+    init(
+        model: ChatViewModel,
+        usesDirectActivation: Bool,
+        inDrawer: Bool = false,
+        openSettings: @escaping () -> Void,
+        onActivate: @escaping () -> Void = {}
+    ) {
+        self.model = model
+        self.runState = model.runState
+        self.usesDirectActivation = usesDirectActivation
+        self.inDrawer = inDrawer
+        self.openSettings = openSettings
+        self.onActivate = onActivate
+    }
+
     /// Presents session navigation and the iOS Chat overflow menu.
     var body: some View {
-        sidebarList
-        .listStyle(.sidebar)
+        VStack(spacing: 0) {
+            #if os(iOS)
+            if inDrawer { drawerHeader }
+            #endif
+            sidebarList
+                .scrollContentBackground(.hidden)
+                .listStyle(.sidebar)
+        }
+        .background(AppTheme.paperDeep.ignoresSafeArea())
         .navigationTitle("Veetbot")
         .confirmationDialog(
             "Delete conversation everywhere?",
@@ -500,43 +596,7 @@ private struct SessionSidebar: View {
         #if os(iOS)
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                if activeMode == .chat {
-                    Menu {
-                        Button {
-                            showingMemoryBrowser = true
-                        } label: {
-                            Label("Memory", systemImage: "brain.head.profile")
-                        }
-                        .accessibilityIdentifier("sidebar.memory")
-
-                        Button {
-                            showingScheduleBrowser = true
-                        } label: {
-                            Label("Schedules", systemImage: "calendar")
-                        }
-                        .accessibilityIdentifier("sidebar.schedules")
-
-                        Button {
-                            showingPersonaEditor = true
-                        } label: {
-                            Label("Persona", systemImage: "person.crop.circle")
-                        }
-                        .accessibilityIdentifier("sidebar.persona")
-
-                        Divider()
-
-                        Button(action: openSettings) {
-                            Label("Settings", systemImage: "gearshape")
-                        }
-                        .accessibilityIdentifier("sidebar.settings")
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .frame(minWidth: 44, minHeight: 44)
-                    }
-                    .accessibilityLabel("More")
-                    .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
-                    .accessibilityIdentifier("sidebar.more")
-                }
+                if activeMode == .chat, !inDrawer { moreMenu }
             }
         }
         #endif
@@ -551,6 +611,62 @@ private struct SessionSidebar: View {
             ScheduleBrowserView(model: scheduleViewModel)
         }
     }
+
+    #if os(iOS)
+    /// The drawer's own top: the app's name in the display face and the
+    /// overflow menu the navigation bar would otherwise hold.
+    private var drawerHeader: some View {
+        HStack(spacing: 8) {
+            Text("Veetbot")
+                .appDisplayFont(.title3)
+                .foregroundColor(AppTheme.ink)
+            Spacer()
+            moreMenu
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 8)
+        .padding(.top, 8)
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button {
+                showingMemoryBrowser = true
+            } label: {
+                Label("Memory", systemImage: "brain.head.profile")
+            }
+            .accessibilityIdentifier("sidebar.memory")
+
+            Button {
+                showingScheduleBrowser = true
+            } label: {
+                Label("Schedules", systemImage: "calendar")
+            }
+            .accessibilityIdentifier("sidebar.schedules")
+
+            Button {
+                showingPersonaEditor = true
+            } label: {
+                Label("Persona", systemImage: "person.crop.circle")
+            }
+            .accessibilityIdentifier("sidebar.persona")
+
+            Divider()
+
+            Button(action: openSettings) {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .accessibilityIdentifier("sidebar.settings")
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .foregroundColor(AppTheme.inkSoft)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("More")
+        .accessibilityHint("Shows Memory, Schedules, Persona, and Settings")
+        .accessibilityIdentifier("sidebar.more")
+    }
+    #endif
 
     @ViewBuilder
     private var sidebarList: some View {
@@ -574,9 +690,13 @@ private struct SessionSidebar: View {
             } label: {
                 newConversationLabel
             }
+            .buttonStyle(PrimaryCapsuleButtonStyle(expands: true))
             .accessibilityIdentifier("sidebar.new-conversation")
-            .buttonStyle(.plain)
-            .listRowBackground(AppTheme.brandGradient)
+            .sidebarRow()
+
+            needsYouSection { entry in
+                activate(.session(entry.sessionID))
+            }
 
             historySections { entry, isRecent in
                 HStack(spacing: 8) {
@@ -596,11 +716,45 @@ private struct SessionSidebar: View {
                     moveMenu(for: entry, isRecent: isRecent)
                     deleteButton(for: entry)
                 }
-                .listRowBackground(
-                    entry.sessionID == model.selectedSessionID
-                        ? AppTheme.turquoise.opacity(0.15)
-                        : Color.clear
-                )
+                .sidebarRow(selected: entry.sessionID == model.selectedSessionID)
+            }
+        }
+    }
+
+
+    /// What needs the owner, ahead of every conversation: an approval waiting
+    /// or a report not yet read, each naming its conversation.
+    @ViewBuilder
+    private func needsYouSection(open: @escaping (SessionHistoryEntry) -> Void) -> some View {
+        let rows = SidebarAttention.rows(
+            history: model.history,
+            sessionsAwaitingApproval: model.sessionsNeedingApproval,
+            hasUnreadReport: model.hasUnreadReport
+        )
+        if !rows.isEmpty {
+            Section {
+                ForEach(rows) { row in
+                    Button {
+                        open(row.entry)
+                    } label: {
+                        HStack(spacing: 8) {
+                            AttentionDot(kind: row.kind)
+                                .frame(width: 16)
+                            (Text(row.label).fontWeight(.medium)
+                                + Text(" · \(row.entry.title)").foregroundColor(AppTheme.inkSoft))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundColor(AppTheme.ink)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(row.label), \(row.entry.title)")
+                    .accessibilityIdentifier("sidebar.needs-you.\(row.id)")
+                    .sidebarRow(selected: row.entry.sessionID == model.selectedSessionID)
+                }
+            } header: {
+                SidebarSectionLabel(title: "Needs you")
             }
         }
     }
@@ -620,7 +774,11 @@ private struct SessionSidebar: View {
                 newConversationLabel
             }
             .accessibilityIdentifier("sidebar.new-conversation")
-            .listRowBackground(AppTheme.brandGradient)
+            .sidebarRow()
+
+            needsYouSection { entry in
+                Task { await model.selectSession(entry) }
+            }
 
             historySections { entry, isRecent in
                 HStack(spacing: 8) {
@@ -639,11 +797,7 @@ private struct SessionSidebar: View {
                     moveMenu(for: entry, isRecent: isRecent)
                     deleteButton(for: entry)
                 }
-                .listRowBackground(
-                    entry.sessionID == model.selectedSessionID
-                        ? AppTheme.turquoise.opacity(0.15)
-                        : Color.clear
-                )
+                .sidebarRow(selected: entry.sessionID == model.selectedSessionID)
             }
         }
     }
@@ -671,6 +825,7 @@ private struct SessionSidebar: View {
                         }
                     }
                 )
+                .sidebarRow()
                 if folderSidebar.recentChatsExpanded {
                     ForEach(grouped.recent) { entry in
                         row(entry, true)
@@ -680,12 +835,15 @@ private struct SessionSidebar: View {
             }
         }
         if model.foldersAvailable, !model.suggestedFolders.isEmpty {
-            Section("Suggested folders") {
+            Section {
                 ForEach(model.suggestedFolders) { proposal in
                     SuggestedFolderRow(proposal: proposal, model: model) {
                         folderEditor = .acceptProposal(proposal)
                     }
+                    .sidebarRow()
                 }
+            } header: {
+                SidebarSectionLabel(title: "Suggested folders")
             }
         }
         if !grouped.folders.isEmpty {
@@ -704,6 +862,7 @@ private struct SessionSidebar: View {
                             folderSidebar.expansion.setSolo(solo, order: grouped.folders.map(\.id))
                         }
                     )
+                    .sidebarRow()
                     if expanded {
                         ForEach(section.entries) { entry in
                             row(entry, false)
@@ -714,7 +873,7 @@ private struct SessionSidebar: View {
             }
         }
         if !grouped.schedules.isEmpty {
-            Section("Scheduled") {
+            Section {
                 ForEach(grouped.schedules) { group in
                     let expanded = scheduleGroups.isExpanded(group.id)
                     ScheduleGroupHeaderRow(
@@ -723,6 +882,7 @@ private struct SessionSidebar: View {
                         hasUnreadReport: group.entries.contains { model.hasUnreadReport($0) },
                         onToggle: { setScheduleGroup(group.id, expanded: !expanded) }
                     )
+                    .sidebarRow()
                     if expanded {
                         ForEach(group.entries) { entry in
                             row(entry, false)
@@ -730,9 +890,11 @@ private struct SessionSidebar: View {
                         }
                     }
                 }
+            } header: {
+                SidebarSectionLabel(title: "Scheduled")
             }
         }
-        Section("History") {
+        Section {
             ForEach(grouped.uncategorized) { entry in
                 row(entry, false)
             }
@@ -741,10 +903,15 @@ private struct SessionSidebar: View {
                     folderEditor = .create(moving: nil)
                 } label: {
                     Label("New folder", systemImage: "folder.badge.plus")
+                        .appFont(.callout)
+                        .foregroundColor(AppTheme.inkSoft)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("sidebar.new-folder")
+                .sidebarRow()
             }
+        } header: {
+            SidebarSectionLabel(title: "History")
         }
     }
 
@@ -794,7 +961,7 @@ private struct SessionSidebar: View {
                 .accessibilityIdentifier("sidebar.session.move.new")
             } label: {
                 Image(systemName: "folder")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkFaint)
             }
             .menuIndicator(.hidden)
             #if os(macOS)
@@ -819,29 +986,26 @@ private struct SessionSidebar: View {
     }
 
     private var newConversationLabel: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "square.and.pencil")
-                .foregroundColor(AppTheme.orange)
-            Text("New conversation")
-                .appFont(.headline)
-            Spacer()
-        }
-        .padding(.vertical, 4)
+        Label("New chat", systemImage: "plus")
+            .frame(maxWidth: .infinity)
     }
 
+    /// One line: the conversation's symbol, its title, and a dot while a
+    /// scheduled report waits to be read.
     private func historyLabel(_ entry: SessionHistoryEntry) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(entry.title)
-                    .lineLimit(2)
-                    .foregroundColor(.primary)
-                if model.hasUnreadReport(entry) { NewReportIndicator() }
-            }
-            ConversationAgeText(updatedAt: entry.updatedAt)
-                .appFont(.caption)
-                .foregroundColor(.secondary)
+        HStack(spacing: 8) {
+            Image(systemName: entry.scheduleID != nil ? "calendar.badge.clock" : "bubble.left")
+                .font(.system(size: 13))
+                .foregroundColor(AppTheme.inkSoft)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(entry.title)
+                .lineLimit(1)
+                .foregroundColor(AppTheme.ink)
+            if model.hasUnreadReport(entry) { NewReportIndicator() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: A2Metrics.rowHeight - 8)
     }
 
     private func deleteButton(for entry: SessionHistoryEntry) -> some View {
@@ -849,7 +1013,7 @@ private struct SessionSidebar: View {
             deletionCandidate = entry
         } label: {
             Image(systemName: "trash")
-                .foregroundColor(.secondary)
+                .foregroundColor(AppTheme.inkFaint)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Delete \(entry.title) everywhere")
@@ -866,6 +1030,7 @@ private struct SessionSidebar: View {
             }
             Task { await model.selectSession(entry) }
         }
+        onActivate()
     }
 }
 
@@ -1135,7 +1300,7 @@ private final class SettingsWindowPresenter: NSObject, ObservableObject, NSWindo
         )
         .environmentObject(appearance)
         .appTypography(appearance)
-        .tint(AppTheme.turquoise)
+        .tint(AppTheme.teal)
         window.contentViewController = NSHostingController(rootView: settings)
         SettingsWindowConfiguration.apply(to: window)
         window.delegate = self
@@ -1232,21 +1397,6 @@ private final class MainWindowFrameAutosaveNSView: NSView {
 }
 #endif
 
-private struct ConversationAgeText: View {
-    let updatedAt: Date
-
-    var body: some View {
-        TimelineView(ConversationAgeSchedule(updatedAt: updatedAt)) { context in
-            Text(
-                ConversationAgeFormatter.string(
-                    since: updatedAt,
-                    relativeTo: context.date
-                )
-            )
-        }
-    }
-}
-
 enum ConversationAgeFormatter {
     static func string(
         since updatedAt: Date,
@@ -1262,7 +1412,7 @@ enum ConversationAgeFormatter {
     }
 }
 
-private struct ConversationAgeSchedule: TimelineSchedule {
+struct ConversationAgeSchedule: TimelineSchedule {
     let updatedAt: Date
 
     func entries(from startDate: Date, mode: Mode) -> Entries {
@@ -1289,5 +1439,118 @@ private struct ConversationAgeSchedule: TimelineSchedule {
             nextDate.addTimeInterval(refreshInterval)
             return result
         }
+    }
+}
+
+/// Chat or Email: a two-way segment in a sunken field, the chosen one lifted
+/// onto a white pill, as the reference draws it.
+private struct ModeSegment: View {
+    let selected: ClientMode
+    let choose: (ClientMode) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ClientMode.allCases) { mode in
+                Button { choose(mode) } label: {
+                    Label(mode.title, systemImage: mode.symbol)
+                        .labelStyle(.titleOnly)
+                        .appFont(.caption, weight: .medium)
+                        .foregroundColor(selected == mode ? AppTheme.ink : AppTheme.inkSoft)
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(selected == mode ? AppTheme.surface : Color.clear)
+                                .shadow(color: AppTheme.ink.opacity(selected == mode ? 0.14 : 0), radius: 1, y: 1)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("mode.\(mode.rawValue)")
+                .accessibilityAddTraits(selected == mode ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(AppTheme.field))
+    }
+}
+
+#if os(iOS)
+/// The chat list sliding over a compact conversation from the leading edge,
+/// with a scrim on the rest. The scrim, or a swipe towards the edge, closes it.
+struct ChatListDrawer<Content: View>: View {
+    @Binding var isPresented: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var dragOffset: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = min(geometry.size.width * 0.86, 360)
+            ZStack(alignment: .leading) {
+                if isPresented {
+                    AppTheme.ink.opacity(0.32)
+                        .ignoresSafeArea()
+                        .onTapGesture { close() }
+                        .accessibilityLabel("Close chats")
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier("sidebar.scrim")
+                        .transition(.opacity)
+                    content()
+                        .frame(width: width)
+                        .background(AppTheme.paperDeep.ignoresSafeArea())
+                        .offset(x: min(0, dragOffset))
+                        .gesture(
+                            DragGesture(minimumDistance: 20)
+                                .onChanged { value in
+                                    if abs(value.translation.width) > abs(value.translation.height) {
+                                        dragOffset = value.translation.width
+                                    }
+                                }
+                                .onEnded { value in
+                                    let shouldClose = value.translation.width < -width / 3
+                                        || value.predictedEndTranslation.width < -width
+                                    dragOffset = 0
+                                    if shouldClose { close() }
+                                }
+                        )
+                        .transition(.move(edge: .leading))
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
+        }
+        .allowsHitTesting(isPresented)
+        .accessibilityHidden(!isPresented)
+    }
+
+    private func close() {
+        withAnimation(.easeOut(duration: 0.22)) { isPresented = false }
+    }
+}
+#endif
+
+/// A sidebar row: the selected row's soft ink wash inset like the
+/// reference's rounded rows, and on iOS, where list rows otherwise come
+/// white with separators, neither.
+private struct SidebarRowModifier: ViewModifier {
+    let selected: Bool
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.listRowSeparator(.hidden).listRowBackground(background)
+        #else
+        content.listRowBackground(background)
+        #endif
+    }
+
+    private var background: some View {
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .fill(selected ? AppTheme.selected : Color.clear)
+            .padding(.horizontal, 6)
+    }
+}
+
+extension View {
+    fileprivate func sidebarRow(selected: Bool = false) -> some View {
+        modifier(SidebarRowModifier(selected: selected))
     }
 }

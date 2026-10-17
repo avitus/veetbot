@@ -98,8 +98,45 @@ preferences include app-wide text sizing and system, rounded,
 serif, or monospaced typography. They are stored in device preferences and apply
 immediately. System sizing preserves the platform's accessibility setting, while
 the three explicit sizes use deterministic scales on both platforms. The
-interface palette uses the app icon's turquoise, orange, and navy while retaining
-semantic colors for errors, approvals, and tool risk.
+body face still defaults to the rounded face, because the system face runs
+about two points wider per toolbar label and folds the iPhone Subscriptions
+toolbar into an overflow menu; the system, serif and monospaced choices apply
+everywhere.
+
+### Design tokens
+
+The interface draws from one set of semantic colours in
+`clients/apple/Veetbot/Views/AppTheme.swift`, the "A2 Dock" palette the owner
+chose on MagicPath in October 2026. Each token carries a light value and a
+night-green dark value and resolves with the view's appearance, so no screen
+chooses a colour by mode. The tokens are:
+
+| Token | Role | Light | Dark |
+| --- | --- | --- | --- |
+| `paper` | the page: transcript and reading surfaces | `#fcfaf6` | `#0c211d` |
+| `paperDeep` | the sidebar and the mode bar | `#f3f0e8` | `#091a17` |
+| `surface` | a card on the page | `#ffffff` | `#14302a` |
+| `field` | a sunken input or segment | ink at 5 % | ink at 8 % |
+| `ink`, `inkSoft`, `inkFaint` | text in three weights | `#102923`, `#2f4640`, `#566a64` | `#ece6d8`, `#bccbc5`, `#95a8a1` |
+| `teal`, `tealFill`, `tealText`, `tealWash` | marks, filled buttons, links, the owner's capsule | `#0e8b78`, `#0b7a69`, `#086657`, teal at 10 % | `#36d5bb`, `#36d5bb`, `#5ee3c9`, teal at 12 % |
+| `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)` | `#f2a93b` throughout |
+| `red` | failure | `#b4452e` | `#e07a62` |
+| `hairline`, `hairlineStrong`, `selected` | dividers, borders, the chosen row | ink at 14 %, 28 %, 9 % | ink at 10 %, 22 %, 12 % |
+
+Titles use the serif display face through `appDisplayFont`; body text follows
+the owner's font-style preference through `appFont`, and tool detail uses the
+monospaced face through `appCodeFont`. Capsule buttons come in three weights
+(filled teal, hairline, quiet) in `A2Controls.swift`.
+
+Chat is the first surface drawn with these tokens: the sidebar on `paperDeep`
+with a "Needs you" group ahead of Recent, folders and Scheduled; answers on bare
+paper behind a small teal mark; the owner's messages in `tealWash` capsules; each
+tool run one sentence that opens into a monospaced ledger; a pending approval or
+clarifying question docked above a translucent composer while the transcript
+shows one amber "Waiting for your approval" line. On a compact window the chat
+list slides over the conversation from the leading edge. Email, Memory, People,
+Schedules, Persona, Settings and Connect read the same tokens but keep their
+earlier layouts until their own restyle.
 
 Website Access lists the authenticated principal's browser profiles and lets the
 user choose one `READY` profile for new conversations. Adding access, or

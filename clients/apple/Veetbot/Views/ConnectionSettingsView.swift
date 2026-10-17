@@ -206,7 +206,7 @@ public struct ConnectionSettingsView: View {
                 title: "Connection",
                 summary: "The server Veetbot uses and the credential for this device.",
                 systemImage: "network",
-                tint: AppTheme.turquoise
+                tint: AppTheme.teal
             ) {
                 VStack(alignment: .leading, spacing: 16) {
                     settingsField(
@@ -259,7 +259,7 @@ public struct ConnectionSettingsView: View {
                 title: "Website Access",
                 summary: "Create a dedicated login profile for sites Veetbot may use.",
                 systemImage: "globe.badge.chevron.backward",
-                tint: AppTheme.orange
+                tint: AppTheme.amber
             ) {
                 if model.isConfigured {
                     VStack(alignment: .leading, spacing: 16) {
@@ -290,7 +290,7 @@ public struct ConnectionSettingsView: View {
                             Label("Sign in on this device", systemImage: "person.badge.key.fill")
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(AppTheme.turquoise)
+                        .tint(AppTheme.teal)
                         .disabled(websiteAccessBlocked)
                         .accessibilityIdentifier("website-access.sign-in-on-device")
                         Button {
@@ -306,7 +306,7 @@ public struct ConnectionSettingsView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 Label("Secure login ready", systemImage: "lock.shield.fill")
                                     .appFont(.headline)
-                                    .foregroundColor(AppTheme.turquoise)
+                                    .foregroundColor(AppTheme.teal)
                                 Text(
                                     "Continue in your web browser, then use the remote-browser image to sign in. Keep that page open—reloading or copying its one-time link requires starting over."
                                 )
@@ -319,11 +319,11 @@ public struct ConnectionSettingsView: View {
                                     Label("Continue in web browser", systemImage: "safari")
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(AppTheme.orange)
+                                .tint(AppTheme.amberText)
                             }
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(AppTheme.turquoise.opacity(0.08))
+                            .background(AppTheme.teal.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
 
@@ -374,7 +374,7 @@ public struct ConnectionSettingsView: View {
                         if !model.activeTaskGrants.isEmpty {
                             HStack(spacing: 10) {
                                 Image(systemName: "checkmark.shield.fill")
-                                    .foregroundColor(AppTheme.turquoise)
+                                    .foregroundColor(AppTheme.teal)
                                 Text("Task permissions")
                                     .appFont(.body, weight: .semibold)
                                 Spacer(minLength: 8)
@@ -412,7 +412,7 @@ public struct ConnectionSettingsView: View {
                 title: "Appearance",
                 summary: "Typography changes are saved automatically and apply immediately.",
                 systemImage: "textformat",
-                tint: AppTheme.orange
+                tint: AppTheme.amber
             ) {
                 VStack(alignment: .leading, spacing: 16) {
                     settingsField(
@@ -463,7 +463,7 @@ public struct ConnectionSettingsView: View {
                 title: "Data & Privacy",
                 summary: "A quick view of what this client keeps on the device.",
                 systemImage: "lock.shield",
-                tint: AppTheme.turquoise
+                tint: AppTheme.teal
             ) {
                 VStack(alignment: .leading, spacing: 14) {
                     SettingsInfoRow(
@@ -506,7 +506,7 @@ public struct ConnectionSettingsView: View {
             title: "SMS Integration",
             summary: "Let Veetbot prepare texts you send from this iPhone.",
             systemImage: "message",
-            tint: AppTheme.turquoise
+            tint: AppTheme.teal
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 settingsField(
@@ -575,7 +575,7 @@ public struct ConnectionSettingsView: View {
                 if model.selectedBrowserProfileID == profile.id {
                     Label("Used for new chats", systemImage: "checkmark.circle.fill")
                         .appFont(.caption, weight: .semibold)
-                        .foregroundColor(AppTheme.turquoise)
+                        .foregroundColor(AppTheme.teal)
                 } else {
                     Button("Use") {
                         Task { await model.selectBrowserProfile(profile.id) }
@@ -606,7 +606,7 @@ public struct ConnectionSettingsView: View {
             )
         }
         .buttonStyle(.borderedProminent)
-        .tint(AppTheme.turquoise)
+        .tint(AppTheme.teal)
         .keyboardShortcut(.defaultAction)
         .disabled(
             isSaving
@@ -721,7 +721,7 @@ private struct ModelSettingsCard: View {
             title: "Models",
             summary: "Choose the models Veetbot uses to chat and to form memories.",
             systemImage: "cpu",
-            tint: AppTheme.turquoise
+            tint: AppTheme.teal
         ) {
             if isConfigured {
                 VStack(alignment: .leading, spacing: 16) {

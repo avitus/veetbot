@@ -298,11 +298,11 @@ struct DeviceSignInSheet: View {
                     systemImage: "hand.raised.fill"
                 )
                 .appFont(.caption)
-                .foregroundColor(AppTheme.orange)
+                .foregroundColor(AppTheme.amberText)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppTheme.orange.opacity(0.08))
+                .background(AppTheme.amberText.opacity(0.08))
                 .accessibilityIdentifier("device-sign-in.blocked")
             }
             DeviceSignInWebView(webView: session.webView)
@@ -374,7 +374,7 @@ struct DeviceSignInSheet: View {
                     confirm()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(AppTheme.turquoise)
+                .tint(AppTheme.teal)
                 .disabled(isConfirming || !DeviceSignInNavigationPolicy.canConfirm(
                     currentURL: session.currentURL,
                     isLoading: session.isLoading,

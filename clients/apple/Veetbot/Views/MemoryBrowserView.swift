@@ -217,7 +217,7 @@ public struct MemoryBrowserView: View {
                 if item.flaggedForReview {
                     Label("Flagged", systemImage: "flag.fill")
                         .appFont(.caption2, weight: .semibold)
-                        .foregroundColor(AppTheme.orange)
+                        .foregroundColor(AppTheme.amberText)
                 }
                 if !item.conflictsWith.isEmpty {
                     Label("Conflicts", systemImage: "exclamationmark.triangle.fill")
@@ -450,9 +450,9 @@ struct MemorySensitivityBadge: View {
 
     private var color: Color {
         switch kind {
-        case .public: return AppTheme.turquoise
+        case .public: return AppTheme.teal
         case .internal: return .secondary
-        case .sensitive: return AppTheme.orange
+        case .sensitive: return AppTheme.amberText
         case .restricted: return .red
         case nil: return .secondary
         }
