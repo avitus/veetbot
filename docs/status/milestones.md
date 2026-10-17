@@ -22,18 +22,19 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
 State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
 runs as release `20260928-202932-e55551f`; Milestone 14's completion was
 recorded on 2026-10-09. With Milestone 32 authorized, twenty-two of thirty-three milestones are complete; ten
-are in progress and one is authorized but not started.
+were in progress and one was authorized but not started at that review.
+The independent reliability repair now begins Milestone 15 under ADR-0205.
 Milestone 32 has implemented components and registered gates;
 comparative quality and complete runtime/release evidence remain pending.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
-| 15 Operational hardening | Not started | All sixteen gates | Engineering, then owner |
+| 15 Operational hardening | In progress | All sixteen gates; independent reliability repair under ADR-0205 | Engineering, then owner |
 | 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
 | 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | Physical-iPhone verification | Owner |
 | 25 WhatsApp | In progress | Meta ceremony, live smoke | Owner |
-| 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance; expired-body drafting | Owner with engineering |
+| 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance | Owner with engineering |
 | 27 Bland calling | In progress | Dashboard and live checks; final-head review | Owner; engineering |
 | 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
 | 30 Advisory approval | In progress | Threshold calibration and enforce decision; final-head review | Owner; engineering |
@@ -89,6 +90,20 @@ up; their status was recorded on 2026-09-28 from the pull requests' review and
 hosted-CI records.
 
 ## In progress
+
+### Milestone 15 — Operational hardening
+
+The independent ADR-0205 repair adds safe failure references, worker backoff,
+cleanup isolation and scoped reliability reporting. Focused failure-injection
+and PostgreSQL regressions pass; production delivery remains pending. All
+sixteen operational-hardening gates remain open, including off-host backups,
+restore rehearsals, watchdogs and independent outage alerts.
+
+- [ ] Complete all sixteen Milestone 15 gates and reviewed production delivery
+- [ ] Implement encrypted off-host backups and verify restore rehearsals
+- [ ] Complete host health probes and an independent outage alert channel
+- [ ] Verify firewall, SSH, proxy, rollback and worker watchdog hardening
+- [ ] Measure production reliability and explicitly activate reviewed monitoring
 
 ### Milestone 25 — WhatsApp business surface
 
@@ -195,7 +210,7 @@ verified ceiling. Remaining:
 - [ ] Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
 - [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
 - [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
-- [ ] Make reply drafting refetch a thread whose retained body has expired, as email-experience.md requires; today the draft run fails as internal_error (EmailToolError) before any model request, so tests/unit/test_email_scan_cost.py::test_draft_generation_never_receives_an_expired_body passes vacuously
+- [ ] Deliver the independently verified expired-source drafting repair (ADR-0205)
 
 ### Milestone 27 — Bland calling and public reception
 
@@ -354,11 +369,8 @@ succeeded on merge `a9b81420` (`outside_milestone_evidence` in the state file).
 
 ## Authorized
 
-Specified, gated, and authorized, with implementation not yet begun.
-
-- **Milestone 15 — Operational hardening** — sixteen gates; the next
-  sequential milestone now that Milestone 14 is complete. Its backup tranche
-  depends on none of the milestones before it.
+No authorized milestone remains unstarted. Milestone 15 has begun its independent
+reliability repair; its remaining gates and backup tranche remain open.
 
 
 

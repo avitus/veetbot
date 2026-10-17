@@ -1001,7 +1001,7 @@ async def _invoke_model(
                 "ModelProtocolError",
                 "the normalized model stream violated its contract",
                 step,
-                {"protocol_detail": str(exc)},
+                {"protocol_detail": str(exc), **exc.diagnostic_details},
             )
         if terminal is None:
             return _failure(

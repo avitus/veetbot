@@ -245,8 +245,8 @@ class FailureReason(StrEnum):
     EMPTY_MODEL_TURN = "empty_model_turn"
     AUTHORIZATION_ERROR = "authorization_error"
     CHILD_RUN_FAILED = "child_run_failed"
+    DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
     INTERNAL_ERROR = "internal_error"
-
 
 class RunFailure(BaseModel):
     reason: FailureReason
@@ -1938,3 +1938,19 @@ request can be retried. Child runs retain CANCELLED so the existing join reports
 their deadline as a tool error to the parent. Owner cancellation remains
 CANCELLED. Approval expiration is capped
 by the run deadline so the maintenance reaper can release a parked run.
+
+## Reliability recovery (ADR-0205)
+
+Consecutive infrastructure failures in the durable worker back off exponentially
+from the poll interval to a thirty-second ceiling. A successful iteration resets
+the allowance. Cancellation propagates immediately. Post-run resource cleanup
+and enrichment have separate bounded error scopes; an unavailable optional hook
+cannot prevent later cleanup or change a committed terminal outcome. No such
+recovery retries an external action or consumes a run's crash allowance.
+Delegation continuation remains governed by its parent run budget and lease;
+it is not interrupted by the optional enrichment timeout.
+
+The additive `dependency_unavailable` failure reason distinguishes a bounded
+email-source recovery failure from a platform defect. Unexpected failures retain
+a diagnostic UUID, code fingerprint, phase and release in `RunFailure.details`;
+raw exception text stays absent. Public run views expose only the optional UUID.

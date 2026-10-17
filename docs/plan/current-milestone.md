@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Independent reliability repair — ADR-0205:** The owner authorized safe
+  failure diagnostics, bounded recovery, cleanup isolation and scoped reliability
+  reporting on `codex/app-reliability`, with its own pull request to `main`.
+  This repairs existing app behavior without importing the parallel memory
+  retrieval workstream or changing its activation gates. Milestone 15 remains
+  incomplete; monitoring activation and production delivery remain separate steps.
+
 - **Milestone 33 — General memory search and recall:** the owner authorized
   the six-stage plan on 2026-10-11 under ADR-0178.
   [General memory recall](general-memory-recall.md) registers twelve gates for

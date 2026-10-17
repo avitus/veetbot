@@ -543,6 +543,7 @@ private struct RunFailureCard: View {
                 .appFont(.body)
                 .textSelection(.enabled)
             Text(failure.diagnosticSummary)
+                .textSelection(.enabled)
                 .appFont(.caption)
                 .foregroundColor(.secondary)
         }

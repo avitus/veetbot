@@ -278,6 +278,7 @@ public final class ChatViewModel: ObservableObject {
     private let watchTasks = WatchTaskBox()
     private var loadedApprovalIDs: Set<UUID> = []
     private var selectionRequestID: UUID?
+    private var operationalAttentionSessionID: UUID?
     private var callResultRequestID: UUID?
     private var removedHistorySessionIDs: Set<UUID> = []
     private var deletingHistorySessionIDs: Set<UUID> = []
@@ -493,14 +494,15 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         do {
-            var fetched: SessionView?
-            if let emailNotificationHandler {
-                let session = try await api.getSession(link.sessionID)
-                fetched = session
-                if session.metadata["email_operational"]?.boolValue == true, link.focus == nil {
-                    await emailNotificationHandler(nil, nil)
-                    return
+            let session = try await api.getSession(link.sessionID)
+            if session.isOperational, link.focus == nil {
+                try await hideOperationalSession(session.id)
+                if session.metadata["email_operational"]?.boolValue == true {
+                    await emailNotificationHandler?(nil, nil)
                 }
+                return
+            }
+            if let emailNotificationHandler {
                 if let value = session.metadata["email_thread_id"]?.stringValue,
                     let threadID = UUID(uuidString: value),
                     await emailAnswers(link.focus, threadID: threadID, api: api) {
@@ -511,11 +513,16 @@ public final class ChatViewModel: ObservableObject {
                 }
             }
             let entry: SessionHistoryEntry
-            if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
+            if session.isOperational {
+                // A focused approval/question uses the shared attention cards,
+                // without persisting an internal audit session as a conversation.
+                entry = Self.mergedHistoryEntry(
+                    session: session, existing: nil, lastRunID: link.runID,
+                    suggestedTitle: nil, touchedAt: nil
+                )
+            } else if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
                 entry = existing
             } else {
-                let session: SessionView
-                if let fetched { session = fetched } else { session = try await api.getSession(link.sessionID) }
                 try await store(
                     session: session,
                     lastRunID: link.runID
@@ -525,7 +532,9 @@ public final class ChatViewModel: ObservableObject {
                 }
                 entry = stored
             }
-            await selectSession(entry, preferredRunID: link.runID)
+            await selectSession(
+                entry, preferredRunID: link.runID, operationalAttention: session.isOperational
+            )
             guard selectedSessionID == link.sessionID, runState.activeRunID == link.runID else {
                 return
             }
@@ -925,8 +934,10 @@ public final class ChatViewModel: ObservableObject {
         } catch { present(error) }
     }
 
+    /// Clear selection, attention focus and in-flight observation state together.
     private func resetSelectedSession() {
         selectionRequestID = nil
+        operationalAttentionSessionID = nil
         watchTasks.cancel()
         observedTerminalNotificationRunID = nil
         loadedNotificationSessionID = nil
@@ -942,13 +953,16 @@ public final class ChatViewModel: ObservableObject {
         runState.reset()
     }
 
+    /// Restore one conversation while retaining explicit attention to a hidden operational run.
     public func selectSession(
         _ entry: SessionHistoryEntry,
-        preferredRunID: UUID? = nil
+        preferredRunID: UUID? = nil,
+        operationalAttention: Bool = false
     ) async {
         guard let api, !removedHistorySessionIDs.contains(entry.sessionID) else { return }
         let requestID = UUID()
         selectionRequestID = requestID
+        operationalAttentionSessionID = operationalAttention ? entry.sessionID : nil
         watchTasks.cancel()
         if selectedSessionID != entry.sessionID { clearAttachments() }
         observedTerminalNotificationRunID = nil
@@ -971,10 +985,15 @@ public final class ChatViewModel: ObservableObject {
                 !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
             selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
-            try await store(
-                session: session,
-                lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
-            )
+            if session.isOperational, operationalAttention {
+                try await historyStore.delete(sessionID: session.id)
+                history = try await historyStore.list()
+            } else {
+                try await store(
+                    session: session,
+                    lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
+                )
+            }
             guard selectionRequestID == requestID else {
                 if removedHistorySessionIDs.contains(entry.sessionID) {
                     try? await historyStore.delete(sessionID: entry.sessionID)
@@ -1099,6 +1118,7 @@ public final class ChatViewModel: ObservableObject {
         try? await reconcileHistory()
     }
 
+    /// Refresh paginated history without overriding newer selections or restoring internal rows.
     private func reconcileHistory() async throws {
         guard let api else { return }
         let reconciliationID = UUID()
@@ -1117,8 +1137,8 @@ public final class ChatViewModel: ObservableObject {
             let page = try await api.listSessions(cursor: cursor)
             guard historyReconciliationID == reconciliationID else { return }
             for session in page.items {
-                // A cached People session left unlisted is pruned below.
-                guard !session.isPeopleOperational else { continue }
+                // A cached internal session left unlisted is pruned below.
+                guard !session.isOperational else { continue }
                 serverIDs.insert(session.id)
                 serverSpeaksFolders = serverSpeaksFolders || session.folderSupported
                 guard !removedHistorySessionIDs.contains(session.id),
@@ -1149,11 +1169,11 @@ public final class ChatViewModel: ObservableObject {
         var prunedHistory = false
         for resolution in missingResolutions {
             switch resolution {
-            case .found(let session) where session.isPeopleOperational:
-                // The session backs People data, so it is hidden locally, never deleted.
+            case .found(let session) where session.isOperational:
+                // Preserve the server audit session; remove only its local Chat row.
                 try await historyStore.delete(sessionID: session.id)
                 guard historyReconciliationID == reconciliationID else { return }
-                if selectedSessionID == session.id {
+                if selectedSessionID == session.id, operationalAttentionSessionID != session.id {
                     resetSelectedSession()
                 }
             case .found(let session):
@@ -2779,12 +2799,24 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Remove an internal session from local Chat history without deleting its server record.
+    private func hideOperationalSession(_ sessionID: UUID) async throws {
+        try await historyStore.delete(sessionID: sessionID)
+        history = try await historyStore.list()
+        if selectedSessionID == sessionID { resetSelectedSession() }
+    }
+
+    /// Persist ordinary history entries and remove operational sessions from the local index.
     private func store(
         session: SessionView,
         lastRunID: UUID?,
         suggestedTitle: String? = nil,
         touchedNow: Bool = false
     ) async throws {
+        guard !session.isOperational else {
+            try await hideOperationalSession(session.id)
+            return
+        }
         let existing = history.first { $0.sessionID == session.id }
         let entry = Self.mergedHistoryEntry(
             session: session,

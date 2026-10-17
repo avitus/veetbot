@@ -114,6 +114,7 @@ class FailureReason(StrEnum):
     AUTHORIZATION_ERROR = "authorization_error"
     CHILD_RUN_FAILED = "child_run_failed"
     INTERNAL_ERROR = "internal_error"
+    DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
 
 
 class RunFailure(BaseModel):

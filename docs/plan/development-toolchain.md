@@ -176,9 +176,11 @@ binds a `structlog` logger. The bootstrap therefore installs one root handler
 whose formatter runs the same processor chain over a standard-library record
 — its `extra` fields included — so a record and a native `structlog` event
 render identically, carry `timestamp` and `level`, inherit the context
-variables, and pass the redaction processor. A traceback is rendered to text
-ahead of that processor, so an exception message that quotes a provider key is
-redacted like any other string. A handler that prints only the message would
+variables, and pass the redaction processor. Under ADR-0205, exception records
+carry bounded class chains and code locations instead of rendered tracebacks:
+exception messages and source lines can contain private mail even when they
+contain no recognizable credential. The same safe processor applies to every
+service logger, including background cleanup. A handler that prints only the message would
 drop every field and skip redaction; that is what ran before.
 
 **A long-running service configures logging at phase 1; a one-shot command
@@ -1010,3 +1012,12 @@ return HTTP 200 before the release succeeds. See
 
 ADR-0186 additionally redacts all Cookie and Set-Cookie fields, including nested
 headers, because the dreaming review cookie is an authentication credential.
+
+## Safe failure diagnostics (ADR-0205)
+
+Unexpected API, run and tool failures log a diagnostic UUID, a SHA-256 fingerprint,
+a bounded exception-class chain and first-party file/function/line locations.
+No exception message, source line or local variable enters that record. The
+fingerprint excludes per-occurrence identities and private input. Request, run
+and tool contexts restore the prior scope on exit, including cancellation and
+nested inline runs. Production service records carry the release identifier.

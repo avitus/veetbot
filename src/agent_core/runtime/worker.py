@@ -11,6 +11,7 @@ from uuid import UUID
 
 from agent_core.domain.errors import ArtifactSweepError
 from agent_core.domain.events import NewEvent
+from agent_core.domain.failures import log_failure
 from agent_core.domain.persistence import ClaimedRun
 from agent_core.domain.runs import CancelReason
 from agent_core.ports.determinism import Clock
@@ -43,6 +44,9 @@ class DurableWorker:
         maintain_browser_leases: Callable[[], Awaitable[None]] | None = None,
         browser_lease_upkeep_seconds: float = 60,
     ) -> None:
+        """Bind leased work and validate bounded polling, heartbeat and browser-maintenance
+        intervals.
+        """
         if heartbeat_divisor < 2:
             raise ValueError("heartbeat_divisor must be at least two")
         if browser_lease_upkeep_seconds <= 0:
@@ -66,10 +70,26 @@ class DurableWorker:
         # this worker (not the maintenance role) releases and renews them.
         self._maintain_browser_leases = maintain_browser_leases
         self._browser_lease_upkeep_seconds = browser_lease_upkeep_seconds
+        if not 0 < poll_interval_seconds <= 30:
+            raise ValueError("Worker poll interval must be positive and at most thirty seconds.")
         self._stopping = False
+        self._stop_event = asyncio.Event()
 
     def stop(self) -> None:
+        """Request shutdown and wake an idle or backing-off worker immediately."""
         self._stopping = True
+        self._stop_event.set()
+
+    async def _wait_for_poll(self, seconds: float) -> None:
+        """Wait for the poll delay or stop signal, then cancel and collect the losing task."""
+        sleeper = asyncio.create_task(self._clock.sleep(seconds))
+        stopped = asyncio.create_task(self._stop_event.wait())
+        try:
+            await asyncio.wait({sleeper, stopped}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            sleeper.cancel()
+            stopped.cancel()
+            await asyncio.gather(sleeper, stopped, return_exceptions=True)
 
     async def _keep_browser_leases(
         self,
@@ -183,6 +203,7 @@ class DurableWorker:
         return True
 
     async def run_forever(self) -> None:
+        """Poll durable work with capped failure backoff and independent lease maintenance."""
         upkeep = (
             None
             if self._maintain_browser_leases is None
@@ -191,18 +212,27 @@ class DurableWorker:
                 name=f"browser-lease-upkeep-{self._worker_id}",
             )
         )
+        failure_delay = self._poll_interval
         try:
             while not self._stopping:
                 try:
                     worked = await self.run_once()
                 except asyncio.CancelledError:
                     raise
-                except Exception:
-                    logger.exception("durable worker iteration failed: %s", self._worker_id)
-                    await self._clock.sleep(self._poll_interval)
+                except Exception as exc:
+                    log_failure(
+                        logger,
+                        "durable_worker_iteration_failed",
+                        exc,
+                        phase="worker",
+                        worker_id=self._worker_id,
+                    )
+                    await self._wait_for_poll(failure_delay)
+                    failure_delay = min(failure_delay * 2, 30.0)
                     continue
+                failure_delay = self._poll_interval
                 if not worked:
-                    await self._clock.sleep(self._poll_interval)
+                    await self._wait_for_poll(self._poll_interval)
         finally:
             if upkeep is not None:
                 upkeep.cancel()

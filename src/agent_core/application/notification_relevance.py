@@ -8,6 +8,7 @@ from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.notifications import Notification, NotificationKind
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.sessions import SESSION_EMAIL_OPERATIONAL_METADATA_KEY
 from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.repositories import (
     ApprovalRepository,
@@ -32,6 +33,7 @@ async def notification_obsolete(
     *,
     include_expiry: bool = True,
 ) -> bool:
+    """Check whether an owner notification still refers to attention the user can act on."""
     if include_expiry and notification.expires_at is not None and notification.expires_at <= now:
         return True
     principal = Principal(
@@ -40,7 +42,14 @@ async def notification_obsolete(
     )
     try:
         if notification.session_id is not None:
-            await uow.sessions.get(notification.session_id, principal)
+            session = await uow.sessions.get(notification.session_id, principal)
+            if (
+                notification.kind is NotificationKind.RUN_FAILED
+                and session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is True
+            ):
+                # Refresh failures belong to Email status, not a Chat deep link.
+                # Retain the transactional outbox/event audit and clear old pushes.
+                return True
         if notification.kind is NotificationKind.APPROVAL_REQUESTED:
             assert notification.approval_id is not None
             approval = await uow.approvals.get(notification.approval_id, principal)

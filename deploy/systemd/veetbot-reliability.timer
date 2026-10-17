@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Veetbot reliability every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=15s
+Unit=veetbot-reliability.service
+
+[Install]
+WantedBy=timers.target
