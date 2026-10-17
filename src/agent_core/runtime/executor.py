@@ -328,6 +328,7 @@ class RunExecutor:
         max_compactions_per_step: int = 2,
         model_settings: ModelSettingsCatalog | None = None,
     ) -> None:
+        """Bind run services, deterministic dependencies and optional lifecycle callbacks."""
         self._model_settings = model_settings
         self._release_id = release_id
         self._principal = principal
@@ -705,6 +706,9 @@ class RunExecutor:
         lease: WorkerLease | None,
         on_token: TokenCallback | None = None,
     ) -> None:
+        """Execute an admitted run and persist its outcome under cancellation and lease
+        fencing.
+        """
         token = RunCancellationToken(self._clock, run.deadline_at)
         checkpoint_state = RunCheckpoint(
             run_id=run.id,
@@ -1253,6 +1257,7 @@ class RunExecutor:
         return None
 
     def _internal_failure(self, run: Run, exc: Exception) -> RunOutcome:
+        """Create a generic terminal failure without exposing the exception message."""
         return RunOutcome(
             kind=OutcomeKind.FAILED,
             failure=RunFailure(

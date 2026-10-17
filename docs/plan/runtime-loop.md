@@ -245,8 +245,8 @@ class FailureReason(StrEnum):
     EMPTY_MODEL_TURN = "empty_model_turn"
     AUTHORIZATION_ERROR = "authorization_error"
     CHILD_RUN_FAILED = "child_run_failed"
+    DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
     INTERNAL_ERROR = "internal_error"
-
 
 class RunFailure(BaseModel):
     reason: FailureReason

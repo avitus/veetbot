@@ -19,7 +19,10 @@ from tests.gates.test_model_m3 import ATTEMPT_ID, completed, text, tool
 
 
 async def rejected(event: ModelEvent) -> ModelStreamError:
+    """Collect one event and return only its expected normalized-stream rejection."""
+
     async def source() -> AsyncIterator[ModelEvent]:
+        """Yield the supplied synthetic event without contacting a provider."""
         yield event
 
     with pytest.raises(ModelStreamError, match="credential-shaped") as caught:
@@ -41,6 +44,7 @@ async def test_credential_failure_names_only_fixed_diagnostic_labels(
     value: str,
     detector: str,
 ) -> None:
+    """Verify that credential failure names only fixed diagnostic labels."""
     error = await rejected(text(0, 0, value))
     assert getattr(error, "diagnostic_details", {}) == {
         "protocol_event_kind": "text_delta",
@@ -70,6 +74,7 @@ async def test_opaque_payload_is_still_rejected_with_a_safe_field_label(
     field: str,
     expected_field: str,
 ) -> None:
+    """Verify that opaque payload is still rejected with a safe field label."""
     terminal = completed(0)
     value = "ciphertext-prefix-sk-" + "synthetic123456"
     terminal.turn.provider_reasoning_items.append(
@@ -109,6 +114,7 @@ async def test_opaque_payload_is_still_rejected_with_a_safe_field_label(
 async def test_arbitrary_mapping_keys_and_nested_values_never_enter_diagnostics(
     in_key: bool,
 ) -> None:
+    """Verify that arbitrary mapping keys and nested values never enter diagnostics."""
     event = completed(0)
     value = "sk-" + "synthetic123456"
     event.turn.provider_reasoning_items.append(
@@ -130,6 +136,7 @@ async def test_arbitrary_mapping_keys_and_nested_values_never_enter_diagnostics(
 
 
 async def test_tool_argument_diagnostic_does_not_parse_or_publish_argument_keys() -> None:
+    """Verify that tool argument diagnostic does not parse or publish argument keys."""
     event = tool(0, 0).model_copy(
         update={"arguments_delta": '{"private-name":"sk-' + 'synthetic123456"}'}
     )
@@ -145,6 +152,7 @@ async def test_tool_argument_diagnostic_does_not_parse_or_publish_argument_keys(
     "field", ["protocol_event_kind", "protocol_field_path", "protocol_detector"]
 )
 def test_malformed_diagnostic_labels_are_dropped_before_persistence(field: str) -> None:
+    """Verify that malformed diagnostic labels are dropped before persistence."""
     details = {
         "protocol_event_kind": "completed",
         "protocol_field_path": (
@@ -158,6 +166,7 @@ def test_malformed_diagnostic_labels_are_dropped_before_persistence(field: str) 
 
 
 async def test_reasoning_display_remains_scanned_without_retaining_reasoning() -> None:
+    """Verify that reasoning display remains scanned without retaining reasoning."""
     event = ReasoningDeltaEvent(
         **text(0, 0, "sk-" + "synthetic123456").model_dump(exclude={"kind"}), is_summary=True
     )
@@ -170,6 +179,7 @@ async def test_reasoning_display_remains_scanned_without_retaining_reasoning() -
 
 
 async def test_failed_event_error_is_still_scanned() -> None:
+    """Verify that failed event error is still scanned."""
     event = ModelFailedEvent(
         **completed(0).model_dump(include={"attempt_id", "run_id", "step_number", "sequence"}),
         error=ModelPermanentError(

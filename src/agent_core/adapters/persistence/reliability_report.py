@@ -59,6 +59,7 @@ where {_SCOPE} and m.started_at >= :since and m.started_at <= :until and m.error
 
 
 def _safe(value: object, pattern: str) -> str | None:
+    """Return a bounded public label only when the complete value matches its allowlist."""
     return value if isinstance(value, str) and re.fullmatch(pattern, value) else None
 
 
@@ -81,6 +82,7 @@ async def read_reliability_report(
     }
 
     async def rows(statement: str) -> list[Any]:
+        """Read aggregate rows using the same owner and time-window bindings."""
         return list((await session.execute(text(statement), parameters)).all())
 
     [totals] = await rows(_TOTALS)

@@ -771,11 +771,13 @@ async def test_postcondition_does_not_start_a_capture_that_exceeds_its_remaining
     elapsed = 0.0
 
     async def sleep(seconds: float) -> None:
+        """Advance the deterministic polling clock."""
         nonlocal elapsed
         elapsed += seconds
 
     @asynccontextmanager
     async def timeout_at(deadline: float) -> AsyncIterator[None]:
+        """Model cancellation when the deterministic capture reaches its deadline."""
         yield
         if elapsed >= deadline:
             raise TimeoutError
@@ -792,6 +794,7 @@ async def test_postcondition_does_not_start_a_capture_that_exceeds_its_remaining
 
     class MeasuredProvider(FakeBrowserProvider):
         async def observe(self) -> BrowserObservation:
+            """Advance the synthetic clock by a known capture cost before returning evidence."""
             nonlocal elapsed
             elapsed += 0.2
             return await super().observe()

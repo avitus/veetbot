@@ -20,6 +20,7 @@ from tests.gates.test_email_privacy_m26 import (
 async def test_failure_boundaries_record_safe_diagnostics(
     boundary: str, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """Verify that failure boundaries record safe diagnostics."""
     caplog.set_level(logging.ERROR)
     if boundary == "api":
         await _internal_api_error()
@@ -48,8 +49,11 @@ async def test_failure_boundaries_record_safe_diagnostics(
 
 
 def test_fingerprint_does_not_depend_on_exception_text_and_chains_are_bounded() -> None:
+    """Verify that fingerprint does not depend on exception text and chains are bounded."""
+
     class HostileError(Exception):
         def __str__(self) -> str:
+            """Fail if diagnostics attempt to render the private exception text."""
             raise AssertionError("Diagnostic formatting must never call str(exception).")
 
     first = HostileError("Private mail")
@@ -67,9 +71,11 @@ def test_fingerprint_does_not_depend_on_exception_text_and_chains_are_bounded() 
 
 
 async def test_log_scopes_restore_parent_and_isolate_parallel_tasks() -> None:
+    """Verify that log scopes restore parent and isolate parallel tasks."""
     observed: list[str] = []
 
     async def task(name: str) -> None:
+        """Verify nested and concurrent diagnostic scopes restore their parent identifiers."""
         with log_context(run_id=name):
             await asyncio.sleep(0)
             run_id = failure_context()["run_id"]
@@ -92,6 +98,7 @@ async def test_log_scopes_restore_parent_and_isolate_parallel_tasks() -> None:
 
 
 def test_run_view_exposes_only_the_safe_diagnostic_reference() -> None:
+    """Verify that run view exposes only the safe diagnostic reference."""
     from agent_core.application.public_services import _run_view
     from agent_core.domain.runs import FailureReason, RunFailure, RunStatus
     from tests.contract.support import NOW, run

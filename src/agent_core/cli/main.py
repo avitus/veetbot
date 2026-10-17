@@ -662,6 +662,7 @@ def run_export(
 async def _reliability_report(
     hours: int, notify: bool, thresholds: ReliabilityThresholds
 ) -> ReliabilityReport:
+    """Fetch the scoped operator report with notification delivery explicitly selected."""
     return await operator_reliability(hours, notify, thresholds)
 
 

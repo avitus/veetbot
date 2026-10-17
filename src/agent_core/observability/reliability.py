@@ -72,6 +72,7 @@ def degraded_signals(
 
 
 def render_reliability_report(report: ReliabilityReport) -> str:
+    """Format aggregate health and safe failure groups without private event content."""
     rate = (
         "No completed or failed runs in this window"
         if report.completion_rate is None

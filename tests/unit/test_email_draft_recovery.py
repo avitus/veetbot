@@ -20,16 +20,21 @@ from tests.unit.test_email_scan_cost import expire, record_model_requests
 async def test_failed_source_recovery_is_actionable_and_preserves_the_draft(
     problem: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Verify that failed source recovery is actionable and preserves the draft."""
     base = await _current_mail_factory()
     reads: list[str] = []
 
     def factory(
         config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
     ) -> ScriptedMCPClient:
+        """Wrap the scripted mailbox client with the selected source-recovery failure."""
         client = base(config, credential, environment)
         original = client.call_tool
 
         async def call(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Inject unavailable, partial or foreign-account reads while recording
+            attempted tools.
+            """
             reads.append(name)
             if name == "get_profile" and problem == "wrong_account":
                 return MCPCallResult(

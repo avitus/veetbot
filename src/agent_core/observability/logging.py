@@ -148,11 +148,13 @@ def configure_logging(
         renderer = structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty())
 
     def add_release(_logger: WrappedLogger, _method: str, event: EventDict) -> EventDict:
+        """Attach the configured release identity to each structured service record."""
         if release_id is not None:
             event.setdefault("release_id", release_id)
         return event
 
     def add_failure_context(_logger: WrappedLogger, _method: str, event: EventDict) -> EventDict:
+        """Add scoped diagnostic identifiers without replacing explicit event fields."""
         for key, value in failure_context().items():
             event.setdefault(key, value)
         return event

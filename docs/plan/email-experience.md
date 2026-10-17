@@ -1324,7 +1324,7 @@ milestone's thirty-two gates are unchanged.
 
 ## Cheap junk screening
 
-[ADR-0205](../adr/0203-email-junk-first-pass.md) admits a bounded, cached
+[ADR-0203](../adr/0203-email-junk-first-pass.md) admits a bounded, cached
 TypeSafe Jev first pass before the full assessment. It defaults off; shadow
 mode preserves normal assessment, and filter mode needs independent reviewed
 calibration matching its pinned policy/model. Protected or uncertain mail

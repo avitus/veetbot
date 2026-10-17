@@ -51,6 +51,7 @@ class RequestBoundaryMiddleware:
         self._upload_slots = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Scope HTTP diagnostics to a validated request ID and restore the caller context."""
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
@@ -68,6 +69,9 @@ class RequestBoundaryMiddleware:
         request_id: str,
         headers: dict[bytes, bytes],
     ) -> None:
+        """Enforce authentication, body limits and private response boundaries for one
+        request.
+        """
         state = scope.setdefault("state", {})
         state["request_id"] = request_id
 

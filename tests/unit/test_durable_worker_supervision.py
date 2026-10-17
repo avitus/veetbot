@@ -280,10 +280,12 @@ def test_worker_rejects_supervision_settings_that_cannot_keep_a_lease(
 async def test_persistent_worker_failures_back_off_and_success_resets_the_delay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify that persistent worker failures back off and success resets the delay."""
     worker, _executor, _queue, _unit, clock = _worker("three_heartbeats", [])
     attempts = 0
 
     async def iteration() -> bool:
+        """Alternate failed and successful polling to verify backoff reset."""
         nonlocal attempts
         attempts += 1
         if attempts == 5:
@@ -301,11 +303,13 @@ async def test_persistent_worker_failures_back_off_and_success_resets_the_delay(
 async def test_stopping_during_failure_backoff_wakes_the_worker_promptly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify that stopping during failure backoff wakes the worker promptly."""
     worker, _executor, _queue, _unit, clock = _worker("three_heartbeats", [])
     sleeping = asyncio.Event()
     cancelled = asyncio.Event()
 
     async def sleep(_seconds: float) -> None:
+        """Hold a poll sleep until shutdown cancels it."""
         sleeping.set()
         try:
             await asyncio.Event().wait()
@@ -313,6 +317,7 @@ async def test_stopping_during_failure_backoff_wakes_the_worker_promptly(
             cancelled.set()
 
     async def unavailable() -> bool:
+        """Raise a private synthetic dependency failure without any external request."""
         raise ConnectionError("Synthetic database outage")
 
     monkeypatch.setattr(clock, "sleep", sleep)

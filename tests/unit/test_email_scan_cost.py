@@ -171,6 +171,7 @@ async def test_task_point_reads_withhold_expired_bodies() -> None:
 async def test_draft_generation_never_receives_an_expired_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify that draft generation never receives an expired body."""
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[ScriptedTurn(text='{"body": "Reply"}')]),

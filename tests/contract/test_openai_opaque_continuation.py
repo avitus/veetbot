@@ -13,6 +13,7 @@ from tests.gates.test_runtime_tool_budget import _settings
 
 
 async def test_openai_opaque_collision_survives_real_tool_loop_without_content_leakage() -> None:
+    """Verify that OpenAI opaque collision survives real tool loop without content leakage."""
     opaque = "gAAAA-ciphertext-sk-" + "synthetic123456=="
     reasoning = {
         "type": "response.output_item.done",

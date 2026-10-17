@@ -21,6 +21,7 @@ pytestmark = pytest.mark.integration
 async def test_reliability_monitor_deduplicates_concurrent_checks_and_records_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify that reliability monitor deduplicates concurrent checks and records recovery."""
     settings = replace(
         database_settings(), notification_api_enabled=True, notification_dispatch_enabled=True
     )
@@ -37,6 +38,7 @@ async def test_reliability_monitor_deduplicates_concurrent_checks_and_records_re
         try:
 
             async def status(value: str) -> None:
+                """Change the fixture run outcome to test one monitor transition."""
                 async with engine.begin() as connection:
                     await connection.execute(
                         text("update runs set status=:status, failure=cast(:failure as jsonb)"),
@@ -49,6 +51,7 @@ async def test_reliability_monitor_deduplicates_concurrent_checks_and_records_re
                     )
 
             async def kinds() -> list[str]:
+                """Read the notification kinds emitted by the monitor fixture."""
                 async with engine.connect() as connection:
                     return list(
                         (
@@ -65,6 +68,9 @@ async def test_reliability_monitor_deduplicates_concurrent_checks_and_records_re
             from agent_core.adapters.persistence.repositories import PostgresProcessEventRepository
 
             async def broken_append(*_args: Any, **_kwargs: Any) -> None:
+                """Fail event persistence to verify that its notification is rolled back
+                atomically.
+                """
                 raise RuntimeError("Synthetic transaction failure")
 
             with monkeypatch.context() as patch:

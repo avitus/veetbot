@@ -29,6 +29,7 @@ KEY = "sk-" + "synthetic123456"
 def terminal(
     value: object = COLLISION, *, failed: bool = False
 ) -> ModelCompletedEvent | ModelFailedEvent:
+    """Build a completed or partial terminal fixture with the requested provider identity."""
     event = completed(0)
     event.turn.usage.provider = "openai"
     event.turn.provider_metadata = ProviderMetadata(provider_api="responses")
@@ -51,17 +52,20 @@ def terminal(
 
 
 def turn_of(event: ModelCompletedEvent | ModelFailedEvent) -> ModelTurn:
+    """Extract the completed or partial turn represented by a terminal fixture."""
     turn = event.turn if isinstance(event, ModelCompletedEvent) else event.partial_turn
     assert turn is not None
     return turn
 
 
 async def events(event: ModelEvent) -> AsyncIterator[ModelEvent]:
+    """Yield fixture events through the real normalized-stream collector."""
     yield event
 
 
 @pytest.mark.parametrize("failed", [False, True])
 async def test_embedded_openai_collision_preserves_original_event_and_usage(failed: bool) -> None:
+    """Verify that embedded OpenAI collision preserves original event and usage."""
     event = terminal(failed=failed)
     original = event.model_dump_json()
     received = [item async for item in validated_stream(events(event))]
@@ -91,6 +95,7 @@ async def test_embedded_openai_collision_preserves_original_event_and_usage(fail
 async def test_standalone_credentials_other_detectors_and_nonopaque_values_still_fail(
     value: object, failed: bool
 ) -> None:
+    """Verify that standalone credentials other detectors and nonopaque values still fail."""
     event = terminal(value, failed=failed)
     with pytest.raises(ModelStreamError, match="credential-shaped") as caught:
         _ = [item async for item in validated_stream(events(event))]
@@ -103,6 +108,7 @@ async def test_standalone_credentials_other_detectors_and_nonopaque_values_still
     "mismatch", ["provider", "usage", "metadata", "api", "type", "field", "nested", "key"]
 )
 async def test_only_the_agreed_openai_direct_value_is_admitted(mismatch: str, failed: bool) -> None:
+    """Verify that only the agreed OpenAI direct value is admitted."""
     event = terminal(failed=failed)
     turn = turn_of(event)
     item = turn.provider_reasoning_items[0]
@@ -127,6 +133,7 @@ async def test_only_the_agreed_openai_direct_value_is_admitted(mismatch: str, fa
 
 
 async def test_partial_turn_cannot_borrow_openai_authority_from_a_different_error() -> None:
+    """Verify that partial turn cannot borrow OpenAI authority from a different error."""
     event = terminal(failed=True)
     assert isinstance(event, ModelFailedEvent)
     event.error.provider = "anthropic"
@@ -138,6 +145,7 @@ async def test_partial_turn_cannot_borrow_openai_authority_from_a_different_erro
 async def test_admitted_collision_does_not_mask_a_later_rejection_or_its_field(
     failed: bool,
 ) -> None:
+    """Verify that admitted collision does not mask a later rejection or its field."""
     event = terminal(failed=failed)
     turn_of(event).provider_reasoning_items[0].provider_payload["other"] = KEY
     with pytest.raises(ModelStreamError, match="credential-shaped") as caught:
@@ -153,6 +161,7 @@ async def test_admitted_collision_does_not_mask_a_later_rejection_or_its_field(
 async def test_an_admitted_value_never_exempts_other_turn_content(
     surface: str, failed: bool
 ) -> None:
+    """Verify that an admitted value never exempts other turn content."""
     event = terminal(failed=failed)
     turn = turn_of(event)
     if surface == "text":
@@ -184,6 +193,7 @@ async def test_an_admitted_value_never_exempts_other_turn_content(
 
 
 async def test_an_admitted_partial_value_never_exempts_its_error_message() -> None:
+    """Verify that an admitted partial value never exempts its error message."""
     event = terminal(failed=True)
     assert isinstance(event, ModelFailedEvent)
     event.error.message = KEY

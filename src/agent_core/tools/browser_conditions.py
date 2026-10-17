@@ -111,6 +111,7 @@ async def check_browser_condition(
     observation: BrowserObservation,
     condition: BrowserCondition,
 ) -> BrowserObservation:
+    """Check visible evidence with bounded read-only polling and a hard capture deadline."""
     loop = asyncio.get_running_loop()
     started = loop.time()
     deadline = started + condition.timeout_ms / 1000
@@ -119,6 +120,7 @@ async def check_browser_condition(
     row = condition.evidence if isinstance(condition.evidence, BrowserRowEvidence) else None
 
     async def capture(previous: BrowserObservation) -> BrowserObservation:
+        """Capture fresh evidence within the shared deadline and record its elapsed duration."""
         nonlocal count, capture_seconds
         capture_started = loop.time()
 
