@@ -76,10 +76,10 @@ The requested workflow and all ordinary exact-head checks remain required.
   2026-09-17 the owner enabled protection requiring the seven verification
   contexts as status checks, and a pull request whose head has no requested run
   can no longer merge. The Apple signing smoke is not one of those contexts: it
-  is not a verification partition and runs only in a requested `dev` pipeline
-  (decision 5), so its required pass on the exact revision proposed for `main`
-  remains a check of the review gate, not of branch protection. The owner keeps
-  an admin override for an emergency, and the `main`
+  is not a verification partition: it runs in requested `dev` pipelines or on
+  the exact `reliability` revision admitted under ADR-0211. Its required pass on
+  the exact revision proposed for `main` remains a review-gate check rather than
+  branch protection. The owner keeps an emergency admin override, and the `main`
   pipeline, which verifies before it delivers, remains the backstop behind it.
   The setting lives in the repository host, outside the configuration this
   repository can test, so no gate test observes it.
