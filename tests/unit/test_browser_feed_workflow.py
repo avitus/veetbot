@@ -451,6 +451,78 @@ async def test_verified_authentication_resumes_without_reply_or_replaying_scroll
         assert sum(event.event_type == "user.message.created" for event in events) == 1
 
 
+async def test_sign_in_wait_does_not_spend_the_feed_collection_ceiling() -> None:
+    """The 2026-10-17 briefing: a three-minute sign-in left the 180-second ceiling spent."""
+    from datetime import timedelta
+    from typing import cast
+    from uuid import UUID
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.application.browser_continuation import VerifiedBrowserRunResumer
+    from agent_core.domain.browser import BrowserAuthenticationRecord, BrowserAuthenticationStatus
+
+    class Provider(FeedProvider):
+        signed_out = True
+
+        async def navigate(self, url: str) -> BrowserObservation:
+            if self.signed_out:
+                self.signed_out = False
+                raise BrowserProviderError("tool.browser.authentication_required", retryable=False)
+            return await super().navigate(url)
+
+    provider = Provider()
+    async with feed_app(provider) as app:
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await app.runs.submit(INTENT, session.id)
+        assert (await app.runs.get(run_id)).status is RunStatus.WAITING_FOR_USER
+        # The owner takes longer to sign in than the recipe allows for collection.
+        cast(FixedClock, app.clock).advance(timedelta(seconds=200))
+        ceremony_id = UUID(int=88560)
+        now = app.clock.now()
+        async with app.uow_factory() as uow:
+            profile = await uow.browser_profiles.get(PROFILE_ID, app.principal)
+            await uow.browser_authentications.create(
+                BrowserAuthenticationRecord(
+                    id=ceremony_id,
+                    profile_id=PROFILE_ID,
+                    tenant_id=profile.tenant_id,
+                    principal_id=profile.principal_id,
+                    status=BrowserAuthenticationStatus.READY,
+                    created_at=now,
+                    updated_at=now,
+                    expires_at=now + timedelta(minutes=5),
+                )
+            )
+            await uow.browser_profiles.advance_generation(
+                PROFILE_ID, app.principal, expected_generation=profile.generation, updated_at=now
+            )
+        resumer = cast(VerifiedBrowserRunResumer, app.services.runs)
+        assert await resumer.resume_verified_browser_authentication(
+            app.principal, run_id, ceremony_id
+        )
+        assert (await app.runs.wait_terminal(run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            after = await uow.checkpoints.latest(run_id)
+        assert after is not None
+        state = after.working_state["browser_workflow"]
+        assert state["status"] == "verified", state["status"]
+        assert len(state["feed"]["post_ids"]) == 6
+        assert "suspended_at" not in state
+
+
+def test_feed_report_names_the_reason_collection_stopped() -> None:
+    from agent_core.runtime.browser_feed import feed_report_control
+
+    text = feed_report_control({"status": "bounded_stop", "feed": {}})
+    assert "Collection outcome: bounded_stop" in text
+    assert "ran out of its time or call ceiling" in text
+    assert "say why collection stopped" in text
+    verified = feed_report_control({"status": "verified", "feed": {"post_ids": ["1"] * 6}})
+    assert "ran out of" not in verified
+
+
 @pytest.mark.parametrize(
     "intent", [INTENT + " Then follow someone.", "Do not " + INTENT, "Give me public X trends."]
 )
