@@ -1850,7 +1850,9 @@ stop, never another scroll. Authentication uses verified same-run resumption;
 generation changes clear captured post IDs, restart home navigation and exclude
 earlier evidence, while retaining the retry/scroll ceilings and possible-effect
 state. Calls, steps, cancellation and deadlines remain inside the ordinary run
-budget and the recipe's 180-second ceiling.
+budget and the recipe's 180-second ceiling. That ceiling bounds the workflow's
+own activity: time the run spends suspended for sign-in does not count against
+it, while the run deadline still does.
 
 Final synthesis has no tools. It uses only qualifying rows from current-generation
 extraction calls, keeps their external-untrusted status, cites observed links and
