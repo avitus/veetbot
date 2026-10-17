@@ -15,7 +15,7 @@ from agent_core.domain.browser import (
     browser_origin,
 )
 from agent_core.domain.browser_workflows import BrowserWorkflowCatalog, BrowserWorkflowRecipe
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, UserInputRequiredError
 from agent_core.domain.messages import TextPart, ToolCallItem, ToolResultItem, UserMessage
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import BudgetScope, RunOutcome, Step
@@ -152,6 +152,15 @@ class BrowserWorkflowRunner:
             raise ConflictError("the reviewed browser workflow binding changed")
         if state["status"] != "running":
             return None
+        suspended_at = state.pop("suspended_at", None)
+        if isinstance(suspended_at, str):
+            # The ceiling bounds the workflow's own activity, not the owner's sign-in:
+            # the run deadline still limits the whole run.
+            paused = context.clock.now() - datetime.fromisoformat(suspended_at)
+            if paused > timedelta(0):
+                state["expires_at"] = (
+                    datetime.fromisoformat(state["expires_at"]) + paused
+                ).isoformat()
         if profile.status is not BrowserProfileStatus.READY:
             raise ConflictError("the browser workflow profile is not ready")
         if profile.generation != state["generation"]:
@@ -409,6 +418,9 @@ class BrowserWorkflowRunner:
         before_recovery = context.run.tool_call_count
         try:
             await recover_browser_failure(context, step, calls, results)
+        except UserInputRequiredError:
+            state["suspended_at"] = context.clock.now().isoformat()
+            raise
         finally:
             # Recovery reads/questions spend this workflow's ceiling too, including
             # a question that suspends before returning to this dispatcher.
