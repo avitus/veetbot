@@ -4,11 +4,12 @@ title: Current Milestone
 
 # Current milestone
 
-- **Reliability repair — ADR-0205:** The owner authorized safe root-cause
-  diagnostics, bounded recovery and scoped reliability reporting on the
-  `reliability` branch. This begins part of Milestone 15 and repairs the
-  expired-source drafting gap in Milestone 26. It does not complete either
-  milestone or authorize production activation.
+- **Independent reliability repair — ADR-0205:** The owner authorized safe
+  failure diagnostics, bounded recovery, cleanup isolation and scoped reliability
+  reporting on `codex/app-reliability`, with its own pull request to `main`.
+  This repairs existing app behavior without importing the parallel memory
+  retrieval workstream or changing its activation gates. Milestone 15 remains
+  incomplete; monitoring activation and production delivery remain separate steps.
 
 - **Milestone 33 — General memory search and recall:** the owner authorized
   the six-stage plan on 2026-10-11 under ADR-0178.

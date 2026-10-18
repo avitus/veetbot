@@ -14,6 +14,8 @@ project:
   # operational reliability reporting on the owner-requested reliability branch.
   # Production activation and the verified milestone ceiling are unchanged.
   current_milestone: 14
+  # ADR-0205: independently authorized existing-app reliability repair; no M33
+  # source, evaluation, migration or activation changes are included.
   active_milestone: 15
   # ADR-0209 records the owner-authorized browser approval, native feedback and
   # deadline repair on 2026-10-16. No milestone or gate moves; delivery is pending.
@@ -1463,9 +1465,9 @@ milestones:
     open_items:
       - Complete all sixteen Milestone 15 gates and reviewed production delivery
       - Implement encrypted off-host backups and verify restore rehearsals
-      - Complete host health probes, cooldown reminders and an independent outage channel
+      - Complete host health probes and an independent outage alert channel
       - Verify firewall, SSH, proxy, rollback and worker watchdog hardening
-      - Validate production reliability baselines and explicitly activate reviewed monitoring
+      - Measure production reliability and explicitly activate reviewed monitoring
   "16":
     title: Memory evaluation and lifecycle
     status: complete
@@ -2244,15 +2246,17 @@ milestones:
       - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
       - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
+      - Deliver the independently verified expired-source drafting repair (ADR-0205)
     evidence:
       - check: reply drafting after the retained body expires
         outcome: passed_on_sidecar
         detail: >-
-          ADR-0205 repairs the 2026-09-28 audit gap. The strengthened regression
-          requires a completed draft and a model request containing newly fetched
-          provider evidence, excluding the expired body. Unavailable, partial and
-          wrong-account source regressions require dependency_unavailable with no
-          model request or draft revision change. Production delivery is pending.
+          The independent ADR-0205 regression first failed on production main
+          with internal_error before any model request, then passed with bounded
+          fresh reads and a completed draft. Three unavailable, partial and
+          wrong-account cases preserve edits and return dependency_unavailable.
+          The reliability partition passed 61 tests on the sidecar. Production
+          delivery remains pending; no memory quality gate is claimed.
       - check: uv run pytest tests/unit/test_email_importance_replay.py tests/gates/test_email_privacy_m26.py
         outcome: pass
         detail: >-

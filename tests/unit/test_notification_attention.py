@@ -199,6 +199,7 @@ async def test_sync_rejects_active_and_foreign_runs_before_writing_receipts() ->
 
 
 async def test_operational_email_failure_cleanup_preserves_chat_alerts() -> None:
+    """Verify that operational email failure cleanup preserves chat alerts."""
     from agent_core.adapters.determinism import SequenceIdFactory
     from agent_core.adapters.push import FakePushTransport
     from agent_core.application.device_management import NotificationInboxService

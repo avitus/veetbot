@@ -659,5 +659,9 @@ arrives. A resolution event, or a card disappearing from the pending list,
 refreshes the stored decision across devices. After a successful decision the
 client reads the run state, displaying a completed or failed outcome instead of
 leaving a stale wait. Reads cannot update a different selected conversation or
-connection. Historical cancellation events whose reason is `deadline` show the
-same actionable deadline explanation as new failed runs (ADR-0209).
+connection. Pending approvals load only for a selected conversation; a late refresh
+after starting a new conversation cannot fetch account-wide cards.
+Historical cancellation events whose reason is `deadline` show the
+same actionable deadline explanation as new failed runs (ADR-0209). These locally
+reconstructed failures carry no diagnostic reference; authoritative server failures
+retain their validated references.

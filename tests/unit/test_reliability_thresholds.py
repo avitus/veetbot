@@ -13,6 +13,7 @@ from agent_core.observability.reliability import (
 
 
 def test_only_observed_outcomes_contribute_to_error_rate() -> None:
+    """Verify that only observed outcomes contribute to error rate."""
     now = datetime(2026, 10, 14, tzinfo=UTC)
     report = ReliabilityReport(since=now - timedelta(hours=1), until=now, cancelled=100, waiting=20)
     assert degraded_signals(report, ReliabilityThresholds()) == frozenset()
@@ -22,6 +23,7 @@ def test_only_observed_outcomes_contribute_to_error_rate() -> None:
 
 
 def test_queue_and_internal_error_alarms_do_not_require_high_traffic() -> None:
+    """Verify that queue and internal error alarms do not require high traffic."""
     now = datetime(2026, 10, 14, tzinfo=UTC)
     report = ReliabilityReport(
         since=now - timedelta(hours=1),
@@ -38,6 +40,7 @@ def test_queue_and_internal_error_alarms_do_not_require_high_traffic() -> None:
 
 
 def test_monitor_script_is_inert_without_explicit_enablement(tmp_path: Path) -> None:
+    """Verify that monitor script is inert without explicit enablement."""
     script = Path(__file__).resolve().parents[2] / "deploy/ops/reliability-check.sh"
     result = subprocess.run(
         ["sh", str(script)],

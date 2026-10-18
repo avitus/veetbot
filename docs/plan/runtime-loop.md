@@ -245,8 +245,8 @@ class FailureReason(StrEnum):
     EMPTY_MODEL_TURN = "empty_model_turn"
     AUTHORIZATION_ERROR = "authorization_error"
     CHILD_RUN_FAILED = "child_run_failed"
+    DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
     INTERNAL_ERROR = "internal_error"
-
 
 class RunFailure(BaseModel):
     reason: FailureReason
@@ -1928,6 +1928,23 @@ twice. Uncertain outcomes permit observation only. Changed definitions or stale
 pending action generations cannot authorize a new effect. A bounded stop forces
 a tool-free report of the evidence and remaining gap.
 
+## Deadline feedback and synthesis time (ADR-0209)
+
+A deadline-bound run with any synthesis reserve uses its final fifth of elapsed
+budget, capped at sixty seconds, for a tool-free answer. Every model attempt
+rechecks the clock. Recovery also rechecks it before resuming a saved or rebuilt
+tool batch. A tool batch arriving after the reserve begins receives
+persisted budget refusals, leaving paired history for synthesis; a model that
+ignores a time-synthesis instruction fails visibly without dispatch. Usage
+accounting retains tools completed before an interruption, but never counts
+persisted budget refusals as executions when rebuilding a completed turn. The hard
+run deadline remains unchanged. For top-level runs, finalization maps deadline
+cancellation to FAILED with `deadline_exceeded` and an explanation that the
+request can be retried. Child runs retain CANCELLED so the existing join reports
+their deadline as a tool error to the parent. Owner cancellation remains
+CANCELLED. Approval expiration is capped
+by the run deadline so the maintenance reaper can release a parked run.
+
 ## Reliability recovery (ADR-0205)
 
 Consecutive infrastructure failures in the durable worker back off exponentially
@@ -1943,17 +1960,3 @@ The additive `dependency_unavailable` failure reason distinguishes a bounded
 email-source recovery failure from a platform defect. Unexpected failures retain
 a diagnostic UUID, code fingerprint, phase and release in `RunFailure.details`;
 raw exception text stays absent. Public run views expose only the optional UUID.
-
-## Deadline feedback and synthesis time (ADR-0209)
-
-A deadline-bound run with any synthesis reserve uses its final fifth of elapsed
-budget, capped at sixty seconds, for a tool-free answer. Every model attempt
-rechecks the clock. A tool batch arriving after the reserve begins receives
-persisted budget refusals, leaving paired history for synthesis; a model that
-ignores a time-synthesis instruction fails visibly without dispatch. The hard
-run deadline remains unchanged. For top-level runs, finalization maps deadline
-cancellation to FAILED with `deadline_exceeded` and an explanation that the
-request can be retried. Child runs retain CANCELLED so the existing join reports
-their deadline as a tool error to the parent. Owner cancellation remains
-CANCELLED. Approval expiration is capped
-by the run deadline so the maintenance reaper can release a parked run.

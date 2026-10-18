@@ -384,11 +384,11 @@ public final class RunStateReducer: ObservableObject {
             transitionToTerminal(.failed)
         case "run.cancelled":
             if frame.data["reason"]?.stringValue == "deadline" {
-                failure = decode(RunFailureView.self, from: .object([
-                    "reason": .string("deadline_exceeded"),
-                    "message": .string("The run ran out of time before producing an answer. Retry the request to continue."),
-                    "occurred_at": .string(ISO8601DateFormatter().string(from: Date())),
-                ]))
+                failure = RunFailureView(
+                    reason: .deadlineExceeded,
+                    message: "The run ran out of time before producing an answer. Retry the request to continue.",
+                    stepNumber: nil, attemptNumber: nil, occurredAt: Date()
+                )
             }
             transitionToTerminal(.cancelled)
         default:

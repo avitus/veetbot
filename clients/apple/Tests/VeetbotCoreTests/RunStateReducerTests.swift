@@ -35,6 +35,7 @@ import Testing
         #expect(reducer.runStatus == .cancelled)
         #expect(reducer.failure?.reason == .deadlineExceeded)
         #expect(reducer.failure?.userFacingMessage.isEmpty == false)
+        #expect(reducer.failure?.diagnosticID == nil)
     }
 
     @Test

@@ -4056,6 +4056,9 @@ async def _compose(
                     logger.exception("browser_run_cleanup_failed", extra={"run_id": str(run_id)})
 
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
+            """Bound independent cleanup hooks while leaving parent continuation under its
+            run budget.
+            """
             try:
                 async with asyncio.timeout(POST_RUN_HOOK_TIMEOUT_SECONDS):
                     async with uow_factory() as uow:

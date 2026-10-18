@@ -482,11 +482,23 @@ also carries a closed detector-family label, normalized event kind and bounded
 schema field path. These labels reach the durable run failure; arbitrary mapping
 keys become placeholders. No matched bytes, snippets, hashes, provider bodies or
 reasoning text enter the diagnostic. Malformed diagnostic labels are discarded.
-Known provider continuation fields may be named in the path, but remain subject
-to the same whole-event check. A credential-shaped match alone does not establish
-actual credential leakage or identify opaque ciphertext as a false positive.
-The original event is not retained for diagnosis, no retry is added, and opaque
-continuation bytes are neither rewritten nor exempted by this diagnostic repair.
+Known provider continuation fields may be named in the path. A credential-shaped
+match alone does not establish actual credential leakage or identify opaque
+ciphertext as a false positive. The original event is not retained for diagnosis
+and no retry is added.
+
+The owner-approved [ADR-0210](../adr/0210-openai-opaque-credential-boundary.md)
+narrows this check for embedded provider-key patterns in OpenAI's direct
+`reasoning.encrypted_content` string only. Completed and failed partial turns
+must have matching OpenAI usage, Responses API metadata and item provider/type;
+a failed event's error provider must agree. The value must be one uninterrupted
+URL-safe token with optional padding, and a recognizable key starting the value
+still fails. Other detector families, plaintext, tools, errors, summaries,
+metadata, mapping keys, unknown fields and Anthropic payloads remain checked.
+Only eligible values are omitted from a temporary inspection copy. The original
+event and continuation bytes remain unchanged; a refusal elsewhere in that event
+still fails and supplies the diagnostic field. This narrow heuristic exception
+does not establish the meaning of encrypted content or make it trusted text.
 
 ### Assembling a turn from a stream
 
@@ -1609,8 +1621,10 @@ Changing the plan's default is not this document's call. What this document
 can do is make the label unable to cause harm, by fixing four properties of
 the payload:
 
-1. `provider_payload` is never parsed. The gateway treats it as bytes to
-   round-trip. No field of it is read, matched, or branched on.
+1. `provider_payload` is never interpreted as instructions or evidence. It is
+   round-tripped unchanged. The bounded credential inspection above may identify
+   its provider, type and designated opaque field, but cannot decrypt it, derive
+   facts from it or use its contents for policy or tool decisions (ADR-0210).
 2. It is never rendered as prompt text. It is attached to the provider
    request in the provider's own continuation slot, not concatenated into any
    message body.

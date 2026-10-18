@@ -33,6 +33,7 @@ async def notification_obsolete(
     *,
     include_expiry: bool = True,
 ) -> bool:
+    """Check whether an owner notification still refers to attention the user can act on."""
     if include_expiry and notification.expires_at is not None and notification.expires_at <= now:
         return True
     principal = Principal(

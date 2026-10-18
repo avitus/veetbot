@@ -91,7 +91,7 @@ EMAIL_ASSESSMENT_PASSAGE_CHARACTERS = 8192
 EMAIL_CHANGE_EVENT_LIMIT = 1000
 EMAIL_CHANGE_PAGE_LIMIT = 10
 EMAIL_HISTORY_POLICY = "email-history@2:90d"
-# The account server modes each task kind calls. Drafts call only the model.
+# Initial server modes; drafting prepares a read server only for source recovery.
 EMAIL_TASK_SERVER_MODES: dict[str, tuple[str, ...]] = {
     "refresh": ("read",),
     "archive": ("read", "write"),
@@ -1886,6 +1886,9 @@ class _TaskIO:
                     continue
 
     async def generate_draft(self, thread_id: UUID, instruction: str | None = None) -> None:
+        """Refresh missing source evidence before generating a versioned draft through
+        governed tools.
+        """
         c = self.context
         async with c.uow_factory() as uow:
             thread = await self.service._thread(uow.email, c.principal, thread_id)

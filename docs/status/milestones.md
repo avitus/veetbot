@@ -23,13 +23,13 @@ State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
 runs as release `20260928-202932-e55551f`; Milestone 14's completion was
 recorded on 2026-10-09. With Milestone 32 authorized, twenty-two of thirty-three milestones are complete; ten
 were in progress and one was authorized but not started at that review.
-The reliability repair now begins Milestone 15 under ADR-0205.
+The independent reliability repair now begins Milestone 15 under ADR-0205.
 Milestone 32 has implemented components and registered gates;
 comparative quality and complete runtime/release evidence remain pending.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
-| 15 Operational hardening | In progress | All sixteen gates; supplemental reliability diagnostics implemented | Engineering, then owner |
+| 15 Operational hardening | In progress | All sixteen gates; independent reliability repair under ADR-0205 | Engineering, then owner |
 | 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
 | 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | Physical-iPhone verification | Owner |
@@ -93,17 +93,17 @@ hosted-CI records.
 
 ### Milestone 15 — Operational hardening
 
-ADR-0205 implements safe root-cause diagnostics, bounded recovery and a scoped
-application reliability report with optional alerts. Synthetic fault-injection
-and PostgreSQL tests cover these repairs. All sixteen milestone gates remain
-open, including host monitoring, independent outage alerts, backups and restore
-rehearsal. Production delivery and activation are separate operator steps.
+The independent ADR-0205 repair adds safe failure references, worker backoff,
+cleanup isolation and scoped reliability reporting. Focused failure-injection
+and PostgreSQL regressions pass; production delivery remains pending. All
+sixteen operational-hardening gates remain open, including off-host backups,
+restore rehearsals, watchdogs and independent outage alerts.
 
 - [ ] Complete all sixteen Milestone 15 gates and reviewed production delivery
 - [ ] Implement encrypted off-host backups and verify restore rehearsals
-- [ ] Complete host health probes, cooldown reminders and an independent outage channel
+- [ ] Complete host health probes and an independent outage alert channel
 - [ ] Verify firewall, SSH, proxy, rollback and worker watchdog hardening
-- [ ] Validate production reliability baselines and explicitly activate reviewed monitoring
+- [ ] Measure production reliability and explicitly activate reviewed monitoring
 
 ### Milestone 25 — WhatsApp business surface
 
@@ -210,6 +210,7 @@ verified ceiling. Remaining:
 - [ ] Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
 - [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
 - [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
+- [ ] Deliver the independently verified expired-source drafting repair (ADR-0205)
 
 ### Milestone 27 — Bland calling and public reception
 
@@ -378,7 +379,11 @@ succeeded on merge `a9b81420` (`outside_milestone_evidence` in the state file).
 
 ## Authorized
 
-No authorized milestone remains unstarted.
+No authorized milestone remains unstarted. Milestone 15 has begun its independent
+reliability repair; its remaining gates and backup tranche remain open.
+
+
+
 
 ## Deferred
 

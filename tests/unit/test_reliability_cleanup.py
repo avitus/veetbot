@@ -17,18 +17,21 @@ from tests.integration.m2_support import memory_settings
 async def test_optional_hook_failure_preserves_answer_and_later_cleanup(
     monkeypatch: pytest.MonkeyPatch, stalled: bool
 ) -> None:
+    """Verify that optional hook failure preserves answer and later cleanup."""
     import agent_core.bootstrap as bootstrap
 
     monkeypatch.setattr(bootstrap, "POST_RUN_HOOK_TIMEOUT_SECONDS", 0.01, raising=False)
     seen: list[str] = []
 
     async def review(*_args: Any, **_kwargs: Any) -> None:
+        """Fail or stall an optional review hook after recording that it ran."""
         seen.append("review")
         if stalled:
             await asyncio.Event().wait()
         raise RuntimeError("Synthetic optional hook failure")
 
     async def erasure(*_args: Any, **_kwargs: Any) -> int:
+        """Record that later privacy cleanup still runs after an optional hook fails."""
         seen.append("erasure")
         return 0
 
@@ -49,6 +52,7 @@ async def test_optional_hook_failure_preserves_answer_and_later_cleanup(
 async def test_delegated_continuation_keeps_context_and_is_not_an_optional_hook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify that delegated continuation keeps context and is not an optional hook."""
     from dataclasses import replace
 
     import agent_core.bootstrap as bootstrap
@@ -59,6 +63,9 @@ async def test_delegated_continuation_keeps_context_and_is_not_an_optional_hook(
     contexts: list[dict[str, Any]] = []
 
     async def join(*_args: Any) -> None:
+        """Delay a parent continuation beyond the optional-hook limit and capture its log
+        scope.
+        """
         await asyncio.sleep(0.03)
         contexts.append(failure_context())
 

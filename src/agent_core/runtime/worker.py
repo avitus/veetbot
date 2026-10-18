@@ -44,6 +44,9 @@ class DurableWorker:
         maintain_browser_leases: Callable[[], Awaitable[None]] | None = None,
         browser_lease_upkeep_seconds: float = 60,
     ) -> None:
+        """Bind leased work and validate bounded polling, heartbeat and browser-maintenance
+        intervals.
+        """
         if heartbeat_divisor < 2:
             raise ValueError("heartbeat_divisor must be at least two")
         if browser_lease_upkeep_seconds <= 0:
@@ -73,10 +76,12 @@ class DurableWorker:
         self._stop_event = asyncio.Event()
 
     def stop(self) -> None:
+        """Request shutdown and wake an idle or backing-off worker immediately."""
         self._stopping = True
         self._stop_event.set()
 
     async def _wait_for_poll(self, seconds: float) -> None:
+        """Wait for the poll delay or stop signal, then cancel and collect the losing task."""
         sleeper = asyncio.create_task(self._clock.sleep(seconds))
         stopped = asyncio.create_task(self._stop_event.wait())
         try:
@@ -198,6 +203,7 @@ class DurableWorker:
         return True
 
     async def run_forever(self) -> None:
+        """Poll durable work with capped failure backoff and independent lease maintenance."""
         upkeep = (
             None
             if self._maintain_browser_leases is None

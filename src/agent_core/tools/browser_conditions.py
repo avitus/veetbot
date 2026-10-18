@@ -111,14 +111,18 @@ async def check_browser_condition(
     observation: BrowserObservation,
     condition: BrowserCondition,
 ) -> BrowserObservation:
+    """Check visible evidence with bounded read-only polling and a hard capture deadline."""
     loop = asyncio.get_running_loop()
     started = loop.time()
     deadline = started + condition.timeout_ms / 1000
     count = 1
+    capture_seconds = 0.0
     row = condition.evidence if isinstance(condition.evidence, BrowserRowEvidence) else None
 
     async def capture(previous: BrowserObservation) -> BrowserObservation:
-        nonlocal count
+        """Capture fresh evidence within the shared deadline and record its elapsed duration."""
+        nonlocal count, capture_seconds
+        capture_started = loop.time()
 
         async def read(*, extract: bool, revision: str) -> BrowserObservation:
             nonlocal count
@@ -152,6 +156,8 @@ async def check_browser_condition(
                     )
         except TimeoutError as error:
             raise BrowserProviderError("tool.browser.page_changed", retryable=False) from error
+        finally:
+            capture_seconds = loop.time() - capture_started
 
     with browser_phase("postcondition", "orchestrator") as phase:
         if not provider.allows(observation.url):
@@ -164,6 +170,11 @@ async def check_browser_condition(
             if status in {"satisfied", "failed"} or remaining <= 0.25 or count >= 21:
                 break
             await asyncio.sleep(0.25)
+            # Recheck after the delay: starting a read with less time than the
+            # preceding capture consumed can turn an unmet predicate into lost
+            # evidence. This estimate never extends the hard capture deadline.
+            if deadline - loop.time() <= capture_seconds:
+                break
             observation = await capture(observation)
         if status != "satisfied":
             phase.outcome = "bound_expired"

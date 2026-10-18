@@ -180,6 +180,7 @@ def test_no_log_call_names_a_field_the_log_record_reserves() -> None:
 def test_a_traceback_keeps_safe_diagnostics_without_rendering_text(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Verify that a traceback keeps safe diagnostics without rendering text."""
     configure_logging(DeploymentMode.PRODUCTION)
     provider_value = "sk-" + ("x" * 24)
 
@@ -216,6 +217,7 @@ def test_review_session_cookies_are_redacted() -> None:
 def test_background_tracebacks_never_emit_private_exception_text(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Verify that background tracebacks never emit private exception text."""
     configure_logging(DeploymentMode.PRODUCTION)
     try:
         raise RuntimeError("PRIVATE_MAIL_CANARY_NOT_A_CREDENTIAL")
@@ -231,6 +233,7 @@ def test_background_tracebacks_never_emit_private_exception_text(
 def test_domain_context_reaches_service_logs_and_restores_the_parent(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Verify that domain context reaches service logs and restores the parent."""
     from agent_core.domain.failures import log_context
 
     configure_logging(DeploymentMode.PRODUCTION, release_id="test-release")

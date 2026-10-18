@@ -134,6 +134,52 @@ SECRET_VALUE = re.compile(
 )
 
 
+def _credential_inspection_event(event: ModelEvent) -> ModelEvent:
+    """Omit only ADR-0210's embedded OpenAI collisions from an inspection copy."""
+
+    turn: ModelTurn | None
+    if isinstance(event, ModelCompletedEvent):
+        turn = event.turn
+    elif isinstance(event, ModelFailedEvent) and event.error.provider == "openai":
+        turn = event.partial_turn
+    else:
+        return event
+    if (
+        turn is None
+        or turn.usage.provider != "openai"
+        or turn.provider_metadata is None
+        or turn.provider_metadata.provider_api != "responses"
+    ):
+        return event
+
+    eligible: list[int] = []
+    for index, item in enumerate(turn.provider_reasoning_items):
+        value = item.provider_payload.get("encrypted_content")
+        if (
+            item.provider != "openai"
+            or item.provider_payload.get("type") != "reasoning"
+            or not isinstance(value, str)
+            or re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", value) is None
+        ):
+            continue
+        matches = list(SECRET_VALUE.finditer(value))
+        if matches and all(
+            match.lastgroup == "provider_key" and match.start() > 0 for match in matches
+        ):
+            eligible.append(index)
+    if not eligible:
+        return event
+
+    inspection = event.model_copy(deep=True)
+    inspected_turn = (
+        inspection.turn if isinstance(inspection, ModelCompletedEvent) else inspection.partial_turn
+    )
+    assert inspected_turn is not None
+    for index in eligible:
+        inspected_turn.provider_reasoning_items[index].provider_payload["encrypted_content"] = ""
+    return inspection
+
+
 def _credential_field(
     value: object,
     path: tuple[str, ...] = (),
@@ -151,8 +197,8 @@ def _credential_field(
         for name in type(value).model_fields:
             fields: frozenset[str] = frozenset()
             if isinstance(value, ProviderReasoningItem) and name == "provider_payload":
-                # These names improve diagnostics only. No payload is exempt from
-                # the whole-event check, including opaque continuation bytes.
+                # These names improve diagnostics only; admission is decided by
+                # the separate, schema-bound inspection view above.
                 fields = {
                     ("openai", "reasoning"): frozenset({"encrypted_content"}),
                     ("anthropic", "thinking"): frozenset({"signature"}),
@@ -308,10 +354,12 @@ async def validated_stream(source: AsyncIterable[ModelEvent]) -> AsyncIterator[M
             raise ModelStreamError("stream sequence did not start at zero and remain gapless")
         expected_sequence += 1
         if credential_match := SECRET_VALUE.search(event.model_dump_json()):
-            raise ModelStreamError(
-                "normalized event carried credential-shaped content",
-                diagnostic_details=_credential_diagnostics(event, credential_match),
-            )
+            inspection = _credential_inspection_event(event)
+            if credential_match := SECRET_VALUE.search(inspection.model_dump_json()):
+                raise ModelStreamError(
+                    "normalized event carried credential-shaped content",
+                    diagnostic_details=_credential_diagnostics(inspection, credential_match),
+                )
 
         if isinstance(event, (TextDeltaEvent, ReasoningDeltaEvent, ToolCallDeltaEvent)):
             item_kind = event.kind

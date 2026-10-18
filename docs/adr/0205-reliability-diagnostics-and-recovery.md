@@ -52,3 +52,12 @@ existing outbox cannot alert while its database is unavailable. The remainder of
 Milestone 15, including backups and restore rehearsal, remains governed by its
 existing design. No new dependency, model routing or automatic replay of failed
 external actions is introduced.
+
+## Independent delivery
+
+On 2026-10-17 the owner separated existing-app reliability from the memory
+retrieval workstream and requested its own branch and pull request to `main`.
+The repair is based on production `main` and carries no new recall algorithm,
+evaluator, migration, or memory activation. Memory quality and activation gates
+remain with that independent workstream; they are not prerequisites for this
+repair. Existing memory behavior and its gates remain unchanged.

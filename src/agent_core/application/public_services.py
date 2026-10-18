@@ -205,6 +205,9 @@ def _session_view(
 
 
 def _run_view(run: Run) -> RunView:
+    """Expose public run state and a validated diagnostic UUID without private failure
+    details.
+    """
     failure = None
     if run.status is RunStatus.FAILED and run.failure is not None:
         raw_reference = run.failure.details.get("diagnostic_id")

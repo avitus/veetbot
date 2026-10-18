@@ -60,9 +60,11 @@ def _opts_in(call: ast.Call) -> bool:
 async def test_a_service_composition_configures_logging_and_a_one_shot_does_not(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify that a service composition configures logging and a one shot does not."""
     configured: list[tuple[DeploymentMode, str | None]] = []
 
     def configure(mode: DeploymentMode, *, release_id: str | None = None) -> None:
+        """Record the service logging configuration without changing global logging state."""
         configured.append((mode, release_id))
 
     monkeypatch.setattr(bootstrap, "configure_logging", configure)

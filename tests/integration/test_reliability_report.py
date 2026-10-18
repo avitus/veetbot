@@ -16,6 +16,7 @@ pytestmark = pytest.mark.integration
 
 
 async def test_reliability_counts_terminal_outcomes_and_excludes_foreign_principals() -> None:
+    """Verify that reliability counts terminal outcomes and excludes foreign principals."""
     settings = database_settings()
     async with build(
         settings=settings,
@@ -115,6 +116,7 @@ async def test_reliability_counts_terminal_outcomes_and_excludes_foreign_princip
 async def test_operator_report_does_not_bootstrap_providers_or_write_application_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify that operator report does not bootstrap providers or write application state."""
     import agent_core.bootstrap as bootstrap
     from agent_core.cli import main
     from agent_core.observability.reliability import ReliabilityThresholds
@@ -122,6 +124,7 @@ async def test_operator_report_does_not_bootstrap_providers_or_write_application
     monkeypatch.setattr(bootstrap, "load_settings", database_settings)
 
     def forbidden_build(**_kwargs: object) -> None:
+        """Reject composition startup during a database-only operator report."""
         raise AssertionError("An operator report must not bootstrap the application.")
 
     monkeypatch.setattr(main, "build", forbidden_build)

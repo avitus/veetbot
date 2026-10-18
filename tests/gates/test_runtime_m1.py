@@ -275,6 +275,7 @@ async def test_credential_failure_diagnostics_reach_durable_run_without_content(
         resolved: ResolvedModel,
         attempt: ModelAttempt,
     ) -> AsyncIterator[ModelEvent]:
+        """Yield a synthetic credential violation to exercise durable failure diagnostics."""
         yield TextDeltaEvent(
             attempt_id=attempt.attempt_id,
             run_id=attempt.run_id,
