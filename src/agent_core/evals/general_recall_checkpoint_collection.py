@@ -88,6 +88,10 @@ def _inventory(store: CheckpointStore) -> dict[str, str]:
         "operator-segments",
         "recovery",
         "formation-repair",
+        "collector-recovery",
+        "provider-terminals",
+        "unsealed-segments",
+        "cleanup-failures",
     ):
         directory = store.directory / name
         if not directory.exists():
@@ -204,6 +208,11 @@ def compile_checkpoint_collection(
     claim = execution_claim(store)
     if repair is not None:
         protocol_sha256 = repair[1]["successor_protocol_sha256"]
+    from agent_core.evals.general_recall_collector_recovery import retained_collector_recovery
+
+    collector_recovery = retained_collector_recovery(store)
+    if collector_recovery is not None:
+        protocol_sha256 = collector_recovery[1]["successor_protocol_sha256"]
     verify_worker_admissions(
         store,
         protocol_sha256=protocol_sha256,
@@ -403,6 +412,48 @@ def compile_checkpoint_collection(
                         "attempt": attempt,
                     }
                 )
+    if collector_recovery is not None:
+        reconciled = _load(_read(store.directory / "collector-recovery/reconciled-segment.json"))
+        _require(
+            reconciled["version"] == "recall-continuation-reconciled@1"
+            and reconciled["derived_from_durable_events"] is True
+            and reconciled["plan_sha256"] == _digest(store.plan.encoded())
+            and reconciled["measurement_identity_sha256"] == parent.identity_sha256
+            and reconciled["ledger_sha256"] in ledger_calls,
+            "reconciled segment identity changed",
+        )
+        for attempt in reconciled["attempts"]:
+            key = tuple(attempt["key"])
+            _require(key in slots and attempt["wall_seconds"] is None, "foreign reconciled attempt")
+            if attempt["state"] == "completed":
+                _require(
+                    key not in attempts and key not in parent.rows,
+                    "duplicate or imported reconciled result",
+                )
+                attempts[key] = {**attempt, "ledger_sha256": reconciled["ledger_sha256"]}
+            else:
+                _require(attempt["state"] == "unresolved", "invented reconciled outcome")
+                failures.add((reconciled["ledger_sha256"], key))
+        review.append(
+            {
+                "kind": "reconciled_collector_segment",
+                "manifest_sha256": collector_recovery[1]["manifest_sha256"],
+                "transition": collector_recovery[1],
+                "report": reconciled,
+            }
+        )
+    for name in ("unsealed-segments", "cleanup-failures"):
+        folder = store.directory / name
+        if folder.exists():
+            for path in sorted(folder.iterdir()):
+                review.append(
+                    {
+                        "kind": "collector_failure",
+                        "artifact": name + "/" + path.name,
+                        "sha256": _digest(_read(path)),
+                        "facts": _load(_read(path)),
+                    }
+                )
     _require(
         set(attempts) == set(slots) - set(parent.rows),
         "completed results lack exact segment reports",
@@ -519,8 +570,15 @@ def compile_checkpoint_collection(
             if repair
             else "recall-checkpoint-collection@1",
             "formation_repair_sha256": repair[1]["manifest_sha256"] if repair else None,
+            "collector_recovery_sha256": collector_recovery[1]["manifest_sha256"]
+            if collector_recovery
+            else None,
             "execution_repair": claim,
-            "preserved_original_rows": repair[0].completed_rows if repair else len(parent.rows),
+            "preserved_original_rows": collector_recovery[0].completed_rows
+            if collector_recovery
+            else repair[0].completed_rows
+            if repair
+            else len(parent.rows),
             "activation_eligible": False,
             "plan_sha256": _digest(store.plan.encoded()),
             "measurement_identity_sha256": parent.identity_sha256,

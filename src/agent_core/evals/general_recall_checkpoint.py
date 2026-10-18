@@ -144,6 +144,7 @@ class _Event(ReleaseValue):
         "replacement",
         "bounded_replacement",
         "formation_repair",
+        "collector_repair",
     ]
     result_sha256: Digest | None = None
     stage: Literal["formation", "answer"] | None = None
@@ -183,6 +184,7 @@ class CheckpointStore:
         self._replaced: set[str] = set()
         self._bounded_replaced: set[Slot] = set()
         self._formation_repaired: set[Slot] = set()
+        self._collector_repaired: set[Slot] = set()
         self._replaying = True
         self._count = 0
         self._previous = _digest(encoded)
@@ -280,7 +282,10 @@ class CheckpointStore:
             or (event.action in {"failed", "parent_failed"}) != (event.stage is not None)
             or (event.action in {"failed", "parent_failed"}) != (event.error_class is not None)
             or (event.action in {"failed", "parent_failed"}) != (event.ledger_sha256 is not None)
-            or (event.action in {"parent_failed", "bounded_replacement", "formation_repair"})
+            or (
+                event.action
+                in {"parent_failed", "bounded_replacement", "formation_repair", "collector_repair"}
+            )
             != (event.source_sha256 is not None)
         ):
             raise ValueError("Invalid checkpoint event or chain")
@@ -289,7 +294,13 @@ class CheckpointStore:
         if event.action == "started":
             if any(self._states[k].action == "failed" for k in self._bounded_replaced):
                 raise ValueError("An approved bounded recovery failed; paid admissions must stop")
-            if action not in {None, "replacement", "bounded_replacement", "formation_repair"}:
+            if action not in {
+                None,
+                "replacement",
+                "bounded_replacement",
+                "formation_repair",
+                "collector_repair",
+            }:
                 raise ValueError("Unresolved or unknown slot cannot resend")
             if any(
                 key != event.key
@@ -298,6 +309,12 @@ class CheckpointStore:
                 for key, value in self._states.items()
             ):
                 raise ValueError("Scenario has an unresolved preparation or answer")
+        elif event.action == "collector_repair":
+            from agent_core.evals.general_recall_collector_recovery import (
+                validate_collector_recovery_event,
+            )
+
+            validate_collector_recovery_event(self, event.key, str(event.source_sha256))
         elif event.action == "formation_repair":
             from agent_core.evals.general_recall_formation_repair import (
                 validate_formation_repair_event,
@@ -356,6 +373,8 @@ class CheckpointStore:
             self._bounded_replaced.add(event.key)
         if event.action == "formation_repair":
             self._formation_repaired.add(event.key)
+        if event.action == "collector_repair":
+            self._collector_repaired.add(event.key)
         self._count, self._previous = event.index, _digest(raw)
 
     def _record(self, action: str, key: Slot, **details: object) -> None:
@@ -503,7 +522,7 @@ class CheckpointStore:
             and (
                 key not in self._states
                 or self._states[key].action
-                in {"replacement", "bounded_replacement", "formation_repair"}
+                in {"replacement", "bounded_replacement", "formation_repair", "collector_repair"}
             )
         )
 

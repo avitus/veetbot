@@ -249,3 +249,4 @@ implementation without one.
 - [ADR-0213: Bounded recovery of reconciled evaluation interruptions](0213-bounded-interruption-recovery.md)
 
 - [ADR-0214: Formation deadline repair](0214-formation-deadline-repair.md)
+- [ADR-0215: Retained formation terminal outcomes and collector cleanup](0215-formation-terminal-outcomes.md)

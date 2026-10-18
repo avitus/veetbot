@@ -1,5 +1,7 @@
 """The segment coordinator does not construct paid adapters before every guard."""
 
+import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -138,5 +140,58 @@ async def test_next_segment_cannot_reuse_workers_or_renew_deadline(
         with pytest.raises((ValueError, FileExistsError)):
             await runner.run_checkpoint_segment(**args)
         assert _read(args["store"].directory / "deadline.json") == before
+    finally:
+        args["store"].close()
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_coordinator_retains_primary_failure_when_cleanup_also_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool
+) -> None:
+    args, _ = operator_fixture(tmp_path, monkeypatch)
+    primary = asyncio.CancelledError() if cancelled else TimeoutError("Primary private detail")
+
+    async def fail_collection(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise primary
+
+    async def fail_close(*_args: Any) -> None:
+        raise ValueError("Private cleanup detail")
+
+    monkeypatch.setattr(runner, "collect_segment", fail_collection)
+    monkeypatch.setattr(runner.FrozenSlotEvaluator, "close", fail_close)
+    try:
+        with pytest.raises(type(primary)) as caught:
+            await runner.run_checkpoint_segment(**args)
+        assert caught.value is primary
+        assert (args["store"].directory / "budget/000001.sealed.json").exists()
+        reports = tuple((args["store"].directory / "cleanup-failures").glob("*.json"))
+        assert len(reports) == 1
+        facts = json.loads(reports[0].read_bytes())
+        assert facts["primary_error_class"] == type(primary).__name__
+        assert facts["cleanup_error_classes"] == ["ValueError"]
+        assert "Private" not in reports[0].read_text()
+    finally:
+        args["store"].close()
+
+
+async def test_new_cleanup_cancellation_propagates_after_retention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, _ = operator_fixture(tmp_path, monkeypatch)
+
+    async def fail_collection(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise TimeoutError("Original failure")
+
+    async def cancel_close(*_args: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(runner, "collect_segment", fail_collection)
+    monkeypatch.setattr(runner.FrozenSlotEvaluator, "close", cancel_close)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await runner.run_checkpoint_segment(**args)
+        assert (args["store"].directory / "budget/000001.sealed.json").exists()
+        files = tuple((args["store"].directory / "cleanup-failures").glob("*.json"))
+        assert json.loads(files[0].read_bytes())["primary_error_class"] == "TimeoutError"
     finally:
         args["store"].close()

@@ -8,18 +8,25 @@ import fcntl
 import hashlib
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import Field
 
 from agent_core.domain.errors import BudgetExceededError
 from agent_core.domain.general_recall_release import Digest, ReleaseValue
-from agent_core.domain.messages import ModelAttempt, ModelEvent, ModelRequest, ResolvedModel
+from agent_core.domain.messages import (
+    ModelAttempt,
+    ModelCompletedEvent,
+    ModelEvent,
+    ModelFailedEvent,
+    ModelRequest,
+    ResolvedModel,
+)
 from agent_core.evals.general_recall_checkpoint import (
     CheckpointStore,
     Slot,
@@ -33,6 +40,9 @@ from agent_core.memory.general_recall_evidence import _unique_object
 from agent_core.ports.models import ModelProvider
 
 _CALL_SLOT: ContextVar[Slot | None] = ContextVar("recall_continuation_slot", default=None)
+_CALL_RECORD: ContextVar[list[dict[str, object]] | None] = ContextVar(
+    "recall_continuation_record", default=None
+)
 
 
 class _Entry(ReleaseValue):
@@ -273,10 +283,55 @@ class ContinuationBudget(EvaluationBudget):
             raise ValueError("Provider segment is sealed")
         slot = _CALL_SLOT.get()
         super().append(record if slot is None else {**record, "slot": slot})
+        current = _CALL_RECORD.get()
+        if current is not None and record.get("outcome") == "reserved":
+            current.append(dict(record))
         if record.get("outcome") in {"uncertain", "overrun"}:
             self.halt_reason = (
                 "uncertain_usage" if record["outcome"] == "uncertain" else "reservation_overrun"
             )
+
+    def retain_terminal(
+        self,
+        slot: Slot,
+        records: list[dict[str, object]],
+        event: ModelCompletedEvent | ModelFailedEvent,
+    ) -> None:
+        """Keep normalized terminal facts before a downstream consumer can reject them."""
+        self.store._owned()
+        if len(records) != 1 or self._segment_lock is None:
+            raise ValueError("Terminal facts require one live, slot-bound reservation")
+        record = records[0]
+        directory = self.store.directory / "provider-terminals"
+        if not directory.exists():
+            directory.mkdir(mode=0o700)
+            _sync(self.store.directory)
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError("Unsafe provider terminal directory")
+        facts: dict[str, Any] = {
+            "version": "recall-provider-terminal@1",
+            "ledger_file": self.journal.relative_to(self.store.directory).as_posix(),
+            "index": record["index"],
+            "request_sha256": record["request_sha256"],
+            "slot": slot,
+            "event": "completed" if isinstance(event, ModelCompletedEvent) else "failed",
+        }
+        if isinstance(event, ModelCompletedEvent):
+            facts.update(
+                stop_reason=event.stop_reason.value,
+                turn_stop_reason=event.turn.stop_reason.value,
+                internal_retry_count=event.internal_retry_count,
+                usage=event.turn.usage.model_dump(mode="json", exclude={"provider", "model"}),
+                tool_calls=len(event.turn.tool_calls),
+                assistant_parts=[
+                    part.kind
+                    for message in event.turn.assistant_messages
+                    for part in message.content
+                ],
+            )
+        else:
+            facts.update(error_class=type(event.error).__name__, failure_kind=event.error.kind)
+        _write(directory / f"{self.journal.stem}-{record['index']:06}.json", _json(facts))
 
     def seal(self) -> LedgerAccounting:
         """Close only after admitted streams settle; unknown usage is never refunded."""
@@ -327,14 +382,40 @@ class ContinuationProvider(BudgetedProvider):
         if ledger.failed:
             raise ContinuationHaltedError(ledger.halt_reason)
         ledger.active_streams += 1
-        token = _CALL_SLOT.set(self.slot)
+        stream = cast(AsyncGenerator[ModelEvent, None], super().stream(request, resolved, attempt))
+        records: list[dict[str, object]] = []
+        terminal: ModelCompletedEvent | ModelFailedEvent | None = None
         try:
-            async for event in super().stream(request, resolved, attempt):
-                yield event
+            while True:
+                # Never retain a ContextVar token across a yield to the consumer:
+                # async-generator finalization can run in another task/context.
+                token = _CALL_SLOT.set(self.slot)
+                record_token = _CALL_RECORD.set(records)
+                try:
+                    event = await anext(stream)
+                except StopAsyncIteration:
+                    break
+                finally:
+                    _CALL_RECORD.reset(record_token)
+                    _CALL_SLOT.reset(token)
+                if isinstance(event, ModelCompletedEvent | ModelFailedEvent):
+                    ledger.retain_terminal(self.slot, records, event)
+                    terminal = event
+                else:
+                    yield event
         except BudgetExceededError as error:
             if ledger.failed:
                 raise ContinuationHaltedError(ledger.halt_reason) from error
             raise
         finally:
-            _CALL_SLOT.reset(token)
-            ledger.active_streams -= 1
+            token = _CALL_SLOT.set(self.slot)
+            try:
+                await stream.aclose()
+            finally:
+                _CALL_SLOT.reset(token)
+                ledger.active_streams -= 1
+        # The reservation wrapper has now validated EOF and settled the stream.
+        # A consumer rejecting this terminal cannot leak a stream or mark the
+        # otherwise completed provider call uncertain during generator cleanup.
+        if terminal is not None:
+            yield terminal

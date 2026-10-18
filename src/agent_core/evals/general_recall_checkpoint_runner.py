@@ -69,15 +69,41 @@ _COLLECTOR_MODULES = frozenset(
         "general_recall_checkpoint_runner",
         "general_recall_checkpoint_recovery",
         "general_recall_formation_repair",
+        "general_recall_collector_recovery",
         "general_recall_continuation_budget",
         "general_recall_continuation_collector",
     )
 )
 
 
-def verify_frozen_module(root: Path, runtime_patch: Path | None = None) -> None:
+def verify_frozen_module(
+    root: Path, runtime_patch: Path | None = None, bank_patch_root: Path | None = None
+) -> None:
     """Refuse mixed runtime imports; only separately pinned collector modules differ."""
     package = (root / "src/agent_core").resolve()
+    bank_modules = (
+        {
+            "agent_core.evals.general_recall_formation_bank",
+            "agent_core.evals.general_recall_observation",
+        }
+        if bank_patch_root is not None
+        else set()
+    )
+    for name in bank_modules:
+        loaded = sys.modules.get(name)
+        assert bank_patch_root is not None
+        if (
+            loaded is None
+            or Path(str(loaded.__file__)).resolve()
+            != (bank_patch_root / (name.rsplit(".", 1)[-1] + ".py")).resolve()
+        ):
+            raise ValueError("The declared bank implementation is not loaded")
+    if (
+        bank_modules
+        and evaluate_fixture.__globals__.get("FormationBank")
+        is not sys.modules["agent_core.evals.general_recall_formation_bank"].FormationBank
+    ):
+        raise ValueError("The frozen evaluator retained a different formation bank")
     if runtime_patch is not None:
         from agent_core.evals.general_recall_formation_repair import verify_deadline_source
 
@@ -89,6 +115,7 @@ def verify_frozen_module(root: Path, runtime_patch: Path | None = None) -> None:
         if (
             not (name == "agent_core" or name.startswith("agent_core."))
             or name in _COLLECTOR_MODULES
+            or name in bank_modules
             or (runtime_patch is not None and name == "agent_core.memory.distillation")
         ):
             continue
@@ -117,6 +144,7 @@ class FrozenSlotEvaluator:
         verify_protocol: Callable[[], None],
         forbidden_databases: tuple[str, ...],
         runtime_patch: Path | None = None,
+        bank_patch_root: Path | None = None,
     ) -> None:
         self.root, self.parent, self.prepared = root, parent, prepared
         self.options, self.budget, self.deadline = options, budget, deadline
@@ -125,7 +153,7 @@ class FrozenSlotEvaluator:
         self._encoders: dict[int, LocalEmbeddingProvider] = {}
         self._closed = False
         verify_protocol()
-        verify_frozen_module(root, runtime_patch)
+        verify_frozen_module(root, runtime_patch, bank_patch_root)
         from agent_core.evals.general_recall_formation_repair import execution_claim
 
         self.execution_repair = execution_claim(budget.store)
@@ -333,14 +361,36 @@ async def run_checkpoint_segment(
     bounded_recovery: tuple[bytes, bytes, bytes] | None = None,
     formation_repair: tuple[bytes, ...] | None = None,
     runtime_patch: Path | None = None,
+    bank_patch_root: Path | None = None,
+    collector_recovery: tuple[bytes, ...] | None = None,
     monotonic: Callable[[], float] = elapsed_time,
 ) -> dict[str, Any]:
     """Run one explicitly admitted segment, never automatically launch a successor."""
     store._owned()
     verify_protocol()
-    verify_frozen_module(root, runtime_patch)
+    verify_frozen_module(root, runtime_patch, bank_patch_root)
     parent.archive.verify()
     parent.import_into(store)
+    if collector_recovery is not None:
+        from agent_core.evals.general_recall_collector_recovery import admit_collector_recovery
+
+        if (
+            preparation_approval is not None
+            or bounded_recovery is not None
+            or formation_repair is not None
+            or create_deadline
+            or runtime_patch is None
+            or bank_patch_root is None
+        ):
+            raise ValueError("Collector repair cannot renew earlier admissions or deadlines")
+        declaration, decision, assessment = collector_recovery
+        admit_collector_recovery(
+            store,
+            manifest=declaration,
+            owner=decision,
+            assessment=assessment,
+            protocol_sha256=protocol_sha256,
+        )
     if bounded_recovery is not None:
         from agent_core.evals.general_recall_checkpoint_recovery import admit_bounded_recovery
 
@@ -412,6 +462,7 @@ async def run_checkpoint_segment(
         monotonic=monotonic,
     )
     budget = ContinuationBudget(store, parents)
+    primary: BaseException | None = None
     evaluator = None
     try:
         directory = store.directory / "operator-segments"
@@ -451,6 +502,7 @@ async def run_checkpoint_segment(
             verify_protocol=verify_protocol,
             forbidden_databases=forbidden,
             runtime_patch=runtime_patch,
+            bank_patch_root=bank_patch_root,
         )
 
         def seal() -> str:
@@ -465,11 +517,42 @@ async def run_checkpoint_segment(
             seal_ledger=seal,
             monotonic=monotonic,
         )
+    except BaseException as error:
+        primary = error
+        raise
     finally:
         # The collector settles admitted peers even on supervisor cancellation.
+        cleanup_errors: list[BaseException] = []
         try:
             if evaluator is not None:
                 await evaluator.close()
-        finally:
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
             if budget._segment_lock is not None:
                 budget.seal()
+        except BaseException as error:
+            cleanup_errors.append(error)
+        if cleanup_errors:
+            from agent_core.evals.general_recall_continuation_collector import _error_class
+
+            directory = store.directory / "cleanup-failures"
+            if not directory.exists():
+                directory.mkdir(mode=0o700)
+                _sync(store.directory)
+            if directory.is_symlink() or not directory.is_dir():
+                raise ValueError("Invalid cleanup failure directory")
+            evidence = _json(
+                {
+                    "version": "recall-checkpoint-cleanup-failure@1",
+                    "ledger_file": budget.journal.relative_to(store.directory).as_posix(),
+                    "primary_error_class": _error_class(primary) if primary is not None else None,
+                    "cleanup_error_classes": [_error_class(error) for error in cleanup_errors],
+                }
+            )
+            _write(directory / f"{_digest(evidence)}.json", evidence)
+            for cleanup_error in cleanup_errors:
+                if isinstance(cleanup_error, asyncio.CancelledError):
+                    raise cleanup_error
+            if primary is None:
+                raise cleanup_errors[0]

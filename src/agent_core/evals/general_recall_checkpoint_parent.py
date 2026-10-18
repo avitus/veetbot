@@ -279,6 +279,8 @@ class CheckpointParent:
             suffix = ".final-replacement.json"
         if (case_id, "automatic", "formation", "sparse") in store._formation_repaired:
             suffix = ".deadline-repair.json"
+        if (case_id, "automatic", "formation", "sparse") in store._collector_repaired:
+            suffix = ".terminal-repair.json"
         return directory / (_digest(case_id.encode()) + suffix)
 
     def admit_preparation_replacement(

@@ -346,8 +346,16 @@ def admit_bounded_recovery(
 
 def protocol_ancestry(store: CheckpointStore, protocol_sha256: str) -> tuple[str, int]:
     """Return the immutable deadline protocol; every later epoch stays explicit."""
+    from agent_core.evals.general_recall_collector_recovery import retained_collector_recovery
     from agent_core.evals.general_recall_formation_repair import retained_formation_repair
 
+    collector = retained_collector_recovery(store)
+    if collector is not None:
+        _require(
+            protocol_sha256 == collector[1]["successor_protocol_sha256"],
+            "unadmitted collector protocol",
+        )
+        protocol_sha256 = collector[0].predecessor_protocol_sha256
     repaired = retained_formation_repair(store)
     if repaired is not None:
         repair_proof, transition = repaired
@@ -367,9 +375,13 @@ def protocol_ancestry(store: CheckpointStore, protocol_sha256: str) -> tuple[str
 
 
 def protocol_for_segment(store: CheckpointStore, protocol_sha256: str, index: int) -> str:
+    from agent_core.evals.general_recall_collector_recovery import retained_collector_recovery
     from agent_core.evals.general_recall_formation_repair import retained_formation_repair
 
     root, first = protocol_ancestry(store, protocol_sha256)
+    collector = retained_collector_recovery(store)
+    if collector is not None and index < collector[1]["first_segment"]:
+        protocol_sha256 = collector[0].predecessor_protocol_sha256
     repaired = retained_formation_repair(store)
     if repaired is not None and index < repaired[1]["first_segment"]:
         protocol_sha256 = repaired[0].predecessor_protocol_sha256

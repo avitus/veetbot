@@ -5,15 +5,24 @@ import hashlib
 import json
 import subprocess
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from agent_core.domain.errors import BudgetExceededError
-from agent_core.domain.messages import ModelAttempt, ModelEvent, ModelRequest, ResolvedModel
+from agent_core.domain.messages import (
+    ModelAttempt,
+    ModelCompletedEvent,
+    ModelEvent,
+    ModelRequest,
+    ResolvedModel,
+    StopReason,
+    TextDeltaEvent,
+)
 from agent_core.evals.general_recall_checkpoint import (
     CheckpointStore,
     ContinuationPlan,
@@ -303,3 +312,105 @@ def test_settlement_cannot_change_its_slot() -> None:
             encode({**reserved(), "slot": first}, {**completed(), "slot": second}),
             maximum=Decimal(1),
         )
+
+
+@pytest.mark.parametrize("terminal", [True, False])
+async def test_consumer_close_in_another_context_settles_its_original_slot(
+    tmp_path: Path, terminal: bool
+) -> None:
+    class StreamingProvider(CompletingProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            if not terminal:
+                yield TextDeltaEvent(
+                    attempt_id=attempt.attempt_id,
+                    run_id=attempt.run_id,
+                    step_number=attempt.step_number,
+                    sequence=1,
+                    item_index=0,
+                    text="Unfinished ordinary output",
+                )
+            async for event in super().stream(request, resolved, attempt):
+                yield event
+
+    with CheckpointStore(tmp_path / "collection", plan(), create=True) as store:
+        ledger = ContinuationBudget(store, parents())
+        key = required_slots(store.plan.scenarios)[0]
+        store.begin(key)
+        provider = ContinuationProvider(StreamingProvider(Decimal("0.03")), ledger, slot=key)
+        stream = cast(AsyncGenerator[ModelEvent, None], provider.stream(*request_model_attempt()))
+
+        async def receive() -> ModelEvent:
+            return await anext(stream)
+
+        await asyncio.create_task(receive())
+        await stream.aclose()
+        assert ledger.active_streams == 0
+        account = ledger.seal()
+        assert account.reported == (Decimal("0.03") if terminal else Decimal(0))
+        assert account.held == (Decimal(0) if terminal else Decimal("0.11"))
+        assert ledger.failed is not terminal
+        entries = [json.loads(line) for line in ledger.journal.read_bytes().splitlines()]
+        assert {tuple(entry["slot"]) for entry in entries} == {key}
+
+
+async def test_terminal_settles_before_a_bank_can_reject_it(tmp_path: Path) -> None:
+    with CheckpointStore(tmp_path / "collection", plan(), create=True) as store:
+        ledger = ContinuationBudget(store, parents())
+        key = required_slots(store.plan.scenarios)[0]
+        store.begin(key)
+        provider = ContinuationProvider(CompletingProvider(Decimal("0.03")), ledger, slot=key)
+        stream = cast(AsyncGenerator[ModelEvent, None], provider.stream(*request_model_attempt()))
+        try:
+            await anext(stream)
+            assert ledger.active_streams == 0
+            assert ledger.seal().reported == Decimal("0.03")
+            assert not ledger.failed
+        finally:
+            await stream.aclose()
+
+
+async def test_rejected_terminal_facts_survive_without_assistant_or_opaque_content(
+    tmp_path: Path,
+) -> None:
+    class LimitedProvider(CompletingProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            async for event in super().stream(request, resolved, attempt):
+                assert isinstance(event, ModelCompletedEvent)
+                yield event.model_copy(
+                    update={
+                        "stop_reason": StopReason.MAX_TOKENS,
+                        "turn": event.turn.model_copy(
+                            update={"stop_reason": StopReason.MAX_TOKENS}
+                        ),
+                    }
+                )
+
+    with CheckpointStore(tmp_path / "collection", plan(), create=True) as store:
+        ledger = ContinuationBudget(store, parents())
+        key = required_slots(store.plan.scenarios)[0]
+        store.begin(key)
+        stream = cast(
+            AsyncGenerator[ModelEvent, None],
+            ContinuationProvider(LimitedProvider(Decimal("0.03")), ledger, slot=key).stream(
+                *request_model_attempt()
+            ),
+        )
+        try:
+            await anext(stream)
+            files = tuple((store.directory / "provider-terminals").glob("*.json"))
+            assert len(files) == 1
+            facts = json.loads(files[0].read_bytes())
+            assert facts["slot"] == list(key)
+            assert facts["ledger_file"] == "budget/000001.jsonl"
+            assert facts["index"] == 1
+            assert facts["stop_reason"] == "max_tokens"
+            assert facts["internal_retry_count"] == 0
+            assert facts["usage"]["cost"] == "0.03"
+            assert not set(facts) & {"turn", "messages", "content", "provider_state"}
+            ledger.seal()
+        finally:
+            await stream.aclose()

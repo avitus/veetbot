@@ -33,6 +33,7 @@ MODULES = (
     "general_recall_formation_repair",
     "general_recall_checkpoint_runner",
 )
+BANK_MODULES = ("general_recall_formation_bank", "general_recall_observation")
 
 
 def _read(path: Path) -> bytes:
@@ -93,6 +94,7 @@ def verify_invocation(
             "recall-checkpoint-operator@1",
             "recall-checkpoint-operator@2",
             "recall-checkpoint-operator@3",
+            "recall-checkpoint-operator@4",
         }
         or segment["version"] != "recall-checkpoint-paid-admission@1"
         or segment["paid_launch_authorized"] is not True
@@ -105,6 +107,8 @@ def verify_invocation(
         verify_successor(protocol, segment)
     if protocol["version"] == "recall-checkpoint-operator@3":
         verify_formation_successor(protocol, segment)
+    if protocol["version"] == "recall-checkpoint-operator@4":
+        verify_collector_successor(protocol, segment)
     captured = datetime.fromisoformat(segment["checked_at"])
     if captured.tzinfo is None or not 0 <= (datetime.now(UTC) - captured).total_seconds() <= 3600:
         raise ValueError("Fresh configuration and budget admission are required")
@@ -236,6 +240,54 @@ def verify_formation_successor(protocol: dict[str, Any], segment: dict[str, Any]
     verify_formation_sources(protocol)
 
 
+def verify_collector_successor(protocol: dict[str, Any], segment: dict[str, Any]) -> None:
+    predecessor = _load(
+        Path(protocol["terminal_predecessor_file"]), protocol["terminal_predecessor_sha256"]
+    )
+    additions = {
+        "terminal_predecessor_file",
+        "terminal_predecessor_sha256",
+        "collector_recovery_manifest_file",
+        "collector_recovery_owner_file",
+        "collector_recovery_assessment_file",
+        "bank_patch_root",
+    }
+    changed = {"version", "files", "collector_root", "collector_commit", "repair_runtime_source"}
+    if (
+        predecessor["version"] != "recall-checkpoint-operator@3"
+        or set(protocol) != set(predecessor) | additions
+        or {k: v for k, v in protocol.items() if k not in additions | changed}
+        != {k: v for k, v in predecessor.items() if k not in changed}
+        or segment["initialize_store"]
+        or segment["initialize_deadline"]
+        or protocol["bank_patch_root"]
+        != str(Path(protocol["collector_root"]) / "src/agent_core/evals")
+    ):
+        raise ValueError("Collector repair cannot change runtime, plan, state or deadline")
+    files = protocol["files"]
+    if any(files.get(name) != digest for name, digest in predecessor["files"].items()):
+        raise ValueError("Collector repair omitted or changed a predecessor input")
+    for key in additions - {"terminal_predecessor_sha256", "bank_patch_root"}:
+        if protocol[key] not in files:
+            raise ValueError("Collector recovery evidence is not pinned")
+    if files[protocol["terminal_predecessor_file"]] != protocol["terminal_predecessor_sha256"]:
+        raise ValueError("Collector predecessor is not pinned")
+    for short in BANK_MODULES:
+        if str(Path(protocol["bank_patch_root"]) / (short + ".py")) not in files:
+            raise ValueError("The terminal bank implementation is not pinned")
+    manifest = _load(
+        Path(protocol["collector_recovery_manifest_file"]),
+        files[protocol["collector_recovery_manifest_file"]],
+    )
+    if (
+        manifest["predecessor_protocol_sha256"] != protocol["terminal_predecessor_sha256"]
+        or segment.get("collector_recovery_manifest_sha256")
+        != files[protocol["collector_recovery_manifest_file"]]
+    ):
+        raise ValueError("Collector paid admission does not name the exact recovery")
+    verify_formation_sources(protocol)
+
+
 def verify_formation_sources(protocol: dict[str, Any]) -> None:
     # Stdlib-only duplicate of the evidence guard: verify BEFORE importing runtime.
     # A regression enforces these exact two source hashes in both implementations.
@@ -264,10 +316,18 @@ def _bootstrap(protocol: dict[str, Any]) -> None:
         raise ValueError("Use the frozen runtime's interpreter")
     sys.path.insert(0, str(root / "src"))
     importlib.import_module("agent_core.evals")
-    if protocol["version"] == "recall-checkpoint-operator@3":
+    if protocol["version"] in {"recall-checkpoint-operator@3", "recall-checkpoint-operator@4"}:
         verify_formation_sources(protocol)
         name = "agent_core.memory.distillation"
-        if name in sys.modules:
+        patches = {name: Path(protocol["repair_runtime_source"])}
+        if protocol["version"] == "recall-checkpoint-operator@4":
+            patches.update(
+                {
+                    "agent_core.evals." + short: Path(protocol["bank_patch_root"]) / (short + ".py")
+                    for short in BANK_MODULES
+                }
+            )
+        if any(n in sys.modules for n in patches):
             raise ValueError("Formation was imported before its explicit repair")
 
         class RepairFinder(importlib.abc.MetaPathFinder):
@@ -277,10 +337,8 @@ def _bootstrap(protocol: dict[str, Any]) -> None:
                 path: Sequence[str] | None,
                 target: ModuleType | None = None,
             ) -> importlib.machinery.ModuleSpec | None:
-                if fullname == name:
-                    return importlib.util.spec_from_file_location(
-                        fullname, Path(protocol["repair_runtime_source"])
-                    )
+                if fullname in patches:
+                    return importlib.util.spec_from_file_location(fullname, patches[fullname])
                 return None
 
         finder = RepairFinder()
@@ -288,10 +346,14 @@ def _bootstrap(protocol: dict[str, Any]) -> None:
         try:
             # memory.__init__ builds its extractor census during import; intercept
             # the first load so that it cannot retain an old class reference.
-            importlib.import_module(name)
+            for name in patches:
+                importlib.import_module(name)
         finally:
             sys.meta_path.remove(finder)
-    for short in MODULES:
+    modules: tuple[str, ...] = MODULES
+    if protocol["version"] == "recall-checkpoint-operator@4":
+        modules = (*MODULES[:-1], "general_recall_collector_recovery", MODULES[-1])
+    for short in modules:
         path = Path(protocol["collector_root"]) / f"src/agent_core/evals/{short}.py"
         if str(path) not in protocol["files"]:
             raise ValueError("An external collector module is not pinned")
@@ -342,10 +404,15 @@ async def _run(
     root = Path(protocol["frozen_root"])
     runtime_patch = (
         Path(protocol["repair_runtime_source"])
-        if protocol["version"] == "recall-checkpoint-operator@3"
+        if protocol["version"] in {"recall-checkpoint-operator@3", "recall-checkpoint-operator@4"}
         else None
     )
-    verify_frozen_module(root, runtime_patch)
+    bank_patch_root = (
+        Path(protocol["bank_patch_root"])
+        if protocol["version"] == "recall-checkpoint-operator@4"
+        else None
+    )
+    verify_frozen_module(root, runtime_patch, bank_patch_root)
     plan_data = json.loads(pinned("plan_file"), object_pairs_hook=_unique)
     plan_data.pop("version")
     plan_data["scenarios"] = tuple(plan_data["scenarios"])
@@ -451,6 +518,19 @@ async def _run(
             create_deadline=segment["initialize_deadline"],
             preparation_approval=approval,
             runtime_patch=runtime_patch,
+            bank_patch_root=bank_patch_root,
+            collector_recovery=(
+                tuple(
+                    pinned(name)
+                    for name in (
+                        "collector_recovery_manifest_file",
+                        "collector_recovery_owner_file",
+                        "collector_recovery_assessment_file",
+                    )
+                )
+                if protocol["version"] == "recall-checkpoint-operator@4"
+                else None
+            ),
             formation_repair=(
                 tuple(
                     pinned(name)

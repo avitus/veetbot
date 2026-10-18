@@ -263,3 +263,32 @@ async def test_supervisor_cancellation_preserves_admitted_answers_before_propaga
     reports = tuple((store.directory / "segments").glob("*.json"))
     assert len(reports) == 1
     assert json.loads(reports[0].read_bytes())["interrupted"] is True
+
+
+async def test_seal_failure_retains_attempt_facts_without_claiming_a_sealed_ledger(
+    store: CheckpointStore,
+) -> None:
+    async def evaluate(key: Slot, worker: int) -> bytes:
+        raise CollectionFailureError("formation", TimeoutError("Private provider detail"))
+
+    def broken_seal() -> str:
+        raise ValueError("The journal could not be sealed")
+
+    with pytest.raises(ValueError, match="could not be sealed"):
+        await collect_segment(
+            store,
+            evaluate=evaluate,
+            validate=validate,
+            admit=lambda key: None,
+            seal_ledger=broken_seal,
+        )
+    reports = tuple((store.directory / "unsealed-segments").glob("*.json"))
+    assert len(reports) == 1
+    report = json.loads(reports[0].read_bytes())
+    assert report["state"] == "unsealed"
+    assert report["seal_error_class"] == "ValueError"
+    assert report["attempts"][0]["error_class"] == "TimeoutError"
+    assert "ledger_sha256" not in report
+    assert "Private provider detail" not in json.dumps(report)
+    with pytest.raises(ValueError, match=r"unknown|unresolved"):
+        store.begin(required_slots(store.plan.scenarios)[0])

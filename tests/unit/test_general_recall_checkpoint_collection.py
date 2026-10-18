@@ -221,3 +221,62 @@ def test_incomplete_lineage_never_compiles_or_creates_a_release(
         parent.import_into(store)
         with pytest.raises(ValueError, match=r"complete|matrix"):
             compile_checkpoint_collection(store, parent, old_ledgers())
+
+
+def test_reconciled_completed_rows_keep_original_hashes_and_missing_wall_timings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from agent_core.evals import general_recall_collector_recovery as recovery
+
+    store, parent, parents = setup_collection(tmp_path, monkeypatch)
+    with store:
+        path = next((store.directory / "segments").iterdir())
+        report = json.loads(path.read_bytes())
+        completed = report["attempts"].pop()
+        path.unlink()
+        raw = _json(report)
+        (path.parent / (_digest(raw) + ".json")).write_bytes(raw)
+        directory = store.directory / "collector-recovery"
+        directory.mkdir()
+        reconciled = {
+            "version": "recall-continuation-reconciled@1",
+            "derived_from_durable_events": True,
+            "plan_sha256": _digest(store.plan.encoded()),
+            "measurement_identity_sha256": parent.identity_sha256,
+            "ledger_sha256": report["ledger_sha256"],
+            "attempts": [
+                {
+                    k: v
+                    for k, v in completed.items()
+                    if k not in {"worker", "started_at", "finished_at"}
+                }
+            ],
+        }
+        reconciled["attempts"][0]["wall_seconds"] = None
+        target = directory / "reconciled-segment.json"
+        target.write_bytes(_json(reconciled))
+        # The proof validator has its own original-byte/unknown-send regressions.
+        # This seam isolates merging a validated reconciliation into the full matrix.
+        monkeypatch.setattr(
+            recovery,
+            "retained_collector_recovery",
+            lambda _: (
+                SimpleNamespace(predecessor_protocol_sha256="a" * 64, completed_rows=5),
+                {
+                    "successor_protocol_sha256": "b" * 64,
+                    "first_segment": 2,
+                    "manifest_sha256": "f" * 64,
+                },
+            ),
+        )
+        result = compile_checkpoint_collection(store, parent, parents)
+        assert len(result.observations) == 1600
+        items = [i for i in result.review_items if i["kind"] == "reconciled_collector_segment"]
+        assert items[0]["report"]["attempts"][0]["wall_seconds"] is None
+        assert items[0]["report"]["attempts"][0]["result_sha256"] == completed["result_sha256"]
+        reconciled["attempts"][0]["result_sha256"] = "0" * 64
+        target.write_bytes(_json(reconciled))
+        with pytest.raises(ValueError):
+            compile_checkpoint_collection(store, parent, parents)

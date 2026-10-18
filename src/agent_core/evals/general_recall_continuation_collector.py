@@ -163,9 +163,34 @@ async def _collect(
             # A cancelled observer/coordinator must not cancel another admitted answer.
             stopping = interrupted = True
     await settling
-    ledger_sha256 = seal_ledger()
-    if re.fullmatch(r"[0-9a-f]{64}", ledger_sha256) is None:
-        raise ValueError("Invalid sealed provider ledger identity")
+    try:
+        ledger_sha256 = seal_ledger()
+        if re.fullmatch(r"[0-9a-f]{64}", ledger_sha256) is None:
+            raise ValueError("Invalid sealed provider ledger identity")
+    except Exception as error:
+        # Keep the actual admitted outcomes even if cleanup cannot seal a ledger.
+        # This is diagnostic evidence, never a report granting a slot retry.
+        unsealed = store.directory / "unsealed-segments"
+        if not unsealed.exists():
+            unsealed.mkdir(mode=0o700)
+            _sync(store.directory)
+        if unsealed.is_symlink() or not unsealed.is_dir():
+            raise ValueError("Invalid unsealed segment directory") from error
+        evidence = _json(
+            {
+                "version": "recall-continuation-unsealed@1",
+                "plan_sha256": hashlib.sha256(store.plan.encoded()).hexdigest(),
+                "state": "unsealed",
+                "seal_error_class": _error_class(error),
+                "interrupted": interrupted,
+                "started_at": started_at,
+                "finished_at": store.clock.now().isoformat(),
+                "wall_seconds": monotonic() - segment_start,
+                "attempts": attempts,
+            }
+        )
+        _write(unsealed / f"{hashlib.sha256(evidence).hexdigest()}.json", evidence)
+        raise
     for attempt in attempts:
         if attempt["state"] == "failed":
             store.fail(

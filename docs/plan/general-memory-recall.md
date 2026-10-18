@@ -454,6 +454,18 @@ The owner permits an aggregate cap up to USD 500 if necessary; any added allowan
 requires fresh reconciliation, and the original allocation is not renewed.
 Independent human review must include both failed attempts and replacements.
 
+[ADR-0215](../adr/0215-formation-terminal-outcomes.md) repairs collector cleanup
+after a settled call: slot context cannot span consumer yields, terminal facts
+are retained before downstream validation, and cleanup cannot mask the original
+failure. An explicitly admitted successor preserves all 418 completed rows,
+derives the five missing report entries only from original events and bytes, and
+keeps missing wall timings null. A supplemental seal accounts for the stopped
+journal without rewriting it or claiming successful original sealing. The failed
+pre-answer preparation and proved-unsent reader receive distinct, one-use recovery
+events; unknown sent work remains blocked. The changed bank and collector modules
+are pinned separately in protocol version four, alongside the existing deadline
+repair and all predecessor inputs. This grants no automatic successor or activation.
+
 ## Release admission mechanism
 
 `general-recall-release@1` binds reviewed scenario/independence manifests, exact
@@ -666,6 +678,11 @@ planning tokens and cost in the measurement. This is an evaluation option, not a
 new unconditional production model call. Optional paired formation banks replay
 identical recorded structured completions and verify identical formed current
 state before each arm, as specified in [ADR-0194](../adr/0194-paired-formation-response-banks.md).
+Version two banks additionally retain the narrow, completed MAX_TOKENS refusal
+defined in [ADR-0215](../adr/0215-formation-terminal-outcomes.md). Recording and
+replay raise the same refusal at the same request position, allowing the same
+audited runtime fallback and requiring identical formed state. Legacy bank bytes
+and all other unsupported or interrupted completion rejections remain unchanged.
 Observations distinguish replayed formation usage from new provider work.
 Reproducible sparse baseline configurations are under
 `evals/capability/general-recall/experiments/`. Reviewed corpus, full comparisons,
