@@ -539,7 +539,7 @@ Completion rate divides completed runs by completed plus
 failed runs; cancellations and parked work are reported separately. A null rate
 means no outcomes. The completion latency includes queueing and approval waits.
 Failure groups contain only validated classes, fingerprints and release IDs.
-The current queue signal excludes future scheduled work from ready-queue age.
+Ready-queue age runs from a run's latest readiness and excludes future scheduled work.
 Recovered tool/model failures remain visible even when the run completes.
 
 The explicit `--check --notify` mode evaluates four supplementary application
