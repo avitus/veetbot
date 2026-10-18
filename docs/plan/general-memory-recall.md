@@ -338,8 +338,12 @@ by synthetic analogues; real-data export retains the separate consent rules.
 Public datasets remain operator-supplied, versioned and license-aware, never vendored.
 The scorer never supplies expected labels, categories or answer values to retrieval.
 
-Every scenario exercises automatic and deliberate recall. Record both correctly
-seeded retrieval and the full formation-to-answer path. Include old relevant facts,
+Every scenario exercises automatic and deliberate recall. Under
+[ADR-0212](../adr/0212-checkpointed-memory-confirmation.md), the required production
+comparison records the full formation-to-answer path with sparse control and final
+hybrid retrieval: 1,600 observations across the 400 reviewed scenarios. Correctly
+seeded retrieval and dense-only comparisons remain separately reported diagnostics;
+the legacy release formats continue to require all twelve variants. Include old relevant facts,
 newer unrelated facts, hard semantic distractors, another person's facts, conflicts,
 negation, updates, deletion, historical questions and information never supplied.
 Load tests use 100, 1,000 and 10,000 competing records, with a separately measured
@@ -410,6 +414,18 @@ exclusive paired formation bank. Failures stop new work while already admitted
 requests settle. Setup, native indexing and actual reader runtime are reported
 separately; contention remains part of measured answer latency. No corpus, load,
 quality, monetary or per-answer latency requirement changes.
+
+ADR-0212 supersedes the full-matrix and no-reuse requirements for the separately
+identified checkpointed continuation. It preserves every original failed run,
+retains completed rows without retagging or outcome-based selection, and requires
+byte verification, original formation banks, mechanical reconstruction and complete
+ledger reconciliation before reuse. Durable starts and results prevent duplicate
+sends after an interruption. An uncertain started answer cannot be resent. One
+cancelled formation preparation without any completed answer may receive one
+recorded replacement bank; all charges and uncertainty remain accounted for.
+Publication of this reduced comparison requires a new explicit protocol and its
+verified admission implementation. Existing version-one/two publication does not
+accept a reduced matrix. No activation gate is satisfied by checkpoint retention.
 
 ## Release admission mechanism
 
@@ -512,6 +528,15 @@ secrets and all other fields/providers retain rejection. Deterministic stream an
 actual adapter/runtime replay regressions precede fresh reviewed source, native
 measurement and complete confirmation. No failed rows are reused, no quality
 gate is weakened, and neither this prefix nor native load establishes full quality.
+That repair's subsequent v6 run on `16153a5f` stopped at 1,239 observations after
+a cancelled formation call. Its complete originals and both scratch databases are
+retained. Eight ledgers total USD 135.90882425 including USD 7.83424 in uncertain
+reservations, leaving USD 164.09117575 under the unchanged cap. The owner then
+approved checkpointed continuation (ADR-0212), replacing the earlier no-reuse
+method for unchanged, verified inputs. Work now proceeds on the isolated
+`codex/memory-retrieval-evaluation` branch without holding unrelated development
+or production releases. Continuation implementation, collection, independent human
+failure review, publication and a separately authorized release route remain open.
 The native historical-index load measurement
 under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
 100,000 competing records. It measures one synthetic information need and cannot

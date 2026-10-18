@@ -245,3 +245,4 @@ implementation without one.
 - [ADR-0208: Grounded relationship discovery](0208-grounded-relationship-discovery.md)
 - [ADR-0210: OpenAI opaque continuation credential boundary](0210-openai-opaque-credential-boundary.md)
 - [ADR-0211: Commit-scoped reliability signing](0211-commit-scoped-reliability-signing.md)
+- [ADR-0212: Checkpointed memory confirmation](0212-checkpointed-memory-confirmation.md)

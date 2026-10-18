@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from agent_core.domain.general_recall_checkpoint_release import CheckpointReleaseBundle
 from agent_core.domain.general_recall_release import (
     RecallExpectedSource,
     RecallObservation,
@@ -99,7 +100,9 @@ def _answer(row: RecallObservation, scenario: RecallScenario) -> bool:
     )
 
 
-def _validate_corpus(bundle: RecallReleaseBundle) -> dict[str, RecallScenario]:
+def _validate_corpus(
+    bundle: RecallReleaseBundle | CheckpointReleaseBundle,
+) -> dict[str, RecallScenario]:
     scenarios = {s.id: s for s in bundle.scenarios}
     _require(len(scenarios) == len(bundle.scenarios), "duplicate scenario")
     _require(
@@ -151,6 +154,13 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
     """
     # model_copy/model_construct are not validation, including for nested values.
     bundle = RecallReleaseBundle.model_validate(bundle.model_dump())
+    return _score_measurements(bundle)
+
+
+def _score_measurements(
+    bundle: RecallReleaseBundle | CheckpointReleaseBundle,
+) -> dict[str, Any]:
+    """Shared numeric gates; public callers validate their own versioned schema."""
     if bundle.version == "general-recall-release@1":
         _require(
             not any(s.evidence_sources for s in bundle.scenarios)
@@ -163,7 +173,7 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
     else:
         _require(
             all(r.rendered_noise_items is not None for r in bundle.observations),
-            "version two requires measured noise counts",
+            "source-accounted evidence requires measured noise counts",
         )
     scenarios = _validate_corpus(bundle)
     identity_hash = hashlib.sha256(bundle.identity.model_dump_json().encode()).hexdigest()
@@ -186,19 +196,20 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
         and all(g.failed == 0 for g in bundle.gates),
         "incomplete or failing gate receipts",
     )
+    reduced = isinstance(bundle, CheckpointReleaseBundle)
     expected = {
         (s.id, path, pipeline, channel)
         for s in bundle.scenarios
         for path in ("automatic", "deliberate")
-        for pipeline in ("seeded", "formation")
-        for channel in ("sparse", "dense", "hybrid")
+        for pipeline in (("formation",) if reduced else ("seeded", "formation"))
+        for channel in (("sparse", "hybrid") if reduced else ("sparse", "dense", "hybrid"))
     }
     rows: dict[tuple[str, str, str, str], RecallObservation] = {
         (r.scenario_id, r.path, r.pipeline, r.channel): r for r in bundle.observations
     }
     _require(
         set(rows) == expected and len(rows) == len(bundle.observations),
-        "observation coverage differs from the full experiment",
+        "observation coverage differs from the registered experiment",
     )
     grouped: dict[tuple[str, str, str, str, str], list[RecallObservation]] = defaultdict(list)
     for row in bundle.observations:
@@ -219,7 +230,7 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
             and len(row.recovered_sources) <= row.searches * 3,
             "invalid recovered source provenance or work bound",
         )
-        if bundle.version == "general-recall-release@2":
+        if bundle.version != "general-recall-release@1":
             _require(
                 row.global_rank_certifiable is True
                 and all(source.anchor_rank is not None for source in row.recovered_sources),

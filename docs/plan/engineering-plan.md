@@ -4316,6 +4316,13 @@ source/index invalidation, and version-bound comparative activation evidence.
 M16/M32 frozen controls and unattended dreaming gates remain unchanged. This
 parallel workstream does not advance the sequential verified ceiling.
 
+The owner-authorized continuation protocol in ADR-0212 retains all 400 scenarios
+and both recall paths, with formation-to-answer sparse-control and final-hybrid
+comparisons as the 1,600 required observations. Seeded and dense-only comparisons
+remain diagnostics. Completed observations may carry forward only with immutable
+provenance and unchanged evaluated inputs; all quality thresholds, independent
+human failure review, accounting and activation gates remain required.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

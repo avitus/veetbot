@@ -144,6 +144,17 @@ title: Current Milestone
   preserving deferred `dev` work and restoring the original restriction afterward.
   Complete confirmation, independent failure review and release publication
   remain outstanding.
+  The later v6 on `16153a5f` stopped at 1,239 observations after a cancelled
+  formation call. All originals remain immutable; eight ledgers total
+  USD 135.90882425 including uncertain reservations, leaving USD 164.09117575.
+  The owner approved checkpointed continuation and a focused production comparison
+  (ADR-0212): all 400 scenarios, both paths, formation sparse control versus final
+  hybrid, or 1,600 required observations. Reuse requires unchanged runtime inputs,
+  verified original rows and banks, and complete accounting. The guarded collector
+  and publication implementation is in final verification; paid admission remains
+  pending. No quality threshold or independent human review is
+  waived. Work proceeds independently on `codex/memory-retrieval-evaluation`;
+  unrelated development and releases are not dependencies or held by this run.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
 
