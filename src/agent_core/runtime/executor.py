@@ -1239,8 +1239,13 @@ class RunExecutor:
                     # the run has answered and lost only its finalization.
                     return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=adopted[-1])
                 return None
-            # This batch was never recorded, though its answered calls ran.
+            # This batch was never recorded, though its answered calls ran. Like a
+            # checkpointed batch it is dispatched and reserved whole at its
+            # pre-batch watermark; an answered call returns its recorded outcome,
+            # so a further resume counts the batch once.
+            calls = fitted
             step_number = context.run.step_count
+            pending_batch_budget = {"step_count": step_number, "tool_call_count": adopted_baseline}
         else:
             baseline = restored.budget_state.get("tool_call_count", 0)
             if not isinstance(baseline, int):

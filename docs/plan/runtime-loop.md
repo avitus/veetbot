@@ -747,9 +747,11 @@ an adopted batch's answered calls. This also works after every checkpoint is
 lost and does not count a recorded batch twice. Legacy events without the
 watermark retain the prior accounting fallback and its undercount limitation.
 When recall preparation reserves work before redispatching the checkpoint's own
-batch, that reservation checkpoint preserves the batch's original proposal step
-and tool-usage watermark. A second interruption cannot give its invocations new
-idempotency keys or count the batch again. The reservation still records current
+batch or a partly answered batch adopted from the log, that reservation
+checkpoint keeps the whole batch with its original proposal step and tool-usage
+watermark; an answered call returns its recorded outcome. A second interruption
+cannot give its invocations new idempotency keys, lose the answered calls' usage
+or count the batch again. The reservation still records current
 model usage and recall work; after dispatch, `tool_recovered` records live step
 and tool counters normally.
 Recovery records a refusal only for a refused call the log does not already
