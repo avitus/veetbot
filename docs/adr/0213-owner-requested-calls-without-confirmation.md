@@ -51,8 +51,10 @@ requires for `mcp.bland_call.start_call`, and for a `schedule.create` with
   or call-record content, or a message ingested from a device; and
 - every number dialed appears in the owner's own messages in the conversation.
   A scheduled occurrence's seed is the owner-approved instruction, so its
-  number counts. Formatting differs freely; a national number of ten or more
-  digits matches its country-prefixed form.
+  number counts. Formatting differs freely, but the complete number must
+  match: a ten-digit national number equals its `+1` form, because the
+  deployment's calling number is North American, and no other prefix or
+  shared suffix matches.
 
 Origin trust resets at each user message, so an email read in an earlier turn
 would not taint a later "go ahead"; the conversation-wide check closes that.

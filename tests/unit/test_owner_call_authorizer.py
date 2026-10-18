@@ -236,6 +236,10 @@ async def test_scheduling_an_owner_call_needs_no_confirmation(
         ("Call Riv at +16505550123.", "Call Riv at +1 (650) 555-0123 at 6:15.", True),
         ("Call Riv at +16505550123.", "Call Riv at (650) 555-0123 at 6:15.", True),
         ("Call Riv at +16505550123.", "Call Riv at 555-0123 at 6:15.", False),
+        # A different country code with the same national digits is another phone.
+        ("Call Riv at +916505550123.", "Call Riv at (650) 555-0123 at 6:15.", False),
+        ("Call Riv at +446505550123.", "Call Riv at 650-555-0123 at 6:15.", False),
+        ("Call Riv at +916505550123.", "Call Riv at +1 650 555 0123 at 6:15.", False),
         ("Call Riv at +16505550123.", "Call Riv at 6:15.", False),
         # Every number the schedule will dial must come from the owner.
         (

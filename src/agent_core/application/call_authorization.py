@@ -38,6 +38,7 @@ _OWNER_ORIGINS = frozenset(
 )
 
 
+NORTH_AMERICAN_COUNTRY_CODE = "1"
 # A dialable number as people write it: "+1 (650) 555-0123", "650.555.0123".
 _PHONE_NUMBER = re.compile(r"\+?\d[\d\s().-]{6,}\d")
 
@@ -153,8 +154,14 @@ def _owner_gave_every_number(action: ProposedAction, owner_texts: tuple[str, ...
 
 
 def _same_number(dialed: str, given: str) -> bool:
-    """Equal digits, or a national number of at least ten digits the model prefixed."""
-    if dialed == given:
-        return len(dialed) >= 7
-    shorter, longer = sorted((dialed, given), key=len)
-    return len(shorter) >= 10 and longer.endswith(shorter)
+    """The same complete number, never a shared suffix.
+
+    The deployment's calling number is North American, so a ten-digit
+    national number the owner typed is the same phone as its +1 form. Any
+    other country code is a different phone and keeps the card.
+    """
+    return _international(dialed) == _international(given) and len(dialed) >= 7
+
+
+def _international(digits: str) -> str:
+    return f"{NORTH_AMERICAN_COUNTRY_CODE}{digits}" if len(digits) == 10 else digits
