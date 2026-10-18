@@ -143,6 +143,7 @@ class _Event(ReleaseValue):
         "parent_failed",
         "replacement",
         "bounded_replacement",
+        "formation_repair",
     ]
     result_sha256: Digest | None = None
     stage: Literal["formation", "answer"] | None = None
@@ -181,6 +182,8 @@ class CheckpointStore:
         self._states: dict[Slot, _Event] = {}
         self._replaced: set[str] = set()
         self._bounded_replaced: set[Slot] = set()
+        self._formation_repaired: set[Slot] = set()
+        self._replaying = True
         self._count = 0
         self._previous = _digest(encoded)
         self._lock: int | None = None
@@ -212,6 +215,7 @@ class CheckpointStore:
                 event = _Event.model_validate(json.loads(raw, object_pairs_hook=_unique_object))
                 self._validate_event(event)
                 self._apply(event, raw)
+            self._replaying = False
             expected: set[Path] = set()
             for key, event in self._states.items():
                 if event.action == "importing":
@@ -276,7 +280,7 @@ class CheckpointStore:
             or (event.action in {"failed", "parent_failed"}) != (event.stage is not None)
             or (event.action in {"failed", "parent_failed"}) != (event.error_class is not None)
             or (event.action in {"failed", "parent_failed"}) != (event.ledger_sha256 is not None)
-            or (event.action in {"parent_failed", "bounded_replacement"})
+            or (event.action in {"parent_failed", "bounded_replacement", "formation_repair"})
             != (event.source_sha256 is not None)
         ):
             raise ValueError("Invalid checkpoint event or chain")
@@ -285,7 +289,7 @@ class CheckpointStore:
         if event.action == "started":
             if any(self._states[k].action == "failed" for k in self._bounded_replaced):
                 raise ValueError("An approved bounded recovery failed; paid admissions must stop")
-            if action not in {None, "replacement", "bounded_replacement"}:
+            if action not in {None, "replacement", "bounded_replacement", "formation_repair"}:
                 raise ValueError("Unresolved or unknown slot cannot resend")
             if any(
                 key != event.key
@@ -294,6 +298,12 @@ class CheckpointStore:
                 for key, value in self._states.items()
             ):
                 raise ValueError("Scenario has an unresolved preparation or answer")
+        elif event.action == "formation_repair":
+            from agent_core.evals.general_recall_formation_repair import (
+                validate_formation_repair_event,
+            )
+
+            validate_formation_repair_event(self, event.key, str(event.source_sha256))
         elif event.action == "bounded_replacement":
             from agent_core.evals.general_recall_checkpoint_recovery import validate_recovery_event
 
@@ -344,6 +354,8 @@ class CheckpointStore:
             self._replaced.add(event.key[0])
         if event.action == "bounded_replacement":
             self._bounded_replaced.add(event.key)
+        if event.action == "formation_repair":
+            self._formation_repaired.add(event.key)
         self._count, self._previous = event.index, _digest(raw)
 
     def _record(self, action: str, key: Slot, **details: object) -> None:
@@ -490,7 +502,8 @@ class CheckpointStore:
             if key[0] not in blocked
             and (
                 key not in self._states
-                or self._states[key].action in {"replacement", "bounded_replacement"}
+                or self._states[key].action
+                in {"replacement", "bounded_replacement", "formation_repair"}
             )
         )
 

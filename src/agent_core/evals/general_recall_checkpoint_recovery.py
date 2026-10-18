@@ -268,7 +268,7 @@ def validate_recovery_event(store: CheckpointStore, key: Slot, source_sha256: st
         previous.action == "failed"
         and previous.index == claim.failed_event
         and key not in store._bounded_replaced
-        and not store._retained(key)
+        and (store._replaying or not store._retained(key))
         and (
             claim.stage != "formation"
             or (
@@ -345,7 +345,17 @@ def admit_bounded_recovery(
 
 
 def protocol_ancestry(store: CheckpointStore, protocol_sha256: str) -> tuple[str, int]:
-    """Return the immutable deadline's protocol and the first successor segment."""
+    """Return the immutable deadline protocol; every later epoch stays explicit."""
+    from agent_core.evals.general_recall_formation_repair import retained_formation_repair
+
+    repaired = retained_formation_repair(store)
+    if repaired is not None:
+        repair_proof, transition = repaired
+        _require(
+            protocol_sha256 == transition["successor_protocol_sha256"],
+            "unadmitted repaired protocol",
+        )
+        protocol_sha256 = repair_proof.predecessor_protocol_sha256
     retained = retained_recovery(store)
     if retained is None:
         return protocol_sha256, 0
@@ -354,3 +364,13 @@ def protocol_ancestry(store: CheckpointStore, protocol_sha256: str) -> tuple[str
         protocol_sha256 == transition["successor_protocol_sha256"], "unadmitted successor protocol"
     )
     return proof.predecessor_protocol_sha256, int(transition["first_segment"])
+
+
+def protocol_for_segment(store: CheckpointStore, protocol_sha256: str, index: int) -> str:
+    from agent_core.evals.general_recall_formation_repair import retained_formation_repair
+
+    root, first = protocol_ancestry(store, protocol_sha256)
+    repaired = retained_formation_repair(store)
+    if repaired is not None and index < repaired[1]["first_segment"]:
+        protocol_sha256 = repaired[0].predecessor_protocol_sha256
+    return root if index < first else protocol_sha256

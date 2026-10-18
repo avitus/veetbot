@@ -4323,6 +4323,14 @@ remain diagnostics. Completed observations may carry forward only with immutable
 provenance and unchanged evaluated inputs; all quality thresholds, independent
 human failure review, accounting and activation gates remain required.
 
+ADR-0214 authorizes the specific formation deadline repair after repeated local
+preparation cancellation. The 413 completed observations retain their original
+identities and bytes. The remaining observations explicitly name the repaired
+runtime; a versioned collection binds both cohorts and verifies that model-visible
+requests, formation decisions and reader behavior are unchanged. This narrow
+compatibility exception cannot admit another runtime change or retag old evidence.
+All coverage, quality and security gates and the existing absolute deadline remain.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

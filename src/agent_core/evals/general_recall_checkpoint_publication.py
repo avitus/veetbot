@@ -115,6 +115,11 @@ def publish_checkpoint_release(
 
     verify_source()
     collected = compile_checkpoint_collection(store, parent, parents)
+    from agent_core.evals.general_recall_formation_repair import validate_repair_lineage
+
+    validate_repair_lineage(
+        bundle, json.loads(collected.manifest, object_pairs_hook=_unique_object)
+    )
     _require(
         collected.scenarios == bundle.scenarios
         and collected.observations == bundle.observations
@@ -198,7 +203,10 @@ def publish_checkpoint_release(
         "retained collection changed during review verification",
     )
     provenance = {
-        "version": "recall-checkpoint-publication@1",
+        "version": "recall-checkpoint-publication@2"
+        if lineage.formation_repair_sha256
+        else "recall-checkpoint-publication@1",
+        "formation_repair_sha256": lineage.formation_repair_sha256,
         "release_sha256": _digest(raw[bundle_path]),
         "activation_eligible": False,
         "measurement_identity_sha256": parent.identity_sha256,

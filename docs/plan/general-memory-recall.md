@@ -436,6 +436,22 @@ collector appends the authorization and protocol ancestry; it uses fresh workers
 and a distinct final preparation bank. Either exception failing again stops further
 paid admissions. This does not authorize retries for other readers or preparations,
 change evaluated runtime inputs or relax any quality/security/per-answer limit.
+
+[ADR-0214](../adr/0214-formation-deadline-repair.md) subsequently authorizes a
+root-cause runtime repair: formation@11 has a finite 600-second enclosing stage
+deadline, separate from the unchanged 120-second transport request. Explicit
+caller limits and frozen controls remain unchanged. A pinned source comparison
+and complete request regression restrict compatibility to this deadline and its
+safe audit metadata. The original 413 rows remain byte-identical; new rows name
+a distinct repaired execution identity alongside the original comparison inputs.
+Collection/publication version two requires the exact repair manifest, complete
+protocol ancestry and independent human review of this exception. It cannot
+publish under the unchanged-runtime version or erase the patch from eventual
+deployment binding. Only the repeatedly interrupted pre-answer preparation may
+start a new bank; completed or unknown reader work cannot resend. All prior
+reservations, the original absolute deadline and every quality gate remain.
+The owner permits an aggregate cap up to USD 500 if necessary; any added allowance
+requires fresh reconciliation, and the original allocation is not renewed.
 Independent human review must include both failed attempts and replacements.
 
 ## Release admission mechanism

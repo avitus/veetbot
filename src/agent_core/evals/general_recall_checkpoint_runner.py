@@ -68,19 +68,28 @@ _COLLECTOR_MODULES = frozenset(
         "general_recall_checkpoint_parent",
         "general_recall_checkpoint_runner",
         "general_recall_checkpoint_recovery",
+        "general_recall_formation_repair",
         "general_recall_continuation_budget",
         "general_recall_continuation_collector",
     )
 )
 
 
-def verify_frozen_module(root: Path) -> None:
+def verify_frozen_module(root: Path, runtime_patch: Path | None = None) -> None:
     """Refuse mixed runtime imports; only separately pinned collector modules differ."""
     package = (root / "src/agent_core").resolve()
+    if runtime_patch is not None:
+        from agent_core.evals.general_recall_formation_repair import verify_deadline_source
+
+        verify_deadline_source(_read(package / "memory/distillation.py"), _read(runtime_patch))
+        loaded = sys.modules.get("agent_core.memory.distillation")
+        if loaded is None or Path(str(loaded.__file__)).resolve() != runtime_patch.resolve():
+            raise ValueError("The declared repaired runtime is not loaded")
     for name, module in tuple(sys.modules.items()):
         if (
             not (name == "agent_core" or name.startswith("agent_core."))
             or name in _COLLECTOR_MODULES
+            or (runtime_patch is not None and name == "agent_core.memory.distillation")
         ):
             continue
         filename = getattr(module, "__file__", None)
@@ -107,6 +116,7 @@ class FrozenSlotEvaluator:
         deadline: ContinuationDeadline,
         verify_protocol: Callable[[], None],
         forbidden_databases: tuple[str, ...],
+        runtime_patch: Path | None = None,
     ) -> None:
         self.root, self.parent, self.prepared = root, parent, prepared
         self.options, self.budget, self.deadline = options, budget, deadline
@@ -115,7 +125,12 @@ class FrozenSlotEvaluator:
         self._encoders: dict[int, LocalEmbeddingProvider] = {}
         self._closed = False
         verify_protocol()
-        verify_frozen_module(root)
+        verify_frozen_module(root, runtime_patch)
+        from agent_core.evals.general_recall_formation_repair import execution_claim
+
+        self.execution_repair = execution_claim(budget.store)
+        if (runtime_patch is not None) != (self.execution_repair is not None):
+            raise ValueError("Runtime repair and durable authorization disagree")
         self.prepared = bind_frozen_preflight(
             parent_identity=parent.identity.model_dump(mode="json"),
             parent_manifest=parent.manifest.model_dump(mode="json"),
@@ -245,10 +260,17 @@ class FrozenSlotEvaluator:
                         else TimeoutError()
                     )
             raise CollectionFailureError(stage, cause) from error
+        if self.execution_repair is not None:
+            row["execution_repair"] = self.execution_repair
         row["observed_at"] = system_clock().now().isoformat()
         return (json.dumps(row) + "\n").encode()
 
     def validate(self, value: dict[str, Any]) -> None:
+        from agent_core.evals.general_recall_formation_repair import validate_execution_claim
+
+        validate_execution_claim(
+            self.execution_repair, value, repaired=self.execution_repair is not None
+        )
         self.parent.confirmation.validate_observation(value)
         key = self.parent._key(value)
         if key not in required_slots(self.budget.store.plan.scenarios):
@@ -309,12 +331,14 @@ async def run_checkpoint_segment(
     create_deadline: bool,
     preparation_approval: tuple[bytes, str, bytes] | None = None,
     bounded_recovery: tuple[bytes, bytes, bytes] | None = None,
+    formation_repair: tuple[bytes, ...] | None = None,
+    runtime_patch: Path | None = None,
     monotonic: Callable[[], float] = elapsed_time,
 ) -> dict[str, Any]:
     """Run one explicitly admitted segment, never automatically launch a successor."""
     store._owned()
     verify_protocol()
-    verify_frozen_module(root)
+    verify_frozen_module(root, runtime_patch)
     parent.archive.verify()
     parent.import_into(store)
     if bounded_recovery is not None:
@@ -328,6 +352,28 @@ async def run_checkpoint_segment(
             manifest=declaration,
             owner=decision,
             assessment=assessment,
+            protocol_sha256=protocol_sha256,
+        )
+    if formation_repair is not None:
+        from agent_core.evals.general_recall_formation_repair import admit_formation_repair
+
+        if (
+            preparation_approval is not None
+            or bounded_recovery is not None
+            or create_deadline
+            or runtime_patch is None
+        ):
+            raise ValueError("Formation repair cannot renew earlier exceptions or deadlines")
+        declaration, decision, assessment, original, repaired = formation_repair
+        if _read(runtime_patch) != repaired:
+            raise ValueError("Loaded formation repair differs from retained proof")
+        admit_formation_repair(
+            store,
+            manifest=declaration,
+            owner=decision,
+            assessment=assessment,
+            original_source=original,
+            repaired_source=repaired,
             protocol_sha256=protocol_sha256,
         )
     if preparation_approval is not None:
@@ -404,6 +450,7 @@ async def run_checkpoint_segment(
             deadline=deadline,
             verify_protocol=verify_protocol,
             forbidden_databases=forbidden,
+            runtime_patch=runtime_patch,
         )
 
         def seal() -> str:

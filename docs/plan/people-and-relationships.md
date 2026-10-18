@@ -479,6 +479,14 @@ must be bounded too: at most 64 mentions, 64 proposed links, and 32 interaction
 proposals per segment, with an explicit overflow disposition for each omitted
 source unit. Ordinary multi-person examples must fit and form completely.
 
+ADR-0214 separates formation@11's default 600-second overall stage deadline from
+its unchanged 120-second provider request timeout. A progressing stream can
+finish within that finite stage budget. Explicit timeout overrides retain their
+exact bound; formation@9 and other frozen controls stay at 120 seconds. This
+changes no model-visible request, stage order, parsing, grounding or fallback
+policy. Stage-deadline exhaustion remains a failure with explicit audit metadata;
+external cancellation propagates. No provider retry is added.
+
 Email extraction should reuse its admitted assessment batch under its new
 evaluated version rather than make a second assessment call for each person.
 Charge all People work on email evidence to the existing aggregate email

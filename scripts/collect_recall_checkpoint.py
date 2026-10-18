@@ -8,6 +8,8 @@ import argparse
 import asyncio
 import hashlib
 import importlib
+import importlib.abc
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -15,8 +17,10 @@ import re
 import stat
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 MODULES = (
@@ -26,6 +30,7 @@ MODULES = (
     "general_recall_checkpoint_parent",
     "general_recall_continuation_collector",
     "general_recall_checkpoint_recovery",
+    "general_recall_formation_repair",
     "general_recall_checkpoint_runner",
 )
 
@@ -83,7 +88,12 @@ def verify_invocation(
     protocol = _load(protocol_path, protocol_sha256)
     segment = _load(segment_path, segment_sha256)
     if (
-        protocol["version"] not in {"recall-checkpoint-operator@1", "recall-checkpoint-operator@2"}
+        protocol["version"]
+        not in {
+            "recall-checkpoint-operator@1",
+            "recall-checkpoint-operator@2",
+            "recall-checkpoint-operator@3",
+        }
         or segment["version"] != "recall-checkpoint-paid-admission@1"
         or segment["paid_launch_authorized"] is not True
         or segment["protocol_sha256"] != protocol_sha256
@@ -93,6 +103,8 @@ def verify_invocation(
         raise ValueError("Unadmitted checkpoint protocol or segment")
     if protocol["version"] == "recall-checkpoint-operator@2":
         verify_successor(protocol, segment)
+    if protocol["version"] == "recall-checkpoint-operator@3":
+        verify_formation_successor(protocol, segment)
     captured = datetime.fromisoformat(segment["checked_at"])
     if captured.tzinfo is None or not 0 <= (datetime.now(UTC) - captured).total_seconds() <= 3600:
         raise ValueError("Fresh configuration and budget admission are required")
@@ -179,6 +191,71 @@ def verify_successor(protocol: dict[str, Any], segment: dict[str, Any]) -> None:
         raise ValueError("Paid admission does not bind the exact bounded recovery")
 
 
+def verify_formation_successor(protocol: dict[str, Any], segment: dict[str, Any]) -> None:
+    """Admit only the owner-approved fixed source patch, keeping all prior inputs."""
+    predecessor = _load(
+        Path(protocol["repair_predecessor_file"]), protocol["repair_predecessor_sha256"]
+    )
+    additions = {
+        "repair_predecessor_file",
+        "repair_predecessor_sha256",
+        "repair_manifest_file",
+        "repair_owner_file",
+        "repair_assessment_file",
+        "repair_original_source",
+        "repair_runtime_source",
+    }
+    changed = {"version", "files", "collector_root", "collector_commit"}
+    if (
+        predecessor["version"] != "recall-checkpoint-operator@2"
+        or set(protocol) != set(predecessor) | additions
+        or {k: v for k, v in protocol.items() if k not in additions | changed}
+        != {k: v for k, v in predecessor.items() if k not in changed}
+        or segment["initialize_store"]
+        or segment["initialize_deadline"]
+    ):
+        raise ValueError(
+            "Formation repair cannot change frozen inputs, allocation, state or deadline"
+        )
+    files = protocol["files"]
+    if any(files.get(name) != digest for name, digest in predecessor["files"].items()):
+        raise ValueError("Formation repair omitted or changed an original input")
+    for key in additions - {"repair_predecessor_sha256"}:
+        if protocol[key] not in files:
+            raise ValueError("Formation repair input is not pinned")
+    if files[protocol["repair_predecessor_file"]] != protocol["repair_predecessor_sha256"]:
+        raise ValueError("Formation repair predecessor changed")
+    manifest = _load(
+        Path(protocol["repair_manifest_file"]), files[protocol["repair_manifest_file"]]
+    )
+    if (
+        manifest["predecessor_protocol_sha256"] != protocol["repair_predecessor_sha256"]
+        or segment.get("repair_manifest_sha256") != files[protocol["repair_manifest_file"]]
+    ):
+        raise ValueError("Formation repair admission mismatch")
+    verify_formation_sources(protocol)
+
+
+def verify_formation_sources(protocol: dict[str, Any]) -> None:
+    # Stdlib-only duplicate of the evidence guard: verify BEFORE importing runtime.
+    # A regression enforces these exact two source hashes in both implementations.
+    for key, root_key, expected in (
+        (
+            "repair_original_source",
+            "frozen_root",
+            "e7ce0e0f0e93f2279126ba8a7d6f9e554222c22f2c9fd074836ed48c2bad6823",
+        ),
+        (
+            "repair_runtime_source",
+            "collector_root",
+            "110141418041c582f635dcb25ae22bb3088d748e00227424060c4da1b3e6a1a7",
+        ),
+    ):
+        path = Path(protocol[root_key]) / "src/agent_core/memory/distillation.py"
+        if str(path) != protocol[key] or hashlib.sha256(_read(path)).hexdigest() != expected:
+            raise ValueError("Unverified formation deadline repair source")
+
+
 def _bootstrap(protocol: dict[str, Any]) -> None:
     if any(name == "agent_core" or name.startswith("agent_core.") for name in sys.modules):
         raise ValueError("Use a fresh interpreter with no previously imported runtime")
@@ -187,6 +264,33 @@ def _bootstrap(protocol: dict[str, Any]) -> None:
         raise ValueError("Use the frozen runtime's interpreter")
     sys.path.insert(0, str(root / "src"))
     importlib.import_module("agent_core.evals")
+    if protocol["version"] == "recall-checkpoint-operator@3":
+        verify_formation_sources(protocol)
+        name = "agent_core.memory.distillation"
+        if name in sys.modules:
+            raise ValueError("Formation was imported before its explicit repair")
+
+        class RepairFinder(importlib.abc.MetaPathFinder):
+            def find_spec(
+                self,
+                fullname: str,
+                path: Sequence[str] | None,
+                target: ModuleType | None = None,
+            ) -> importlib.machinery.ModuleSpec | None:
+                if fullname == name:
+                    return importlib.util.spec_from_file_location(
+                        fullname, Path(protocol["repair_runtime_source"])
+                    )
+                return None
+
+        finder = RepairFinder()
+        sys.meta_path.insert(0, finder)
+        try:
+            # memory.__init__ builds its extractor census during import; intercept
+            # the first load so that it cannot retain an old class reference.
+            importlib.import_module(name)
+        finally:
+            sys.meta_path.remove(finder)
     for short in MODULES:
         path = Path(protocol["collector_root"]) / f"src/agent_core/evals/{short}.py"
         if str(path) not in protocol["files"]:
@@ -236,7 +340,12 @@ async def _run(
         return raw
 
     root = Path(protocol["frozen_root"])
-    verify_frozen_module(root)
+    runtime_patch = (
+        Path(protocol["repair_runtime_source"])
+        if protocol["version"] == "recall-checkpoint-operator@3"
+        else None
+    )
+    verify_frozen_module(root, runtime_patch)
     plan_data = json.loads(pinned("plan_file"), object_pairs_hook=_unique)
     plan_data.pop("version")
     plan_data["scenarios"] = tuple(plan_data["scenarios"])
@@ -341,6 +450,21 @@ async def _run(
             forbidden_databases=tuple(protocol["forbidden_databases"]),
             create_deadline=segment["initialize_deadline"],
             preparation_approval=approval,
+            runtime_patch=runtime_patch,
+            formation_repair=(
+                tuple(
+                    pinned(name)
+                    for name in (
+                        "repair_manifest_file",
+                        "repair_owner_file",
+                        "repair_assessment_file",
+                        "repair_original_source",
+                        "repair_runtime_source",
+                    )
+                )
+                if protocol["version"] == "recall-checkpoint-operator@3"
+                else None
+            ),
             bounded_recovery=(
                 (
                     pinned("recovery_manifest_file"),

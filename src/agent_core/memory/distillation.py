@@ -1180,6 +1180,7 @@ class NemoriAssistedCandidateExtractor:
 
     name = NEMORI_EXTRACTOR_VERSION
     policy_version = NEMORI_FORMATION_POLICY_VERSION
+    default_stage_timeout_seconds = DISTILLATION_TIMEOUT_SECONDS
 
     def __init__(
         self,
@@ -1190,7 +1191,7 @@ class NemoriAssistedCandidateExtractor:
         clock: Clock,
         ids: IdFactory,
         fallback: MemoryCandidateExtractor | None = None,
-        timeout_seconds: float = DISTILLATION_TIMEOUT_SECONDS,
+        timeout_seconds: float | None = None,
         commit_guard: Callable[[RepositoryUnitOfWork], Awaitable[None]] | None = None,
         source_isolated: bool = False,
         reasoning_effort: ReasoningEffort | None = None,
@@ -1206,7 +1207,12 @@ class NemoriAssistedCandidateExtractor:
         self._clock = clock
         self._ids = ids
         self._fallback = fallback or HighRecallCandidateExtractor()
-        self._timeout_seconds = timeout_seconds
+        self._timeout_seconds = (
+            DISTILLATION_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+        )
+        self._stage_timeout_seconds = (
+            self.default_stage_timeout_seconds if timeout_seconds is None else timeout_seconds
+        )
         self._commit_guard = commit_guard
         self._source_isolated = source_isolated
         self.last_audit = DistillationAudit(provider_calls=0)
@@ -1675,8 +1681,9 @@ class NemoriAssistedCandidateExtractor:
             attempt_number=1,
             started_at=self._clock.now(),
         )
+        deadline = asyncio.timeout(self._stage_timeout_seconds)
         try:
-            async with asyncio.timeout(self._timeout_seconds):
+            async with deadline:
                 turn = await collect_turn(
                     self._provider.stream(request, self._resolved_model, attempt)
                 )
@@ -1709,7 +1716,11 @@ class NemoriAssistedCandidateExtractor:
             partial_turn = exc.partial_turn if isinstance(exc, ModelStreamError) else None
             partial_usage = None if partial_turn is None else partial_turn.usage
             if partial_usage is None:
-                return None, _safe_failure(exc), _empty_stage_metric("provider_failure", latency_ms)
+                metric = _empty_stage_metric("provider_failure", latency_ms)
+                if deadline.expired():
+                    metric["timeout_origin"] = "stage_deadline"
+                    metric["stage_deadline_seconds"] = str(self._stage_timeout_seconds)
+                return None, _safe_failure(exc), metric
             return (
                 None,
                 _safe_failure(exc),
@@ -1964,6 +1975,9 @@ class PeopleAssistedCandidateExtractor(NemoriAssistedCandidateExtractor):
 
     name = "people-assisted-v1"
     policy_version = "formation@11"
+    # A progressing structured stream may exceed an individual HTTP operation's
+    # timeout. Keep its total stage budget finite without changing request bytes.
+    default_stage_timeout_seconds = 600.0
 
     @staticmethod
     def _distillation_schema() -> dict[str, Any]:

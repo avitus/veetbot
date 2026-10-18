@@ -294,9 +294,8 @@ def verify_worker_admissions(
         p.with_suffix(".json").name for p in journals
     }:
         raise ValueError("Incomplete or extra worker admission inventory")
-    from agent_core.evals.general_recall_checkpoint_recovery import protocol_ancestry
+    from agent_core.evals.general_recall_checkpoint_recovery import protocol_for_segment
 
-    predecessor, first_successor = protocol_ancestry(store, protocol_sha256)
     used: tuple[str, ...] = ()
     for index, journal in enumerate(journals, 1):
         value = WorkerAdmission.model_validate_json(
@@ -305,8 +304,7 @@ def verify_worker_admissions(
         if (
             journal.name != f"{index:06d}.jsonl"
             or value.plan_sha256 != _digest(store.plan.encoded())
-            or value.protocol_sha256
-            != (predecessor if index < first_successor else protocol_sha256)
+            or value.protocol_sha256 != protocol_for_segment(store, protocol_sha256, index)
             or value.budget_admission_sha256
             != _digest(_read(journal.with_suffix(".admission.json")))
             or value.forbidden_databases != forbidden_databases + used

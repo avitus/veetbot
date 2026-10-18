@@ -87,6 +87,7 @@ def _inventory(store: CheckpointStore) -> dict[str, str]:
         "budget",
         "operator-segments",
         "recovery",
+        "formation-repair",
     ):
         directory = store.directory / name
         if not directory.exists():
@@ -193,6 +194,16 @@ def compile_checkpoint_collection(
     protocol_sha256 = (
         recovery[1]["successor_protocol_sha256"] if recovery else deadline.protocol_sha256
     )
+    from agent_core.evals.general_recall_formation_repair import (
+        execution_claim,
+        retained_formation_repair,
+        validate_execution_claim,
+    )
+
+    repair = retained_formation_repair(store)
+    claim = execution_claim(store)
+    if repair is not None:
+        protocol_sha256 = repair[1]["successor_protocol_sha256"]
     verify_worker_admissions(
         store,
         protocol_sha256=protocol_sha256,
@@ -211,6 +222,15 @@ def compile_checkpoint_collection(
     references = []
     reported = held = Decimal(0)
     review: list[dict[str, Any]] = []
+    if repair is not None:
+        review.append(
+            {
+                "kind": "owner_approved_formation_deadline_repair",
+                "manifest": repair[0].model_dump(mode="json"),
+                "transition": repair[1],
+                "execution_repair": claim,
+            }
+        )
     if recovery is not None:
         review.append(
             {
@@ -419,6 +439,8 @@ def compile_checkpoint_collection(
         _require(_digest(raw) == event.result_sha256, "retained result changed")
         row = _load(raw)
         _require(parent._key(row) == key, "result moved to another slot")
+        repaired_row = repair is not None and event.index > repair[0].history_events
+        validate_execution_claim(claim, row, repaired=repaired_row)
         parent.confirmation.validate_observation(row)
         if key in parent.rows:
             _require(raw == parent.rows[key], "imported original bytes changed")
@@ -493,7 +515,12 @@ def compile_checkpoint_collection(
     parent.archive.verify()
     manifest = _json(
         {
-            "version": "recall-checkpoint-collection@1",
+            "version": "recall-checkpoint-collection@2"
+            if repair
+            else "recall-checkpoint-collection@1",
+            "formation_repair_sha256": repair[1]["manifest_sha256"] if repair else None,
+            "execution_repair": claim,
+            "preserved_original_rows": repair[0].completed_rows if repair else len(parent.rows),
             "activation_eligible": False,
             "plan_sha256": _digest(store.plan.encoded()),
             "measurement_identity_sha256": parent.identity_sha256,
