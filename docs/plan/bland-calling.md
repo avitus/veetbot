@@ -133,6 +133,7 @@ outbound correlation identifier durably. Final states distinguish no answer,
 busy, voicemail, completed conversation, failure, and an uncertain dispatch.
 
 Use the executor's existing effect watermark and uncertain-outcome handling.
+
 A timeout, disconnection, malformed success response, or crash after possible
 dispatch must never cause an automatic redial. Reconcile using provider call
 history and the correlation identifier; unresolved ambiguity remains visible to
@@ -147,6 +148,27 @@ and content-free errors. API credentials never enter tool arguments or model
 context. The implementation adds no major dependency unless a separate decision
 justifies it. [Send Call](https://docs.bland.ai/api-v1/post/calls),
 [Call Details](https://docs.bland.ai/api-v1/get/calls-id)
+
+### Owner-requested and scheduled calls (ADR-0213)
+
+A call the owner asks for needs no confirmation card. An application standing
+authorizer satisfies the deterministic approval for `start_call` when the run is
+the owner's top-level chat or a scheduler occurrence, the newest user message
+is `USER`, nothing anywhere in the conversation came from email, the web, a
+document or a call record, and the dialed number appears in the owner's own
+messages. A scheduled occurrence's owner-approved instruction counts as the
+owner's message. Any other call keeps the card, including one whose number came
+only from memory or People. `AGENT_CALL_OWNER_REQUESTS_ENABLED=0` restores the
+card for every call. Dispatch still enforces the pinned configuration, caller
+ID, recording and duration checks above.
+
+"Call Riv at +1 (650) 555-0123 at 6:15" is one `schedule.create` with
+`place_call=true`, which the same authorizer allows when every number in its
+instruction is one the owner gave. Its definition requests exactly the two
+calling scopes, so the occurrence can call and read the outcome. Creation fails
+with `schedule.calling_unavailable` when calling is not composed, rather than
+at firing; the scheduler role mirrors `AGENT_CALL_ENABLED` to vouch for the
+scopes.
 
 The server's stderr is not a private channel: the API or worker process that
 spawns the child passes on its own stderr, so anything the child logs lands in
@@ -300,7 +322,7 @@ performed as part of local implementation.
 
 2. **Tool separation.** Scoped read and call rosters are fixed and honestly classified with no provider administration or arbitrary API passthrough. **M27.**
 
-3. **Approval binding.** Every outbound call requires approval of the exact recipient, brief, facts, limits, voicemail message and pinned configuration; changes, denial, expiry and revocation prevent dispatch. **M27.**
+3. **Approval binding.** Every outbound call is approved on its card — exact recipient, brief, facts, limits, voicemail message and pinned configuration — or authorized by the owner's own request (ADR-0213); a call derived from email, web or call content always needs the card, and changes, denial, expiry and revocation prevent dispatch. **M27.**
 
 4. **Dispatch recovery.** Crashes or lost responses after possible dispatch never redial and preserve uncertain outcomes. **M27.**
 

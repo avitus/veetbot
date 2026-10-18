@@ -282,6 +282,7 @@ from agent_core.application.browser_task_grants import (
     read_task_grant_context,
     sweep_expired_task_grants,
 )
+from agent_core.application.call_authorization import OwnerCallAuthorizer
 from agent_core.application.call_worker import CallWorker
 from agent_core.application.calling import CallService
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
@@ -676,6 +677,7 @@ from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
     SCHEDULE_CREATE_TOOL_NAME,
     LegacyScheduleCreateTool,
+    PreviousScheduleCreateTool,
     ScheduleCreateTool,
 )
 from agent_core.tools.schedule_lifecycle import (
@@ -1694,6 +1696,12 @@ def _validate_schedule_role(settings: Settings) -> Principal:
         raise ConfigurationError(
             "AUTH_SCOPES contains unknown platform scopes: " + ", ".join(sorted(unknown))
         )
+    return _schedule_principal(settings)
+
+
+def _schedule_principal(settings: Settings) -> Principal:
+    """The scheduler vouches for the same first-party rosters the application composes."""
+
     email_scopes = {
         scope
         for row in email_server_configs(
@@ -1703,11 +1711,17 @@ def _validate_schedule_role(settings: Settings) -> Principal:
         )
         for scope in row.required_scopes
     }
+    # ADR-0213: a call schedule's occurrence keeps its calling scopes.
+    call_scopes = {
+        scope
+        for row in calling_server_configs(settings.auth_tenant_id, enabled=settings.call_enabled)
+        for scope in row.required_scopes
+    }
     return Principal(
         tenant_id=settings.auth_tenant_id,
         principal_id=settings.auth_principal_id,
         roles=set(settings.auth_roles),
-        scopes={*settings.auth_scopes, *email_scopes},
+        scopes={*settings.auth_scopes, *email_scopes, *call_scopes},
     )
 
 
@@ -2768,8 +2782,17 @@ async def _compose(
             LegacyScheduleCreateTool(schedule_service, agent, schedule_definition_limits)
         )
         registry.register(
-            ScheduleCreateTool(
+            PreviousScheduleCreateTool(
                 schedule_service, agent, schedule_definition_limits, uow_factory=uow_factory
+            )
+        )
+        registry.register(
+            ScheduleCreateTool(
+                schedule_service,
+                agent,
+                schedule_definition_limits,
+                uow_factory=uow_factory,
+                calling_enabled=settings.call_enabled,
             )
         )
         registry.register(LegacyScheduleListTool(schedule_service))
@@ -3861,6 +3884,8 @@ async def _compose(
                     now=clock.now,
                 )
             )
+        if settings.call_enabled and settings.call_owner_requests_enabled:
+            standing_authorizers.append(OwnerCallAuthorizer(uow_factory=uow_factory, now=clock.now))
         standing_authorizer = (
             CompositeStandingAuthorizer(standing_authorizers) if standing_authorizers else None
         )
