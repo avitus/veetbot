@@ -1,6 +1,8 @@
 import XCTest
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 final class ConversationNavigationUITests: XCTestCase {
@@ -2644,6 +2646,22 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["To: alex@example.test"].exists)
         send.click()
         XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 10))
+        // A sent reply is read-only text the owner can still select and copy; a disabled
+        // container blocks that. The owner's clipboard is restored afterwards.
+        let sentBody = app.staticTexts["email.draft-body"]
+        XCTAssertTrue(sentBody.waitForExistence(timeout: 5), app.debugDescription)
+        let pasteboard = NSPasteboard.general
+        let savedClipboard = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let savedClipboard { pasteboard.setString(savedClipboard, forType: .string) }
+        }
+        pasteboard.clearContents()
+        sentBody.doubleClick()
+        app.typeKey("c", modifierFlags: .command)
+        let copied = pasteboard.string(forType: .string) ?? ""
+        XCTAssertFalse(copied.isEmpty, "The sent reply must stay selectable")
+        XCTAssertTrue((sentBody.value as? String ?? "").contains(copied), copied)
         app.buttons["mode.chat"].click()
         XCTAssertTrue(app.descendants(matching: .any)["sidebar.new-conversation"].waitForExistence(timeout: 5))
     }

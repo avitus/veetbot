@@ -731,37 +731,43 @@ private struct EmailThreadScreen: View {
                 Text("From: \(accountDescription(draft.accountID))").appFont(.caption).foregroundColor(.secondary)
                 draftNotices(draft)
                 VStack(alignment: .leading, spacing: 12) {
-                    envelopeField("To", path: \.to, field: .to)
-                    Button {
-                        showingEnvelope.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Cc, Bcc & subject")
-                            Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
+                    Group {
+                        envelopeField("To", path: \.to, field: .to)
+                        Button {
+                            showingEnvelope.toggle()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("Cc, Bcc & subject")
+                                Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
+                            }
+                        }.buttonStyle(.plain).appFont(.caption).foregroundColor(EmailSurface.accent)
+                            .accessibilityIdentifier("email.draft-envelope")
+                            .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
+                        if showingEnvelope {
+                            envelopeField("Cc", path: \.cc, field: .cc)
+                            envelopeField("Bcc", path: \.bcc, field: .bcc)
+                            envelopeField("Subject", path: \.subject, field: .subject)
                         }
-                    }.buttonStyle(.plain).appFont(.caption).foregroundColor(EmailSurface.accent)
-                        .accessibilityIdentifier("email.draft-envelope")
-                        .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
-                    if showingEnvelope {
-                        envelopeField("Cc", path: \.cc, field: .cc)
-                        envelopeField("Bcc", path: \.bcc, field: .bcc)
-                        envelopeField("Subject", path: \.subject, field: .subject)
-                    }
+                    }.disabled(!draft.canEdit || model.isPerformingAction)
                     Divider()
                     // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
                     // no longer change (sending, sent, uncertain) renders as text instead of an editor.
+                    // Only the editor is disabled: a disabled ancestor would also block selecting the text.
                     if draft.canEdit {
                         TextEditor(text: editBinding(\.body)).appFont(.body).lineSpacing(5).frame(
                             minHeight: 180, idealHeight: 220
                         )
                         .focused($focusedField, equals: .body)
+                        .disabled(model.isPerformingAction)
                         .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
                     } else {
+                        // No accessibilityLabel: on a selectable Text, AppKit resolves the label
+                        // through the text itself and recurses until the stack overflows.
                         Text(edit.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
+                            .accessibilityIdentifier("email.draft-body")
                     }
-                }.disabled(!draft.canEdit || model.isPerformingAction)
+                }
                 Divider()
                 HStack(spacing: 12) {
                     Menu {
