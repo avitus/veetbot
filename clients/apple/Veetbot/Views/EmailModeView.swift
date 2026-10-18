@@ -773,11 +773,19 @@ private struct EmailThreadScreen: View {
                         envelopeField("Subject", path: \.subject, field: .subject)
                     }
                     Divider()
-                    TextEditor(text: editBinding(\.body)).appFont(.body).lineSpacing(5).frame(
-                        minHeight: 180, idealHeight: 220
-                    )
-                    .focused($focusedField, equals: .body)
-                    .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
+                    // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
+                    // no longer change (sending, sent, uncertain) renders as text instead of an editor.
+                    if draft.canEdit {
+                        TextEditor(text: editBinding(\.body)).appFont(.body).lineSpacing(5).frame(
+                            minHeight: 180, idealHeight: 220
+                        )
+                        .focused($focusedField, equals: .body)
+                        .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
+                    } else {
+                        Text(edit.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
+                    }
                 }.disabled(!draft.canEdit || model.isPerformingAction)
                 Divider()
                 HStack(spacing: 12) {
@@ -830,6 +838,7 @@ private struct EmailThreadScreen: View {
             }.padding(20).emailCard(accent: true)
                 .onAppear { showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
                 .onChange(of: draft.id) { _ in showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
+                .onChange(of: draft.canEdit) { canEdit in if !canEdit { focusedField = nil } }
         } else {
             VStack(alignment: .leading, spacing: 14) {
                 Label("Your reply", systemImage: "square.and.pencil").appFont(.headline)
