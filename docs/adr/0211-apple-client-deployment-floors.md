@@ -79,7 +79,8 @@ a macOS 27 image."
    store for the launch, and the authoritative session index repopulates it
    on connect (ADR-0050). The cache boundary of ADR-0049 decision 7 is what
    makes that degradation acceptable: nothing in the file was ever
-   authoritative.
+   authoritative. Startup removes a leftover `session-history.json`, which
+   could still list conversations deleted later.
 5. **Hosted CI keeps the Xcode 27.0.0 image.** Its macOS 26.6.2 host and
    iOS 27.0 simulators satisfy both floors; no job changes.
 6. **The documents that named the old floors change with this record.**

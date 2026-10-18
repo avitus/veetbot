@@ -29,6 +29,8 @@ from {_RUNS} and {_WINDOW}
 """
 # A QUEUED row's updated_at is when it became ready: creation, or the requeue
 # after an approval, answer, child join or reclaimed lease; created_at is not.
+# Any other write to a queued row (such as a cancel request) also moves
+# updated_at, so the reported age is a lower bound on the true wait.
 _QUEUE = f"""
 select count(*) filter (where r.status='QUEUED') as queued,
        count(*) filter (where r.status='RUNNING') as running,

@@ -207,6 +207,26 @@ import Testing
         await cache.removeAll()
         #expect(await cache.value(for: secondID) == nil)
     }
+
+    @Test
+    func testRetiredFileHistoryIsRemovedAtStartup() throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let directory = support.appendingPathComponent("Veetbot", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let legacy = directory.appendingPathComponent("session-history.json")
+        let neighbour = directory.appendingPathComponent("keep.json")
+        try Data("[{\"title\":\"Deleted later\"}]".utf8).write(to: legacy)
+        try Data("{}".utf8).write(to: neighbour)
+
+        SessionHistoryStoreFactory.removeLegacyHistoryFile(applicationSupport: support)
+
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        #expect(FileManager.default.fileExists(atPath: neighbour.path))
+        // A second launch finds nothing to remove and does not fail.
+        SessionHistoryStoreFactory.removeLegacyHistoryFile(applicationSupport: support)
+    }
 }
 
 /// The local-history backends: SwiftData in the app, and the in-memory store

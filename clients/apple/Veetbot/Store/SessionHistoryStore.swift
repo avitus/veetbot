@@ -64,6 +64,7 @@ public enum SessionHistoryStoreFactory {
     /// authoritative session index refills it on connect (ADR-0211). Command
     /// Line Tools builds cannot link SwiftData and use the in-memory store.
     public static func makeDefault() -> any SessionHistoryStore {
+        removeLegacyHistoryFile()
         #if XCODE_BUILD
         do {
             return try SwiftDataSessionHistoryStore()
@@ -74,6 +75,26 @@ public enum SessionHistoryStoreFactory {
         }
         #endif
         return VolatileSessionHistoryStore()
+    }
+
+    /// The retired file store's cache (ADR-0211) could still list conversations
+    /// the owner deleted later, so it is removed rather than left orphaned.
+    static func removeLegacyHistoryFile(applicationSupport: URL? = nil) {
+        guard
+            let support = applicationSupport
+                ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                .first
+        else { return }
+        let legacy = support.appendingPathComponent("Veetbot", isDirectory: true)
+            .appendingPathComponent("session-history.json")
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: legacy)
+        } catch {
+            logger.error(
+                "Retired history file removal failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 }
 
