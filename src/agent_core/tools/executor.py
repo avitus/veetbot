@@ -296,13 +296,35 @@ def _active_turn_facts(checkpoint: RunCheckpoint) -> AuthorizationTurn:
     """
 
     names: set[str] = set()
+    newest_user_trust = TrustLevel.EXTERNAL_UNTRUSTED
     for item in reversed(checkpoint.conversation):
         if isinstance(item, UserMessage):
-            return AuthorizationTurn(newest_user_trust=item.trust, tool_names=frozenset(names))
+            newest_user_trust = item.trust
+            break
         if isinstance(item, ToolCallItem):
             names.add(_unwrapped_call_name(item))
+    # ADR-0213 looks past the active turn: origin trust resets at each user
+    # message, so an email read earlier must still count.
+    owner_texts = tuple(
+        part.text
+        for item in checkpoint.conversation
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.USER
+        for part in item.content
+        if isinstance(part, TextPart)
+    )
+    conversation_untrusted = any(
+        (isinstance(item, UserMessage) and item.trust is not TrustLevel.USER)
+        or (
+            isinstance(item, ToolResultItem)
+            and item.trust in {TrustLevel.EXTERNAL_UNTRUSTED, TrustLevel.KNOWLEDGE}
+        )
+        for item in checkpoint.conversation
+    )
     return AuthorizationTurn(
-        newest_user_trust=TrustLevel.EXTERNAL_UNTRUSTED, tool_names=frozenset(names)
+        newest_user_trust=newest_user_trust,
+        tool_names=frozenset(names),
+        owner_texts=owner_texts,
+        conversation_untrusted=conversation_untrusted,
     )
 
 

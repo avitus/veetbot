@@ -45,14 +45,22 @@ requires for `mcp.bland_call.start_call`, and for a `schedule.create` with
   principal holds `mcp.bland_call.use`;
 - the run's seed is the owner's own message, or a scheduler seed in a schedule
   session;
-- the newest user message has `USER` trust; and
-- the turn's origin trust is platform, trusted configuration, user, or memory.
+- the newest user message has `USER` trust;
+- the turn's origin trust is platform, trusted configuration, user, or memory;
+- no item anywhere in the conversation, in any turn, is email, web, knowledge
+  or call-record content, or a message ingested from a device; and
+- every number dialed appears in the owner's own messages in the conversation.
+  A scheduled occurrence's seed is the owner-approved instruction, so its
+  number counts. Formatting differs freely; a national number of ten or more
+  digits matches its country-prefixed form.
 
-Memory is admitted so that "call Riv" can use Riv's number from the owner's
-own memory or People. A turn that consumed email, web, knowledge or call
-transcript content has `EXTERNAL_UNTRUSTED` origin and keeps the ordinary
-confirmation card, so content cannot place a call. Hardline rules and denials
-still precede the authorizer. Like ADR-0209, this is an application
+Origin trust resets at each user message, so an email read in an earlier turn
+would not taint a later "go ahead"; the conversation-wide check closes that.
+Memory can hold email-derived statements, so a number found only in memory or
+People keeps the card: content can never choose who is called. Memory remains
+admissible origin for the rest of the turn, so the owner's own context can
+shape the brief. Every other call keeps the ordinary confirmation card.
+Hardline rules and denials still precede the authorizer. Like ADR-0209, this is an application
 authorization receipt after deterministic evaluation; the compiled policy, its
 version, and the memory release evidence bound to it are unchanged. The policy
 engine's refusal to let a profile turn calls into allows is unchanged too.

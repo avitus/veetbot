@@ -668,8 +668,9 @@ existing standing grants; setting the flag to `0` restores ordinary approvals.
 
 ADR-0213 adds a second application authorization, for a call the owner asked
 for: `start_call`, or `schedule.create` with `place_call=true`, from the
-owner's own chat or schedule seed whose turn read only owner, memory or People
-content. It does not change the compiled policy or the engine's refusal to let a
+owner's own chat or schedule seed, dialing only numbers the owner typed, in a
+conversation with no external, knowledge or device-ingested content in any
+turn. It does not change the compiled policy or the engine's refusal to let a
 profile allow calls; `AGENT_CALL_OWNER_REQUESTS_ENABLED=0` restores approvals.
 
 ADR-0168's `bounded_browser_scroll` condition remains available, allowing

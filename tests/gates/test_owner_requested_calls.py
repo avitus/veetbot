@@ -32,7 +32,7 @@ from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.scheduling.materializer import ScheduleMaterializer
 from bland_mcp.client import BlandClient
 from bland_mcp.server import create_server
-from tests.contract.test_bland_client_contract import CALL_ID, KEY, NUMBER
+from tests.contract.test_bland_client_contract import CALL_ID, KEY, NUMBER, RECIPIENT
 from tests.gates.test_call_lifecycle import arguments
 from tests.gates.test_call_m27 import call_configuration
 from tests.integration.m2_support import memory_settings
@@ -111,13 +111,35 @@ async def test_an_owner_asked_call_is_placed_without_a_prompt() -> None:
     async with build(
         settings=call_settings(), script=script, sequential_ids=True, mcp_client_factory=factory
     ) as app:
-        run_id = await app.runs.submit("Call the shop and ask about ticket 12.")
+        run_id = await app.runs.submit(f"Call the shop at {RECIPIENT} about ticket 12.")
         terminal = await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=5)
         pending = await app.approvals.list_pending(run_id=run_id)
 
     assert terminal.status is RunStatus.COMPLETED
     assert pending == []
     assert placed(factory) == 1
+
+
+async def test_a_number_the_owner_did_not_give_keeps_the_card() -> None:
+    """ADR-0213: content or the model alone cannot choose who is called."""
+    factory = await call_factory()
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(name="mcp.bland_call.start_call", arguments=arguments())
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="unused", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with build(
+        settings=call_settings(), script=script, sequential_ids=True, mcp_client_factory=factory
+    ) as app:
+        run_id = await app.runs.submit("Call the shop and ask about ticket 12.")
+        assert len(await app.approvals.list_pending(run_id=run_id)) == 1
+    assert placed(factory) == 0
 
 
 async def test_the_kill_switch_restores_the_confirmation() -> None:
@@ -139,7 +161,7 @@ async def test_the_kill_switch_restores_the_confirmation() -> None:
         sequential_ids=True,
         mcp_client_factory=factory,
     ) as app:
-        run_id = await app.runs.submit("Call the shop and ask about ticket 12.")
+        run_id = await app.runs.submit(f"Call the shop at {RECIPIENT} about ticket 12.")
         assert len(await app.approvals.list_pending(run_id=run_id)) == 1
     assert placed(factory) == 0
 
@@ -185,7 +207,9 @@ async def test_a_scheduled_owner_call_is_placed_at_its_time_without_a_prompt() -
         sequential_ids=True,
         mcp_client_factory=factory,
     ) as app:
-        chat = await app.runs.submit("Call Riv at 6:15 tonight to remind her to throw the ball.")
+        chat = await app.runs.submit(
+            f"Call Riv at {RECIPIENT} at 6:15 tonight to remind her to throw the ball."
+        )
         created = await asyncio.wait_for(app.runs.wait_terminal(chat), timeout=5)
         assert created.status is RunStatus.COMPLETED, created.failure
         assert await app.approvals.list_pending(run_id=chat) == []

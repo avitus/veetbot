@@ -286,7 +286,9 @@ async def test_a_deferred_call_gets_the_same_authorization(
     )
     async with context as app:
         session_id = await app.sessions.create()
-        run_id = await app.runs.submit("Call to ask about ticket 12.", session_id)
+        run_id = await app.runs.submit(
+            f"Call {call_arguments()['phone_number']} to ask about ticket 12.", session_id
+        )
         if not owner_requests:
             [approval] = await app.approvals.list_pending(run_id=run_id)
             assert approval.tool_name == START_CALL

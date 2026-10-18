@@ -1,5 +1,6 @@
 """ADR-0213: the owner's own request for a call is its authorization."""
 
+import re
 from collections.abc import Callable
 from datetime import datetime
 
@@ -37,6 +38,10 @@ _OWNER_ORIGINS = frozenset(
 )
 
 
+# A dialable number as people write it: "+1 (650) 555-0123", "650.555.0123".
+_PHONE_NUMBER = re.compile(r"\+?\d[\d\s().-]{6,}\d")
+
+
 class OwnerCallAuthorizer:
     """Composed only with calling enabled; a refusal uses ordinary approval."""
 
@@ -68,7 +73,9 @@ class OwnerCallAuthorizer:
             and run.agent_version == agent_version
             and turn is not None
             and turn.newest_user_trust is TrustLevel.USER
+            and not turn.conversation_untrusted
             and action.origin_trust in _OWNER_ORIGINS
+            and _owner_gave_every_number(action, turn.owner_texts)
             and self._now() < action_deadline
         ):
             return refused
@@ -118,3 +125,36 @@ def _is_call(action: ProposedAction) -> bool:
         and action.arguments.get("place_call") is True
         and not action.arguments.get("use_website")
     )
+
+
+def _digits(text: str) -> str:
+    return "".join(character for character in text if character.isdigit())
+
+
+def _owner_gave_every_number(action: ProposedAction, owner_texts: tuple[str, ...]) -> bool:
+    """Who is dialed comes from the owner's own words, never from content or the model.
+
+    A scheduled occurrence's seed is the owner-approved instruction, so the
+    number it carries counts as the owner's.
+    """
+    if action.name == START_CALL_TOOL_NAME:
+        recipient = action.arguments.get("phone_number")
+        numbers = [recipient] if isinstance(recipient, str) else []
+    else:
+        instruction = action.arguments.get("instruction")
+        numbers = _PHONE_NUMBER.findall(instruction) if isinstance(instruction, str) else []
+    given = {
+        _digits(candidate) for text in owner_texts for candidate in _PHONE_NUMBER.findall(text)
+    }
+    wanted = [_digits(number) for number in numbers]
+    return bool(wanted) and all(
+        any(_same_number(number, candidate) for candidate in given) for number in wanted
+    )
+
+
+def _same_number(dialed: str, given: str) -> bool:
+    """Equal digits, or a national number of at least ten digits the model prefixed."""
+    if dialed == given:
+        return len(dialed) >= 7
+    shorter, longer = sorted((dialed, given), key=len)
+    return len(shorter) >= 10 and longer.endswith(shorter)

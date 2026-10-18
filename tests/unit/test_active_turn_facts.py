@@ -11,8 +11,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agent_core.domain.messages import AssistantMessage, TextPart, ToolCallItem, UserMessage
-from agent_core.domain.policies import AuthorizationTurn, TrustLevel
+from agent_core.domain.messages import (
+    AssistantMessage,
+    TextPart,
+    ToolCallItem,
+    ToolResultItem,
+    UserMessage,
+)
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.tools.executor import _active_turn_facts
 from tests.contract.support import NOW, RUN_ID
@@ -54,10 +60,8 @@ def test_the_turn_starts_at_the_newest_user_message() -> None:
         )
     )
 
-    assert facts == AuthorizationTurn(
-        newest_user_trust=TrustLevel.USER,
-        tool_names=frozenset({"browser.navigate", "browser.act"}),
-    )
+    assert facts.newest_user_trust is TrustLevel.USER
+    assert facts.tool_names == frozenset({"browser.navigate", "browser.act"})
 
 
 def test_a_deferred_call_counts_as_the_tool_it_names() -> None:
@@ -81,3 +85,32 @@ def test_an_untrusted_or_missing_user_message_is_recorded() -> None:
 
     assert ingested.newest_user_trust is TrustLevel.EXTERNAL_UNTRUSTED
     assert none.newest_user_trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+def result(index: int, trust: TrustLevel) -> ToolResultItem:
+    return ToolResultItem(call_id=f"call-{index}", content=[TextPart(text="x")], trust=trust)
+
+
+def test_owner_words_and_outside_content_span_the_whole_conversation() -> None:
+    """ADR-0213: an email read in an earlier turn still taints a later owner turn."""
+    facts = _active_turn_facts(
+        checkpoint(
+            user("Read my latest email."),
+            call("mcp.gmail_read.get_message", {}, 0),
+            result(0, TrustLevel.EXTERNAL_UNTRUSTED),
+            user("from a device", TrustLevel.EXTERNAL_UNTRUSTED),
+            user("Go ahead."),
+        )
+    )
+    clean = _active_turn_facts(
+        checkpoint(
+            user("Call Riv at +1 (650) 555-0123."),
+            call("memory.search", {}, 0),
+            result(0, TrustLevel.MEMORY),
+        )
+    )
+
+    assert facts.owner_texts == ("Read my latest email.", "Go ahead.")
+    assert facts.conversation_untrusted is True
+    assert clean.owner_texts == ("Call Riv at +1 (650) 555-0123.",)
+    assert clean.conversation_untrusted is False

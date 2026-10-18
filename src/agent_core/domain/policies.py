@@ -195,6 +195,10 @@ class AuthorizationTurn(BaseModel):
 
     newest_user_trust: TrustLevel
     tool_names: frozenset[str] = frozenset()
+    # ADR-0213: the owner's own words anywhere in the conversation, and whether
+    # any earlier or current item came from outside the owner.
+    owner_texts: tuple[str, ...] = ()
+    conversation_untrusted: bool = False
 
 
 class PolicyRule(BaseModel):
