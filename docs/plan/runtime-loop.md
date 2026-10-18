@@ -1936,7 +1936,9 @@ A deadline-bound run with any synthesis reserve uses its final fifth of elapsed
 budget, capped at sixty seconds, for a tool-free answer. Every model attempt
 rechecks the clock. Recovery also rechecks it before resuming a saved or rebuilt
 tool batch. A tool batch arriving after the reserve begins receives
-persisted budget refusals, leaving paired history for synthesis; a model that
+persisted budget refusals, leaving paired history for synthesis. A waiting call
+whose approval was resolved before the deadline is exempt, so the pipeline runs,
+denies or expires it as decided and never strands its invocation; a model that
 ignores a time-synthesis instruction fails visibly without dispatch. Usage
 accounting retains tools completed before an interruption, but never counts
 persisted budget refusals as executions when rebuilding a completed turn. The hard

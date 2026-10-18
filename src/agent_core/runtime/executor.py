@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.delegations import DelegationStatus
 from agent_core.domain.errors import (
@@ -1135,17 +1136,40 @@ class RunExecutor:
         rebuilt from the conversation is the model's whole turn (ADR-0115). A
         refusal the log already holds is not recorded again. Recheck the clock
         for unfinished calls, retaining already executed calls for accounting.
+        A call whose approval was resolved before the deadline is exempt from
+        the time reserve, so the pipeline honors that decision (ADR-0209).
         """
 
         proposed, _ = _fit_tool_batch(context.run, turn, used=used)
         fitted, refusals = _fit_tool_batch(context.run, turn, used=used, now=context.clock.now())
+        decided = await self._resolved_approval_calls(context)
+        refusals = [(call, result) for call, result in refusals if call.call_id not in decided]
         budget_refused = self._budget_refused_calls(context.checkpoint.conversation)
-        eligible = ({call.call_id for call in fitted} | answered) - budget_refused
+        eligible = ({call.call_id for call in fitted} | decided | answered) - budget_refused
         fitted = [call for call in proposed if call.call_id in eligible]
         await _record_refusals(
             context, [(call, result) for call, result in refusals if call.call_id not in answered]
         )
         return fitted
+
+    async def _resolved_approval_calls(self, context: RunContext) -> set[str]:
+        """Name the waiting calls whose suspending approval has been resolved."""
+
+        if not context.checkpoint.pending_approval_ids:
+            return set()
+        async with context.uow_factory() as uow:
+            invocation_ids = set()
+            for approval_id in context.checkpoint.pending_approval_ids:
+                approval = await uow.approvals.get(approval_id, context.principal)
+                if approval.status is not ApprovalStatus.PENDING:
+                    invocation_ids.add(approval.tool_invocation_id)
+            invocations = await uow.invocations.list_for_run(context.run.id, context.principal)
+        return {
+            invocation.call_id
+            for invocation in invocations
+            if invocation.id in invocation_ids
+            and invocation.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
+        }
 
     async def _turn_usage_baseline(
         self, context: RunContext, calls: list[ToolCallItem]
