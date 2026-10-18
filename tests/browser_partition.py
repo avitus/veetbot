@@ -16,6 +16,7 @@ BROWSER_MODULES = frozenset(
         "test_browser_extraction_real_chromium.py",
         "test_browser_text_real_chromium.py",
         "test_browser_focus_real_chromium.py",
+        "test_browser_request_guidance_real_chromium.py",
         "test_browser_synthetic_tasks.py",
         "test_browser_runtime_real_chromium.py",
         "test_browser_grant_hostile_pages.py",

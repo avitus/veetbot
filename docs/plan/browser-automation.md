@@ -1328,6 +1328,8 @@ The stable reason-code family includes:
 - `tool.browser.needs_user`
 - `tool.browser.page_changed`
 - `tool.browser.element_not_found`
+- `tool.browser.region_not_actionable`
+- `tool.browser.focus_required`
 - `tool.browser.action_not_allowed`
 - `tool.browser.grant_not_applicable`
 - `tool.browser.output_invalid`
@@ -1702,6 +1704,21 @@ Text continuation rechecks unchanged captured text. Detached regions, stale
 revisions and changed continuation text fail with `tool.browser.page_changed`.
 Main and section regions are discoverable; active dialog controls precede general
 navigation. Existing node, candidate, UTF-8, privacy and origin limits apply.
+
+Tool guidance distinguishes action references (`elements[].ref`, including for
+scroll) from read-only region references (`regions[].ref`). The first focused
+read omits `text_offset` or uses zero; continuation copies the returned
+`next_text` request rather than guessing an offset. When the session-scoped
+cached observation proves that a current action reference is a region, the tool
+refuses with `tool.browser.region_not_actionable` before browser dispatch. A
+nonzero offset for a known current region without matching focus similarly
+returns `tool.browser.focus_required` before a read is dispatched. Both are
+non-retryable argument failures with fixed corrective messages; they preserve
+the snapshot and do not consume an automatic stale-page recovery read. Providers
+without the optional snapshot capability retain their existing checks. Stale or
+unknown references still reach the provider's revision and target fences. These
+corrections neither choose another target nor replay an action, and do not alter
+the executor's conservative pre-tool effect watermark or authentication checks.
 
 A stale observation failure permits one separately audited fresh read, at most
 three automatic recovery reads per run, within tool and run budgets and deadlines.

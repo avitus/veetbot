@@ -18,6 +18,7 @@ from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolR
 from agent_core.ports.browser import (
     BrowserProvider,
     bind_browser_execution,
+    browser_snapshot_in_session,
     expand_browser_observation,
     extract_browser_observation,
 )
@@ -183,7 +184,8 @@ class BrowserObserveTool:
         version="1.7.0",
         description=(
             "Read modes: {}; next_observe "
-            "after/cursor; region_ref+expected_revision with text_offset; extract "
+            "after/cursor; focus with region_ref+expected_revision and no text_offset first, "
+            "then copy next_text exactly to continue text; never guess offsets. extract "
             "table/list/form; wait_for role/name or evidence. Evidence: text=complete line, "
             "region=kind/text, location=exact url, row=collection/index/typed fields/value. "
             "timeout_ms: 2000 default, 5000 max. failure_evidence: text/region/location. Form "
@@ -229,6 +231,22 @@ class BrowserObserveTool:
             )
         try:
             await bind_browser_execution(self._provider, context)
+            if expansion is not None and expansion.region_ref is not None and expansion.text_offset:
+                snapshot = await browser_snapshot_in_session(self._provider, context.session_id)
+                if snapshot is not None:
+                    cached = snapshot.observation
+                    if (
+                        cached.revision == expansion.expected_revision
+                        and any(region.ref == expansion.region_ref for region in cached.regions)
+                        and (
+                            cached.focus is None or cached.focus.region_ref != expansion.region_ref
+                        )
+                    ):
+                        return browser_failure(
+                            ToolFailureKind.INVALID_ARGUMENTS,
+                            "tool.browser.focus_required",
+                            retryable=False,
+                        )
             observation = (
                 await extract_browser_observation(self._provider, extraction)
                 if extraction is not None
@@ -253,12 +271,12 @@ class ArticleBrowserObserveTool(BrowserObserveTool):
             "version": "1.8.0",
             "input_schema": ARTICLE_INPUT_SCHEMA,
             "description": (
-                "Read: {}; next_observe after/cursor; region_ref+expected_revision+text_offset; "
-                "extract table/list/form/articles. Article index selects main; columns: "
-                "0 excerpt, 1 unique same-origin timestamp link. Form: label/role/disabled/"
-                "checked/required, never values. wait_for: role/name or text/region/location/row "
-                "evidence; optional failure_evidence. Checks are bounded, window-scoped, "
-                "not action authority."
+                "Read {}; copy next_observe for controls. Focus: region_ref+expected_revision "
+                "without text_offset first; then copy next_text exactly. Never guess offsets. "
+                "Extract table/list/form/articles; article index selects main, columns "
+                "0 excerpt/1 unique same-origin timestamp link. Form: label/role/disabled/"
+                "checked/required, never values. wait_for role/name or text/region/location/row; "
+                "failure_evidence optional. Window evidence is not authority."
             ),
         }
     )

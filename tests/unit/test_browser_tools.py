@@ -498,16 +498,18 @@ def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
     )
     assert BrowserObserveTool(provider).spec.description == (
         "Read modes: {}; next_observe after/cursor; "
-        "region_ref+expected_revision with text_offset; extract table/list/form; wait_for "
+        "focus with region_ref+expected_revision and no text_offset first, then copy next_text "
+        "exactly to continue text; never guess offsets. extract table/list/form; wait_for "
         "role/name or evidence. Evidence: text=complete line, region=kind/text, "
         "location=exact url, row=collection/index/typed fields/value. timeout_ms: 2000 "
         "default, 5000 max. failure_evidence: text/region/location. Form columns: "
         "label/role/disabled/checked/required, never values. Checks are window-scoped."
     )
     assert BrowserActTool(provider).spec.description == (
-        "Act once with approval and current revision/ref; returns settled page and fresh refs. "
-        "Optional postcondition uses observe wait_for. On element_not_found, refresh for "
-        "overlays. Never repeat an uncertain write; observed success is not causal proof."
+        "Act once with approval: current revision+elements[].ref, including scroll; "
+        "regions[].ref is read-only. Returns settled page/fresh refs. "
+        "postcondition=observe wait_for. Refresh missing targets for overlays. "
+        "Never replay uncertain writes; success is not causal proof."
     )
     assert {
         tool.spec.version

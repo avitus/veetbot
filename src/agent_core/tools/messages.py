@@ -93,6 +93,30 @@ TOOL_MESSAGES: dict[str, str] = {
         "Generated media exceeded the file size limit. "
         "A charge may have occurred; ask the user before trying again."
     ),
+    "tool.browser.region_not_actionable": (
+        "No action was sent. regions[].ref identifies a read-only region, not a control. "
+        "For every action, including scroll, choose elements[].ref from the current observation. "
+        "Use browser.observe with region_ref and expected_revision to read a region."
+    ),
+    "tool.browser.focus_required": (
+        "No read was dispatched. Open the current region with region_ref and expected_revision, "
+        "omitting text_offset or setting it to zero. Then copy the returned next_text request "
+        "exactly to continue; do not guess offsets or reuse them after another operation."
+    ),
+    "tool.browser.element_not_found": (
+        "The target control is missing, disabled or covered. Use the latest observation's "
+        "elements[].ref, never regions[].ref, for actions including scroll. "
+        "Inspect fresh evidence before proposing another action; do not substitute targets blindly."
+    ),
+    "tool.browser.page_changed": (
+        "The observation or continuation is no longer valid. Use the latest fresh observation. "
+        "Start a region read with region_ref and expected_revision without text_offset; "
+        "continue only with its returned next_text. Never replay an uncertain action."
+    ),
+    "tool.browser.outcome_unknown": (
+        "The action may already have happened. Do not repeat it. "
+        "Use read-only evidence to reconcile the result, or report the uncertainty."
+    ),
     # ADR-0129: names no grant, so the model cannot learn that one exists.
     "tool.browser.grant_not_applicable": (
         "Not performed. The page changed since it was observed; observe it again."

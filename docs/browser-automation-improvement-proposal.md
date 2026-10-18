@@ -95,15 +95,39 @@ separately audited reads and bounded owner sign-in suspension; no action replay
 or automatic credential entry is introduced. See
 [ADR-0163](adr/0163-focused-browser-observations-and-recovery.md).
 
-W1–W5 remain partial: live task quality, production-image validation, operational
-aggregates, in-flight phase streaming, frame coverage, reusable workflows and
-site-specific positive sign-in verification still need evidence. W6–W10 remain
-outstanding. Live site contracts use the websites, tasks and account/action
+W1–W6 remain partial. Later slices added verified sign-in resumption, a reviewed
+X Home briefing workflow and bounded startup recovery (ADRs 0164, 0175 and 0177).
+Those capabilities do not establish broad site coverage, task quality or capacity.
+In-flight phase streaming, frame coverage and the broader W7–W10 capabilities
+remain outstanding. Live site contracts use the websites, tasks and account/action
 scope the owner has already selected; ask only for genuinely missing scope.
 Technical predicate and workflow maintenance belongs to the implementation,
 not to the user.
 Keep the release scorecard unmeasured until its own evidence exists; local work
 is not a push, review, deployment or a completed program.
+
+### Production diagnosis — 2026-10-18
+
+A read-only inspection of retained October 11–18 production records found 12
+browser runs and eight failed browser calls. Three scroll requests used read-only
+region references as action targets; four focused reads guessed a nonzero text
+offset before establishing focus. In all seven cases the requested revision
+matched the preceding observation. Generic failure messages and automatic fresh
+reads did not explain how to correct these arguments. The remaining failure was
+an authentication interruption whose activity-budget handling was already repaired
+in the deployed revision `dc9ba72a`.
+
+The scoped repair adds explicit tool guidance and fixed correction messages,
+refuses provably invalid requests before browser dispatch, and retains the valid
+snapshot for the next agent decision. It does not replace targets, resend writes,
+relax authentication or expand authority. Regression coverage checks corrected
+continuation without user prompts and real Chromium focus cursors and scrolling.
+Release and subsequent live-run evidence remain separate delivery steps.
+
+The latest briefing collected five valid posts within four windows and stopped
+with insufficient evidence. Its six-post requirement and collection limits remain
+unchanged. Further improvements must address observed collection failures without
+lowering the evidence threshold. Comparative benchmarks remain deferred.
 
 ## 1. Product outcome and priorities
 
@@ -815,9 +839,11 @@ questions and finite reviewed workflow execution. Focused regressions prove
 bounded reads, positive and negative account cases, native question clearing,
 one dispatch after response loss and no extra prompts for an existing standing
 grant. Real Chromium completion fixtures count effects at the server.
-Catalogs remain empty pending reviewed definitions for selected live sites;
-this is not a claim of live-site coverage or production activation. The integrated
-release gate and site acceptance remain required before rollout.
+The initially empty catalogs now have a reviewed X Home briefing recipe and
+optional private account-verification definitions under ADR-0175. The production
+diagnosis above records the current limited live evidence; it does not establish
+general live-site coverage. Each further definition still requires the integrated
+release gate and site acceptance before rollout.
 
 ### Original kickoff sequence — historical
 
