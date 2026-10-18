@@ -446,7 +446,11 @@ async def test_owner_can_answer_missing_access_wait_without_being_forced_to_conn
 
 
 def test_existing_schedule_tool_pins_keep_the_original_closed_contract() -> None:
-    from agent_core.tools.schedule_create import LegacyScheduleCreateTool, ScheduleCreateTool
+    from agent_core.tools.schedule_create import (
+        LegacyScheduleCreateTool,
+        PreviousScheduleCreateTool,
+        ScheduleCreateTool,
+    )
 
     old = LegacyScheduleCreateTool.spec
     assert old.version == "1.1.1"
@@ -456,7 +460,15 @@ def test_existing_schedule_tool_pins_keep_the_original_closed_contract() -> None
         "Create one future one-time or recurring schedule. For recurrence, supply a "
         "complete IANA-zone cadence; ask about ambiguous dates or times."
     )
-    assert ScheduleCreateTool.spec.version == "1.2.0"
+    previous = PreviousScheduleCreateTool.spec
+    assert previous.version == "1.2.0"
+    assert "use_website" in previous.input_schema["properties"]
+    assert "place_call" not in previous.input_schema["properties"]
+    assert "place_call" not in previous.description
+    assert "place_call" not in old.input_schema["properties"]
+    # ADR-0213 added call schedules as 1.3.0.
+    assert ScheduleCreateTool.spec.version == "1.3.0"
+    assert "place_call" in ScheduleCreateTool.spec.input_schema["properties"]
 
 
 async def test_disabled_browser_never_creates_an_unresolvable_connection_wait() -> None:

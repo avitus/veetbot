@@ -118,6 +118,26 @@ def test_lean_schedule_role_derives_legacy_gmail_authority_without_credentials()
     }
 
 
+def test_lean_schedule_role_mirrors_calling_without_the_bland_key(tmp_path: Path) -> None:
+    """ADR-0213: a call schedule's occurrence keeps its calling scopes at firing."""
+    from tests.gates.test_call_m27 import call_configuration
+
+    configuration = tmp_path / "bland-configuration.json"
+    configuration.write_text(call_configuration().model_dump_json(), encoding="utf-8")
+    configured_scopes = {"session.read", "schedule.read", "schedule.write", "schedule.cancel"}
+    settings = load_schedule_worker_settings(
+        {
+            **_production_schedule_environment(scopes=",".join(sorted(configured_scopes))),
+            "AGENT_CALL_ENABLED": "1",
+            "BLAND_CONFIGURATION_FILE": str(configuration),
+        }
+    )
+
+    assert settings.credentials == {}
+    principal = _validate_schedule_role(settings)
+    assert principal.scopes == configured_scopes | {"mcp.bland_call.use", "mcp.bland_read.use"}
+
+
 @pytest.mark.parametrize(
     "scope",
     [

@@ -163,6 +163,8 @@ class Settings:
     call_enabled: bool = False
     call_ingress_enabled: bool = False
     call_notifications_enabled: bool = False
+    # ADR-0213: the owner's own call request needs no confirmation card.
+    call_owner_requests_enabled: bool = True
     call_configuration: CallConfiguration | None = None
     call_webhook_secret: SecretStr | None = None
     svp_enabled: bool = False
@@ -2042,6 +2044,9 @@ def _load_settings(
         call_enabled=call_enabled,
         call_ingress_enabled=call_ingress_enabled,
         call_notifications_enabled=call_notifications_enabled,
+        call_owner_requests_enabled=_parse_flag(
+            values, "AGENT_CALL_OWNER_REQUESTS_ENABLED", default=True
+        ),
         call_configuration=call_configuration,
         call_webhook_secret=call_webhook_secret,
         svp_enabled=svp_enabled,

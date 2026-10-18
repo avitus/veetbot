@@ -34,6 +34,11 @@ from tests.unit.test_web_tools import FakeWebProvider
 
 @pytest.mark.parametrize("approved", [False, True])
 async def test_call_dispatch_occurs_only_after_the_bound_owner_approval(approved: bool) -> None:
+    """With owner-request permission off (ADR-0213), dispatch waits for the bound approval.
+
+    The permission is on by default; `test_owner_requested_calls.py` gates that side, and
+    content-driven calls keep this approval whatever the switch says.
+    """
     configuration = call_configuration()
     catalog = create_server("call", BlandClient(KEY, NUMBER), configuration.model_dump())
     discovered = MCPDiscovery(
@@ -67,6 +72,7 @@ async def test_call_dispatch_occurs_only_after_the_bound_owner_approval(approved
     settings = replace(
         memory_settings(),
         call_enabled=True,
+        call_owner_requests_enabled=False,
         call_configuration=configuration,
         credentials={
             name: SecretStr(

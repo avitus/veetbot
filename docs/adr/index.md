@@ -220,3 +220,4 @@ implementation without one.
 - [ADR-0205: Reliability diagnostics and recovery](0205-reliability-diagnostics-and-recovery.md)
 - [ADR-0209: Uninterrupted browser research and visible deadlines](0209-uninterrupted-browser-research.md)
 - [ADR-0210: OpenAI opaque credential boundary](0210-openai-opaque-credential-boundary.md)
+- [ADR-0213: Owner-requested calls without confirmation](0213-owner-requested-calls-without-confirmation.md)

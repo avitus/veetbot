@@ -49,6 +49,9 @@ DEFAULT_MAX_COST = Decimal("5")
 DEFAULT_SYNTHESIS_RESERVE_STEPS = 2
 DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS = 2
 DEFAULT_SYNTHESIS_RESERVE_COST = Decimal("1")
+# ADR-0213: a call schedule delegates exactly the calling scopes, so its
+# occurrence can place the call and read back how it went.
+CALL_SCOPES = frozenset({"mcp.bland_call.use", "mcp.bland_read.use"})
 
 _FORBIDDEN_CADENCE_FIELD_SCHEMA: dict[str, Any] = {"not": {}}
 
@@ -137,6 +140,7 @@ INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "use_website": {"type": "boolean"},
+        "place_call": {"type": "boolean"},
         "title": {"type": "string", "minLength": 1, "maxLength": 1024},
         "instruction": {"type": "string", "minLength": 1, "maxLength": 65_536},
         "at": {"type": "string", "format": "date-time"},
@@ -200,12 +204,15 @@ class ScheduleCreateTool:
 
     spec = ToolSpec(
         name=SCHEDULE_CREATE_TOOL_NAME,
-        version="1.2.0",
+        version="1.3.0",
         description=(
             "Create one future one-time or recurring schedule. For recurrence, supply a "
             "complete IANA-zone cadence; ask about ambiguous dates or times. For tasks requiring "
             "a signed-in website, set use_website=true to pin this chat's selected website. "
-            "Connect Website Access first if missing; never promise authenticated work without it."
+            "Connect Website Access first if missing; never promise authenticated work without it. "
+            "When the scheduled task is to place a phone call, set place_call=true and put the "
+            "recipient's E.164 number, the brief and any voicemail text in the instruction; "
+            "without place_call the scheduled run cannot call."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
@@ -225,11 +232,14 @@ class ScheduleCreateTool:
         agent: AgentSpec,
         limits: ScheduleDefinitionLimits,
         uow_factory: UnitOfWorkFactory | None = None,
+        *,
+        calling_enabled: bool = False,
     ) -> None:
         self._service = service
         self._agent = agent
         self._limits = limits
         self._uow_factory = uow_factory
+        self._calling_enabled = calling_enabled
 
     async def approval_view(
         self,
@@ -242,8 +252,9 @@ class ScheduleCreateTool:
         proposal: dict[str, Any] = {
             "title": title,
             "instruction": str(arguments["instruction"]),
-            "requested_scopes": ["browser.profile.read"] if arguments.get("use_website") else [],
+            "requested_scopes": sorted(_requested_scopes(arguments)),
             **({"use_website": True} if arguments.get("use_website") else {}),
+            **({"place_call": True} if arguments.get("place_call") else {}),
         }
         try:
             cadence = parse_cadence(arguments)
@@ -297,6 +308,13 @@ class ScheduleCreateTool:
                 retryable=True,
             )
 
+        if arguments.get("place_call") and not self._calling_enabled:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "schedule.calling_unavailable",
+                "Calling is not set up, so a scheduled call could not be placed.",
+                retryable=False,
+            )
         selected_profile = None
         if arguments.get("use_website"):
             if self._uow_factory is not None:
@@ -316,9 +334,7 @@ class ScheduleCreateTool:
             agent_id=self._agent.id,
             agent_version=self._agent.version,
             policy_profile=self._agent.policy_profile,
-            requested_scopes=frozenset({"browser.profile.read"})
-            if selected_profile
-            else frozenset(),
+            requested_scopes=_requested_scopes(arguments),
             browser_profile_id=UUID(selected_profile) if selected_profile else None,
             limits=self._run_limits(),
             run_timeout_seconds=min(
@@ -404,6 +420,17 @@ class ScheduleCreateTool:
         )
 
 
+def _requested_scopes(arguments: dict[str, Any]) -> frozenset[str]:
+    """The model selects capabilities by flag; it never names a scope."""
+
+    return frozenset(
+        {
+            *(("browser.profile.read",) if arguments.get("use_website") else ()),
+            *(CALL_SCOPES if arguments.get("place_call") else ()),
+        }
+    )
+
+
 def _reserve_within[T: (int, Decimal)](reserve: T, limit: T) -> T:
     """Keep a reserve only when its limit leaves room to research before it."""
 
@@ -436,6 +463,31 @@ def parse_cadence(arguments: dict[str, Any]) -> Cadence:
     return cadence
 
 
+class PreviousScheduleCreateTool(ScheduleCreateTool):
+    """Retain version 1.2.0, which had no call schedules, for already pinned runs."""
+
+    spec = ScheduleCreateTool.spec.model_copy(
+        update={
+            "version": "1.2.0",
+            "description": (
+                "Create one future one-time or recurring schedule. For recurrence, supply a "
+                "complete IANA-zone cadence; ask about ambiguous dates or times. For tasks "
+                "requiring a signed-in website, set use_website=true to pin this chat's selected "
+                "website. Connect Website Access first if missing; never promise authenticated "
+                "work without it."
+            ),
+            "input_schema": {
+                **INPUT_SCHEMA,
+                "properties": {
+                    key: value
+                    for key, value in INPUT_SCHEMA["properties"].items()
+                    if key != "place_call"
+                },
+            },
+        }
+    )
+
+
 class LegacyScheduleCreateTool(ScheduleCreateTool):
     """Retain the closed input shown to already pinned runs."""
 
@@ -451,7 +503,7 @@ class LegacyScheduleCreateTool(ScheduleCreateTool):
                 "properties": {
                     key: value
                     for key, value in INPUT_SCHEMA["properties"].items()
-                    if key != "use_website"
+                    if key not in {"use_website", "place_call"}
                 },
             },
         }

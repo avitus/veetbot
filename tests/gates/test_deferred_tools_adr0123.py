@@ -16,6 +16,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+import pytest
 from pydantic import SecretStr
 
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
@@ -266,7 +267,12 @@ async def test_an_agent_without_tool_call_records_what_it_cannot_offer(tmp_path:
     assert len(plan.skipped_tool_names) == len(legacy_tools) + 22 - 30
 
 
-async def test_a_deferred_call_waits_for_the_same_approval(tmp_path: Path) -> None:
+@pytest.mark.parametrize("owner_requests", [True, False])
+async def test_a_deferred_call_gets_the_same_authorization(
+    tmp_path: Path, owner_requests: bool
+) -> None:
+    """Deferral changes no authority: the owner's call needs no prompt (ADR-0213), and
+    with that permission switched off it waits for the same approval as a direct call."""
     factory, context = await _production(
         tmp_path,
         [
@@ -276,15 +282,18 @@ async def test_a_deferred_call_waits_for_the_same_approval(tmp_path: Path) -> No
             ),
             ScriptedTurn(text="The call request was processed.", stop_reason=StopReason.END_TURN),
         ],
+        extra_environment={"AGENT_CALL_OWNER_REQUESTS_ENABLED": "1" if owner_requests else "0"},
     )
     async with context as app:
         session_id = await app.sessions.create()
         run_id = await app.runs.submit("Call to ask about ticket 12.", session_id)
-        [approval] = await app.approvals.list_pending(run_id=run_id)
-        assert approval.tool_name == START_CALL
-        assert sum(client.call_count for client in factory.created) == 0
-        await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        if not owner_requests:
+            [approval] = await app.approvals.list_pending(run_id=run_id)
+            assert approval.tool_name == START_CALL
+            assert sum(client.call_count for client in factory.created) == 0
+            await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
         terminal = await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=30)
+        assert await app.approvals.list_pending(run_id=run_id) == []
         events = await _session_events(app, session_id)
         async with app.uow_factory() as uow:
             reservations = await uow.calls.list(app.principal, "dispatch")
