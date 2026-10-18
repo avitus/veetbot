@@ -189,11 +189,14 @@ test-apple-ui-macos:
 # starts itself. Two cold boots at once bring SpringBoard up after that, it
 # holds the runner as still being updated, and the launch is refused as Busy.
 # Both devices therefore finish booting before either run starts.
+# Each pick is the newest iOS runtime's device, ties broken by udid. The
+# iPhone pick skips the foldable iPhone Duo device type, which is the only
+# iPhone the iOS 27.1 runtime offers, so a standard iPhone wins.
 test-apple-ui-ios:
 	@$(APPLE_FULL_XCODE); \
 	$(APPLE_RESULTS_RUN_DIR); \
 	iphone_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
-		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPhone")]; print(max(candidates)[1] if candidates else "")'); \
+		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPhone") and not device["deviceTypeIdentifier"].rsplit(".", 1)[-1].startswith("iPhone-Duo")]; print(max(candidates)[1] if candidates else "")'); \
 	ipad_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPad")]; print(max(candidates)[1] if candidates else "")'); \
 	if test -z "$$iphone_device_id" -o -z "$$ipad_device_id"; then \

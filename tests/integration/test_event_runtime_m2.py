@@ -808,6 +808,262 @@ async def _reclaim_and_resume(composition: Any, clock: FixedClock, worker_id: st
     assert await recovery.run_once()
 
 
+async def test_repeated_resume_preserves_batch_identity_during_recall_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.memory.recall_preparation import SemanticRecallPreparation
+    from agent_core.memory.retrieval import DeterministicQueryFormer
+    from agent_core.runtime import executor as runtime_executor
+
+    class LeaseClock(FixedClock):
+        async def sleep(self, seconds: float) -> None:
+            # Heartbeat scheduling must not consume the ten-second recall
+            # allowance merely by yielding; lease expiry is advanced below.
+            await asyncio.sleep(seconds)
+
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    clock = LeaseClock(NOW)
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="memory.search",
+                        arguments={"text": "Remembered constraints", "scope": "general"},
+                        call_id="pending-recall",
+                    ),
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17*23"},
+                        call_id="pending-calculation",
+                    ),
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="recovered"),
+        ]
+    )
+    try:
+        async with build(
+            settings=settings, storage="postgres", script=script, clock=clock
+        ) as composition:
+            run_id = await composition.runs.submit("Recall constraints and calculate")
+            original_invoke = runtime_loop._invoke_model
+
+            async def interrupt_second_step(context: Any, *args: Any, **kwargs: Any) -> Any:
+                if context.run.step_count == 2:
+                    raise _InjectedWorkerCrash
+                return await original_invoke(context, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(runtime_loop, "_invoke_model", interrupt_second_step)
+                worker = DurableWorker(
+                    uow_factory=composition.uow_factory,
+                    executor=composition.executor,
+                    clock=clock,
+                    worker_id="before-second-model",
+                )
+                with pytest.raises(_InjectedWorkerCrash):
+                    await worker.run_once()
+            # Restore the first batch's pending checkpoint after its effects and
+            # usage committed and the run advanced to the second model step.
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id, CheckpointRow.version == newest
+                    )
+                )
+            async with composition.uow_factory() as uow:
+                pending = await uow.checkpoints.latest(run_id)
+                live = await uow.runs.get(run_id, PRINCIPAL)
+            assert pending is not None and len(pending.pending_tool_calls) == 2
+            assert pending.budget_state["step_count"] == 1
+            assert pending.budget_state["tool_call_count"] == 0
+            assert (live.step_count, live.tool_call_count) == (2, 2)
+            composition.executor._prepare_recall = SemanticRecallPreparation(
+                composition.uow_factory,
+                composition.principal,
+                composition.memory_retriever,
+                DeterministicQueryFormer(composition.principal),
+            )
+            assert len(await composition.executor._prepare_recall.plan(live, pending)) == 1
+            original_checkpoint = runtime_loop.checkpoint
+
+            async def interrupt_after_reservation(
+                context: Any, trigger: str, **kwargs: Any
+            ) -> None:
+                await original_checkpoint(context, trigger, **kwargs)
+                if trigger == "memory_preparation":
+                    raise _InjectedWorkerCrash
+
+            with monkeypatch.context() as patch:
+                patch.setattr(runtime_loop, "checkpoint", interrupt_after_reservation)
+                with pytest.raises(_InjectedWorkerCrash):
+                    await _reclaim_and_resume(composition, clock, "reserve-then-crash")
+            async with composition.uow_factory() as uow:
+                reserved = await uow.checkpoints.latest(run_id)
+            assert reserved is not None and reserved.recall_work is not None
+            assert reserved.recall_work.searches == 1 and reserved.recall_work.rounds == 1
+            assert reserved.budget_state["step_count"] == 1, (
+                "A recall reservation must retain the pending invocation's proposal step"
+            )
+            assert reserved.budget_state["tool_call_count"] == 0
+            completed_watermarks: list[tuple[int, int]] = []
+
+            async def observe_recovered(context: Any, trigger: str) -> None:
+                await original_checkpoint(context, trigger)
+                if trigger == "tool_recovered":
+                    completed_watermarks.append(
+                        (
+                            context.checkpoint.budget_state["step_count"],
+                            context.checkpoint.budget_state["tool_call_count"],
+                        )
+                    )
+
+            monkeypatch.setattr(runtime_executor, "checkpoint", observe_recovered)
+            await _reclaim_and_resume(composition, clock, "resume-reserved-batch")
+            recovered = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                invocations = await uow.invocations.list_for_run(run_id, PRINCIPAL)
+                history = (await uow.history.catch_up(recovered.session_id)).items
+            assert recovered.status is RunStatus.COMPLETED, recovered.failure
+            assert recovered.final_message == "recovered" and recovered.tool_call_count == 2
+            assert completed_watermarks == [(2, 2)], "Completed recovery records live usage"
+            assert len(invocations) == 2 and {call.step_number for call in invocations} == {1}
+            validate_tool_pairs(history)
+    finally:
+        await engine.dispose()
+
+
+async def test_adopted_partial_batch_keeps_its_whole_usage_through_recall_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch adopted from the log is reserved whole, at its pre-batch watermark.
+
+    The first call answered and the second did not before the checkpoints
+    recording the turn were lost. If the recall reservation saved only the
+    unanswered call at the live usage count, the next resume would count only
+    that call and the answered one's usage would vanish from the budget.
+    """
+
+    from agent_core.memory.recall_preparation import SemanticRecallPreparation
+    from agent_core.memory.retrieval import DeterministicQueryFormer
+    from agent_core.tools.executor import ToolPipeline
+
+    class LeaseClock(FixedClock):
+        async def sleep(self, seconds: float) -> None:
+            await asyncio.sleep(seconds)
+
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    clock = LeaseClock(NOW)
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "17*23"},
+                        call_id="answered-calculation",
+                    ),
+                    ScriptedToolCall(
+                        name="memory.search",
+                        arguments={"text": "Remembered constraints", "scope": "general"},
+                        call_id="unanswered-recall",
+                    ),
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="recovered"),
+        ]
+    )
+    original_dispatch_one = ToolPipeline._dispatch_one
+    interrupted = False
+
+    async def crash_on_the_recall(self: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal interrupted
+        if kwargs["call"].call_id == "unanswered-recall" and not interrupted:
+            interrupted = True
+            raise _InjectedWorkerCrash
+        return await original_dispatch_one(self, *args, **kwargs)
+
+    try:
+        async with build(
+            settings=settings, storage="postgres", script=script, clock=clock
+        ) as composition:
+            run_id = await composition.runs.submit("Recall constraints and calculate")
+            with monkeypatch.context() as patch:
+                patch.setattr(ToolPipeline, "_dispatch_one", crash_on_the_recall)
+                worker = DurableWorker(
+                    uow_factory=composition.uow_factory,
+                    executor=composition.executor,
+                    clock=clock,
+                    worker_id="crash-mid-batch",
+                )
+                with pytest.raises(_InjectedWorkerCrash):
+                    await worker.run_once()
+            # Lose the model_response and tool_pending checkpoints, so the
+            # resume adopts the turn and its one answered call from the log.
+            async with engine.begin() as connection:
+                newest = await connection.scalar(
+                    select(func.max(CheckpointRow.version)).where(CheckpointRow.run_id == run_id)
+                )
+                assert newest is not None and newest > 2
+                await connection.execute(
+                    delete(CheckpointRow).where(
+                        CheckpointRow.run_id == run_id, CheckpointRow.version > newest - 2
+                    )
+                )
+            async with composition.uow_factory() as uow:
+                surviving = await uow.checkpoints.latest(run_id)
+                live = await uow.runs.get(run_id, PRINCIPAL)
+            assert surviving is not None and surviving.pending_tool_calls == []
+            assert live.tool_call_count == 0
+            composition.executor._prepare_recall = SemanticRecallPreparation(
+                composition.uow_factory,
+                composition.principal,
+                composition.memory_retriever,
+                DeterministicQueryFormer(composition.principal),
+            )
+            original_checkpoint = runtime_loop.checkpoint
+
+            async def interrupt_after_reservation(
+                context: Any, trigger: str, **kwargs: Any
+            ) -> None:
+                await original_checkpoint(context, trigger, **kwargs)
+                if trigger == "memory_preparation":
+                    raise _InjectedWorkerCrash
+
+            with monkeypatch.context() as patch:
+                patch.setattr(runtime_loop, "checkpoint", interrupt_after_reservation)
+                with pytest.raises(_InjectedWorkerCrash):
+                    await _reclaim_and_resume(composition, clock, "adopt-then-reserve")
+            async with composition.uow_factory() as uow:
+                reserved = await uow.checkpoints.latest(run_id)
+            assert reserved is not None and reserved.recall_work is not None
+            assert [call["call_id"] for call in reserved.pending_tool_calls] == [
+                "answered-calculation",
+                "unanswered-recall",
+            ], "The reservation must keep the adopted batch whole"
+            assert reserved.budget_state["tool_call_count"] == 0
+            await _reclaim_and_resume(composition, clock, "resume-adopted-reservation")
+            recovered = await composition.runs.get(run_id)
+            async with composition.uow_factory() as uow:
+                invocations = await uow.invocations.list_for_run(run_id, PRINCIPAL)
+                history = (await uow.history.catch_up(recovered.session_id)).items
+            assert recovered.status is RunStatus.COMPLETED, recovered.failure
+            assert recovered.final_message == "recovered"
+            assert recovered.tool_call_count == 2, "The answered call's usage must survive"
+            assert len(invocations) == 2 and {call.step_number for call in invocations} == {1}
+            validate_tool_pairs(history)
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("interrupted_at", "lost", "restored_trigger"),
     [

@@ -30,6 +30,8 @@ class SemanticSource(BaseModel):
     source: SourceVersion
     space: EmbeddingSpace
     content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # Historical vectors bind their original revision and today's invalidation fence.
+    current_fence: SourceVersion | None = None
 
 
 def embedding_text(record: MemoryRecord) -> str:

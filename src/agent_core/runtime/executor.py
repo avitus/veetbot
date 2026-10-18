@@ -36,6 +36,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.model_settings import ModelSettingsCatalog, chat_reasoning_effort
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.recall_execution import recall_phase
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     CancelReason,
@@ -71,6 +72,7 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.loop import (
     AddOpenQuestion,
     ModelEventCallback,
+    RecallPreparation,
     RunContext,
     ToolDispatch,
     _fit_tool_batch,
@@ -81,6 +83,7 @@ from agent_core.runtime.loop import (
     checkpoint,
     guard_tool_turn,
     prepare_browser_connection_question,
+    prepare_recall,
     recover_browser_failure,
     run_loop,
 )
@@ -327,8 +330,12 @@ class RunExecutor:
         identical_denial_threshold: int = 3,
         max_compactions_per_step: int = 2,
         model_settings: ModelSettingsCatalog | None = None,
+        prepare_recall: RecallPreparation | None = None,
+        recall_elapsed_time: Callable[[], float] | None = None,
     ) -> None:
         """Bind run services, deterministic dependencies and optional lifecycle callbacks."""
+        self._prepare_recall = prepare_recall
+        self._recall_elapsed_time = recall_elapsed_time
         self._model_settings = model_settings
         self._release_id = release_id
         self._principal = principal
@@ -869,6 +876,8 @@ class RunExecutor:
                     else chat_reasoning_effort(chat_choice, resolved_model.reasoning_efforts)
                 ),
                 reasoning_summary=not typed and chat_choice is not None,
+                prepare_recall=self._prepare_recall,
+                recall_elapsed_time=self._recall_elapsed_time,
             )
             if pin_created:
                 await checkpoint(context, "provider_pinned")
@@ -1198,6 +1207,7 @@ class RunExecutor:
             if missing > 0:
                 await context.budgets.record_tool_usage(context.run, missing, step=step)
         unrecorded_batch: int | None = None
+        pending_batch_budget: dict[str, int] | None = None
         if any(isinstance(item, (AssistantMessage, ToolCallItem)) for item in adopted):
             # The log holds a turn the checkpoint never saw. Its own batch
             # returned before that turn, whose continuation was never
@@ -1229,8 +1239,13 @@ class RunExecutor:
                     # the run has answered and lost only its finalization.
                     return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=adopted[-1])
                 return None
-            # This batch was never recorded, though its answered calls ran.
+            # This batch was never recorded, though its answered calls ran. Like a
+            # checkpointed batch it is dispatched and reserved whole at its
+            # pre-batch watermark; an answered call returns its recorded outcome,
+            # so a further resume counts the batch once.
+            calls = fitted
             step_number = context.run.step_count
+            pending_batch_budget = {"step_count": step_number, "tool_call_count": adopted_baseline}
         else:
             baseline = restored.budget_state.get("tool_call_count", 0)
             if not isinstance(baseline, int):
@@ -1257,6 +1272,7 @@ class RunExecutor:
             # later one, so the batch keeps the step its checkpoint recorded.
             proposed_at = restored.budget_state.get("step_count")
             step_number = proposed_at if isinstance(proposed_at, int) else context.run.step_count
+            pending_batch_budget = {"step_count": step_number, "tool_call_count": baseline}
         restored.pending_tool_calls = [call.model_dump(mode="json") for call in calls]
         step = Step(
             run_id=context.run.id,
@@ -1266,16 +1282,18 @@ class RunExecutor:
         # The queued generation is revalidating the persisted calls. Any approval
         # raised below becomes the sole pending suspension for the next generation.
         restored.pending_approval_ids = []
-        results = await context.dispatch_tools(
-            run=context.run,
-            checkpoint=restored,
-            tool_calls=calls,
-            principal=context.principal,
-            step=step,
-            agent=context.agent,
-            token=context.token,
-            lease=context.lease,
-        )
+        await prepare_recall(context, pending_batch_budget=pending_batch_budget)
+        with recall_phase(context.recall_permit):
+            results = await context.dispatch_tools(
+                run=context.run,
+                checkpoint=restored,
+                tool_calls=calls,
+                principal=context.principal,
+                step=step,
+                agent=context.agent,
+                token=context.token,
+                lease=context.lease,
+            )
         step.tool_call_count = len(results)
         if unrecorded_batch is not None:
             await context.budgets.record_tool_usage(context.run, unrecorded_batch, step=step)

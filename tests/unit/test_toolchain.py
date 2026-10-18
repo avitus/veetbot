@@ -2510,6 +2510,103 @@ def test_apple_ui_records_only_the_simulators_that_were_not_booted(
     assert result.stdout.split() == expected
 
 
+def _simctl_device(name: str, device_type: str, udid: str) -> dict[str, object]:
+    return {
+        "name": name,
+        "udid": udid,
+        "deviceTypeIdentifier": f"com.apple.CoreSimulator.SimDeviceType.{device_type}",
+        "isAvailable": True,
+        "state": "Shutdown",
+    }
+
+
+# The owner's Mac on 2026-10-17: the iOS 27.1 runtime offers only the foldable
+# iPhone Duo, while iOS 27.0 and 26.5 carry the standard iPhones and iPads.
+_SIMCTL_WITH_FOLDABLE_ONLY_RUNTIME = {
+    "devices": {
+        "com.apple.CoreSimulator.SimRuntime.iOS-27-1": [
+            _simctl_device("iPhone Duo", "iPhone-Duo", "FFFF0000-DUO"),
+        ],
+        "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
+            _simctl_device("iPhone 18 Pro", "iPhone-18-Pro", "E7F5F449-18PRO"),
+            _simctl_device("iPhone 17e", "iPhone-17e", "B2D0EFA5-17E"),
+            _simctl_device("iPad Pro 13-inch (M5)", "iPad-Pro-13-inch-M5-12GB", "56B044C6-IPAD"),
+            _simctl_device("iPad (A16)", "iPad-A16", "752B083E-IPAD"),
+        ],
+        "com.apple.CoreSimulator.SimRuntime.iOS-26-5": [
+            _simctl_device("iPhone 17 Pro", "iPhone-17-Pro", "FFFE0000-17PRO"),
+            _simctl_device("iPad (A16)", "iPad-A16", "FFFE0000-IPAD"),
+        ],
+        "com.apple.CoreSimulator.SimRuntime.watchOS-12-0": [
+            _simctl_device("Apple Watch Series 11", "Apple-Watch-Series-11-46mm", "FFFFFFFF-W"),
+        ],
+    }
+}
+
+
+def _simulator_pick(makefile: str, variable: str, simctl: Any) -> str:
+    """Run the target's own selection for ``variable`` over a simctl fixture."""
+    recipe = _make_recipe(makefile, "test-apple-ui-ios")
+    selection = re.search(
+        rf"^\t{variable}=\$\$\(.*?\\\n\t\t\| python3 -c '(?P<program>[^']*)'\); \\$",
+        recipe,
+        re.M | re.S,
+    )
+    assert selection, f"the {variable} selection is missing"
+    result = subprocess.run(
+        ["python3", "-I", "-c", selection.group("program").replace("$$", "$")],
+        input=json.dumps(simctl),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def test_apple_ui_ios_picks_a_standard_iphone_over_the_foldable_iphone_duo() -> None:
+    """The iPhone journeys run on a conventional iPhone, never the iPhone Duo.
+
+    The iOS 27.1 runtime supports only the foldable iPhone Duo device type, so
+    ranking every iPhone by runtime alone chose it. The pick is the newest
+    runtime that offers a standard iPhone, and the iPad pick is unchanged.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert (
+        _simulator_pick(makefile, "iphone_device_id", _SIMCTL_WITH_FOLDABLE_ONLY_RUNTIME)
+        == "E7F5F449-18PRO"
+    )
+    assert (
+        _simulator_pick(makefile, "ipad_device_id", _SIMCTL_WITH_FOLDABLE_ONLY_RUNTIME)
+        == "752B083E-IPAD"
+    )
+
+
+def test_apple_ui_ios_skips_a_renamed_iphone_duo() -> None:
+    """The foldable is recognized by its device type, not by the name it shows."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    simctl = json.loads(json.dumps(_SIMCTL_WITH_FOLDABLE_ONLY_RUNTIME))
+    simctl["devices"]["com.apple.CoreSimulator.SimRuntime.iOS-27-1"][0]["name"] = "iPhone 99"
+
+    assert _simulator_pick(makefile, "iphone_device_id", simctl) == "E7F5F449-18PRO"
+
+
+def test_apple_ui_ios_reports_no_iphone_when_only_the_foldable_is_available() -> None:
+    """With no standard iPhone the pick is empty, so the target names what is missing."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    simctl = {
+        "devices": {
+            "com.apple.CoreSimulator.SimRuntime.iOS-27-1": [
+                _simctl_device("iPhone Duo", "iPhone-Duo", "FFFF0000-DUO"),
+            ]
+        }
+    }
+
+    assert _simulator_pick(makefile, "iphone_device_id", simctl) == ""
+
+
 def _run_recipe_shell(
     tmp_path: Path, fragment: str, *, xcrun: str
 ) -> subprocess.CompletedProcess[str]:

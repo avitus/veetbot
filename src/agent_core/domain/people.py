@@ -509,6 +509,9 @@ class PeopleQuery(PeopleValue):
     states: list[str] | None = Field(default=None, min_length=1, max_length=10)
     pinned: bool | None = None
     relationship: PeopleRelationshipFilter | None = None
+    # Resolve a person through already governed direct relationship evidence.
+    # Empty means no matches; this never broadens to the whole directory.
+    owner_relationship_belief_ids: list[UUID] | None = Field(default=None, max_length=1000)
     person_id: UUID | None = None
     belief_id: UUID | None = None
     belief_ids: list[UUID] | None = Field(default=None, max_length=1000)

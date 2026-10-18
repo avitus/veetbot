@@ -1,7 +1,7 @@
 """Comparison costs survive failed calls and cannot bypass the requested cap."""
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -204,6 +204,162 @@ class CompletingProvider:
             stop_reason=StopReason.END_TURN,
             turn=ModelTurn(stop_reason=StopReason.END_TURN, usage=ModelUsage(cost=self.cost)),
         )
+
+
+async def test_failure_after_completion_cannot_write_a_second_settlement(tmp_path: Path) -> None:
+    from agent_core.domain.messages import ModelFailedEvent, ModelTransientError
+
+    class InvalidProvider(CompletingProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            async for event in super().stream(request, resolved, attempt):
+                yield event
+            yield ModelFailedEvent(
+                attempt_id=attempt.attempt_id,
+                run_id=attempt.run_id,
+                step_number=attempt.step_number,
+                sequence=2,
+                error=ModelTransientError(
+                    provider=resolved.provider,
+                    model=resolved.model,
+                    attempt_id=attempt.attempt_id,
+                    message="Invalid later terminal event",
+                ),
+            )
+
+    budget = EvaluationBudget(Decimal("1"), tmp_path / "costs.jsonl")
+    provider = BudgetedProvider(InvalidProvider(Decimal("0.02")), budget)
+    with pytest.raises(ValueError, match="terminal"):
+        _ = [event async for event in provider.stream(*request_model_attempt())]
+    rows = [json.loads(line) for line in budget.journal.read_text().splitlines()]
+    assert [row["outcome"] for row in rows] == ["reserved", "completed"]
+    assert budget.failed and budget.spent == Decimal("0.02") and budget.held == 0
+
+
+async def test_concurrent_calls_share_reservations_and_settle_out_of_order(tmp_path: Path) -> None:
+    import asyncio
+
+    both_started = asyncio.Event()
+    release = [asyncio.Event(), asyncio.Event()]
+
+    class ConcurrentProvider(CompletingProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            index = self.calls
+            self.calls += 1
+            if self.calls == 2:
+                both_started.set()
+            await release[index].wait()
+            yield ModelCompletedEvent(
+                attempt_id=attempt.attempt_id,
+                run_id=attempt.run_id,
+                step_number=1,
+                sequence=1,
+                stop_reason=StopReason.END_TURN,
+                turn=ModelTurn(
+                    stop_reason=StopReason.END_TURN, usage=ModelUsage(cost=Decimal("0.03"))
+                ),
+            )
+
+    budget = EvaluationBudget(Decimal("0.25"), tmp_path / "shared.jsonl")
+    inner = ConcurrentProvider(Decimal("0.03"))
+    provider = BudgetedProvider(inner, budget)
+
+    async def call() -> None:
+        _ = [event async for event in provider.stream(*request_model_attempt())]
+
+    first, second = asyncio.create_task(call()), asyncio.create_task(call())
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        assert budget.calls == inner.calls == 2
+        assert budget.held == Decimal("0.22") and budget.spent == 0
+        with pytest.raises(BudgetExceededError):
+            await call()
+        assert inner.calls == 2
+        release[1].set()
+        await second
+        assert budget.held == Decimal("0.11") and budget.spent == Decimal("0.03")
+        release[0].set()
+        await first
+        assert budget.held == 0 and budget.spent == Decimal("0.06")
+        entries = [json.loads(line) for line in budget.journal.read_text().splitlines()]
+        assert [(entry["index"], entry["outcome"]) for entry in entries] == [
+            (1, "reserved"),
+            (2, "reserved"),
+            (2, "completed"),
+            (1, "completed"),
+        ]
+    finally:
+        for event in release:
+            event.set()
+        await asyncio.gather(first, second, return_exceptions=True)
+
+
+async def test_uncertain_call_retains_safe_failure_class(tmp_path: Path) -> None:
+    request, resolved, attempt = request_model_attempt()
+    budget = EvaluationBudget(Decimal("1"), tmp_path / "costs.jsonl")
+    provider = BudgetedProvider(CompletingProvider(None), budget)
+    with pytest.raises(RuntimeError):
+        async for _ in provider.stream(request, resolved, attempt):
+            pass
+    rows = [json.loads(line) for line in budget.journal.read_text().splitlines()]
+    assert rows[-1]["outcome"] == "uncertain"
+    assert rows[-1].get("error_class") == "RuntimeError"
+    assert "synthetic interrupted transport" not in budget.journal.read_text()
+    assert budget.failed and budget.held > 0
+
+
+@pytest.mark.parametrize("consumer_stops_at_failure", [False, True])
+async def test_failed_terminal_keeps_diagnostics_without_forgiving_uncertain_usage(
+    tmp_path: Path, consumer_stops_at_failure: bool
+) -> None:
+    from agent_core.domain.messages import ModelFailedEvent, ModelTransientError
+
+    class FailedProvider(CompletingProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            self.calls += 1
+            yield ModelFailedEvent(
+                attempt_id=attempt.attempt_id,
+                run_id=attempt.run_id,
+                step_number=attempt.step_number,
+                sequence=0,
+                error=ModelTransientError(
+                    provider=resolved.provider,
+                    model=resolved.model,
+                    attempt_id=attempt.attempt_id,
+                    message="Private provider detail must not enter the journal",
+                    provider_code="transport_error",
+                    http_status=503,
+                ),
+            )
+
+    budget = EvaluationBudget(Decimal("1"), tmp_path / "failed.jsonl")
+    inner = FailedProvider(None)
+    provider = BudgetedProvider(inner, budget)
+    stream = provider.stream(*request_model_attempt())
+    assert isinstance(stream, AsyncGenerator)
+    event = await anext(stream)
+    assert isinstance(event, ModelFailedEvent)
+    assert budget.failed, "A terminal failure must prohibit another send immediately"
+    if consumer_stops_at_failure:
+        await stream.aclose()
+    else:
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+    row = json.loads(budget.journal.read_text().splitlines()[-1])
+    assert row["outcome"] == "uncertain"
+    assert row["failure_kind"] == "transient"
+    assert row["provider_code"] == "transport_error"
+    assert row["http_status"] == 503
+    assert "Private provider detail" not in budget.journal.read_text()
+    assert budget.held == Decimal("0.11") and budget.spent == 0
+    with pytest.raises(BudgetExceededError):
+        _ = [event async for event in provider.stream(*request_model_attempt())]
+    assert inner.calls == 1
 
 
 def request_model_attempt() -> tuple[ModelRequest, ResolvedModel, ModelAttempt]:
@@ -421,3 +577,47 @@ async def test_ordinary_comparison_keeps_transport_open_and_journals_every_arm(
     assert not closed
     await provider.close()
     assert closed
+
+
+async def test_failed_terminal_preserves_provider_diagnostics_and_uncertain_usage(
+    tmp_path: Path,
+) -> None:
+    from agent_core.domain.messages import ModelFailedEvent, ModelTransientError
+    from agent_core.model.streaming import ModelStreamError, collect_turn
+
+    request, resolved, attempt = request_model_attempt()
+    failure = ModelTransientError(
+        provider="test",
+        model="test",
+        attempt_id=attempt.attempt_id,
+        message="Private provider response must not enter the journal",
+        provider_code="transport_error",
+        http_status=503,
+    )
+
+    class FailedProvider(CompletingProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            yield ModelFailedEvent(
+                attempt_id=attempt.attempt_id,
+                run_id=attempt.run_id,
+                step_number=1,
+                sequence=0,
+                error=failure,
+            )
+
+    budget = EvaluationBudget(Decimal("1"), tmp_path / "costs.jsonl")
+    provider = BudgetedProvider(FailedProvider(None), budget)
+    with pytest.raises(ModelStreamError) as caught:
+        await collect_turn(provider.stream(request, resolved, attempt))
+    assert caught.value.failure == failure
+    rows = [json.loads(line) for line in budget.journal.read_text().splitlines()]
+    assert rows[-1]["outcome"] == "uncertain"
+    assert rows[-1]["provider_code"] == "transport_error"
+    assert rows[-1]["failure_kind"] == "transient"
+    assert rows[-1]["http_status"] == 503
+    assert failure.message not in budget.journal.read_text()
+    assert budget.failed and budget.held == Decimal("0.11") and budget.spent == 0
+    with pytest.raises(BudgetExceededError):
+        _ = [event async for event in provider.stream(request, resolved, attempt)]

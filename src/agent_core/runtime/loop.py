@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
@@ -29,6 +30,7 @@ from agent_core.domain.errors import (
     UserInputRequiredError,
 )
 from agent_core.domain.events import NewEvent
+from agent_core.domain.memory import RecallQuery
 from agent_core.domain.messages import (
     AssistantMessage,
     ModelAttempt,
@@ -51,17 +53,20 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.recall_execution import RecallExecutionPermit, recall_phase
 from agent_core.domain.runs import (
     BudgetScope,
     FailureReason,
     OutcomeKind,
     ProviderContinuation,
+    RecallWorkBudget,
     Run,
     RunCheckpoint,
     RunFailure,
     RunOutcome,
     Step,
 )
+from agent_core.domain.semantic_reader import reader_identity
 from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
 from agent_core.domain.tools import ToolOutcome, ToolOutcomeStatus
 from agent_core.model.streaming import ModelStreamError, validated_stream
@@ -77,6 +82,12 @@ from agent_core.runtime.response_text import response_text_stream
 type ToolDispatch = Callable[..., Awaitable[list[ToolResultItem]]]
 type ModelEventCallback = Callable[[Run, ModelEvent], Awaitable[None]]
 type AddOpenQuestion = Callable[[WorkingState, str], WorkingState]
+
+
+class RecallPreparation(Protocol):
+    async def plan(self, run: Run, checkpoint: RunCheckpoint) -> Sequence[RecallQuery]: ...
+
+    async def prepare(self, run: Run, queries: Sequence[RecallQuery]) -> None: ...
 
 
 @dataclass(slots=True)
@@ -110,6 +121,9 @@ class RunContext:
     reasoning_effort: ReasoningEffort | None = None
     # ADR-0144: a chat run asks for a reasoning summary its client can show.
     reasoning_summary: bool = False
+    prepare_recall: RecallPreparation | None = None
+    recall_permit: RecallExecutionPermit | None = None
+    recall_elapsed_time: Callable[[], float] | None = None
 
 
 class CheckpointContext(Protocol):
@@ -207,12 +221,14 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         context.checkpoint.budget_state["context_seed_event_sequence"] = (
             context.run.seed_event_sequence
         )
-        assembled = await context.context_builder.assemble(
-            context.run,
-            context.checkpoint,
-            context.agent,
-            context.principal,
-        )
+        await prepare_recall(context)
+        with recall_phase(context.recall_permit):
+            assembled = await context.context_builder.assemble(
+                context.run,
+                context.checkpoint,
+                context.agent,
+                context.principal,
+            )
         pressure = assembled.pressure
         if pressure.yield_steps or not pressure.fits:
             await _append_event(
@@ -265,6 +281,73 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         await checkpoint(context, "compaction")
 
 
+async def prepare_recall(
+    context: RunContext, *, pending_batch_budget: dict[str, int] | None = None
+) -> None:
+    """Reserve optional work durably; cache misses and resume cannot renew it."""
+    if context.prepare_recall is None:
+        return
+    context.token.raise_if_cancelled()
+    started = context.clock.now()
+    execution_bound = bool(getattr(context.prepare_recall, "execution_budget", False))
+    if execution_bound:
+        context.recall_permit = RecallExecutionPermit(
+            context.principal.tenant_id,
+            context.principal.principal_id,
+            context.run.session_id,
+            context.run.id,
+            0,
+            started,
+            context.clock.now,
+            context.recall_elapsed_time or (lambda: context.clock.now().timestamp()),
+        )
+    budget = context.checkpoint.recall_work
+    if budget is not None and (
+        budget.searches >= 4 or budget.rounds >= 2 or started >= budget.deadline_at
+    ):
+        return
+    try:
+        async with asyncio.timeout(1):
+            queries = tuple(await context.prepare_recall.plan(context.run, context.checkpoint))
+    except Exception:
+        return  # Execution-bound planning failure retains the zero-search permit for this step.
+    context.token.raise_if_cancelled()
+    remaining = 4 - (0 if budget is None else budget.searches)
+    deadline = started + timedelta(seconds=10) if budget is None else budget.deadline_at
+    slots = len(queries) * (
+        2 if execution_bound and not context.checkpoint.pending_tool_calls else 1
+    )
+    if not 1 <= slots <= remaining or context.clock.now() >= deadline:
+        return
+    context.checkpoint.recall_work = RecallWorkBudget(
+        searches=slots + (0 if budget is None else budget.searches),
+        rounds=1 + (0 if budget is None else budget.rounds),
+        deadline_at=deadline,
+    )
+    # This write is authoritative and must not be swallowed as optional work.
+    await checkpoint(context, "memory_preparation", pending_batch_budget=pending_batch_budget)
+    if execution_bound:
+        context.recall_permit = RecallExecutionPermit(
+            context.principal.tenant_id,
+            context.principal.principal_id,
+            context.run.session_id,
+            context.run.id,
+            slots,
+            deadline,
+            context.clock.now,
+            context.recall_elapsed_time or (lambda: context.clock.now().timestamp()),
+        )
+    try:
+        remaining_seconds = (deadline - context.clock.now()).total_seconds()
+        if remaining_seconds > 0:
+            # Existing cleanup may take three seconds; it cannot admit new work.
+            async with asyncio.timeout(remaining_seconds + 3):
+                await context.prepare_recall.prepare(context.run, queries)
+    except Exception:
+        pass  # Sparse recall remains available; the reservation stays consumed.
+    context.token.raise_if_cancelled()
+
+
 def _apply_context_origin_trust(checkpoint_state: RunCheckpoint, request: ModelRequest) -> None:
     try:
         checkpoint_state.context_origin_trust = TrustLevel(
@@ -274,7 +357,12 @@ def _apply_context_origin_trust(checkpoint_state: RunCheckpoint, request: ModelR
         raise ContextOverflow("context builder returned an invalid trust marker") from exc
 
 
-async def checkpoint(context: RunContext, trigger: str) -> None:
+async def checkpoint(
+    context: RunContext,
+    trigger: str,
+    *,
+    pending_batch_budget: dict[str, int] | None = None,
+) -> None:
     """Advance the materialized M1 checkpoint and record the checkpoint event."""
 
     previous = context.checkpoint.model_copy(deep=True)
@@ -285,7 +373,23 @@ async def checkpoint(context: RunContext, trigger: str) -> None:
         "usage": context.run.usage.model_dump(mode="json"),
         "context_model_id": (f"{context.resolved_model.provider}:{context.resolved_model.model}"),
         "context_seed_event_sequence": context.run.seed_event_sequence,
+        "context_reader_sha256": reader_identity(
+            context.resolved_model,
+            reasoning_effort=context.reasoning_effort,
+            reasoning_summary=context.reasoning_summary,
+            registry_version=(
+                None
+                if context.checkpoint.provider_pin is None
+                else context.checkpoint.provider_pin.registry_version
+            ),
+        ),
     }
+    if pending_batch_budget is not None:
+        # A resumed batch still belongs to its proposing step until dispatch
+        # finishes. Other usage and the new recall reservation remain current.
+        context.checkpoint.budget_state.update(
+            {key: pending_batch_budget[key] for key in ("step_count", "tool_call_count")}
+        )
     context.checkpoint.version += 1
     context.checkpoint.status = context.run.status
     context.checkpoint.created_at = context.clock.now()
@@ -306,6 +410,9 @@ async def checkpoint(context: RunContext, trigger: str) -> None:
                         "version": context.checkpoint.version,
                         "trigger": trigger,
                         "full": full,
+                        "recall_work": None
+                        if context.checkpoint.recall_work is None
+                        else context.checkpoint.recall_work.model_dump(mode="json"),
                         **(
                             {"runtime_tool_call": context.checkpoint.pending_tool_calls[0]}
                             if trigger in {"browser_recovery", "browser_workflow"}
@@ -1294,19 +1401,21 @@ async def run_loop(context: RunContext) -> RunOutcome:
             await checkpoint(context, "tool_call")
             continue
         await checkpoint(context, "tool_pending")
+        await prepare_recall(context)
         if context.uow_factory.is_open():
             raise RuntimeError("tool I/O cannot begin while a unit of work is open")
         try:
-            results = await context.dispatch_tools(
-                run=context.run,
-                checkpoint=context.checkpoint,
-                tool_calls=fitted_calls,
-                principal=context.principal,
-                step=step,
-                agent=context.agent,
-                token=context.token,
-                lease=context.lease,
-            )
+            with recall_phase(context.recall_permit):
+                results = await context.dispatch_tools(
+                    run=context.run,
+                    checkpoint=context.checkpoint,
+                    tool_calls=fitted_calls,
+                    principal=context.principal,
+                    step=step,
+                    agent=context.agent,
+                    token=context.token,
+                    lease=context.lease,
+                )
         except ApprovalRequiredError as exc:
             if exc.approval_id not in context.checkpoint.pending_approval_ids:
                 context.checkpoint.pending_approval_ids.append(exc.approval_id)

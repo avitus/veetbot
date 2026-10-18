@@ -15,6 +15,7 @@ from agent_core.domain.messages import (
     ModelAttempt,
     ModelCompletedEvent,
     ModelEvent,
+    ModelFailedEvent,
     ModelRequest,
     ResolvedModel,
 )
@@ -81,8 +82,30 @@ class BudgetedProvider:
             ledger.calls = index
             ledger.held += reserve
         completed = False
+        failed_terminal = False
+        error_class: str | None = None
         try:
             async for event in self.provider.stream(request, resolved, attempt):
+                if completed or failed_terminal:
+                    raise ValueError("evaluation received an event after a terminal event")
+                if isinstance(event, ModelFailedEvent):
+                    # Persist only normalized, content-free diagnostics before yielding:
+                    # a consumer may close the stream at this terminal event. Unknown
+                    # usage remains reserved and no subsequent send is admitted.
+                    async with ledger.lock:
+                        ledger.failed = True
+                        ledger.append(
+                            {
+                                **record,
+                                "outcome": "uncertain",
+                                "error_class": type(event.error).__name__,
+                                "failure_kind": event.error.kind,
+                                "provider_code": event.error.provider_code,
+                                "http_status": event.error.http_status,
+                                "provider_parameter": event.error.provider_parameter,
+                            }
+                        )
+                        failed_terminal = True
                 if isinstance(event, ModelCompletedEvent):
                     actual = event.turn.usage.cost
                     if completed or not actual.is_finite() or actual < 0:
@@ -104,16 +127,17 @@ class BudgetedProvider:
                                 "cost", "People evaluation usage exceeded its reservation"
                             )
                 yield event
-            if not completed:
+            if not completed and not failed_terminal:
                 raise ValueError("evaluation provider ended without final usage")
-        except BaseException:
+        except BaseException as error:
+            error_class = type(error).__name__
             ledger.failed = True
             raise
         finally:
-            if not completed:
+            if not completed and not failed_terminal:
                 async with ledger.lock:
                     ledger.failed = True
-                    ledger.append({**record, "outcome": "uncertain"})
+                    ledger.append({**record, "outcome": "uncertain", "error_class": error_class})
 
 
 class BorrowedProvider:

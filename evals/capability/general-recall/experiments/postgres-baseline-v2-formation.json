@@ -1,0 +1,16 @@
+{
+  "corpus": "evals/capability/general-recall/pilot.v1.jsonl",
+  "output": "/tmp/veetbot-m33-postgres-baseline-formation-v2",
+  "maximum_cost_usd": "5",
+  "noise": 1000,
+  "deadline_seconds": 1800,
+  "execution": "runtime",
+  "storage": "postgres",
+  "disposable_database": true,
+  "pipeline": "formation",
+  "formation_policy": "formation@11",
+  "channel": "sparse",
+  "source_recovery": false,
+  "reranking": "baseline",
+  "query_planning": "baseline"
+}

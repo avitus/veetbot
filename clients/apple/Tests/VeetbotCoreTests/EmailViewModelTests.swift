@@ -79,6 +79,49 @@ import SwiftUI
         #expect(host.bounds.contains(host.convert(scroll.bounds, from: scroll)))
         try snapshot("email-sidebar-small-window")
     }
+
+    /// A sent reply is a record: its rendered body accepts no typing and holds no insertion point,
+    /// even when the owner was editing it just before approving the send.
+    @Test func testSentReplyRendersWithoutAnEditableBody() async throws {
+        var status = "ready"
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON(status: status)) }
+            return (200, self.threadJSON(draft: self.draftJSON(status: status)))
+        }
+        await model.openThread(threadID)
+        let host = NSHostingView(rootView: EmailModeView(model: model, viewportHeight: 800, discussInChat: {}))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        defer {
+            window.contentView = nil
+            model.resetConnection()
+        }
+        /// Settle SwiftUI's asynchronous AppKit updates before inspecting the hierarchy.
+        func settle() async throws {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            host.layoutSubtreeIfNeeded()
+        }
+        /// Collect every AppKit text view the reply surface rendered.
+        func textViews(in view: NSView) -> [NSTextView] {
+            (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap { textViews(in: $0) }
+        }
+        try await settle()
+        let editor = try #require(textViews(in: host).first { $0.isEditable },
+                                  "A ready draft must render an editable reply body")
+        #expect(window.makeFirstResponder(editor))
+
+        status = "sent"
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draft?.status == "sent")
+        try await settle()
+
+        #expect(textViews(in: host).allSatisfy { !$0.isEditable }, "A sent reply must not accept typing")
+        #expect((window.firstResponder as? NSTextView)?.isEditable != true,
+                "A sent reply must not keep a blinking insertion point")
+    }
     #endif
 
     /// Archiving the selected thread from its row or detail advances in visible order before admission

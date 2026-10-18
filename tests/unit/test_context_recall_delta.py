@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from agent_core.adapters.determinism import FixedClock
@@ -386,6 +387,8 @@ async def test_the_delta_is_bounded_by_what_the_base_left_of_the_recall_class() 
     base_query, delta_query = retriever.queries
     assert base_query.budget_tokens == 500
     assert delta_query.budget_tokens == 500 - 120
+    assert delta_query.max_items == base_query.max_items - 1
+    assert BASE_BELIEF in delta_query.exclude_ids
 
 
 async def test_a_base_recall_that_fills_the_class_leaves_no_delta_but_keeps_corrections() -> None:
@@ -494,3 +497,25 @@ async def test_delta_failure_preserves_already_fetched_snapshot_corrections() ->
     assert len(texts) == 2
     assert "<memory>base</memory>" in texts[0]
     assert _correction_line() in texts[1]
+
+
+async def test_full_item_allowance_preserves_corrections_without_another_delta() -> None:
+    class Full(_Retriever):
+        async def recall(self, query: RecallQuery, **kwargs: Any) -> RecallResult:
+            result = await super().recall(query, **kwargs)
+            return result.model_copy(
+                update={
+                    "items": [
+                        _belief(UUID(int=9000 + index), f"Fact {index}")
+                        for index in range(query.max_items)
+                    ]
+                }
+            )
+
+    retriever = Full(base_tokens=120)
+    request = await _builder(retriever).build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+    assert retriever.calls == 1
+    assert retriever.correction_calls == [(SNAPSHOT_TRACE, 7)]
+    assert _correction_line() in "\n".join(_memory_texts(request))

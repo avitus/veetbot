@@ -28,9 +28,112 @@ title: Current Milestone
   Release-bundle validation now recomputes cross-category recall and implicit
   answer lift with exact-version admission and revocation (ADR-0185).
   Source indexing now has default-off configuration and maintenance composition,
-  bound to independently reviewed release dependencies (ADR-0187). Query authority,
-  semantic recall composition, explicit preparation scheduling, historical/People
-  parity and answer-use evidence remain open.
+  bound to independently reviewed release dependencies (ADR-0187). A verified offline
+  CPU adapter now supports restricted inputs without remote disclosure, and local
+  run authority plus explicit preparation are composed on both recall paths
+  (ADR-0188). Governed source recovery now has shared correction fences, source-copy
+  erasure, bounded rendering and default-off composition (ADR-0189). Optional query
+  preparation now reserves a durable run budget before provider work (ADR-0190).
+  A separately admitted relevance reranker has semantic, lexical and linked-record
+  regressions (ADR-0191). The development harness now exercises actual runtime
+  context and tool results with gold-blind inputs and exact-value scoring; source
+  recovery remains distinct from atomic formation (ADR-0192). Bounded deterministic
+  task-context composition is implemented as a default-off ablation (ADR-0193).
+  The PostgreSQL harness now uses actual elapsed worker time, normal People formation
+  and verified paired formation-response banks under one experiment budget
+  (ADR-0194). Sparse development controls complete twenty seeded and twenty
+  formation observations; they expose retrieval and labeling failures and do not
+  pass the release gates. The owner approved the 400-scenario corpus on
+  2026-10-13; explicit factual questions are
+  separated from implicit tasks, with incident and per-family/split coverage checked.
+  The paired pilot exposed a formation@11 defect: named-person statements were
+  rejected by the older owner-subject rule, and separate People claims could merge
+  under one subject. Source-validated named subjects and whole-statement comparison
+  now have regressions without changing formation@9 or People identity admission.
+  Shared rendered recall now caps retained deliberate results plus automatic
+  base/delta recall at twenty items and two thousand tokens per request, with
+  current-source validation and mandatory corrections (ADR-0195).
+  Actual M33 searches now consume the durable run allowance, including sparse
+  fallback, automatic deltas and People discovery (ADR-0196). Exhaustion returns
+  a limitation rather than a false empty search. The paired PostgreSQL pilot
+  completes all five arms: sparse 8/20, hybrid 6/20, reranking 18/20, source recovery
+  6/20 and combined 18/20 correct answers. This development comparison predates
+  the named-People repair and final budget enforcement; it is not activation evidence.
+  Offline publication now requires complete original runtime measurements, settled
+  provider journals, matching formation banks and independently supplied reviews.
+  It recomputes the canonical observations and refuses source or cost discrepancies;
+  actual confirmatory dependency binding and reviewed release inputs remain open.
+  Current People query narrowing now preserves prepared encoder input and all hard
+  restrictions, with identity filtering before sparse and dense limits (ADR-0197).
+  Its shared contracts and PostgreSQL checks pass; comparative release evidence
+  remains pending.
+  Live development failures remain
+  retained, including People-path ranking and incomplete formation. Historical
+  semantic revisions now have shared visibility, invalidation and dated People
+  contracts plus an actual PostgreSQL tool/reader-context regression (ADR-0200).
+  Reviewed held-out formation-to-answer evidence remains open. Runtime assembly now records one bounded combined ordering for
+  scoring, with unknown or truncated evidence refusing certification. The six-arm
+  task-context pilot completes 120 observations: reader-planned search answers
+  16/20 versus reranking with a scripted query at 10/20. All four remaining
+  reader-planned failures exclude correctly formed claims through guessed hard
+  type filters. The model-facing tool now uses soft type hints (ADR-0198), with
+  legacy explicit filters preserved. The frozen pilot predates that repair and
+  exceeds the exploratory reader-latency ceiling in two arms.
+  A separate PostgreSQL load measurement retains 240 retrieval samples across
+  100, 1,000, 10,000 and 100,000 synthetic distractors. Every sample ranks and
+  renders the older stronger match; fixed vectors exclude encoder/model costs.
+  This measures database/retriever load, not end-to-end release latency.
+  The owner approved verified-input release binding (ADR-0199). Its implementation
+  preserves original observations and rejects changed evaluated inputs across a
+  merge. The confirmatory runner now captures deployment composition, verified
+  model assets, actual PostgreSQL schema and frozen controls before held-out task
+  parsing. Production startup binds the same schema fingerprint.
+  Per-observation confirmation now binds all twelve captured runtime variants and
+  independent principal attribution before model work. Confirmation preserves the production
+  model pin and chat reasoning settings and verifies the actual checkpoint's reader
+  digest; the earlier diagnostic reader mode cannot supply confirmation.
+  Collection and publication reject unbound or retagged development rows.
+  The owner authorized one USD 100
+  aggregate cap for the 4,800-observation confirmation; one journal covers every
+  variant and interrupted attempts retain their rows and uncertain reservations.
+  The owner approved the exact 400-scenario corpus on 2026-10-13; its retained
+  independence receipt binds the original corpus and all scenario identities.
+  The production-reader sparse baseline completed twenty development observations
+  with six correct answers; it does not certify quality. Native historical-index
+  load measurement completed 480 samples through 100,000 competing records, with
+  every target ranked first and rendered. The first confirmation stopped at 34 of
+  4,800 observations because a required test-fixture correction changes its bound
+  inputs. Original records and failed status are retained; aggregate reported and
+  held cost is USD 5.45365250. The owner subsequently approved a USD 300 aggregate
+  cap and one replacement
+  after final review and CI; its USD 290 allocation includes no forgiveness of
+  earlier charges. Foundation PR #159 deployed successfully as
+  `81062c5b`; PR #158 retains review, exact-head CI and deployment requirements.
+  The replacement on reviewed/verified `7214a8df` failed at 4 of 4,800 observations:
+  an unused automatic preparation reservation expired before a delayed deliberate
+  search. The evaluator now isolates deliberate preparation as well as context;
+  production budget enforcement is unchanged. Originals remain retained under
+  `20261014-confirmation-v2/`, with aggregate reported and held cost USD 5.62063000.
+  V3 subsequently failed at 1,217 observations on `74b14815`; its original archive
+  and scratch database remain retained. A mandatory incident returned clarification
+  despite rendered evidence, and a diagnostic defect obscured the terminal provider
+  failure. Aggregate reported and held cost is USD 55.913546. The owner requested
+  completion before merging PR #163 on 2026-10-15. ADR-0206 records the scope and
+  diagnostic repair; a new complete run may use at most USD 240 after ledger
+  reconciliation, CodeRabbit review and exact-head CI/signing. Old measurements
+  cannot certify the changed evaluated inputs.
+  The approved recovery now isolates invalid interaction proposals from grounded
+  claims, preserves named-subject corrections, discovers unambiguous people through
+  governed relationship evidence and shares their context with planned recall.
+  Retained evidence validates its identity and temporal dependencies, and People
+  retrieval preserves prepared semantic authority (ADR-0208). Two isolated
+  evaluation workers share one allowance without changing the observation matrix
+  or release thresholds (ADR-0207). Focused regressions pass; combined verification,
+  review and exact-head CI must precede new paid collection. Reviewed reliability
+  and the independent dreaming release are integrated for existing PR #163, with
+  migration ancestry ea3310a1b003 → ea3210a1b00d → ea3310a1b004 → ea3310a1b005.
+  Complete confirmation, independent failure review and release publication
+  remain outstanding.
   Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
 
@@ -99,6 +202,15 @@ title: Current Milestone
   dedicated pull request; supervised delivery does not depend on Milestone 33's
   remaining recall evaluations. Migration ea3210a1b00d follows production
   ea3310a1b003, with later recall migrations rebased before their own release.
+  That release subsequently completed through PR #165 at `0c7b0d74`: all ten
+  hosted checks and every delivery job in pipeline 1141 passed, including
+  TestFlight. The public API, documentation and website identify
+  `20261015-185949-0c7b0d7`. The forward cutover activated at
+  2026-10-15T19:05:44.185661Z with no blockers, preserving all 469 unknown erased
+  heads, five historical run receipts and the existing daily schedule. HTTPS
+  review-only sign-in works with thirty-day cookie persistence. Supervised review
+  remains enabled and unattended application remains off; this operational
+  delivery does not supply the missing comparative quality or independent review.
   The once/dry-run operator
   controls, remaining complete runtime gates and fresh matching comparative
   release evidence remain required; no verified sequential ceiling advances.

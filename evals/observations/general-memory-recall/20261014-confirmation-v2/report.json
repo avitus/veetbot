@@ -1,0 +1,109 @@
+{
+  "version": "retained-confirmation-originals@1",
+  "activation_evidence": false,
+  "run": {
+    "version": "general-recall-confirmation@1",
+    "state": "failed",
+    "activation_evidence": false,
+    "identity_sha256": "6d3bd45bd6003e1355f6af3a07cb4d8d4ff30a8ec581f3088d66c151b7ee3597",
+    "maximum_cost_usd": "290",
+    "completed": 4,
+    "expected_observations": 4800,
+    "options": {
+      "corpus": "/tmp/m33-replacement-inputs-combined-v2/approved-corpus.jsonl",
+      "output": "/tmp/m33-confirmation-20261013-v2",
+      "model_policy": "astra",
+      "maximum_cost_usd": "290",
+      "noise": 1000,
+      "deadline_seconds": 259200,
+      "execution": "runtime",
+      "storage": "postgres",
+      "disposable_database": true,
+      "pipeline": "seeded",
+      "formation_policy": "formation@11",
+      "channel": "sparse",
+      "paths": [
+        "automatic",
+        "deliberate"
+      ],
+      "local_configuration": null,
+      "model_directory": null,
+      "source_recovery": true,
+      "reranking": "relevance",
+      "query_planning": "task_context",
+      "search_planning": "reader",
+      "formation_bank_directory": null,
+      "semantic_fusion_weight": 0.2,
+      "historical_indexing": true,
+      "production_reader": true,
+      "independence_review": "/tmp/m33-replacement-inputs-combined-v2/independence-review.json",
+      "baseline_report": "/tmp/m33-replacement-inputs-combined-v2/production-baseline-report.json",
+      "build_ref": "7214a8dfe0e463ebb82adeee79b7b0c188f596bb",
+      "context_tokens": 2000,
+      "p95_latency_ms": 27088.38298124647,
+      "maximum_case_usd": 0.13937625
+    },
+    "error_class": "ValueError",
+    "actual_cost_usd": "0.1669775",
+    "held_cost_usd": "0.0000",
+    "provider_calls": 8,
+    "finished_at": "2026-10-14T01:44:38.693745+00:00"
+  },
+  "archive": {
+    "path": "m33-confirmation-20261013-v2-originals.tar.gz",
+    "bytes": 264810,
+    "sha256": "fd86093bd35391a4fe2f3c2caf6a145d018885fa1e461c648a33215f9ad402c7"
+  },
+  "files": [
+    {
+      "path": "baseline-report.json",
+      "bytes": 1111,
+      "sha256": "5db4590f1e892a2f1690a680ab4f5ba88b0f4e61c124c762412308e6716ae136"
+    },
+    {
+      "path": "confirmation.json",
+      "bytes": 405803,
+      "sha256": "45b038c4620561bcc7558801ab8c49e74074e676922cc606433edfe8c7960605"
+    },
+    {
+      "path": "corpus.jsonl",
+      "bytes": 526907,
+      "sha256": "69968f84f35159bc2c043ed34e50f9f185e2598b92e6528744d74f3b11435324"
+    },
+    {
+      "path": "identity.json",
+      "bytes": 1415,
+      "sha256": "310229af45af057f106bb282b26a2354708603b469cd08997d8409ebcd0a1812"
+    },
+    {
+      "path": "independence-review.json",
+      "bytes": 11323,
+      "sha256": "4dcda9f91a8b573b7d0ca82c82870a619b9868892f1e03bc03422538b5fae074"
+    },
+    {
+      "path": "inputs.json",
+      "bytes": 1082389,
+      "sha256": "015677503c87d7018e8f7a7ebe600beeda633f4e8159bc3077d3fefa2c188933"
+    },
+    {
+      "path": "observations/1c9695b4d07b28de4511802760efb43f6361f44ab32564972a7c658214c4d832.jsonl",
+      "bytes": 232038,
+      "sha256": "9227607573ddcf40895c4def3f1d00eebd629a9c349492a558d1b065183e2051"
+    },
+    {
+      "path": "preregistration.json",
+      "bytes": 248,
+      "sha256": "999781d724f97ca76df56d9849e9bc7f58e392dd4ff4c8cf624c22d6c355a208"
+    },
+    {
+      "path": "provider-costs.jsonl",
+      "bytes": 3402,
+      "sha256": "e856fff4f09789cef33b33f836655749fd1c92024933d92c67326601a1d126e4"
+    },
+    {
+      "path": "run.json",
+      "bytes": 1628,
+      "sha256": "0d55427543004dab2a0da477ecfa0928e9c7a0f118ed5d842bb101e3066b5fd5"
+    }
+  ]
+}

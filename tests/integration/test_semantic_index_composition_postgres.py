@@ -50,7 +50,7 @@ async def test_index_admission_lease_deferral_and_withdrawal(tmp_path: Path) -> 
             )
 
         async def sweep() -> int:
-            return (await index.run_slice()).indexed
+            return (await index.index.run_slice()).indexed
 
         worker = MaintenanceWorker(
             uow_factory=app.uow_factory, clock=kwargs["clock"], sweep_memory_semantic_index=sweep

@@ -11,7 +11,7 @@ import pytest
 
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError, load_settings
-from agent_core.memory.semantic_indexing import SemanticIndexingPass
+from agent_core.memory.semantic_deployment import SemanticServices
 from agent_core.runtime.worker import MaintenanceWorker
 from tests.contract.support import memory_uow_factory
 from tests.integration.m2_support import memory_settings
@@ -25,6 +25,57 @@ async def test_index_activation_refuses_missing_release_dependencies() -> None:
             settings=replace(settings, sandbox=memory_settings().sandbox), storage="memory"
         ):
             pass
+
+
+@pytest.mark.parametrize("stop", [True, False])
+async def test_metadata_capture_cannot_reach_semantic_admission_or_return_a_runtime(
+    monkeypatch: pytest.MonkeyPatch, stop: bool
+) -> None:
+    import agent_core.bootstrap as bootstrap
+    from agent_core.execution.manager import SandboxManager
+    from agent_core.memory.semantic_deployment import SemanticCompositionInputs
+
+    settings = replace(memory_settings(), memory_semantic_index_enabled=True)
+    captured = []
+    closed = []
+    original_close = SandboxManager.close
+
+    async def close(manager: SandboxManager) -> None:
+        closed.append(manager)
+        await original_close(manager)
+
+    def capture(inputs: SemanticCompositionInputs) -> None:
+        captured.append(inputs)
+        if stop:
+            raise ValueError("Capture complete")
+
+    async def forbidden(**_: Any) -> None:
+        pytest.fail("Capture must stop before semantic admission or provider creation")
+
+    monkeypatch.setattr(bootstrap, "compose_indexing", forbidden)
+    monkeypatch.setattr(SandboxManager, "close", close)
+    error = ValueError if stop else ConfigurationError
+    message = "Capture complete" if stop else "capture callback must stop"
+    with pytest.raises(error, match=message):
+        async with build(settings=settings, model_metadata_only=True, recall_capture=capture):
+            pytest.fail("Configuration capture cannot expose an executable runtime")
+    assert len(captured) == 1
+    assert captured[0].configuration["storage"] == "memory"
+    assert len(closed) == 1, "A stopped capture must close its partially constructed resources"
+
+
+async def test_recall_capture_requires_metadata_mode_before_model_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent_core.bootstrap as bootstrap
+
+    def forbidden(*_: Any, **__: Any) -> None:
+        pytest.fail("Refuse invalid capture before model adapters are constructed")
+
+    monkeypatch.setattr(bootstrap, "_provider_adapters", forbidden)
+    with pytest.raises(ConfigurationError, match="capture requires model metadata"):
+        async with build(settings=memory_settings(), recall_capture=lambda _: None):
+            pytest.fail("Capture must be explicit metadata-only composition")
 
 
 @pytest.mark.parametrize("value", ["maybe", "", "2"])
@@ -264,15 +315,15 @@ async def test_composed_index_sends_only_permitted_sources_and_stops_on_evidence
                 update={"sensitivity": Sensitivity.SENSITIVE}
             )
         )
-    outcome = await index.run_slice()
+    outcome = await index.index.run_slice()
     assert outcome.indexed == 1 and outcome.deferred == 1
     assert len(provider.calls) == 1
     assert "morning walks" in provider.calls[0].texts[0]
     raw = evidence.read_bytes()
     evidence.unlink()
-    assert (await index.run_slice()).reason == "disabled"
+    assert (await index.index.run_slice()).reason == "disabled"
     evidence.write_bytes(raw)
-    assert (await index.run_slice()).reason == "disabled" and len(provider.calls) == 1
+    assert (await index.index.run_slice()).reason == "disabled" and len(provider.calls) == 1
 
 
 @pytest.mark.parametrize("rejected", ["evidence", "manifest", "policy", "credential"])
@@ -376,7 +427,7 @@ async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
         release_files(tmp_path, dependencies)
         return real_bind(root, manifest, path, release, dependencies)
 
-    async def compose(**options: Any) -> SemanticIndexingPass | None:
+    async def compose(**options: Any) -> SemanticServices | None:
         configurations.append(options["configuration"])
         provider = Provider(options["factory"])
         providers.append(provider)
@@ -393,7 +444,9 @@ async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
         credential_resolver=kwargs["credentials"],
     ) as app:
         assert len(providers) == 1 and not providers[0].calls
-        assert configurations[0]["query_authority"] == "withheld"
+        assert configurations[0]["query_authority"] == "local-reviewed-reader@1;remote-withheld"
+        assert app.recall_composition.configuration == configurations[0]
+        assert app.executor._prepare_recall is None
         async with app.uow_factory() as uow:
             await uow.memories.upsert_belief(memory(statement="User prefers morning walks"))
         worker = app.maintenance_factory()
@@ -409,6 +462,47 @@ async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
         assert len(providers[0].calls) == 1
         worker.stop()
         await worker.run_forever()
+
+
+async def test_recall_dependency_capture_uses_the_effective_inactive_composition() -> None:
+    from tests.contract.support import principal
+
+    owner = principal().model_copy(update={"scopes": {"memory.read", "memory.write"}})
+    async with build(
+        settings=memory_settings(), principal=owner, enabled_tools=["memory.search"]
+    ) as app:
+        captured = getattr(app, "recall_composition", None)
+        assert captured is not None, "Confirmation must resolve inputs before index activation"
+        assert captured.configuration["principal"] == {
+            "tenant": owner.tenant_id,
+            "owner": owner.principal_id,
+            "scopes": sorted(owner.scopes),
+            "roles": sorted(owner.roles),
+        }
+        assert captured.configuration["memory"] == app.memory_profiles.model_dump(mode="json")
+        assert captured.configuration["agent"]["enabled_tools"] == ["memory.search"]
+        assert captured.configuration["storage"] == "memory"
+        assert captured.formation["profiles"] == app.memory_profiles.formation.model_dump(
+            mode="json"
+        )
+        assert captured.reader["registry"] == captured.formation["registry"]
+        assert app.semantic_services is None
+
+
+async def test_metadata_only_capture_matches_normal_composition() -> None:
+    from tests.contract.support import NOW, principal
+
+    captured = []
+    for metadata_only in (False, True):
+        async with build(
+            settings=memory_settings(),
+            principal=principal(),
+            fixed_clock_at=NOW,
+            sequential_ids=True,
+            model_metadata_only=metadata_only,
+        ) as app:
+            captured.append(app.recall_composition)
+    assert captured[0] == captured[1]
 
 
 async def test_repeated_stop_does_not_interrupt_index_spend_cleanup() -> None:

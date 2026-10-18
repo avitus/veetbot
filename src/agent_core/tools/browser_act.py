@@ -160,9 +160,10 @@ class BrowserActTool:
         name="browser.act",
         version="1.7.0",
         description=(
-            "Act once with approval and current revision/ref; returns settled page and fresh "
-            "refs. Optional postcondition uses observe wait_for. On element_not_found, refresh "
-            "for overlays. Never repeat an uncertain write; observed success is not causal proof."
+            "Act once with approval: current revision+elements[].ref, including scroll; "
+            "regions[].ref is read-only. Returns settled page/fresh refs. "
+            "postcondition=observe wait_for. Refresh missing targets for overlays. "
+            "Never replay uncertain writes; success is not causal proof."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
@@ -218,6 +219,17 @@ class BrowserActTool:
             # so a refusal never counts as a sent effect.
             constraint = _checked_constraint(self._provider, context.dispatch_constraint)
             await bind_browser_execution(self._provider, context)
+            snapshot = await browser_snapshot_in_session(self._provider, context.session_id)
+            if (
+                snapshot is not None
+                and snapshot.observation.revision == action.expected_revision
+                and any(region.ref == action.ref for region in snapshot.observation.regions)
+            ):
+                return browser_failure(
+                    ToolFailureKind.INVALID_ARGUMENTS,
+                    "tool.browser.region_not_actionable",
+                    retryable=False,
+                )
             await context.mark_effect_sent()
             observation = await _act(self._provider, action, constraint)
         except BrowserProviderError as error:

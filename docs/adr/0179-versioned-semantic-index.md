@@ -93,3 +93,23 @@ A subsequent focused regression exposed noncanonical citation during partial
 indexing of an equivalence group (one behavioral failure, one exclusion case
 already passing). Moving equivalence relevance ahead of scoring repairs that
 case without changing stored authority, evidence or explicit exclusions.
+
+## Current People identity filtering (2026-10-12)
+
+Current sparse and dense search apply the same identity restrictions as ordinary
+People recall before candidate limits. An original with visible identity assignments
+must include a focal person, and every assignment must be resolved and visible at
+the requested ceiling. Unlinked ordinary originals retain their existing behavior.
+The in-memory memory store filters its eligible originals before either ranking
+path. PostgreSQL
+uses the People store's current visibility query, including its dependency closure,
+in shared correlated predicates before sparse or vector ordering and LIMIT. Missing People storage
+withholds a scoped search; no name match can substitute for an identity link.
+
+This index contract alone does not enable People-scoped runtime query preparation.
+[ADR-0197](0197-people-semantic-query-narrowing.md) supplies the separately validated
+vector binding for current query narrowing. The subsequent historical extension
+in [ADR-0200](0200-historical-semantic-revisions.md) supplies distinct revision
+slots, current-source fences and shared dated visibility predicates, with dedicated
+in-memory and PostgreSQL contracts. Historical indexing remains default-off and
+local-only. The release gates remain unchanged.

@@ -58,4 +58,6 @@ async def test_semantic_lookup_cannot_widen_admission(mode: str) -> None:
     )
     result = await retriever.recall(query, session_id=SESSION_ID)
     assert result.items == []
-    assert len(calls) == (1 if mode == "wrong_query" else 0)
+    # People-scoped lookups now reach the shared current identity predicate, but
+    # a vector for another query is still refused before any candidate read.
+    assert len(calls) == (1 if mode in {"wrong_query", "people"} else 0)

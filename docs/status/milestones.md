@@ -333,15 +333,25 @@ current query policy. ADR-0183 refreshes current evidence on every production
 context assembly. ADR-0185 adds exact-version release-bundle validation and
 recomputes quality/budget admission. Source indexing has default-off maintenance
 composition and configuration bound to reviewed release dependencies (ADR-0187).
-Trusted query authority, semantic recall composition, query scheduling,
-historical/People semantic parity and comparative activation evidence remain open.
+Offline model verification, restricted local query authority and shared run preparation
+are implemented (ADR-0188), alongside governed source recovery (ADR-0189), durable
+preparation budgets (ADR-0190) and a separately admitted relevance reranker (ADR-0191).
+The runtime evaluator separates stored atoms from recovered source evidence
+(ADR-0192), and its PostgreSQL mode exercises actual workers and reader authority.
+The owner approved the 400-scenario corpus on 2026-10-13; difficult-failure review
+remains required. Current People narrowing has shared
+PostgreSQL coverage; a six-arm task-context comparison retains all 120 development
+observations. Reader-planned search answers 16/20, with four failures caused by
+guessed hard type filters. ADR-0198 replaces that model-facing argument with soft
+relevance hints while preserving explicit legacy filters. Historical semantic
+parity, confirmatory configuration binding and reviewed release evidence remain open.
 
 Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).
 The staged implementation is in progress; optional channels remain evidence-gated.
 
-- [ ] complete the staged implementation and comparative activation evidence
-- [ ] authorized PR review, hosted CI and separately authorized production delivery
+- [ ] Complete the staged implementation and comparative activation evidence
+- [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 ## Outside a milestone
 

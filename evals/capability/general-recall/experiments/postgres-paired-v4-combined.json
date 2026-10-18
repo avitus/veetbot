@@ -1,0 +1,20 @@
+{
+  "corpus": "evals/capability/general-recall/pilot.v2.jsonl",
+  "output": "/tmp/veetbot-m33-paired-v4-combined",
+  "maximum_cost_usd": "0.75",
+  "noise": 1000,
+  "deadline_seconds": 3600,
+  "execution": "runtime",
+  "storage": "postgres",
+  "disposable_database": true,
+  "pipeline": "formation",
+  "formation_policy": "formation@11",
+  "channel": "hybrid",
+  "source_recovery": true,
+  "reranking": "relevance",
+  "query_planning": "baseline",
+  "search_planning": "scripted",
+  "formation_bank_directory": "/tmp/veetbot-m33-paired-v4-banks",
+  "local_configuration": "evals/observations/general-memory-recall/20261012-local-encoding/configuration.json",
+  "model_directory": "/tmp/veetbot-verified-local-model"
+}

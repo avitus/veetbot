@@ -16,6 +16,11 @@ formation:
     max_open: 5
 retrieval:
   semantic_enabled: false
+  semantic_channel: hybrid
+  semantic_fusion_weight: 0.2
+  reranking: baseline
+  query_planning: baseline
+  source_recovery_enabled: false
   candidate_selection: relevance
   reciprocal_rank_fusion_k: 60
   durable_item_share: 0.6666666667
