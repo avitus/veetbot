@@ -85,6 +85,7 @@ async def authorize(
     problem: str | None,
     *,
     action: ProposedAction | None = None,
+    owner_texts: tuple[str, ...] | None = None,
 ) -> Any:
     _clock, uow_factory = await memory_uow_factory()
     metadata: dict[str, Any] = {}
@@ -167,7 +168,13 @@ async def authorize(
         else AuthorizationTurn(
             newest_user_trust=TrustLevel.EXTERNAL_UNTRUSTED
             if problem == "untrusted_turn"
-            else TrustLevel.USER
+            else TrustLevel.USER,
+            owner_texts=owner_texts
+            if owner_texts is not None
+            else ("Call Riv at +1 (650) 555-0123 and remind her to throw the ball.",)
+            if problem != "number_not_from_owner"
+            else ("Call Riv and remind her to throw the ball.",),
+            conversation_untrusted=problem == "earlier_external_content",
         ),
     )
 
@@ -191,6 +198,8 @@ async def authorize(
         "expired",
         "other_server",
         "already_allowed",
+        "earlier_external_content",
+        "number_not_from_owner",
     ],
 )
 async def test_owner_call_boundaries(problem: str | None) -> None:
@@ -217,4 +226,31 @@ async def test_scheduling_an_owner_call_needs_no_confirmation(
     if "place_call" in arguments and not arguments["place_call"]:
         action.arguments.pop("place_call")
     result = await authorize(None, action=action)
+    assert result.allowed is allowed
+
+
+@pytest.mark.parametrize(
+    ("instruction", "owner_text", "allowed"),
+    [
+        # The owner typed the number; the model normalized it.
+        ("Call Riv at +16505550123.", "Call Riv at +1 (650) 555-0123 at 6:15.", True),
+        ("Call Riv at +16505550123.", "Call Riv at (650) 555-0123 at 6:15.", True),
+        ("Call Riv at +16505550123.", "Call Riv at 555-0123 at 6:15.", False),
+        ("Call Riv at +16505550123.", "Call Riv at 6:15.", False),
+        # Every number the schedule will dial must come from the owner.
+        (
+            "Call Riv at +16505550123, then +19005550199.",
+            "Call Riv at +1 (650) 555-0123 at 6:15.",
+            False,
+        ),
+        ("Call Riv tonight.", "Call Riv at +1 (650) 555-0123 at 6:15.", False),
+    ],
+)
+async def test_a_call_schedule_dials_only_numbers_the_owner_gave(
+    instruction: str, owner_text: str, allowed: bool
+) -> None:
+    """ADR-0213: content cannot pick who a scheduled call dials."""
+    result = await authorize(
+        None, action=schedule_call(instruction=instruction), owner_texts=(owner_text,)
+    )
     assert result.allowed is allowed
