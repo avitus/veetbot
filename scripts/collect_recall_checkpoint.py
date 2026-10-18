@@ -25,6 +25,7 @@ MODULES = (
     "general_recall_continuation_budget",
     "general_recall_checkpoint_parent",
     "general_recall_continuation_collector",
+    "general_recall_checkpoint_recovery",
     "general_recall_checkpoint_runner",
 )
 
@@ -82,7 +83,7 @@ def verify_invocation(
     protocol = _load(protocol_path, protocol_sha256)
     segment = _load(segment_path, segment_sha256)
     if (
-        protocol["version"] != "recall-checkpoint-operator@1"
+        protocol["version"] not in {"recall-checkpoint-operator@1", "recall-checkpoint-operator@2"}
         or segment["version"] != "recall-checkpoint-paid-admission@1"
         or segment["paid_launch_authorized"] is not True
         or segment["protocol_sha256"] != protocol_sha256
@@ -90,6 +91,8 @@ def verify_invocation(
         or any(type(segment[k]) is not bool for k in ("initialize_store", "initialize_deadline"))
     ):
         raise ValueError("Unadmitted checkpoint protocol or segment")
+    if protocol["version"] == "recall-checkpoint-operator@2":
+        verify_successor(protocol, segment)
     captured = datetime.fromisoformat(segment["checked_at"])
     if captured.tzinfo is None or not 0 <= (datetime.now(UTC) - captured).total_seconds() <= 3600:
         raise ValueError("Fresh configuration and budget admission are required")
@@ -132,6 +135,48 @@ def verify_invocation(
     if segment["initialize_deadline"] and any((directory / "budget").glob("*.jsonl")):
         raise ValueError("A paid segment cannot establish a replacement deadline")
     return protocol, segment
+
+
+def verify_successor(protocol: dict[str, Any], segment: dict[str, Any]) -> None:
+    """Only collector identity and explicit recovery inputs may change."""
+    predecessor = _load(
+        Path(protocol["predecessor_protocol_file"]), protocol["predecessor_protocol_sha256"]
+    )
+    additions = {
+        "predecessor_protocol_file",
+        "predecessor_protocol_sha256",
+        "recovery_manifest_file",
+        "recovery_owner_file",
+        "recovery_assessment_file",
+    }
+    changed = {"version", "files", "collector_root", "collector_commit"}
+    if (
+        predecessor["version"] != "recall-checkpoint-operator@1"
+        or set(protocol) != set(predecessor) | additions
+        or {k: v for k, v in protocol.items() if k not in additions | changed}
+        != {k: v for k, v in predecessor.items() if k not in changed}
+        or segment["initialize_store"]
+        or segment["initialize_deadline"]
+    ):
+        raise ValueError("Recovery cannot change runtime, allocation, state or deadline")
+    files = protocol["files"]
+    for name, digest in predecessor["files"].items():
+        # Retain all original operator inputs, even the old collector files.
+        if files.get(name) != digest or hashlib.sha256(_read(Path(name))).hexdigest() != digest:
+            raise ValueError("Original protocol input changed or was omitted")
+    for name in additions - {"predecessor_protocol_sha256"}:
+        if protocol[name] not in files:
+            raise ValueError("Recovery authorization input is not pinned")
+    if files[protocol["predecessor_protocol_file"]] != protocol["predecessor_protocol_sha256"]:
+        raise ValueError("Original protocol is not pinned")
+    manifest = _load(
+        Path(protocol["recovery_manifest_file"]), files[protocol["recovery_manifest_file"]]
+    )
+    if (
+        manifest["predecessor_protocol_sha256"] != protocol["predecessor_protocol_sha256"]
+        or segment.get("recovery_manifest_sha256") != files[protocol["recovery_manifest_file"]]
+    ):
+        raise ValueError("Paid admission does not bind the exact bounded recovery")
 
 
 def _bootstrap(protocol: dict[str, Any]) -> None:
@@ -252,6 +297,7 @@ async def _run(
             pinned("preparation_diagnostic_file"),
         )
         if protocol.get("preparation_approval_file")
+        and protocol["version"] == "recall-checkpoint-operator@1"
         else None
     )
     # Credentials are read only after offline identity and fresh-database checks.
@@ -295,6 +341,15 @@ async def _run(
             forbidden_databases=tuple(protocol["forbidden_databases"]),
             create_deadline=segment["initialize_deadline"],
             preparation_approval=approval,
+            bounded_recovery=(
+                (
+                    pinned("recovery_manifest_file"),
+                    pinned("recovery_owner_file"),
+                    pinned("recovery_assessment_file"),
+                )
+                if protocol["version"] == "recall-checkpoint-operator@2"
+                else None
+            ),
         )
 
 

@@ -275,6 +275,8 @@ class CheckpointParent:
         if directory.is_symlink() or not directory.is_dir():
             raise ValueError("Unsafe continuation bank directory")
         suffix = ".replacement.json" if case_id in store._replaced else ".json"
+        if (case_id, "automatic", "formation", "sparse") in store._bounded_replaced:
+            suffix = ".final-replacement.json"
         return directory / (_digest(case_id.encode()) + suffix)
 
     def admit_preparation_replacement(

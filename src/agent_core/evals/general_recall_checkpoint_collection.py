@@ -86,6 +86,7 @@ def _inventory(store: CheckpointStore) -> dict[str, str]:
         "segments",
         "budget",
         "operator-segments",
+        "recovery",
     ):
         directory = store.directory / name
         if not directory.exists():
@@ -186,9 +187,15 @@ def compile_checkpoint_collection(
         and len(set(first_worker.forbidden_databases)) == len(first_worker.forbidden_databases),
         "original scratch databases are not excluded",
     )
+    from agent_core.evals.general_recall_checkpoint_recovery import retained_recovery
+
+    recovery = retained_recovery(store)
+    protocol_sha256 = (
+        recovery[1]["successor_protocol_sha256"] if recovery else deadline.protocol_sha256
+    )
     verify_worker_admissions(
         store,
-        protocol_sha256=deadline.protocol_sha256,
+        protocol_sha256=protocol_sha256,
         forbidden_databases=first_worker.forbidden_databases,
     )
     for path in (store.directory / "operator-segments").iterdir():
@@ -204,6 +211,14 @@ def compile_checkpoint_collection(
     references = []
     reported = held = Decimal(0)
     review: list[dict[str, Any]] = []
+    if recovery is not None:
+        review.append(
+            {
+                "kind": "owner_approved_bounded_recovery",
+                "manifest": recovery[0].model_dump(mode="json"),
+                "transition": recovery[1],
+            }
+        )
     for item in parents:
         _require(_digest(item.raw) == item.sha256, "parent ledger changed")
         account = account_ledger(item.raw, maximum=item.maximum)
@@ -487,7 +502,8 @@ def compile_checkpoint_collection(
             "parent_original_rows": parent.total_rows,
             "parent_ledgers": references,
             "segments": segment_accounts,
-            "protocol_sha256": deadline.protocol_sha256,
+            "protocol_sha256": protocol_sha256,
+            "original_deadline_protocol_sha256": deadline.protocol_sha256,
             "artifacts": before,
             "reported_usd": str(reported),
             "held_usd": str(held),

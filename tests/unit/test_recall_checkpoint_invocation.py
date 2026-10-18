@@ -180,3 +180,88 @@ def test_incomplete_or_cancelled_segment_has_safe_nonzero_exit(
     assert error.value.code == 1
     result = json.loads(capsys.readouterr().out)
     assert result["state"] in {"stopped", "incomplete"}
+
+
+def successor_fixture(tmp_path: Path) -> dict[str, Any]:
+    args = fixture(tmp_path)
+    predecessor = json.loads(args["protocol_path"].read_bytes())
+    previous_path = tmp_path / "predecessor.json"
+    previous_path.write_bytes(args["protocol_path"].read_bytes())
+    recovery_path = tmp_path / "recovery.json"
+    recovery_path.write_text(json.dumps({"predecessor_protocol_sha256": args["protocol_sha256"]}))
+    protocol = {
+        **predecessor,
+        "version": "recall-checkpoint-operator@2",
+        "predecessor_protocol_file": str(previous_path),
+        "predecessor_protocol_sha256": args["protocol_sha256"],
+        "recovery_manifest_file": str(recovery_path),
+        "recovery_owner_file": str(tmp_path / "owner.json"),
+        "recovery_assessment_file": str(tmp_path / "assessment.json"),
+        "files": dict(predecessor["files"]),
+    }
+    for name in ("owner.json", "assessment.json"):
+        (tmp_path / name).write_text("{}")
+    for path in (
+        previous_path,
+        recovery_path,
+        tmp_path / "owner.json",
+        tmp_path / "assessment.json",
+    ):
+        protocol["files"][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    state = Path(protocol["state_directory"])
+    state.mkdir()
+    (state / "deadline.json").write_text("{}")
+    segment = json.loads(args["segment_path"].read_bytes())
+    segment.update(
+        initialize_store=False,
+        initialize_deadline=False,
+        recovery_manifest_sha256=protocol["files"][str(recovery_path)],
+    )
+    args["protocol_path"].write_text(json.dumps(protocol))
+    args["protocol_sha256"] = hashlib.sha256(args["protocol_path"].read_bytes()).hexdigest()
+    segment["protocol_sha256"] = args["protocol_sha256"]
+    args["segment_path"].write_text(json.dumps(segment))
+    args["segment_sha256"] = hashlib.sha256(args["segment_path"].read_bytes()).hexdigest()
+    return args
+
+
+def test_successor_invocation_links_original_protocol_without_renewal(tmp_path: Path) -> None:
+    args = successor_fixture(tmp_path)
+    protocol, segment = module.verify_invocation(**args)
+    assert protocol["version"] == "recall-checkpoint-operator@2"
+    assert not segment["initialize_store"] and not segment["initialize_deadline"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["plan", "state", "runtime", "prior", "manifest", "binding", "reinitialize", "omitted_file"],
+)
+def test_successor_refuses_unrelated_changes_before_bootstrap(tmp_path: Path, change: str) -> None:
+    args = successor_fixture(tmp_path)
+    protocol = json.loads(args["protocol_path"].read_bytes())
+    segment = json.loads(args["segment_path"].read_bytes())
+    if change == "plan":
+        protocol["plan_sha256"] = segment["plan_sha256"] = "f" * 64
+    if change == "state":
+        protocol["state_directory"] = str(tmp_path / "different-state")
+    if change == "runtime":
+        protocol["frozen_commit"] = "f" * 40
+    if change == "prior":
+        protocol["predecessor_protocol_sha256"] = "f" * 64
+    if change == "binding":
+        segment["recovery_manifest_sha256"] = "f" * 64
+    if change == "manifest":
+        path = Path(protocol["recovery_manifest_file"])
+        path.write_text('{"predecessor_protocol_sha256":"bad"}')
+        protocol["files"][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if change == "reinitialize":
+        segment["initialize_deadline"] = True
+    if change == "omitted_file":
+        protocol["files"].pop(str(Path(protocol["frozen_root"]) / "original"))
+    args["protocol_path"].write_text(json.dumps(protocol))
+    args["protocol_sha256"] = hashlib.sha256(args["protocol_path"].read_bytes()).hexdigest()
+    segment["protocol_sha256"] = args["protocol_sha256"]
+    args["segment_path"].write_text(json.dumps(segment))
+    args["segment_sha256"] = hashlib.sha256(args["segment_path"].read_bytes()).hexdigest()
+    with pytest.raises(ValueError):
+        module.verify_invocation(**args)

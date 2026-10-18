@@ -67,6 +67,7 @@ _COLLECTOR_MODULES = frozenset(
         "general_recall_checkpoint_runtime",
         "general_recall_checkpoint_parent",
         "general_recall_checkpoint_runner",
+        "general_recall_checkpoint_recovery",
         "general_recall_continuation_budget",
         "general_recall_continuation_collector",
     )
@@ -74,7 +75,7 @@ _COLLECTOR_MODULES = frozenset(
 
 
 def verify_frozen_module(root: Path) -> None:
-    """Refuse mixed runtime imports; only the six separately pinned modules differ."""
+    """Refuse mixed runtime imports; only separately pinned collector modules differ."""
     package = (root / "src/agent_core").resolve()
     for name, module in tuple(sys.modules.items()):
         if (
@@ -307,6 +308,7 @@ async def run_checkpoint_segment(
     forbidden_databases: tuple[str, ...],
     create_deadline: bool,
     preparation_approval: tuple[bytes, str, bytes] | None = None,
+    bounded_recovery: tuple[bytes, bytes, bytes] | None = None,
     monotonic: Callable[[], float] = elapsed_time,
 ) -> dict[str, Any]:
     """Run one explicitly admitted segment, never automatically launch a successor."""
@@ -315,6 +317,19 @@ async def run_checkpoint_segment(
     verify_frozen_module(root)
     parent.archive.verify()
     parent.import_into(store)
+    if bounded_recovery is not None:
+        from agent_core.evals.general_recall_checkpoint_recovery import admit_bounded_recovery
+
+        if preparation_approval is not None or create_deadline:
+            raise ValueError("Bounded recovery cannot renew original preparation or deadline")
+        declaration, decision, assessment = bounded_recovery
+        admit_bounded_recovery(
+            store,
+            manifest=declaration,
+            owner=decision,
+            assessment=assessment,
+            protocol_sha256=protocol_sha256,
+        )
     if preparation_approval is not None:
         proof, digest, diagnostic = preparation_approval
         parent.admit_preparation_replacement(

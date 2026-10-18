@@ -135,7 +135,14 @@ class _Event(ReleaseValue):
     recorded_at: datetime
     key: Slot
     action: Literal[
-        "started", "importing", "imported", "completed", "failed", "parent_failed", "replacement"
+        "started",
+        "importing",
+        "imported",
+        "completed",
+        "failed",
+        "parent_failed",
+        "replacement",
+        "bounded_replacement",
     ]
     result_sha256: Digest | None = None
     stage: Literal["formation", "answer"] | None = None
@@ -173,6 +180,7 @@ class CheckpointStore:
         self._slots = required_slots(plan.scenarios)
         self._states: dict[Slot, _Event] = {}
         self._replaced: set[str] = set()
+        self._bounded_replaced: set[Slot] = set()
         self._count = 0
         self._previous = _digest(encoded)
         self._lock: int | None = None
@@ -268,13 +276,16 @@ class CheckpointStore:
             or (event.action in {"failed", "parent_failed"}) != (event.stage is not None)
             or (event.action in {"failed", "parent_failed"}) != (event.error_class is not None)
             or (event.action in {"failed", "parent_failed"}) != (event.ledger_sha256 is not None)
-            or (event.action == "parent_failed") != (event.source_sha256 is not None)
+            or (event.action in {"parent_failed", "bounded_replacement"})
+            != (event.source_sha256 is not None)
         ):
             raise ValueError("Invalid checkpoint event or chain")
         previous = self._states.get(event.key)
         action = previous.action if previous else None
         if event.action == "started":
-            if action not in {None, "replacement"}:
+            if any(self._states[k].action == "failed" for k in self._bounded_replaced):
+                raise ValueError("An approved bounded recovery failed; paid admissions must stop")
+            if action not in {None, "replacement", "bounded_replacement"}:
                 raise ValueError("Unresolved or unknown slot cannot resend")
             if any(
                 key != event.key
@@ -283,6 +294,10 @@ class CheckpointStore:
                 for key, value in self._states.items()
             ):
                 raise ValueError("Scenario has an unresolved preparation or answer")
+        elif event.action == "bounded_replacement":
+            from agent_core.evals.general_recall_checkpoint_recovery import validate_recovery_event
+
+            validate_recovery_event(self, event.key, str(event.source_sha256))
         elif event.action == "importing":
             if previous is not None:
                 raise ValueError("Duplicate imported checkpoint slot")
@@ -327,6 +342,8 @@ class CheckpointStore:
         self._states[event.key] = event
         if event.action == "replacement":
             self._replaced.add(event.key[0])
+        if event.action == "bounded_replacement":
+            self._bounded_replaced.add(event.key)
         self._count, self._previous = event.index, _digest(raw)
 
     def _record(self, action: str, key: Slot, **details: object) -> None:
@@ -460,6 +477,8 @@ class CheckpointStore:
 
     def pending(self) -> tuple[Slot, ...]:
         self._owned()
+        if any(self._states[k].action == "failed" for k in self._bounded_replaced):
+            return ()
         blocked = {
             key[0]
             for key, event in self._states.items()
@@ -469,7 +488,10 @@ class CheckpointStore:
             key
             for key in self._slots
             if key[0] not in blocked
-            and (key not in self._states or self._states[key].action == "replacement")
+            and (
+                key not in self._states
+                or self._states[key].action in {"replacement", "bounded_replacement"}
+            )
         )
 
     def completed(self) -> tuple[Slot, ...]:

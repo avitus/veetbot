@@ -240,13 +240,16 @@ class ContinuationDeadline:
                 duration_seconds=duration_seconds,
             )
             _write(path, value.model_dump_json().encode() + b"\n")
+        from agent_core.evals.general_recall_checkpoint_recovery import protocol_ancestry
+
+        predecessor, _ = protocol_ancestry(store, protocol_sha256)
         self.value = _Deadline.model_validate(
             json.loads(_read(path), object_pairs_hook=_unique_object)
         )
         if (
             self._wall.tzinfo is None
             or self.value.plan_sha256 != plan_sha256
-            or self.value.protocol_sha256 != protocol_sha256
+            or self.value.protocol_sha256 != predecessor
             or self.value.duration_seconds != duration_seconds
             or self.value.expires_at != self.value.started_at + timedelta(seconds=duration_seconds)
             or self._wall < self.value.started_at
@@ -291,6 +294,9 @@ def verify_worker_admissions(
         p.with_suffix(".json").name for p in journals
     }:
         raise ValueError("Incomplete or extra worker admission inventory")
+    from agent_core.evals.general_recall_checkpoint_recovery import protocol_ancestry
+
+    predecessor, first_successor = protocol_ancestry(store, protocol_sha256)
     used: tuple[str, ...] = ()
     for index, journal in enumerate(journals, 1):
         value = WorkerAdmission.model_validate_json(
@@ -299,7 +305,8 @@ def verify_worker_admissions(
         if (
             journal.name != f"{index:06d}.jsonl"
             or value.plan_sha256 != _digest(store.plan.encoded())
-            or value.protocol_sha256 != protocol_sha256
+            or value.protocol_sha256
+            != (predecessor if index < first_successor else protocol_sha256)
             or value.budget_admission_sha256
             != _digest(_read(journal.with_suffix(".admission.json")))
             or value.forbidden_databases != forbidden_databases + used

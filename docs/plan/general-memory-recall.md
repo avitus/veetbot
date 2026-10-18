@@ -427,6 +427,17 @@ Publication of this reduced comparison requires a new explicit protocol and its
 verified admission implementation. Existing version-one/two publication does not
 accept a reduced matrix. No activation gate is satisfied by checkpoint retention.
 
+[ADR-0213](../adr/0213-bounded-interruption-recovery.md) adds two owner-approved
+exceptions bound to retained interruption evidence: one final preparation for
+`dev-decisions-03` and one replacement of the admission-halted deliberate/hybrid
+reader for `dev-decisions-04`. Original failed records, completed rows, uncertain
+charges and the absolute deadline remain unchanged. A separately pinned successor
+collector appends the authorization and protocol ancestry; it uses fresh workers
+and a distinct final preparation bank. Either exception failing again stops further
+paid admissions. This does not authorize retries for other readers or preparations,
+change evaluated runtime inputs or relax any quality/security/per-answer limit.
+Independent human review must include both failed attempts and replacements.
+
 ## Release admission mechanism
 
 `general-recall-release@1` binds reviewed scenario/independence manifests, exact
