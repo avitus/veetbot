@@ -1082,12 +1082,16 @@ class HybridMemoryRetriever:
         """
         if usage.trace_id is None:
             return False
-        semantic_authorized = (
-            self._runtime_semantic_queries is not None
-            and await self._runtime_semantic_queries.validate_authority(
-                session_id=session_id, run_id=run_id, surface_id="private"
-            )
-        )
+        try:
+            return await self._validate_retained(usage, session_id=session_id, run_id=run_id)
+        except SourceRecoveryUnavailableError:
+            # The UOW has rolled back; withhold only this receipt (fail closed).
+            return False
+
+    async def _validate_retained(
+        self, usage: MemoryRecallUsage, *, session_id: UUID, run_id: UUID
+    ) -> bool:
+        assert usage.trace_id is not None
         async with self._uow_factory() as uow, uow.people.lock(self._principal):
             try:
                 trace = await uow.traces.get(usage.trace_id, self._principal)
@@ -1115,7 +1119,14 @@ class HybridMemoryRetriever:
                 if not self._profile.semantic_enabled:
                     return False
                 if self._runtime_semantic_queries is not None:
-                    if not semantic_authorized:
+                    # Only a semantic trace spends the shared deadline on authority.
+                    try:
+                        authorized = await self._runtime_semantic_queries.validate_authority(
+                            session_id=session_id, run_id=run_id, surface_id="private"
+                        )
+                    except Exception:
+                        return False
+                    if not authorized:
                         return False
                 else:
                     cached = (

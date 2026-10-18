@@ -15,7 +15,8 @@ remains unchanged so its retained measurements can be reproduced.
 
 These changes require a complete new comparison. Earlier failures remain in their
 original observations and are not selectively rescored into a passing run. The
-separate draft corpus and difficult-failure packet still need human review.
+owner approved the draft corpus on 2026-10-13 (`draft/review-manifest.json`);
+the separate difficult-failure packet still needs human review.
 
 The five `postgres-paired-v5-*` configurations compare sparse control, baseline
 hybrid, reranking alone, recovery alone and their combination. They share one

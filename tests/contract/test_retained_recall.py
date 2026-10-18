@@ -1,5 +1,6 @@
 """Saved deliberate evidence is checked against its current authoritative support."""
 
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -8,7 +9,10 @@ from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.domain.memory import RecalledBelief
 from agent_core.domain.messages import MemoryRecallUsage
 from agent_core.memory.retrieval import HybridMemoryRetriever
-from agent_core.memory.source_recovery import BoundedSourceRecovery
+from agent_core.memory.source_recovery import (
+    BoundedSourceRecovery,
+    SourceRecoveryUnavailableError,
+)
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.memory_fixtures import formation_stack, memory, recall_query, user_event
 from tests.contract.support import RUN_ID, SESSION_ID, principal
@@ -146,3 +150,84 @@ async def test_missing_trace_does_not_discard_later_valid_search_results() -> No
     )
     assert tool_result(selected, 1).content == [TextPart(text=OMITTED)]
     assert tool_result(selected, 3).content == valid[1].content
+
+
+async def test_unavailable_source_recovery_withholds_only_its_receipt() -> None:
+    clock, factory, _, _ = await formation_stack()
+    sequences = [await user_event(factory, "Workshop detail: " + "4" * 700)]
+    record = memory(statement="The workshop is on Thursday.").model_copy(
+        update={"subject": "workshop", "scope": "general", "source_event_ids": sequences}
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(record)
+
+    class InterruptibleRecovery(BoundedSourceRecovery):
+        available = True
+
+        async def recover(self, *args: Any, **kwargs: Any) -> Any:
+            if not self.available:
+                raise SourceRecoveryUnavailableError
+            return await super().recover(*args, **kwargs)
+
+    recovery = InterruptibleRecovery(principal(), admitted=lambda: True)
+    retriever = HybridMemoryRetriever(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=i) for i in range(8100, 8110)),
+        principal(),
+        source_recovery=recovery,
+    )
+    query = recall_query(text="workshop", budget_tokens=900).model_copy(
+        update={"current_scope": "general"}
+    )
+    result = await retriever.recall(query, session_id=SESSION_ID, run_id=RUN_ID)
+    assert isinstance(result.items[0], RecalledBelief) and result.items[0].sources
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    usage = MemoryRecallUsage(
+        trace_id=result.trace_id,
+        tokens=result.tokens,
+        items=len(result.items),
+        content_sha256=trace.rendered_sha256,
+    )
+    recovery.available = False
+    # Fail closed for this receipt rather than abort the shared validation pass.
+    assert await retriever.validate_retained(usage, session_id=SESSION_ID, run_id=RUN_ID) is False
+
+
+async def test_lexical_receipt_does_not_wait_on_semantic_authority() -> None:
+    clock, factory, _, _ = await formation_stack()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(
+            memory(statement="The workshop is on Thursday.").model_copy(
+                update={"subject": "workshop", "scope": "general"}
+            )
+        )
+    ids = SequenceIdFactory(UUID(int=i) for i in range(8200, 8220))
+    lexical = HybridMemoryRetriever(factory, clock, ids, principal())
+    query = recall_query(text="workshop", budget_tokens=400).model_copy(
+        update={"current_scope": "general"}
+    )
+    result = await lexical.recall(query, session_id=SESSION_ID, run_id=RUN_ID)
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    assert "+semantic@" not in trace.retrieval_policy_version
+    usage = MemoryRecallUsage(
+        trace_id=result.trace_id,
+        tokens=result.tokens,
+        items=len(result.items),
+        content_sha256=trace.rendered_sha256,
+    )
+
+    class UnreachableAuthority:
+        async def validate_authority(self, **_: Any) -> bool:
+            raise TimeoutError
+
+    validating = HybridMemoryRetriever(
+        factory,
+        clock,
+        ids,
+        principal(),
+        runtime_semantic_queries=cast(Any, UnreachableAuthority()),
+    )
+    assert await validating.validate_retained(usage, session_id=SESSION_ID, run_id=RUN_ID)

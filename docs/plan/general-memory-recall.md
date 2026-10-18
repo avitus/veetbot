@@ -132,8 +132,9 @@ frozen prefix remains its existing separate class, and correction notices remain
 mandatory when optional recall has exhausted its allowance. Preparation and
 assembly compute the same current remainder. This bounds rendered context; it
 does not by itself certify a whole-run search-work cap or a combined global
-relevance rank. A missing retained trace invalidates only that result; later
-valid receipts still receive their own validation. If the correction store is
+relevance rank. A missing retained trace, unavailable source recovery or
+unavailable read authority invalidates only that result; later valid receipts
+still receive their own validation, and only semantic traces consult authority. If the correction store is
 unavailable after optional search exhaustion, context assembly applies the same
 logged degradation as its other dependency-failure paths and keeps the explicit
 exhaustion notice. Cancellation still propagates.
