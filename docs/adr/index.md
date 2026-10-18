@@ -245,3 +245,4 @@ implementation without one.
 - [ADR-0208: Grounded relationship discovery](0208-grounded-relationship-discovery.md)
 
 - [ADR-0209: Uninterrupted browser research and visible deadlines](0209-uninterrupted-browser-research.md)
+- [ADR-0213: Owner-requested calls without confirmation](0213-owner-requested-calls-without-confirmation.md)

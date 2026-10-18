@@ -1664,3 +1664,13 @@ and supplies a live dispatch constraint. Setting `0` omits it. Custom
 unconditional approval and deny rules do not compose this permission. No
 versioned policy rule or memory evaluation tuple changes. The detailed contract
 is [browser-automation.md](browser-automation.md).
+
+## ADR-0213 owner-requested calls
+
+`AGENT_CALL_OWNER_REQUESTS_ENABLED` defaults to `1` and accepts only `0` or `1`.
+With `AGENT_CALL_ENABLED=1`, composition appends the owner-call authorizer after
+the browser authorizers; setting `0` omits it and every call asks for approval.
+`schedule.create` receives whether calling is composed. The scheduler role
+derives `mcp.bland_call.use` and `mcp.bland_read.use` from `AGENT_CALL_ENABLED`
+as it derives Gmail scopes, reading `BLAND_CONFIGURATION_FILE` but never a
+Bland credential. The contract is [bland-calling.md](bland-calling.md).

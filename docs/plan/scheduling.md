@@ -1007,7 +1007,10 @@ future occurrence is an argument failure and leaves no schedule.
 
 The definition pins the active agent version and its policy profile and
 sets `requested_scopes = frozenset()` unless `use_website=true` supplies the
-validated website dependency described above (ADR-0172). Its step, model-call, and tool-call
+validated website dependency described above (ADR-0172), or `place_call=true`
+(version 1.3.0, ADR-0213) requests exactly `mcp.bland_call.use` and
+`mcp.bland_read.use`; that flag fails as `schedule.calling_unavailable` when
+calling is not composed. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
 ceilings. Cost is the minimum of the active agent's finite cost or `5` and the
 schedule cost ceiling; run timeout is the lesser of 300 seconds and its

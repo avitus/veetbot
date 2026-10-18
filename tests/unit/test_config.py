@@ -1433,6 +1433,15 @@ def test_browser_research_permission_defaults_on_and_can_be_disabled() -> None:
         load_settings(_hosted(BROWSER_RESEARCH_ENABLED="yes"))
 
 
+def test_owner_call_permission_defaults_on_and_can_be_disabled() -> None:
+    """ADR-0213: the kill switch restores call approvals and rejects ambiguous values."""
+    assert load_settings(_hosted()).call_owner_requests_enabled is True
+    disabled = load_settings(_hosted(AGENT_CALL_OWNER_REQUESTS_ENABLED="0"))
+    assert disabled.call_owner_requests_enabled is False
+    with pytest.raises(ConfigurationError, match="AGENT_CALL_OWNER_REQUESTS_ENABLED"):
+        load_settings(_hosted(AGENT_CALL_OWNER_REQUESTS_ENABLED="yes"))
+
+
 def test_task_grant_scopes_parse_and_refuse() -> None:
     """ADR-0129 D2/D20: exact origin-and-segment scopes behind a hosted-only flag."""
 
