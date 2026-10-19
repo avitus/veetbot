@@ -27,6 +27,8 @@ from tests.gates.test_email_chat_m26 import (
 from tests.gates.test_email_experience_m26 import (
     assert_refresh_admits_one_durable_typed_task_without_owner_message as admission_check,
 )
+from tests.native_mac_vm import macos_journeys_unavailable, run_macos_journeys
+from tests.native_simulators import newest_simulator
 
 ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.integration
@@ -102,16 +104,10 @@ def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path)
     )
     devices: dict[str, str] = {}
     for family in ("iPhone", "iPad"):
-        candidates = [
-            (tuple(int(part) for part in runtime.rsplit("iOS-", 1)[1].split("-")), device["udid"])
-            for runtime, values in inventory["devices"].items()
-            if "iOS-" in runtime
-            for device in values
-            if device["name"].startswith(family) and device["isAvailable"]
-        ]
-        if not candidates:
+        udid = newest_simulator(inventory, family)
+        if udid is None:
             pytest.skip(f"No {family} simulator is available; native layout gate is unverified.")
-        devices[family] = max(candidates)[1]
+        devices[family] = udid
 
     ios_cases = [
         "testEmailCanBeCheckedOffFromInboxWithoutOpeningThread",
@@ -123,51 +119,55 @@ def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path)
         "testEmailReadingKeepsFeedbackOptionalAndReplyReachable",
         "testEmailReadingInDarkAppearance",
     ]
+    mac_cases = [
+        "testEmailModeAndExactDraftApprovalOnMac",
+        "testEmailCanBeCheckedOffFromInboxWithoutOpeningThread",
+        "testEmailArchiveFailurePreservesInboxRow",
+        "testEmailReadingKeepsFeedbackOptionalAndReplyReachable",
+        "testEmailReadingInDarkAppearance",
+        "testEmailReadingAtDefaultMacWindowSize",
+        "testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets",
+    ]
+    # The macOS journeys run in the Tart VM; the simulators stay on the host.
+    mac_unavailable = macos_journeys_unavailable(apple_environment)
     for platform, destination, cases in [
-        (
-            "macos",
-            "platform=macOS",
-            [
-                "testEmailModeAndExactDraftApprovalOnMac",
-                "testEmailCanBeCheckedOffFromInboxWithoutOpeningThread",
-                "testEmailArchiveFailurePreservesInboxRow",
-                "testEmailReadingKeepsFeedbackOptionalAndReplyReachable",
-                "testEmailReadingInDarkAppearance",
-                "testEmailReadingAtDefaultMacWindowSize",
-                "testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets",
-            ],
-        ),
+        ("macos", None, mac_cases),
         ("iphone", f"platform=iOS Simulator,id={devices['iPhone']}", ios_cases),
         ("ipad", f"platform=iOS Simulator,id={devices['iPad']}", ios_cases),
     ]:
         bundle = tmp_path / f"{platform}.xcresult"
-        native_command(
-            [
-                "xcodebuild",
-                "test",
-                "-quiet",
-                "-project",
-                "clients/apple/Veetbot.xcodeproj",
-                "-scheme",
-                "Veetbot",
-                "-destination",
-                destination,
-                "-resultBundlePath",
-                str(bundle),
-                *[
-                    f"-only-testing:VeetbotUITests/ConversationNavigationUITests/{case}"
-                    for case in cases
+        if destination is None:
+            if mac_unavailable:
+                continue
+            run_macos_journeys(cases, bundle, apple_environment, timeout=900)
+        else:
+            native_command(
+                [
+                    "xcodebuild",
+                    "test",
+                    "-quiet",
+                    "-project",
+                    "clients/apple/Veetbot.xcodeproj",
+                    "-scheme",
+                    "Veetbot",
+                    "-destination",
+                    destination,
+                    "-resultBundlePath",
+                    str(bundle),
+                    *[
+                        f"-only-testing:VeetbotUITests/ConversationNavigationUITests/{case}"
+                        for case in cases
+                    ],
+                    "CODE_SIGN_STYLE=Manual",
+                    "CODE_SIGN_IDENTITY=-",
+                    "CODE_SIGNING_REQUIRED=NO",
+                    "CODE_SIGN_ENTITLEMENTS=",
+                    "PROVISIONING_PROFILE_SPECIFIER=",
+                    "DEVELOPMENT_TEAM=",
                 ],
-                "CODE_SIGN_STYLE=Manual",
-                "CODE_SIGN_IDENTITY=-",
-                "CODE_SIGNING_REQUIRED=NO",
-                "CODE_SIGN_ENTITLEMENTS=",
-                "PROVISIONING_PROFILE_SPECIFIER=",
-                "DEVELOPMENT_TEAM=",
-            ],
-            apple_environment,
-            timeout=900,
-        )
+                apple_environment,
+                timeout=900,
+            )
         summary = json.loads(
             native_command(
                 ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(bundle)],
@@ -177,3 +177,5 @@ def test_email_native_layouts(apple_environment: dict[str, str], tmp_path: Path)
         assert summary["passedTests"] == len(cases), summary
         assert summary["failedTests"] == 0 and summary["skippedTests"] == 0, summary
         assert summary["expectedFailures"] == 0, summary
+    if mac_unavailable:
+        pytest.skip(mac_unavailable)

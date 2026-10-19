@@ -745,8 +745,13 @@ also exercises compact navigation through a DEBUG-only launch-time size-class
 override; ordinary launches retain the system's size class. Shared-state and
 foreground checks also execute the backend's shared-profile/context and bounded
 refresh-admission regressions. These checks need full Xcode and both simulator
-families, but no database or live mailbox. An unavailable Apple lane is skipped
-by pytest and remains an unpassed active gate in the gate report.
+families, but no database or live mailbox. The Mac journeys run inside the
+local Tart VM described under Build and connect, through
+`tests/native_mac_vm.py`, so they never take over the desktop; setting
+`VEETBOT_NATIVE_MAC_ON_HOST=1` runs them on the host instead. Without the VM the
+check still runs the simulator journeys and then skips. An unavailable Apple
+lane is skipped by pytest and remains an unpassed active gate in the gate
+report.
 
 ## Subscriptions
 
@@ -808,7 +813,9 @@ executable native unsubscribe gate check. This integration-marked bridge runs
 the real `EmailSubscriptionModelTests`, `EmailSubscriptionsViewModelTests` and
 `EmailSubscriptionViewStructureTests` Swift suites, plus the named spam cases
 in `EmailArchiveModelTests` and `EmailViewModelTests`, and verifies each case
-reported passing. It needs full Xcode but no simulator, database or live
+reported passing. It also runs the Subscriptions and spam journeys on Mac,
+iPhone and iPad, the Mac ones inside the local Tart VM as for the Email checks
+above. It needs full Xcode and both simulator families but no database or live
 mailbox, and an unavailable Apple lane is skipped by pytest and remains an
 unpassed active gate in the gate report.
 

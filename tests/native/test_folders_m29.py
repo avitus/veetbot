@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.native_mac_vm import macos_journeys_unavailable, run_macos_journeys
+
 ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.integration
 
@@ -84,34 +86,11 @@ def test_folder_native_degradation(apple_environment: dict[str, str]) -> None:
 def test_folder_native_journeys(apple_environment: dict[str, str], tmp_path: Path) -> None:
     """The macOS journeys file, rename, accept, decline, and stay flat on an older server."""
 
+    unavailable = macos_journeys_unavailable(apple_environment)
+    if unavailable:
+        pytest.skip(unavailable)
     bundle = tmp_path / "macos.xcresult"
-    native_command(
-        [
-            "xcodebuild",
-            "test",
-            "-quiet",
-            "-project",
-            "clients/apple/Veetbot.xcodeproj",
-            "-scheme",
-            "Veetbot",
-            "-destination",
-            "platform=macOS",
-            "-resultBundlePath",
-            str(bundle),
-            *[
-                f"-only-testing:VeetbotUITests/ConversationNavigationUITests/{case}"
-                for case in MAC_JOURNEYS
-            ],
-            "CODE_SIGN_STYLE=Manual",
-            "CODE_SIGN_IDENTITY=-",
-            "CODE_SIGNING_REQUIRED=NO",
-            "CODE_SIGN_ENTITLEMENTS=",
-            "PROVISIONING_PROFILE_SPECIFIER=",
-            "DEVELOPMENT_TEAM=",
-        ],
-        apple_environment,
-        timeout=1200,
-    )
+    run_macos_journeys(list(MAC_JOURNEYS), bundle, apple_environment)
     summary = json.loads(
         native_command(
             ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(bundle)],

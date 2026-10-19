@@ -503,8 +503,10 @@ geometry. It then copies the checkout to the guest disk, where the guest's build
 and runs the unchanged `make test-apple-ui-macos` there, or the command given
 to the script as arguments, such as one `xcodebuild test -only-testing:` case. It writes the result
 bundle back to `APPLE_TEST_RESULTS_DIR` and stops the VM, and a second run
-waits for the first. Tart is an optional local tool that no other target
-needs. `make test-apple-ui-macos` on the host remains the target CI runs. The
+waits for the first. The native gates under `tests/native/` send their macOS
+journeys through the same script (`tests/native_mac_vm.py`) and skip, an
+unpassed gate, when the VM is missing. Tart is an optional local tool that no
+other target needs. `make test-apple-ui-macos` on the host remains the target CI runs. The
 macOS case resizes the
 real SwiftUI window, terminates the application, and asserts that its size is
 restored after relaunch; a second Mac case verifies Email mode and exact draft

@@ -791,7 +791,8 @@ model-assisted grouper, and the pass bind gates 4, 5, 6, 8, and 11 through the
 unit suites under `tests/unit/`, with `tests/gates/test_folder_m29.py`
 exercising the composed pass through the maintenance worker. The native
 sidebar binds gate 12 through `tests/native/test_folders_m29.py`, which runs
-the Swift package cases and the macOS journeys on a full Xcode installation and
+the Swift package cases and, inside the local Tart VM of
+`development-toolchain.md`, the macOS journeys on a full Xcode installation, and
 never passes on a skipped lane. The `folders/profiles.yaml` document ships the
 seven knobs of the configuration section and joins the executable inventory.
 Registration is not release evidence: exact-head hosted CI, review, and
