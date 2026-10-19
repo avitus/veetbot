@@ -107,6 +107,12 @@ public enum AppPalette {
     public static let selected = AppColorToken(
         light: AppRGBA(hex: 0x102923, alpha: 0.09), dark: AppRGBA(hex: 0xECE6D8, alpha: 0.12)
     )
+    /// The toast inverts the page: an ink ground with paper text, its Undo
+    /// in the opposite mode's teal so it reads on that ground.
+    public static let toastBackground = ink
+    public static let toastText = paper
+    public static let toastAction = AppColorToken(light: AppRGBA(hex: 0x5EE3C9), dark: AppRGBA(hex: 0x086657))
+    public static let toastSoft = AppColorToken(light: AppRGBA(hex: 0xBCCBC5), dark: AppRGBA(hex: 0x2F4640))
 }
 
 /// The semantic colours every screen draws with, as the A2 reference uses
@@ -144,6 +150,10 @@ enum AppTheme {
     static let hairlineStrong = AppPalette.hairlineStrong.color
     /// The selected sidebar row.
     static let selected = AppPalette.selected.color
+    static let toastBackground = AppPalette.toastBackground.color
+    static let toastText = AppPalette.toastText.color
+    static let toastAction = AppPalette.toastAction.color
+    static let toastSoft = AppPalette.toastSoft.color
 
     static let brandGradient = LinearGradient(
         colors: [tealWash, amberWash],

@@ -48,13 +48,16 @@ public final class PersonaViewModel: ObservableObject {
     public var hasPendingMerge: Bool { mergeRequired }
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
+    private let toasts: ToastCenter
 
     public init(
         makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = {
             await MemoryViewModel.makeDefaultAPIClient()
-        }
+        },
+        toasts: ToastCenter? = nil
     ) {
         self.makeAPIClient = makeAPIClient
+        self.toasts = toasts ?? .shared
     }
 
     public func load() async {
@@ -109,6 +112,7 @@ public final class PersonaViewModel: ObservableObject {
             conflictHead = nil
             mergeRequired = false
             conflictDetected = false
+            toasts.show("Persona saved.")
         } catch let HTTPTransportError.api(error) where error.code == .conflict {
             mergeRequired = true
             conflictDetected = true
@@ -166,6 +170,7 @@ public final class PersonaViewModel: ObservableObject {
         do {
             let document = try await client.affirmPersonaNomination(nominationID)
             apply(document)
+            toasts.show("Added to what Veetbot assumes about you.")
             nominations = try await client.listPersonaNominations(state: "nominated").items
         } catch {
             errorMessage = Self.describe(error)
@@ -177,6 +182,8 @@ public final class PersonaViewModel: ObservableObject {
         errorMessage = nil
         do {
             _ = try await client.declinePersonaNomination(nominationID)
+            // A decline is durable (ADR-0079): the same belief is not nominated again.
+            toasts.show("Declined. Veetbot will not suggest this again.")
             nominations = try await client.listPersonaNominations(state: "nominated").items
         } catch {
             errorMessage = Self.describe(error)

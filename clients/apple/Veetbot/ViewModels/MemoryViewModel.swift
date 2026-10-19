@@ -27,6 +27,7 @@ public final class MemoryViewModel: ObservableObject {
     @Published public private(set) var pendingActionID: UUID?
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
+    private let toasts: ToastCenter
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var reloadRequestID: UUID?
@@ -50,9 +51,11 @@ public final class MemoryViewModel: ObservableObject {
     public init(
         makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = {
             await MemoryViewModel.makeDefaultAPIClient()
-        }
+        },
+        toasts: ToastCenter? = nil
     ) {
         self.makeAPIClient = makeAPIClient
+        self.toasts = toasts ?? .shared
     }
 
     deinit {
@@ -133,6 +136,7 @@ public final class MemoryViewModel: ObservableObject {
         do {
             try await api.deleteMemory(memory.id, ceiling: memoryBrowsingCeiling)
             items.removeAll { $0.id == memory.id }
+            toasts.show(Self.deletedConfirmation)
             return true
         } catch VeetbotAPIClientError.memoryChangesUnavailable {
             changesUnavailable = true
@@ -144,6 +148,18 @@ public final class MemoryViewModel: ObservableObject {
         } catch {
             errorMessage = displayMessage(for: error)
             return false
+        }
+    }
+
+    static let deletedConfirmation = "Deleted. The same statement will not form again."
+
+    /// What each review outcome did, said once the server confirms it. None
+    /// can be undone over HTTP, so none offers Undo.
+    static func confirmation(for outcome: MemoryReviewOutcome) -> String {
+        switch outcome {
+        case .dismiss: "Marked as reviewed."
+        case .untrue: "Marked not true. Veetbot will not form it again from the same evidence."
+        case .notHere: "Marked not relevant here."
         }
     }
 
@@ -172,6 +188,7 @@ public final class MemoryViewModel: ObservableObject {
             if let index = items.firstIndex(where: { $0.id == memory.id }) {
                 if stillListed { items[index] = reviewed } else { items.remove(at: index) }
             }
+            toasts.show(Self.confirmation(for: outcome))
             return reviewed
         } catch VeetbotAPIClientError.memoryChangesUnavailable {
             changesUnavailable = true

@@ -513,13 +513,15 @@ import Testing
                 return (200, #"{"items":[],"next_cursor":null}"#)
             }
         }
-        let model = PeopleViewModel(makeAPIClient: { client })
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = PeopleViewModel(makeAPIClient: { client }, toasts: toasts)
         await model.selectCollection(.review)
         #expect(model.suggestions.map(\.id) == [suggestionID])
         #expect(model.suggestions.first?.explanation == "Same first name and your family name")
         let suggestion = try #require(model.suggestions.first)
         await model.resolveSuggestion(suggestion, decision: "merge")
         #expect(model.suggestions.isEmpty)
+        #expect(toasts.current?.text == "Merged.")
         let body = lock.withLock { answered }
         #expect(body["decision"] as? String == "merge")
         #expect(body["expected_revision"] as? Int == 1)

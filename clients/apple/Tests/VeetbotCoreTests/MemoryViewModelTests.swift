@@ -509,6 +509,69 @@ import Testing
     }
 
     @Test
+    func testEachReviewOutcomeAndDeletionConfirmsWithAToast() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000531"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000532"))
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            switch request.httpMethod {
+            case "DELETE": return try self.response(for: request, statusCode: 204, body: "")
+            case "POST":
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: false)
+                )
+            default:
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                        """
+                )
+            }
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        let expected: [(MemoryReviewOutcome, String)] = [
+            (.dismiss, "Marked as reviewed."),
+            (.untrue, "Marked not true. Veetbot will not form it again from the same evidence."),
+            (.notHere, "Marked not relevant here."),
+        ]
+        for (outcome, text) in expected {
+            _ = await model.review(memory, outcome: outcome)
+            #expect(toasts.current?.text == text)
+        }
+        _ = await model.delete(memory)
+        #expect(toasts.current?.text == "Deleted. The same statement will not form again.")
+    }
+
+    @Test
+    func testAFailedReviewKeepsItsErrorInlineAndRaisesNoToast() async throws {
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000541"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000542"))
+        let model = try makeModel(toasts: toasts) { request in
+            if request.httpMethod == "POST" {
+                return try self.response(for: request, statusCode: 500, body: #"{"error":{"code":"internal","message":"x"}}"#)
+            }
+            return try self.response(
+                for: request, statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        _ = await model.review(memory, outcome: .dismiss)
+
+        #expect(model.errorMessage != nil)
+        #expect(toasts.current == nil)
+    }
+
+    @Test
     func testDeleteSendsTheGovernedWriteAndRemovesTheRow() async throws {
         let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000511"))
         let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000512"))
@@ -636,6 +699,7 @@ import Testing
     }
 
     private func makeModel(
+        toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> MemoryViewModel {
         let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
@@ -652,7 +716,10 @@ import Testing
             session: session
         )
         let client = VeetbotAPIClient(transport: transport)
-        return MemoryViewModel(makeAPIClient: { client })
+        return MemoryViewModel(
+            makeAPIClient: { client },
+            toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        )
     }
 
     private func response(

@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — Toasts confirm what just happened
+
+- A short line in a dark capsule now appears at the bottom of the window or
+  sheet when the server confirms a change: a memory marked reviewed, not
+  true, not relevant here or deleted; an email marked handled; a possible
+  duplicate merged or kept separate; the persona saved; a persona suggestion
+  accepted or declined. Marking an email handled offers Undo for six seconds,
+  which puts the thread back. Errors still appear beside the control that
+  failed.
+
 ## 2026-10-19 — Persona, Settings and Connect wear the A2 Dock design
 
 - The last three screens take the warm-paper design, so every screen on

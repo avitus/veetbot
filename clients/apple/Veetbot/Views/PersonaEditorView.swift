@@ -43,6 +43,7 @@ public struct PersonaEditorView: View {
         }
         .tint(AppTheme.tealFill)
         .accessibilityIdentifier("persona.editor")
+        .toastHost()
         .task { await model.load() }
         #if os(macOS)
         .sheetFrame(

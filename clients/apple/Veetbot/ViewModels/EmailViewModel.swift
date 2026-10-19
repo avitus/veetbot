@@ -66,6 +66,7 @@ public final class EmailViewModel: ObservableObject {
     @Published private var draftActionError: String?
     @Published private var threadReadError: String?
     @Published public private(set) var feedbackMessage: String?
+    private let toasts: ToastCenter
     @Published public private(set) var styleExampleMessage: String?
     @Published public private(set) var feedbackID: UUID?
     @Published public private(set) var hasMore = false
@@ -135,8 +136,10 @@ public final class EmailViewModel: ObservableObject {
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
         refreshNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init,
-        statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
+        statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+        toasts: ToastCenter? = nil
     ) {
+        self.toasts = toasts ?? .shared
         self.makeAPIClient = makeAPIClient
         self.refreshNanoseconds = refreshNanoseconds
         self.now = now
@@ -973,21 +976,33 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Applies confirmed attention state while retaining open message content and unsaved draft text.
-    public func setThreadHandled(_ thread: EmailThreadView, handled: Bool) async {
-        guard let api = makeAPIClient(), !isPerformingAction else { return }
+    /// Marking a thread handled confirms with a toast whose Undo sends the
+    /// same reversible command back; the undo itself raises only its own line.
+    @discardableResult
+    public func setThreadHandled(_ thread: EmailThreadView, handled: Bool, confirms: Bool = true) async -> Bool {
+        guard let api = makeAPIClient(), !isPerformingAction else { return false }
         isPerformingAction = true
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
         do {
             let result = try await api.dismissEmailThread(thread, dismissed: handled, idempotencyKey: UUID().uuidString)
-            guard generation == connection else { return }
+            guard generation == connection else { return false }
             // The command returns a summary. Preserve the open messages and
             // unsaved draft, updating only server-confirmed attention state.
             if self.thread?.id == result.id, self.thread?.revision == result.revision {
                 self.thread?.dismissedRevision = result.dismissedRevision
             }
             await reload(preserveOrder: true)
-        } catch { if generation == connection { report(error, draft: selectedThreadID == thread.id) } }
+            if confirms && handled {
+                toasts.show("Marked handled.", restored: "Marked not handled.") { [weak self] in
+                    await self?.setThreadHandled(result, handled: false, confirms: false) ?? false
+                }
+            }
+            return true
+        } catch {
+            if generation == connection { report(error, draft: selectedThreadID == thread.id) }
+            return false
+        }
     }
 
     /// Requires explicit support from this thread's account and known mailbox state.

@@ -25,6 +25,7 @@ struct PeopleLookupSheet: View {
         .accessibilityLabel("People navigation")
         .environment(\.dismissPeople, { dismiss() })
         .accessibilityLabel("People")
+        .toastHost()
         #if os(macOS)
         .frame(minWidth: 820, minHeight: 650)
         .background(PeopleSheetAccessibilityLabel())

@@ -48,6 +48,7 @@ public final class PeopleViewModel: ObservableObject {
     private var isConnectionValid = true
     private var connectionObserver: AnyCancellable?
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
+    private let toasts: ToastCenter
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var failedPage = false
@@ -56,7 +57,8 @@ public final class PeopleViewModel: ObservableObject {
     private var suggestionSessionID: UUID?
     private let asOf: Date?
 
-    public init(searchText: String = "", asOf: Date? = nil, notifications: NotificationCenter = .default, makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = { await MemoryViewModel.makeDefaultAPIClient() }) {
+    public init(searchText: String = "", asOf: Date? = nil, notifications: NotificationCenter = .default, makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = { await MemoryViewModel.makeDefaultAPIClient() }, toasts: ToastCenter? = nil) {
+        self.toasts = toasts ?? .shared
         self.searchText = searchText
         self.collection = searchText.isEmpty ? .people : .all
         self.asOf = asOf
@@ -98,6 +100,8 @@ public final class PeopleViewModel: ObservableObject {
             ], key: UUID().uuidString)
             guard isConnectionValid else { return }
             suggestions.removeAll { $0.id == suggestion.id }
+            // ADR-0125: an answered pair stays answered.
+            toasts.show(decision == "merge" ? "Merged." : "Kept separate. Veetbot will not suggest this pair again.")
             errorMessage = nil
             await reload()
         } catch {

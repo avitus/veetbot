@@ -92,6 +92,7 @@ public struct ConnectionSettingsView: View {
         }
         .background(AppTheme.paper)
         .tint(AppTheme.tealFill)
+        .toastHost()
         #if os(macOS)
         .frame(
             minWidth: SettingsWindowConfiguration.minimumSize.width,

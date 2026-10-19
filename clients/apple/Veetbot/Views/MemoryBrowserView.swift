@@ -46,6 +46,7 @@ public struct MemoryBrowserView: View {
         }
         .accessibilityIdentifier("memory.browser")
         .task { await model.reload() }
+        .toastHost()
         .onReceive(NotificationCenter.default.publisher(for: .peopleConnectionChanged)) { _ in dismiss() }
         #if os(macOS)
         // The ideal height sizes the fitted sheet before a saved size exists;

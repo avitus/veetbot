@@ -205,6 +205,45 @@ import Testing
     }
 
     @Test
+    func testAffirmDeclineAndSaveConfirmWithAToast() async throws {
+        let nominationID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000611"))
+        let beliefID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000511"))
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/persona"), ("PUT", "/v1/persona"):
+                return try self.response(for: request, statusCode: 200, body: self.personaJSON(version: 1))
+            case ("GET", "/v1/persona/nominations"):
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: """
+                        {"items":[\(self.nominationJSON(id: nominationID, beliefID: beliefID))],"next_cursor":null}
+                        """
+                )
+            case ("POST", "/v1/persona/nominations/\(nominationID.uuidString)/affirm"):
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: self.personaJSON(version: 2, affirmedBeliefID: beliefID)
+                )
+            case ("POST", "/v1/persona/nominations/\(nominationID.uuidString)/decline"):
+                return try self.response(
+                    for: request, statusCode: 200, body: self.nominationJSON(id: nominationID, beliefID: beliefID)
+                )
+            default:
+                return try self.response(for: request, statusCode: 404, body: "{}")
+            }
+        }
+
+        await model.load()
+        await model.affirm(nominationID)
+        #expect(toasts.current?.text == "Added to what Veetbot assumes about you.")
+        await model.decline(nominationID)
+        #expect(toasts.current?.text == "Declined. Veetbot will not suggest this again.")
+        await model.save()
+        #expect(toasts.current?.text == "Persona saved.")
+    }
+
+    @Test
     func testAnAbsentSurfaceDegradesToUnavailable() async throws {
         let model = try makeModel { request in
             try self.response(
@@ -223,6 +262,7 @@ import Testing
     }
 
     private func makeModel(
+        toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> PersonaViewModel {
         let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
@@ -239,7 +279,10 @@ import Testing
             session: session
         )
         let client = VeetbotAPIClient(transport: transport)
-        return PersonaViewModel(makeAPIClient: { client })
+        return PersonaViewModel(
+            makeAPIClient: { client },
+            toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        )
     }
 
     private func response(

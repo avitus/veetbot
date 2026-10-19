@@ -16,6 +16,12 @@ enum A2Metrics {
     static let composerRadius: CGFloat = 24
     #endif
     static let cardRadius: CGFloat = 14
+    /// How far a toast sits above the bottom of its window or sheet.
+    #if os(macOS)
+    static let toastBottomInset: CGFloat = 24
+    #else
+    static let toastBottomInset: CGFloat = 16
+    #endif
     static let transcriptMaxWidth: CGFloat = 760
 }
 

@@ -21,6 +21,7 @@ public struct ScheduleBrowserView: View {
         navigationContainer
         .tint(AppTheme.tealFill)
         .accessibilityIdentifier("schedule.browser")
+        .toastHost()
         .task(id: section) { await model.reload(section) }
         #if os(macOS)
         // The ideal height sizes the fitted sheet before a saved size exists;

@@ -94,6 +94,8 @@ public struct RootView: View {
                 ConnectionSettingsView(model: model, embedded: true)
             }
         }
+        // Clears the composer at the foot of Chat.
+        .toastHost(bottomInset: 88)
         .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
         .sheet(isPresented: $showingGlobalSchedules) { ScheduleBrowserView(model: globalSchedules) }

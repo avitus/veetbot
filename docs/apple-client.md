@@ -130,11 +130,25 @@ chooses a colour by mode. The tokens are:
 | `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)` | `#f2a93b` throughout |
 | `red` | failure | `#b4452e` | `#e07a62` |
 | `hairline`, `hairlineStrong`, `selected` | dividers, borders, the chosen row | ink at 14 %, 28 %, 9 % | ink at 10 %, 22 %, 12 % |
+| `toastBackground`, `toastText`, `toastAction` | a toast: ink ground, paper text, its Undo | `#102923`, `#fcfaf6`, `#5ee3c9` | `#ece6d8`, `#0c211d`, `#086657` |
 
 Titles use the serif display face through `appDisplayFont`; body text follows
 the owner's font-style preference through `appFont`, and tool detail uses the
 monospaced face through `appCodeFont`. Capsule buttons come in three weights
 (filled teal, hairline, quiet) in `A2Controls.swift`.
+
+A change the server has confirmed is announced with a toast
+(`ToastCenter`, drawn by `A2Toast.swift`): one short sentence in an ink
+capsule at the bottom centre of the window or sheet, read out by VoiceOver.
+A confirmation leaves after 2.2 seconds. Where the server can reverse the
+change, the toast offers Undo, stays six seconds, holds while the pointer or
+keyboard focus rests on it, and on success says what was restored; Undo is
+also a VoiceOver action on the toast. Only one toast shows at a time, in the
+topmost window or sheet, and a newer one replaces it. A failure never toasts:
+its error stays beside the control that failed. Toasts confirm memory review
+and deletion, Email's Handled (with Undo, through the reversible attention
+command), a merge or keep-separate answer to a possible duplicate, persona
+saves, and accepted or declined persona suggestions.
 
 Chat is the first surface drawn with these tokens: the sidebar on `paperDeep`
 with a "Needs you" group ahead of Recent, folders and Scheduled; answers on bare

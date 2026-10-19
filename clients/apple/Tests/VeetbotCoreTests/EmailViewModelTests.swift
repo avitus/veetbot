@@ -1063,6 +1063,46 @@ import SwiftUI
         #expect(try decoder.decode(EmailThreadView.self, from: Data(changed.utf8)).isHandled == false)
     }
 
+    /// Handled confirms with a toast whose Undo sends the reversible command back.
+    @Test func testHandledConfirmsWithAToastWhoseUndoReopensTheThread() async throws {
+        let requests = EmailRequestRecorder()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        let row = try #require(model.items.first)
+
+        await model.setThreadHandled(row, handled: true)
+        #expect(toasts.current?.text == "Marked handled.")
+        #expect(toasts.current?.undo?.label == "Undo")
+
+        await toasts.performUndo()
+        let commands = requests.snapshot.filter { $0.url!.path.hasSuffix("dismiss") }
+        #expect(commands.count == 2)
+        let body = try Self.archiveRequestBody(try #require(commands.last))
+        #expect(body["dismissed"] as? Bool == false)
+        #expect(toasts.current?.text == "Marked not handled.")
+    }
+
+    /// A rejected Handled raises no toast; the inline error stays.
+    @Test func testFailedHandledRaisesNoToast() async throws {
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.hasSuffix("dismiss") { return (409, Self.error("invalid_state", "New mail arrived. Refresh this thread.")) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        await model.setThreadHandled(try #require(model.items.first), handled: true)
+        #expect(toasts.current == nil)
+        #expect(model.errorMessage != nil)
+    }
+
     /// A rejected inbox checkbox leaves the row unchanged and exposes a recoverable error.
     @Test func testFailedHandledActionKeepsThreadAndReportsError() async throws {
         let model = try makeModel { request in
@@ -2394,6 +2434,7 @@ import SwiftUI
         refreshNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init,
         statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+        toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
         let id = EmailTestURLProtocol.register(handler)
@@ -2405,7 +2446,8 @@ import SwiftUI
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
         return EmailViewModel(
-            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff
+            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff,
+            toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
         )
     }
 
