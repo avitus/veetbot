@@ -43,6 +43,21 @@ import Testing
         #expect(!source.contains("struct EmailAvatar"))
     }
 
+    /// On a compact iPhone the pushed thread keeps its actions beside the back
+    /// button in a paper navigation bar, so neither the button nor the bar
+    /// covers the subject as the conversation scrolls beneath them.
+    @Test
+    func testThePushedThreadPutsItsActionsInAPaperNavigationBar() throws {
+        let source = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(source.contains("actionsInNavigationBar: !directSelection"))
+        #expect(source.contains("ToolbarItemGroup(placement: .topBarTrailing)"))
+        #expect(source.contains("accessibilityID: \"email.handled.detail\", iconOnly: true)"))
+        #expect(source.contains(".toolbarBackground(AppTheme.paper, for: .navigationBar)"))
+        #expect(source.contains("if !actionsInNavigationBar {"))
+        #expect(source.contains(".accessibilityLabel(\"Thread actions\")"))
+    }
+
     /// The reply composer: a decision the draft waits on reads as one amber
     /// card with its action beside it, the envelope and body share one well
     /// whose shapes never take a click, and the rarer actions sit in a menu.

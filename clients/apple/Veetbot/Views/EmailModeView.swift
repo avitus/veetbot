@@ -98,9 +98,14 @@ public struct EmailModeView: View {
         }
     }
 
+    /// On a compact iPhone the thread is pushed, so its actions join the back
+    /// button in the navigation bar, as the A2 iPhone reference draws it.
     private var detail: some View {
-        EmailThreadScreen(model: model, subscriptions: model.subscriptions, discussInChat: discussInChat)
-            .id(model.selectedThreadID)
+        EmailThreadScreen(
+            model: model, subscriptions: model.subscriptions, discussInChat: discussInChat,
+            actionsInNavigationBar: !directSelection
+        )
+        .id(model.selectedThreadID)
     }
 
     #if os(macOS)
@@ -535,15 +540,24 @@ private struct EmailArchiveButton: View {
     @ObservedObject var model: EmailViewModel
     let thread: EmailThreadView
     let accessibilityID: String
+    /// The icon alone, for a navigation bar, which draws its own glass behind it.
+    var iconOnly = false
 
     var body: some View {
+        if iconOnly {
+            button.labelStyle(.iconOnly)
+        } else {
+            button.buttonStyle(SecondaryCapsuleButtonStyle())
+        }
+    }
+
+    private var button: some View {
         Button {
             Task { await model.setThreadArchived(thread, archived: !thread.isArchived) }
         } label: {
             Label(thread.isArchived ? "Move to Inbox" : "Archive in Gmail",
                   systemImage: thread.isArchived ? "checkmark.circle.fill" : "archivebox")
         }
-        .buttonStyle(SecondaryCapsuleButtonStyle())
         .disabled(!model.canArchive(thread))
         .accessibilityIdentifier(accessibilityID)
         .accessibilityLabel(thread.isArchived ? "Move to Inbox" : "Archive in Gmail")
@@ -584,7 +598,11 @@ private struct EmailThreadScreen: View {
     @ObservedObject var model: EmailViewModel
     @ObservedObject var subscriptions: EmailSubscriptionsViewModel
     let discussInChat: () async -> Void
+    /// Archive and the thread menu sit in the navigation bar beside the back
+    /// button instead of on a row of their own above the subject.
+    var actionsInNavigationBar = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.activeClientMode) private var activeMode
     @State private var target: EmailFeedbackTarget = .thread
     @State private var explanation = ""
     @State private var targetValue = ""
@@ -701,6 +719,19 @@ private struct EmailThreadScreen: View {
                     Button("Done") { focusedField = nil }.accessibilityIdentifier("email.keyboard-done")
                 }
             }
+            .toolbar {
+                if actionsInNavigationBar, activeMode == .email, let thread = model.thread {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        EmailArchiveButton(
+                            model: model, thread: thread, accessibilityID: "email.handled.detail", iconOnly: true)
+                        threadActionsMenu(thread)
+                    }
+                }
+            }
+            // Paper behind the bar: the glass back button never floats over the subject
+            // or the conversation as they scroll beneath it.
+            .toolbarBackground(AppTheme.paper, for: .navigationBar)
+            .toolbarBackgroundVisibility(actionsInNavigationBar ? .visible : .automatic, for: .navigationBar)
         #endif
     }
 
@@ -711,23 +742,13 @@ private struct EmailThreadScreen: View {
             HStack(alignment: .center, spacing: 8) {
                 Label(accountDescription(thread.accountID), systemImage: "envelope")
                     .appFont(.caption).foregroundColor(AppTheme.inkFaint).lineLimit(1)
-                Spacer(minLength: 8)
-                // The capsule keeps its full name; the account label is what gives way.
-                EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail")
-                    .fixedSize().layoutPriority(1)
-                Menu {
-                    if model.canReportSpam(thread), !thread.isSuspectedSpam {
-                        Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
-                            .accessibilityIdentifier("email.spam.menu.report")
-                    }
-                    Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
-                } label: {
-                    // The system menu button: a styled Menu hit-tests differently on
-                    // macOS 26 and the journeys click what sits beside it.
-                    Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
+                if !actionsInNavigationBar {
+                    Spacer(minLength: 8)
+                    // The capsule keeps its full name; the account label is what gives way.
+                    EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail")
+                        .fixedSize().layoutPriority(1)
+                    threadActionsMenu(thread)
                 }
-                .accessibilityLabel("Thread actions").help("Thread actions")
-                .disabled(model.isPerformingAction)
             }
             EmailArchiveStatus(model: model, thread: thread, showsAvailability: true)
             VStack(alignment: .leading, spacing: 4) {
@@ -752,6 +773,23 @@ private struct EmailThreadScreen: View {
             }
             EmailSpamControls(model: model, thread: thread)
         }
+    }
+
+    /// Report spam and exclusion from learning, behind one ellipsis.
+    private func threadActionsMenu(_ thread: EmailThreadView) -> some View {
+        Menu {
+            if model.canReportSpam(thread), !thread.isSuspectedSpam {
+                Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
+                    .accessibilityIdentifier("email.spam.menu.report")
+            }
+            Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
+        } label: {
+            // The system menu button: a styled Menu hit-tests differently on
+            // macOS 26 and the journeys click what sits beside it.
+            Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
+        }
+        .accessibilityLabel("Thread actions").help("Thread actions")
+        .disabled(model.isPerformingAction)
     }
 
     /// Each message as prose under its sender's line; a hairline parts them.

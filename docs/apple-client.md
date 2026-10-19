@@ -642,7 +642,9 @@ default text size. Larger accessibility text can expand rows naturally.
 
 Thread detail opens with the subject in the display face and "sender · date"
 under it, with the Archive in Gmail capsule and the thread menu on the line
-above. Veetbot's gist sits behind a two-point teal rule with the state line and
+above. On a compact iPhone, where the thread is pushed, Archive (as an icon)
+and the thread menu join the back button in a paper navigation bar instead,
+so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
 its reason; the messages follow as prose, each under its sender's line and
 parted by hairlines, with View in People and Message details kept beside the
 sender. A "Teach Veetbot" card on `paperDeep` opens into the same scoped
