@@ -212,7 +212,7 @@ public struct ConnectionSettingsView: View {
                     .appDisplayFont(.title)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(
-                    "Your assistant runs on a server you control. Enter its address and the access token it gave you. The token is kept in the Keychain and never leaves this \(deviceName)."
+                    "Your assistant runs on a server you control. Enter its address and the access token it gave you. The token is kept in this \(deviceName)'s Keychain and sent only to that server, to sign you in."
                 )
                 .appFont(.callout)
                 .foregroundColor(AppTheme.inkSoft)
