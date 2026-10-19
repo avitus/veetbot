@@ -1673,12 +1673,15 @@ final class ConversationNavigationUITests: XCTestCase {
 
     private func revealSynthesisAction(_ element: XCUIElement) {
         #if os(macOS)
+        // Scroll until the control lies inside the detail column: macOS 26 reports
+        // a control just below the viewport, but still inside the window, as hittable.
         let scroll = app.scrollViews["memory.synthesis.detail"]
         for _ in 0..<16 {
-            if element.exists && element.isHittable { break }
+            if element.exists && scroll.frame.contains(element.frame) && element.isHittable { break }
             let down = element.exists && element.frame.minY < scroll.frame.minY
             scroll.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
         }
+        XCTAssertTrue(scroll.frame.contains(element.frame), element.debugDescription)
         #else
         let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
