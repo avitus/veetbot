@@ -647,9 +647,15 @@ its reason; the messages follow as prose, each under its sender's line and
 parted by hairlines, with View in People and Message details kept beside the
 sender. A "Teach Veetbot" card on `paperDeep` opens into the same scoped
 feedback (thread, person, kind of content; Important / Less important; reply
-need) and reports what was applied with Undo. The reply is "Your reply, drafted
-by Veetbot": the envelope and body share one surface box behind a strong
-hairline, Review & Send is the filled capsule and Draft options the quiet one.
+need) and reports what was applied with Undo. The reply opens with "Your reply"
+in the display face and its save state at the trailing edge. From, To and the
+folded Cc, Bcc and subject are hairline-parted rows above the body in one
+surface well behind a strong hairline, whose shapes take no clicks. Anything
+the draft waits on (new mail in the thread, an unknown send status, a pending
+approval, an edit from another device) is one amber-ruled card that names the
+decision with its action beside it. Review & Send is the filled capsule; Draft
+options is a quiet icon menu at the trailing edge, and Refine with Veetbot
+folds its field and button into one row.
 The bottom bar keeps Discuss in Chat and the reply shortcut on the material
 edge. The Email learning, Draft history, Review & Send and unsubscribe sheets
 share `EmailSheetHeader` (a display-face title and a quiet way out); the

@@ -899,114 +899,56 @@ private struct EmailThreadScreen: View {
         }.appFont(.callout).disabled(model.isPerformingAction).padding(.top, 4)
     }
 
+    /// The reply as one quiet column: a serif heading with the save state, any
+    /// decision the draft is waiting on, the envelope and body in a single
+    /// well, then Review & Send with the rarer actions folded into a menu.
     @ViewBuilder private var draftEditor: some View {
         if let draft = model.draft, let edit = model.currentEdit {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Your reply, drafted by Veetbot").appFont(.caption, weight: .semibold)
-                        .foregroundColor(AppTheme.inkSoft)
-                    Spacer()
-                    Text(model.isSaving ? "Saving…" : edit.isDirty ? "Unsaved changes" : "Saved")
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Your reply").appDisplayFont(.title3)
+                    Spacer(minLength: 8)
+                    Text(model.isSaving ? "Saving…" : edit.isDirty ? "Unsaved changes" : "Drafted by Veetbot · Saved")
                         .appFont(.caption).foregroundColor(AppTheme.inkFaint)
+                        .multilineTextAlignment(.trailing)
                 }
-                Text("From: \(accountDescription(draft.accountID))").appFont(.caption).foregroundColor(AppTheme.inkFaint)
-                draftNotices(draft)
-                VStack(alignment: .leading, spacing: 10) {
-                    Group {
-                        envelopeField("To", path: \.to, field: .to)
-                        Button {
-                            showingEnvelope.toggle()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text("Cc, Bcc & subject")
-                                Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
-                            }
-                        }.buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
-                            .accessibilityIdentifier("email.draft-envelope")
-                            .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
-                        if showingEnvelope {
-                            envelopeField("Cc", path: \.cc, field: .cc)
-                            envelopeField("Bcc", path: \.bcc, field: .bcc)
-                            envelopeField("Subject", path: \.subject, field: .subject)
-                        }
-                    }.disabled(!draft.canEdit || model.isPerformingAction)
-                    HairlineDivider()
-                    // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
-                    // no longer change (sending, sent, uncertain) renders as text instead of an editor.
-                    // Only the editor is disabled: a disabled ancestor would also block selecting the text.
-                    if draft.canEdit {
-                        TextEditor(text: editBinding(\.body)).appFont(.body).lineSpacing(5)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 180, idealHeight: 220)
-                            .focused($focusedField, equals: .body)
-                            .disabled(model.isPerformingAction)
-                            .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
-                    } else {
-                        // No accessibilityLabel: on a selectable Text, AppKit resolves the label
-                        // through the text itself and recurses until the stack overflows.
-                        Text(edit.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("email.draft-body")
-                    }
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.surface))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.hairlineStrong))
-                HStack(spacing: 10) {
-                    Button("Review & Send") { Task { await model.prepareSend() } }
-                        .primaryCapsule()
-                        .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
-                    Menu {
-                        Button("Save now") { Task { await model.saveDraft() } }
-                            .disabled(!edit.isDirty || model.isSaving || model.conflict != nil)
-                        Button("Draft history") { showingRevisions = true }.accessibilityIdentifier(
-                            "email.draft-history")
-                        Button("Use as writing example") { Task { await model.endorseDraftStyle() } }
-                            .accessibilityIdentifier("email.endorse-style")
-                            .disabled(
-                                model.isPerformingAction || model.isSaving || model.conflict != nil
-                                    || edit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Divider()
-                        Button("Discard draft", role: .destructive) { showingDiscard = true }.disabled(!draft.canEdit)
-                    } label: {
-                        Label("Draft options", systemImage: "ellipsis.circle")
-                    }
-                    .appFont(.callout)
-                    Spacer(minLength: 0)
-                }
+                draftNotices(draft, edit: edit)
+                draftWell(draft, edit: edit)
+                draftActions(draft, edit: edit)
                 // A refused send belongs next to the control that asked for it; above the
                 // conversation it reads as the button having done nothing.
                 if let error = model.draftActionMessage {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
-                        .appFont(.callout).accessibilityIdentifier("email.action-error")
-                }
-                if draft.approvalID != nil && !edit.isDirty && draft.status == "awaiting_approval" {
-                    Button("Open pending approval") { Task { await model.loadReview() } }
-                        .buttonStyle(SecondaryCapsuleButtonStyle()).disabled(draft.stale)
+                        .appFont(.callout).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("email.action-error")
                 }
                 if let message = model.styleExampleMessage {
                     Text(message).appFont(.caption).foregroundColor(AppTheme.inkSoft)
                 }
-                DisclosureGroup("Refine with Veetbot") {
-                    VStack(alignment: .leading, spacing: 10) {
+                DisclosureGroup {
+                    HStack(alignment: .center, spacing: 8) {
                         TextField("How should the reply change?", text: $refinement).focused(
                             $focusedField, equals: .refinement
                         )
-                        .textFieldStyle(.plain).a2Field()
+                        .textFieldStyle(.plain).appFont(.callout).a2Field()
                         Button("Refine draft") { Task { await model.generateDraft(instruction: refinement) } }
                             .buttonStyle(SecondaryCapsuleButtonStyle())
                             .disabled(
                                 refinement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     || model.isPerformingAction || model.conflict != nil)
-                    }.padding(.top, 10)
-                }.appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                    }.padding(.top, 8)
+                } label: {
+                    Label("Refine with Veetbot", systemImage: "sparkles")
+                        .appFont(.callout, weight: .medium).foregroundColor(AppTheme.inkSoft)
+                }
+                .tint(AppTheme.inkSoft)
             }
             .onAppear { showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
             .onChange(of: draft.id) { showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
             .onChange(of: draft.canEdit) { _, canEdit in if !canEdit { focusedField = nil } }
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Your reply").appFont(.caption, weight: .semibold).foregroundColor(AppTheme.inkSoft)
+                Text("Your reply").appDisplayFont(.title3)
                 Text("Start with a draft in your own style, then make it yours.").appFont(.callout)
                     .foregroundColor(AppTheme.inkSoft)
                 Button {
@@ -1017,7 +959,7 @@ private struct EmailThreadScreen: View {
                     } else {
                         Label("Draft reply", systemImage: "square.and.pencil")
                     }
-                }.primaryCapsule().disabled(model.isPerformingAction)
+                }.primaryCapsule().disabled(model.isPerformingAction).padding(.top, 4)
                 if let error = model.draftActionMessage {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
                         .appFont(.callout).accessibilityIdentifier("email.action-error")
@@ -1026,41 +968,213 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// From, To and the folded Cc, Bcc and subject as hairline-parted rows above
+    /// the body, all in one field well like a native mail composer.
+    private func draftWell(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            envelopeRow("From") {
+                Text(accountDescription(draft.accountID)).appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            HairlineDivider()
+            Group {
+                envelopeRow("To") {
+                    TextField("To", text: editBinding(\.to)).textFieldStyle(.plain).appFont(.callout)
+                        .focused($focusedField, equals: .to)
+                        .accessibilityLabel("To").accessibilityIdentifier("email.draft-to")
+                    Button {
+                        showingEnvelope.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Cc, Bcc")
+                            Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
+                                .imageScale(.small)
+                        }
+                        .padding(.vertical, 4).contentShape(Rectangle())
+                    }.buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
+                        .fixedSize()
+                        .accessibilityLabel("Cc, Bcc & subject")
+                        .accessibilityIdentifier("email.draft-envelope")
+                        .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
+                }
+                if showingEnvelope {
+                    HairlineDivider()
+                    envelopeField("Cc", path: \.cc, field: .cc)
+                    HairlineDivider()
+                    envelopeField("Bcc", path: \.bcc, field: .bcc)
+                    HairlineDivider()
+                    envelopeField("Subject", path: \.subject, field: .subject)
+                }
+            }.disabled(!draft.canEdit || model.isPerformingAction)
+            HairlineDivider()
+            // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
+            // no longer change (sending, sent, uncertain) renders as text instead of an editor.
+            // Only the editor is disabled: a disabled ancestor would also block selecting the text.
+            if draft.canEdit {
+                // The text view insets its own text by about five points; the
+                // smaller padding lines its first character up with the labels.
+                TextEditor(text: editBinding(\.body)).appFont(.body).lineSpacing(5)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 180, idealHeight: 220)
+                    .focused($focusedField, equals: .body)
+                    .disabled(model.isPerformingAction)
+                    .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
+                    .padding(.horizontal, Self.wellInset - 5).padding(.vertical, 8)
+            } else {
+                // No accessibilityLabel: on a selectable Text, AppKit resolves the label
+                // through the text itself and recurses until the stack overflows.
+                Text(edit.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("email.draft-body")
+                    .padding(.horizontal, Self.wellInset).padding(.vertical, 12)
+            }
+        }
+        // The well's shapes take no clicks: on a 1x Mac display a stroke over
+        // a text view swallows the click meant for it (see `A2FieldModifier`).
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.surface)
+                .allowsHitTesting(false)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.hairlineStrong)
+                .allowsHitTesting(false)
+        )
+    }
+
+    /// Review & Send leads; saving, history, the style example and discarding
+    /// wait behind one quiet menu at the trailing edge.
+    private func draftActions(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
+        HStack(spacing: 10) {
+            Button("Review & Send") { Task { await model.prepareSend() } }
+                .primaryCapsule()
+                .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
+            Spacer(minLength: 0)
+            Menu {
+                Button("Save now") { Task { await model.saveDraft() } }
+                    .disabled(!edit.isDirty || model.isSaving || model.conflict != nil)
+                Button("Draft history") { showingRevisions = true }.accessibilityIdentifier(
+                    "email.draft-history")
+                Button("Use as writing example") { Task { await model.endorseDraftStyle() } }
+                    .accessibilityIdentifier("email.endorse-style")
+                    .disabled(
+                        model.isPerformingAction || model.isSaving || model.conflict != nil
+                            || edit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Divider()
+                Button("Discard draft", role: .destructive) { showingDiscard = true }.disabled(!draft.canEdit)
+            } label: {
+                Label("Draft options", systemImage: "ellipsis.circle")
+                    .labelStyle(.iconOnly).imageScale(.large)
+                    .frame(minWidth: A2Metrics.controlHeight, minHeight: A2Metrics.controlHeight)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden).fixedSize()
+            .foregroundColor(AppTheme.inkSoft).tint(AppTheme.inkSoft)
+            .help("Draft options")
+        }
+    }
+
     /// Distinguishes draft progress, confirmed sending, uncertainty and recoverable editing conflicts.
-    @ViewBuilder private func draftNotices(_ draft: EmailDraftView) -> some View {
+    /// Each notice that waits on the owner is one amber-ruled card: what happened, then the
+    /// action that answers it beside the sentence.
+    @ViewBuilder private func draftNotices(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         if draft.stale {
-            Text("New mail arrived. Review the updated thread before sending.").foregroundColor(AppTheme.amberText)
-            Button("I've reviewed the updated thread") { Task { await model.confirmCurrentSourceReviewed() } }
-                .buttonStyle(SecondaryCapsuleButtonStyle())
-                .disabled(model.conflict != nil || model.isSaving)
+            draftDecision("New mail arrived", message: "Review the updated thread above before sending.") {
+                Button("I've reviewed the updated thread") { Task { await model.confirmCurrentSourceReviewed() } }
+                    .primaryCapsule()
+                    .disabled(model.conflict != nil || model.isSaving)
+            }
         }
         if draft.status == "uncertain" {
-            Text(
-                "Send status unknown. Check the thread before taking another action. This message will not be resent automatically."
-            ).foregroundColor(AppTheme.amberText)
+            draftDecision(
+                "Send status unknown",
+                message:
+                    "Check the thread before taking another action. This message will not be resent automatically."
+            ) { EmptyView() }
         } else if draft.status == "sent" {
-            Label("Sent", systemImage: "checkmark.circle.fill").foregroundColor(AppTheme.tealText)
+            Label("Sent", systemImage: "checkmark.circle.fill").appFont(.callout, weight: .medium)
+                .foregroundColor(AppTheme.tealText)
         } else if draft.isProcessing {
-            ProgressView(draft.status == "sending" ? "Sending approved message…" : "Preparing your draft…")
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(draft.status == "sending" ? "Sending approved message…" : "Preparing your draft…")
+                    .appFont(.callout).foregroundColor(AppTheme.inkSoft)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        if draft.approvalID != nil && !edit.isDirty && draft.status == "awaiting_approval" {
+            draftDecision("Waiting for your approval", message: "Open the send request to approve or decline it.") {
+                Button("Open pending approval") { Task { await model.loadReview() } }
+                    .buttonStyle(SecondaryCapsuleButtonStyle()).disabled(draft.stale)
+            }
         }
         if let conflict = model.conflict {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("This draft changed on another device. Your edits are preserved.").foregroundColor(AppTheme.amberText)
-                DisclosureGroup("Read the server version") { Text(conflict.body).textSelection(.enabled) }
+            VStack(alignment: .leading, spacing: 10) {
+                AttentionCardLabel(title: "Edited on another device")
+                Text("This draft changed on another device. Your edits are preserved.")
+                    .appFont(.body).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup {
+                    A2Quote { Text(conflict.body).appFont(.callout).textSelection(.enabled) }.padding(.top, 6)
+                } label: {
+                    Text("Read the server version").appFont(.callout, weight: .medium)
+                        .foregroundColor(AppTheme.inkSoft)
+                }
+                .tint(AppTheme.inkSoft)
                 HStack(spacing: 8) {
-                    Button("Use server version") { model.useServerDraft() }
                     Button("Save my version") { Task { await model.keepLocalDraft() } }
-                }.buttonStyle(SecondaryCapsuleButtonStyle())
-            }.accessibilityIdentifier("email.draft-conflict")
+                        .primaryCapsule()
+                    Button("Use server version") { model.useServerDraft() }
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
+                }
+            }
+            .attentionCard()
+            .accessibilityIdentifier("email.draft-conflict")
         }
+    }
+
+    /// One decision the draft waits on: an amber eyebrow and a sentence, with
+    /// its action beside them when the width allows and beneath them when not.
+    private func draftDecision<Action: View>(
+        _ title: String, message: String, @ViewBuilder action: () -> Action
+    ) -> some View {
+        let action = action()
+        let words = VStack(alignment: .leading, spacing: 4) {
+            AttentionCardLabel(title: title)
+            Text(message).appFont(.callout).foregroundColor(AppTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 16) {
+                words.frame(minWidth: 220, alignment: .leading)
+                Spacer(minLength: 0)
+                action
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                words
+                action
+            }
+        }
+        .attentionCard()
+    }
+
+    /// The leading inset every row of the reply well shares.
+    private static let wellInset: CGFloat = 14
+
+    /// One row of the reply envelope: a faint label in a fixed column, then its value.
+    private func envelopeRow<Value: View>(_ title: String, @ViewBuilder value: () -> Value) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title).appFont(.callout).foregroundColor(AppTheme.inkFaint)
+                .frame(width: 58, alignment: .leading)
+            value()
+        }
+        .padding(.horizontal, Self.wellInset)
+        .frame(minHeight: A2Metrics.rowHeight + 8)
     }
 
     /// Connects an envelope field to the versioned edit buffer and keyboard focus.
     private func envelopeField(_ title: String, path: WritableKeyPath<EmailDraftEdit, String>, field: Field)
         -> some View
     {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title).appFont(.callout).foregroundColor(AppTheme.inkSoft).frame(width: 54, alignment: .leading)
+        envelopeRow(title) {
             TextField(title, text: editBinding(path)).textFieldStyle(.plain).appFont(.callout)
                 .focused($focusedField, equals: field)
                 .accessibilityLabel(title).accessibilityIdentifier("email.draft-\(title.lowercased())")

@@ -43,6 +43,32 @@ import Testing
         #expect(!source.contains("struct EmailAvatar"))
     }
 
+    /// The reply composer: a decision the draft waits on reads as one amber
+    /// card with its action beside it, the envelope and body share one well
+    /// whose shapes never take a click, and the rarer actions sit in a menu.
+    @Test
+    func testTheReplyComposerPutsEachDecisionBesideItsAction() throws {
+        let source = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(source.contains("private func draftDecision<Action: View>("))
+        #expect(source.contains("draftDecision(\"New mail arrived\""))
+        #expect(source.contains("draftDecision(\"Waiting for your approval\""))
+        #expect(source.contains("draftDecision(\n                \"Send status unknown\""))
+        #expect(source.contains(".attentionCard()\n            .accessibilityIdentifier(\"email.draft-conflict\")"))
+        #expect(source.contains("private func draftWell("))
+        #expect(source.contains("envelopeRow(\"From\")"))
+        #expect(!source.contains("Text(\"From: \\(accountDescription("))
+        #expect(source.contains(".stroke(AppTheme.hairlineStrong)\n                .allowsHitTesting(false)"))
+        #expect(source.contains(".menuIndicator(.hidden)"))
+        for identifier in [
+            "email.draft-to", "email.draft-envelope", "email.draft-history", "email.endorse-style",
+            "email.action-error", "email.draft-conflict",
+        ] {
+            #expect(source.contains("\"\(identifier)\")"), "\(identifier)")
+        }
+        #expect(source.contains(".accessibilityIdentifier(\"email.draft-\\(title.lowercased())\")"))
+    }
+
     @Test
     func testTheSheetsAndTheCensusWearTheSameSystem() throws {
         let mode = try source(at: "Veetbot/Views/EmailModeView.swift")
