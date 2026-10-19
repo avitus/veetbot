@@ -13,6 +13,8 @@ title: Changelog
   its newest line in view while you read at the bottom. An answer taller than
   the window stops with its beginning at the top, and scrolling away while one
   streams leaves the view where you put it.
+- On iPhone and iPad, the strip under the message field, where the home
+  indicator sits, is warm paper instead of white.
 
 ## 2026-10-19 — People sections, possible duplicates and profile actions
 

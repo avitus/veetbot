@@ -238,6 +238,9 @@ public struct RootView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
+        // Clipping each tree to the space above the home indicator also clips
+        // its own full-bleed paper, so the paper under them reaches the edge.
+        .background(AppTheme.paper.ignoresSafeArea(edges: .bottom))
         .environment(\.activeClientMode, coordinator.mode)
         #if os(macOS)
         // One window-level owner prevents the hidden navigation tree from replacing active controls.

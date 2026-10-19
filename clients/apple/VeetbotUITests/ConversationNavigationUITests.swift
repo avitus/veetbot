@@ -244,6 +244,56 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertLessThan(firstLine.frame.maxY, composer.frame.minY, geometry)
     }
 
+    #if os(iOS)
+    /// The paper runs under the home indicator: the strip below the composer
+    /// is the transcript's paper, not the window's white.
+    func testPaperReachesTheBottomEdgeBelowTheComposer() {
+        app.launchArguments.append("--ui-testing-streamed-answer")
+        app.launch()
+        _ = sendStreamedAnswerRequest()
+        let lastLine = streamedText("The answer's last line.")
+        XCTAssertTrue(lastLine.waitForExistence(timeout: 10))
+        waitForStreamedAnswerToSettle()
+        let window = app.windows.firstMatch.frame
+        let screenshot = XCUIScreen.main.screenshot().image
+        // Both points sit in the conversation's column (beside the iPad's
+        // sidebar): paper just past the short last line, clear of the
+        // composer's shadow, and the window's bottom edge below it.
+        let column = lastLine.frame.maxX + 24
+        let paper = pixel(in: screenshot, at: CGPoint(x: column, y: lastLine.frame.midY))
+        let bottomEdge = pixel(in: screenshot, at: CGPoint(x: column, y: window.maxY - 2))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Bottom edge"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let difference = zip(paper, bottomEdge).map { abs($0 - $1) }.max() ?? 255
+        XCTAssertLessThanOrEqual(difference, 3, "paper \(paper), bottom edge \(bottomEdge)")
+    }
+
+    /// The red, green and blue values of one point of a screenshot.
+    private func pixel(in image: UIImage, at point: CGPoint) -> [Int] {
+        guard let cgImage = image.cgImage else { return [] }
+        let x = Int(point.x * image.scale)
+        let y = Int(point.y * image.scale)
+        var data = [UInt8](repeating: 0, count: 4)
+        data.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return }
+            // Core Graphics counts rows from the bottom.
+            context.draw(
+                cgImage,
+                in: CGRect(
+                    x: -x, y: -(cgImage.height - 1 - y), width: cgImage.width, height: cgImage.height
+                )
+            )
+        }
+        return data.prefix(3).map(Int.init)
+    }
+    #endif
+
     /// Opens the fixture conversation and sends the message the streamed answer replies to.
     private func sendStreamedAnswerRequest() -> XCUIElement {
         let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
