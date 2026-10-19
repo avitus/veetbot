@@ -49,6 +49,10 @@ enum ConversationNavigationUITestFixture {
     static let reportSessionID = "00000000-0000-0000-0000-0000000005A1"
     /// The schedule's earlier occurrence, already read, so the two form a group.
     static let previousReportSessionID = "00000000-0000-0000-0000-0000000005A3"
+    /// With the unread report: both reports are briefings whose runs replay a
+    /// dozen web calls over time, as the production weekday briefing does.
+    /// Today's runs about as tall as a large window; yesterday's is short.
+    static let briefingReplayLaunchArgument = "--ui-testing-briefing-replay"
     static let newsSubscriptionID = "00000000-0000-0000-0000-000000000B01"
     static let dealsSubscriptionID = "00000000-0000-0000-0000-000000000B02"
     static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
@@ -186,6 +190,7 @@ enum ConversationNavigationUITestFixture {
 
 private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private var pendingResponse: DispatchWorkItem?
+    private var stagedDeliveries: [DispatchWorkItem] = []
     private static let emailLock = NSLock()
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
     private static var emailRevision = 1
@@ -345,6 +350,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let reportLock = NSLock()
     /// Set once a notification sync names the report among its seen runs.
     private static var reportSeen = false
+    private static var briefingReplayEnabled: Bool {
+        unreadReportEnabled
+            && ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.briefingReplayLaunchArgument)
+    }
     private static var unreadReportEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.unreadReportLaunchArgument)
     }
@@ -389,6 +398,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let body: String
         let statusCode: Int
         var holdOpen = false
+        var stagedFrames: [String] = []
         switch (request.httpMethod, url.path) {
         case (_, let path) where path.hasPrefix("/v1/memory-reconsolidations") || path.hasPrefix("/v1/memories/00000000-0000-0000-0000-00000000320"):
             let result = Self.synthesisResponse(request)
@@ -697,6 +707,28 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)") where Self.unreadReportEnabled:
             statusCode = 200
             body = Self.reportSessionJSON
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)/messages") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.briefingMessagesJSON(day: "Today's")
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.previousReportSessionID)") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.previousReportSessionJSON
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.previousReportSessionID)/messages") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.briefingMessagesJSON(day: "Yesterday's")
+        case ("GET", "/v1/runs/\(Self.previousReportRunID)") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.completedRunJSON(id: Self.previousReportRunID, sessionID: ConversationNavigationUITestFixture.previousReportSessionID)
+        case ("GET", "/v1/runs/\(Self.previousReportRunID)/events") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = ""
+            stagedFrames = Self.briefingReplayFrames(runID: Self.previousReportRunID, day: "Yesterday's")
+            holdOpen = true
+        case ("GET", "/v1/runs/\(Self.reportRunID)/events") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = ""
+            stagedFrames = Self.briefingReplayFrames(runID: Self.reportRunID, day: "Today's")
+            holdOpen = true
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)/messages") where Self.unreadReportEnabled:
             statusCode = 200
             body = """
@@ -1078,6 +1110,23 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         }
         pendingResponse = deliver
+        if !stagedFrames.isEmpty {
+            // A replay reaches the client a few frames at a time, as large tool
+            // results do over the network, so the view lays out between them.
+            deliver.perform()
+            stagedDeliveries = stagedFrames.enumerated().map { index, frame in
+                let item = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.client?.urlProtocol(self, didLoad: Data(frame.utf8))
+                    if index == stagedFrames.count - 1 {
+                        self.client?.urlProtocolDidFinishLoading(self)
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01 * Double(index + 1), execute: item)
+                return item
+            }
+            return
+        }
         let slowChat = ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-slow-send")
         let isSubmission = request.httpMethod == "POST" && url.path.hasSuffix("/messages")
         let isRunStream = url.path == "/v1/runs/\(Self.runID)/events"
@@ -1096,6 +1145,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     override func stopLoading() {
         pendingResponse?.cancel()
         pendingResponse = nil
+        stagedDeliveries.forEach { $0.cancel() }
+        stagedDeliveries = []
     }
 
     private func requestJSON() -> [String: Any] {
@@ -1321,6 +1372,75 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
 
     private static let reportRunID = "00000000-0000-0000-0000-0000000005A2"
+    private static let previousReportRunID = "00000000-0000-0000-0000-0000000005A4"
+
+    private static func briefingMessagesJSON(day: String) -> String {
+        // The two reports end at different sequences, as the production
+        // briefing (94) and the morning summary before it (99) do.
+        "{\"items\":[{\"sequence\":\(answerSequence(day: day)),\"role\":\"assistant\",\"content\":\(briefingContentJSON(day: day))}],\"next_cursor\":null}"
+    }
+
+    private static func answerSequence(day: String) -> Int { day == "Today's" ? 94 : 99 }
+
+    private static func completedRunJSON(id: String, sessionID: String) -> String {
+        """
+            {"id":"\(id)","session_id":"\(sessionID)","parent_run_id":null,"status":"COMPLETED","step_count":4,"model_call_count":4,"tool_call_count":12,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":12,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-06T16:00:00Z","updated_at":"2026-10-06T16:01:07Z"}
+            """
+    }
+
+    /// The production briefing's shape: a heading, an introduction, then
+    /// stories of two paragraphs and a source link each. Today's has as many
+    /// stories as `VEETBOT_UI_TEST_BRIEFING_STORIES` asks (three by default).
+    private static func briefingContentJSON(day: String) -> String {
+        let count = day == "Today's"
+            ? Int(ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_BRIEFING_STORIES"] ?? "") ?? 3
+            : 1
+        let sentence = "This development matters to the companies the owner follows closely. "
+        let stories = (1...count).map { story in
+            "### \(story). Briefing story \(story)\n\n"
+                + String(repeating: sentence, count: 4) + "\n\n"
+                + String(repeating: sentence, count: 4) + "\n\n"
+                + "[Source \(story)](https://example.com/story/\(story))"
+        }
+        let text = "## \(day) briefing\n\n" + String(repeating: sentence, count: 2) + "\n\n"
+            + stories.joined(separator: "\n\n") + "\n\n\(day) briefing closing line."
+        let data = try! JSONSerialization.data(withJSONObject: [["type": "text", "text": text]])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Four model steps that run a dozen web calls in parallel batches, each
+    /// result tens of kilobytes, then the answer the transcript already holds.
+    private static func briefingReplayFrames(runID: String, day: String) -> [String] {
+        let run = "\"run_id\":\"\(runID)\""
+        var sequence = 2
+        var frames: [String] = []
+        func frame(_ event: String, _ data: String) {
+            sequence += 1
+            frames.append("id: \(sequence)\nevent: \(event)\ndata: {\(run)\(data.isEmpty ? "" : "," + data)}\n\n")
+        }
+        frame("run.queued", "")
+        frame("run.started", "")
+        let result = String(repeating: "Search result text. ", count: 1_000)
+        var call = 0
+        for batch in [2, 5, 5] {
+            frame("model.response.completed", "\"conversation_items\":[]")
+            let calls = (1...batch).map { _ -> String in call += 1; return "\(day.prefix(5).lowercased())-\(call)" }
+            for id in calls { frame("tool.call.proposed", "\"call_id\":\"\(id)\",\"name\":\"web.search\"") }
+            for id in calls { frame("tool.call.started", "\"call_id\":\"\(id)\",\"name\":\"web.search\"") }
+            for id in calls {
+                frame(
+                    "tool.call.completed",
+                    "\"call_id\":\"\(id)\",\"name\":\"web.search\",\"result_item\":{\"content\":[{\"type\":\"text\",\"text\":\"\(result)\"}],\"is_error\":false,\"trust\":\"external_untrusted\"}"
+                )
+            }
+        }
+        frame("model.response.completed", "\"conversation_items\":[]")
+        sequence = answerSequence(day: day) - 1
+        let content = briefingContentJSON(day: day)
+        frame("assistant.message.completed", "\"message\":{\"kind\":\"assistant\",\"content\":\(content)}")
+        frame("run.completed", "\"final_message\":{\"kind\":\"assistant\",\"content\":\(content)}")
+        return frames
+    }
     private static var reportSessionJSON: String {
         """
             {"id":"\(ConversationNavigationUITestFixture.reportSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Weekday briefing","metadata":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)"},"created_at":"2026-10-07T16:00:00Z","updated_at":"2026-10-07T16:01:46Z","active_run_id":null,"last_run_id":"\(reportRunID)"}

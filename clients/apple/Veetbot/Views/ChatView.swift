@@ -326,8 +326,13 @@ public struct ChatView: View {
 
     // MARK: - Transcript
 
+    /// Laid out eagerly. A lazy stack, opened on a report after another
+    /// conversation, could settle at an estimated height of a few hundred
+    /// points with both of its rows held and draw neither, leaving a blank
+    /// pane too short to scroll. A conversation is tens of rows, so measuring
+    /// each one is cheap and the transcript always draws what it holds.
     private var transcript: some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             if let workingState = state.workingState {
                 WorkingStatePanel(state: workingState)
                     .padding(.bottom, 16)

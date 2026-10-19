@@ -419,7 +419,10 @@ counts only, never conversation content. When a conversation opens blank, read
 them on that Mac with
 `/usr/bin/log show --last 1h --predicate 'subsystem == "com.veetbot.apple" AND category == "conversation"'`;
 a settled line with rows but no content height means the transcript failed to
-draw state it holds.
+draw state it holds. That is how the blank weekday briefing was found: on
+2026-10-19 it settled at two rows and 208 points of content in a 991-point
+window, about a fifth of its real height, and drew nothing. The transcript is
+therefore laid out eagerly rather than in a lazy stack.
 
 ## Agent activity and artifacts
 

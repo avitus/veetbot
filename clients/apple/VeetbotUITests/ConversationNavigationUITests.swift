@@ -148,6 +148,62 @@ final class ConversationNavigationUITests: XCTestCase {
         checkAnswerStaysVisible(answer, below: summary)
     }
 
+    /// The owner reads a short scheduled report, then opens the weekday
+    /// briefing, which is about as tall as their window. Each visit must draw
+    /// its report rather than a blank, unscrollable transcript.
+    func testBriefingAboutAWindowTallIsDrawnAfterAShortReport() {
+        app.launchArguments += ["--ui-testing-unread-report", "--ui-testing-briefing-replay"]
+        for key in ["VEETBOT_UI_TEST_BRIEFING_STORIES", "VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] {
+            if let value = ProcessInfo.processInfo.environment[key] { app.launchEnvironment[key] = value }
+        }
+        app.launch()
+        let group = app.descendants(matching: .any)[
+            "sidebar.schedule.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(group.waitForExistence(timeout: 10))
+        let today = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A1"
+        ]
+        let yesterday = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A3"
+        ]
+        for _ in 0..<3 where !yesterday.waitForExistence(timeout: 2) {
+            if group.value as? String != "Expanded" { openSidebarRow(group) }
+        }
+        XCTAssertTrue(today.waitForExistence(timeout: 5))
+        for visit in 1...3 {
+            for (row, day) in [(yesterday, "Yesterday's"), (today, "Today's")] {
+                openSidebarRow(row)
+                let closing = app.staticTexts["\(day) briefing closing line."].firstMatch
+                // The replay streams for about a second; judge the settled transcript.
+                sleep(3)
+                let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+                shot.name = "\(day)-\(visit)"
+                shot.lifetime = .keepAlways
+                add(shot)
+                XCTAssertTrue(closing.exists, "\(day) visit \(visit)\n\(app.debugDescription)")
+                #if os(macOS)
+                XCTAssertTrue(
+                    app.windows.firstMatch.frame.contains(closing.frame),
+                    "\(day) visit \(visit)\n\(app.debugDescription)"
+                )
+                #else
+                XCTAssertTrue(closing.isHittable, "\(day) visit \(visit)\n\(app.debugDescription)")
+                #endif
+            }
+        }
+    }
+
+    private func openSidebarRow(_ row: XCUIElement) {
+        #if os(macOS)
+        // The plain sidebar button's vertical midpoint is between its two text lines.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        #else
+        if !row.isHittable { app.navigationBars.buttons.element(boundBy: 0).tap() }
+        row.tap()
+        #endif
+    }
+
     /// Keeps the answer on screen under the summary row.
     ///
     /// macOS 27 reports SwiftUI's message text as disabled in the accessibility
