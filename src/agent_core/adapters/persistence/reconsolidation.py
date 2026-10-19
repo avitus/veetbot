@@ -1618,6 +1618,27 @@ class PostgresReconsolidationStore:
             excluded=full_count - len(full_valid) + changed_count - len(changed_sources),
         )
 
+    async def selectable_sources(
+        self, principal: Principal, sources: tuple[SourceVersion, ...], now: datetime
+    ) -> tuple[SourceVersion, ...]:
+        if len(sources) > 32:
+            raise ValueError("At most 32 source candidates may be checked")
+        if self._evidence is None:
+            return ()
+        await lock_owner(self._session, principal)
+        async with self._evidence.people.lock(principal):
+            rows = await self._sources(principal, sources, now)
+            originals = {row.id: (_memory(row), _version(row)) for row in rows}
+            return await self._evidence.selectable_sources(
+                principal,
+                tuple(
+                    originals[source.belief_id]
+                    for source in sources
+                    if source.belief_id in originals
+                ),
+                now,
+            )
+
     async def neighbors(
         self, principal: Principal, source: SourceVersion, now: datetime
     ) -> tuple[SourceVersion, ...]:

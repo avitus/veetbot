@@ -153,6 +153,22 @@ class ReconsolidationEvidence:
             active_members=frozenset(),
         )
 
+    async def selectable_sources(
+        self,
+        principal: Principal,
+        originals: tuple[tuple[MemoryRecord, SourceVersion], ...],
+        now: datetime,
+    ) -> tuple[SourceVersion, ...]:
+        """Check candidates independently before a group acquires immutable membership."""
+        if len(originals) > 32:
+            raise ValueError("At most 32 source candidates may be checked")
+        selected = []
+        for original in originals:
+            snapshots = await self._source_snapshots(principal, (original,))
+            if snapshots is not None and source_admissible(snapshots[0], principal, now):
+                selected.append(original[1])
+        return tuple(selected)
+
     async def sources(
         self,
         principal: Principal,
@@ -162,6 +178,15 @@ class ReconsolidationEvidence:
     ) -> tuple[MergeSource, ...] | None:
         if not 2 <= len(originals) <= 32:
             return None
+        return await self._source_snapshots(principal, originals, known_at=known_at)
+
+    async def _source_snapshots(
+        self,
+        principal: Principal,
+        originals: tuple[tuple[MemoryRecord, SourceVersion], ...],
+        *,
+        known_at: datetime | None = None,
+    ) -> tuple[MergeSource, ...] | None:
         if not all(
             [
                 await self.after_forward_boundary(principal, record, version)

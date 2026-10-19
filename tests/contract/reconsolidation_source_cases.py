@@ -18,6 +18,35 @@ from tests.contract.reconsolidation_cases import Factory, Stores
 from tests.contract.support import NOW, SESSION_ID, principal
 
 
+async def preselection_remains_bounded_scoped_and_revalidated(factory: Factory) -> None:
+    async with factory() as uow:
+        await seed_sources(uow)
+        job = await uow.reconsolidation.claim_due(principal(), NOW, "selection-test")
+        assert job is not None
+        page = await uow.reconsolidation.inventory(principal(), job.lease_token, NOW)
+        selected = await uow.reconsolidation.selectable_sources(principal(), page.sources, NOW)
+        assert selected == page.sources
+        foreign = principal().model_copy(update={"principal_id": "other-owner"})
+        assert await uow.reconsolidation.selectable_sources(foreign, selected, NOW) == ()
+        stale = tuple(
+            s.model_copy(update={"content_revision": s.content_revision + 1}) for s in selected
+        )
+        assert await uow.reconsolidation.selectable_sources(principal(), stale, NOW) == ()
+        with pytest.raises(ValueError, match="At most 32"):
+            await uow.reconsolidation.selectable_sources(principal(), selected * 17, NOW)
+        await uow.reconsolidation.checkpoint(principal(), job.lease_token, page, (selected,), NOW)
+        group = await uow.reconsolidation.claim_group(principal(), job.lease_token, NOW)
+        assert group is not None
+    async with factory() as uow:
+        original = await uow.memories.get(selected[0].belief_id, principal())
+        await uow.memories.reinforce(original.model_copy(update={"source_event_ids": [999]}))
+    async with factory() as uow:
+        assert (
+            await uow.reconsolidation.original_input(principal(), job.lease_token, group.id, NOW)
+            is None
+        )
+
+
 async def retained_owner_evidence(factory: Factory) -> None:
     originals = (memory(), memory(belief_id=502).model_copy(update={"store_position": 2}))
     async with factory() as uow:
@@ -402,6 +431,7 @@ def configured(
 
 
 MERGE_SCENARIOS = [
+    preselection_remains_bounded_scoped_and_revalidated,
     retained_owner_evidence,
     fresh_people_resolution,
     foreign_group_is_hidden,

@@ -9,7 +9,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import DreamingRun
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.messages import ResolvedModel
-from agent_core.domain.reconsolidation import ReconsolidationJob
+from agent_core.domain.reconsolidation import ReconsolidationJob, SourceVersion
 from agent_core.domain.reconsolidation_execution import ReconsolidationExecution
 from agent_core.memory.reconsolidation import ReconsolidationInventoryPass
 from agent_core.memory.reconsolidation_apply import apply_review
@@ -118,6 +118,15 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
                         "charged_usd": charged,
                     }
                 ),
+            )
+
+    async def _neighbors(self, source: SourceVersion) -> tuple[SourceVersion, ...]:
+        # End neighbor row locks before taking the owner/People guards. Selection
+        # rechecks source versions after any writer that wins between these reads.
+        sources = await super()._neighbors(source)
+        async with self._uow_factory() as uow:
+            return await uow.reconsolidation.selectable_sources(
+                self._principal, sources, self._clock.now()
             )
 
     async def _process(self, lease: ReconsolidationJob) -> int:
