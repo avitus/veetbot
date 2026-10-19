@@ -123,6 +123,23 @@ extension View {
     func a2Field(radius: CGFloat = 8) -> some View {
         modifier(A2FieldModifier(radius: radius))
     }
+
+    /// The filled teal capsule for a button that sits in scrolling content.
+    /// On the Mac it is the system's prominent button in a capsule: on macOS
+    /// 26 a custom-styled button that a scroll brought on screen reports a
+    /// stale frame to accessibility, so a click lands beside it. Touch keeps
+    /// the custom capsule.
+    @ViewBuilder
+    func primaryCapsule(expands: Bool = false) -> some View {
+        #if os(macOS)
+        buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(AppTheme.tealFill)
+            .controlSize(.large)
+        #else
+        buttonStyle(PrimaryCapsuleButtonStyle(expands: expands))
+        #endif
+    }
 }
 
 /// A square icon button in soft ink, for the composer and the sidebar.

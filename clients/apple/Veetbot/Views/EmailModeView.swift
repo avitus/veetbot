@@ -943,7 +943,7 @@ private struct EmailThreadScreen: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.hairlineStrong))
                 HStack(spacing: 10) {
                     Button("Review & Send") { Task { await model.prepareSend() } }
-                        .buttonStyle(PrimaryCapsuleButtonStyle())
+                        .primaryCapsule()
                         .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
                     Menu {
                         Button("Save now") { Task { await model.saveDraft() } }
@@ -1006,7 +1006,7 @@ private struct EmailThreadScreen: View {
                     } else {
                         Label("Draft reply", systemImage: "square.and.pencil")
                     }
-                }.buttonStyle(PrimaryCapsuleButtonStyle()).disabled(model.isPerformingAction)
+                }.primaryCapsule().disabled(model.isPerformingAction)
                 if let error = model.draftActionMessage {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
                         .appFont(.callout).accessibilityIdentifier("email.action-error")
@@ -1462,7 +1462,7 @@ struct EmailSendReview: View {
                             .buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red)).disabled(model.isPerformingAction)
                         Spacer(minLength: 0)
                         Button("Send") { Task { await model.resolveSend(.approveOnce) } }
-                            .buttonStyle(PrimaryCapsuleButtonStyle())
+                            .primaryCapsule()
                             .disabled(model.isPerformingAction).accessibilityIdentifier("email.approve-send")
                     }
                 }.padding(24)
