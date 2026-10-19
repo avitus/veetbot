@@ -2780,6 +2780,10 @@ final class ConversationNavigationUITests: XCTestCase {
 
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        // The item exists before the menu has finished opening; on the iPad it
+        // reports unhittable for a moment after that, so give it a few seconds.
+        let hittableBy = Date().addingTimeInterval(3)
+        while !destination.isHittable && Date() < hittableBy { usleep(100_000) }
         XCTAssertTrue(destination.isHittable)
         // The iOS 27.0 iPad simulator swallows XCUITest's element tap on the
         // menu's first item and leaves the menu open; a touch at the item's
