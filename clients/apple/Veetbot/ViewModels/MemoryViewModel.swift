@@ -113,6 +113,14 @@ public final class MemoryViewModel: ObservableObject {
         Task { [weak self] in await self?.reload() }
     }
 
+    func applyGroupFilters(flagged: Bool, type: MemoryBeliefTypeKind?) {
+        guard flaggedOnly != flagged || typeFilter != type else { return }
+        flaggedOnly = flagged
+        typeFilter = type
+        searchDebounceTask?.cancel()
+        Task { [weak self] in await self?.reload() }
+    }
+
     public func setFlaggedOnly(_ flagged: Bool) {
         guard flaggedOnly != flagged else { return }
         flaggedOnly = flagged
@@ -339,5 +347,57 @@ public final class MemoryViewModel: ObservableObject {
 
     private func displayMessage(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
+
+/// A group of the Mac sidebar (MagicPath coolly-breeze-5701): the review
+/// queue, everything, or one belief type. Each maps onto the list route's own
+/// `flagged` and `belief_type` filters.
+public enum MemoryBrowseGroup: Hashable, Identifiable, Sendable {
+    case review
+    case all
+    case type(MemoryBeliefTypeKind)
+
+    public var id: String {
+        switch self {
+        case .review: return "review"
+        case .all: return "all"
+        case .type(let type): return "type.\(type.rawValue)"
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .review: return "Needs review"
+        case .all: return "All memories"
+        case .type(.preference): return "Preferences"
+        case .type(.fact): return "Facts"
+        case .type(.relationship): return "Relationships"
+        case .type(.userModelAttr): return "About you"
+        case .type(.procedurePointer): return "Procedures"
+        }
+    }
+
+    public static let browseTypes: [MemoryBrowseGroup] = [
+        .type(.preference), .type(.fact), .type(.relationship), .type(.userModelAttr), .type(.procedurePointer),
+    ]
+}
+
+extension MemoryViewModel {
+    /// The sidebar group the current filters describe.
+    public var group: MemoryBrowseGroup {
+        if flaggedOnly { return .review }
+        if let typeFilter { return .type(typeFilter) }
+        return .all
+    }
+
+    /// Sets the review flag and the type filter together, so a group change
+    /// costs one request.
+    public func selectGroup(_ group: MemoryBrowseGroup) {
+        switch group {
+        case .review: applyGroupFilters(flagged: true, type: nil)
+        case .all: applyGroupFilters(flagged: false, type: nil)
+        case .type(let type): applyGroupFilters(flagged: false, type: type)
+        }
     }
 }

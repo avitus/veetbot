@@ -54,7 +54,7 @@ public struct MemoryBrowserView: View {
         // (an empty or unavailable state) lays out at the screen's height and
         // is cut off above the sheet.
         .frame(
-            minWidth: 560,
+            minWidth: 860,
             maxWidth: .infinity,
             minHeight: 520,
             idealHeight: 600,
@@ -72,7 +72,11 @@ public struct MemoryBrowserView: View {
     private var navigationContainer: some View {
         #if os(macOS)
         NavigationSplitView {
+            groupSidebar
+                .navigationSplitViewColumnWidth(min: 190, ideal: 212, max: 260)
+        } content: {
             collectionColumn
+                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 440)
         } detail: {
             // A stack, so the synthesis detail can push the originals it cites.
             NavigationStack { detailColumn }
@@ -91,15 +95,18 @@ public struct MemoryBrowserView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Memory").appDisplayFont(.title2)
-                Text("What Veetbot has learned and may rely on.")
-                    .appFont(.caption)
-                    .foregroundColor(AppTheme.inkSoft)
+                Text(sidebarItem.title).appDisplayFont(.title2)
+                if sidebarItem == .memories(.review) {
+                    Text("Formed without an explicit statement from you, and not yet confirmed.")
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.top, 14)
-            #endif
+            .padding(.vertical, 14)
+            #else
             Picker("Memory collection", selection: $collection) {
                 Text("Memories").tag("memories")
                 Text("People").tag("people")
@@ -112,6 +119,7 @@ public struct MemoryBrowserView: View {
             .accessibilityLabel("Memory collection")
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            #endif
             if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
             else if collection == "synthesis" { MemorySynthesisBrowserView() }
             else { content }
@@ -139,17 +147,118 @@ public struct MemoryBrowserView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
+                #if !os(macOS)
+                // The Mac's group sidebar carries the review queue and the types.
                 ToolbarItem(placement: .primaryAction) {
                     if collection == "memories" { reviewQueueToggle }
                 }
+                #endif
                 ToolbarItem(placement: .primaryAction) {
                     if collection == "memories" { statusFilterMenu }
                 }
+                #if !os(macOS)
                 ToolbarItem(placement: .primaryAction) {
                     if collection == "memories" { typeFilterMenu }
                 }
+                #endif
             }
     }
+
+    #if os(macOS)
+    /// The Mac's first column (MagicPath coolly-breeze-5701): the review
+    /// queue, the memories by type and the People directory, then the
+    /// synthesis journal. Counts wait on a server summary (ADR-0214).
+    private var groupSidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Memory").appDisplayFont(.title2)
+                    Text("What Veetbot has learned and may rely on.")
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 10)
+                groupHeading("Review")
+                groupRow(.memories(.review), systemImage: "flag")
+                groupHeading("Browse")
+                groupRow(.memories(.all), systemImage: "brain")
+                ForEach(MemoryBrowseGroup.browseTypes) { type in
+                    groupRow(.memories(type), systemImage: nil)
+                }
+                groupRow(.people, systemImage: "person.2")
+                groupHeading("Maintenance")
+                groupRow(.synthesis, systemImage: "arrow.triangle.merge")
+                Text("Merges and summaries Veetbot made from overlapping memories, to review or undo.")
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+            }
+            .padding(10)
+        }
+        .background(AppTheme.paperDeep)
+    }
+
+    private var sidebarItem: MemorySidebarItem {
+        switch collection {
+        case "people": return .people
+        case "synthesis": return .synthesis
+        default: return .memories(model.group)
+        }
+    }
+
+    private func groupHeading(_ title: String) -> some View {
+        Text(title)
+            .appFont(.caption, weight: .semibold)
+            .foregroundColor(AppTheme.inkSoft)
+            .padding(.horizontal, 8)
+            .padding(.top, 12)
+            .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func groupRow(_ group: MemorySidebarItem, systemImage: String?) -> some View {
+        let selected = sidebarItem == group
+        return Button {
+            switch group {
+            case .memories(let memories):
+                collection = "memories"
+                model.selectGroup(memories)
+            case .people: collection = "people"
+            case .synthesis: collection = "synthesis"
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Group {
+                    if let systemImage {
+                        Image(systemName: systemImage)
+                    } else {
+                        Circle().fill(AppTheme.hairlineStrong).frame(width: 6, height: 6)
+                    }
+                }
+                .frame(width: 16)
+                .foregroundColor(group == .memories(.review) ? AppTheme.amberText : AppTheme.inkSoft)
+                .accessibilityHidden(true)
+                Text(group.title).foregroundColor(AppTheme.ink)
+                Spacer(minLength: 4)
+            }
+            .appFont(.body)
+            .padding(.horizontal, 8)
+            .frame(minHeight: A2Metrics.rowHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selected ? AppTheme.selected : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("memory.group.\(group.id)")
+    }
+    #endif
 
     /// On the Mac the directory selects the person its adjacent column shows;
     /// elsewhere each row pushes the profile.
@@ -413,7 +522,8 @@ private extension View {
 
 enum MemoryBrowserWindowConfiguration {
     static let storageKey = "veetbot.memoryBrowser.contentSize"
-    static let minimumSize = NSSize(width: 560, height: 520)
+    // Three columns: the group sidebar, the list and the detail.
+    static let minimumSize = NSSize(width: 860, height: 520)
     static let maximumSize = NSSize(width: 10_000, height: 10_000)
 
     @MainActor
@@ -533,3 +643,28 @@ private extension View {
         if enabled { searchable(text: text, prompt: Text(prompt)) } else { self }
     }
 }
+
+#if os(macOS)
+/// One row of the Mac Memory sidebar.
+enum MemorySidebarItem: Hashable, Identifiable {
+    case memories(MemoryBrowseGroup)
+    case people
+    case synthesis
+
+    var id: String {
+        switch self {
+        case .memories(let group): return group.id
+        case .people: return "people"
+        case .synthesis: return "synthesis"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .memories(let group): return group.title
+        case .people: return "People"
+        case .synthesis: return "Synthesis"
+        }
+    }
+}
+#endif

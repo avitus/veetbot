@@ -107,17 +107,20 @@ public struct MemoryDetailView: View {
         }
     }
 
-    /// The amber-edged card that says why this memory waits on the owner.
+    /// The amber-edged card that asks whether a flagged memory is right
+    /// (MagicPath coolly-breeze-5701): Looks right confirms it, the quiet
+    /// answers reject it. Correcting the wording waits on ADR-0214.
     private var reviewCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Needs review", systemImage: "flag.fill")
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Is this right?", systemImage: "flag")
                 .appFont(.caption, weight: .semibold)
                 .foregroundColor(AppTheme.amberText)
-            if model != nil {
-                Text("Formation committed this memory without an explicit statement from you. Use Review to confirm, correct, or remove it.")
-                    .appFont(.callout)
-                    .foregroundColor(AppTheme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
+            Text("Veetbot formed this without an explicit statement from you. Confirm it, or remove it.")
+                .appFont(.callout)
+                .foregroundColor(AppTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            if let model {
+                reviewButtons(model)
             }
         }
         .padding(14)
@@ -183,6 +186,39 @@ public struct MemoryDetailView: View {
         return rows
     }
 
+    private func reviewButtons(_ model: MemoryViewModel) -> some View {
+        let busy = model.pendingActionID != nil || model.changesUnavailable
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { reviewButtonSet(model) }
+            VStack(alignment: .leading, spacing: 8) { reviewButtonSet(model) }
+        }
+        .disabled(busy)
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func reviewButtonSet(_ model: MemoryViewModel) -> some View {
+        Button("Looks right") { apply(.dismiss, with: model) }
+            .primaryCapsule()
+            .accessibilityIdentifier("memory.review.looks-right")
+        Button("Not true") { apply(.untrue, with: model) }
+            .buttonStyle(QuietCapsuleButtonStyle())
+            .accessibilityIdentifier("memory.review.not-true")
+        if memory.portability != "local" {
+            Button("Not relevant here") { apply(.notHere, with: model) }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                .accessibilityIdentifier("memory.review.not-here")
+        }
+    }
+
+    private func apply(_ outcome: MemoryReviewOutcome, with model: MemoryViewModel) {
+        Task {
+            if let reviewed = await model.review(memory, outcome: outcome) {
+                memory = reviewed
+            }
+        }
+    }
+
     /// The review outcomes of ADR-0117, offered only when a browsing model can
     /// carry them out. A toolbar menu rather than a card of buttons, so the
     /// belief's own lines keep their places on every layout. Each action sends
@@ -192,7 +228,7 @@ public struct MemoryDetailView: View {
         let busy = model.pendingActionID != nil || model.changesUnavailable
         return Menu {
             if memory.flaggedForReview {
-                Button("Mark reviewed") {
+                Button("Looks right") {
                     Task {
                         if let reviewed = await model.review(memory, outcome: .dismiss) {
                             memory = reviewed

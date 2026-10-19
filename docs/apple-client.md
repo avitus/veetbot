@@ -534,9 +534,17 @@ Memory opens from the toolbar (on iOS, from the More menu) with two
 collections; the server mounts its routes when `AGENT_MEMORY_API_ENABLED=1`.
 **Memories** lists the principal's governed beliefs with status and
 type filters and a flag toggle that shows only memories needing review; every
-email-derived memory arrives flagged. A memory's Review menu offers Mark
-reviewed, Not true, Not relevant here, and Delete memory, and a row can be
-swiped to delete after a confirmation (ADR-0117, under `memory.write`). A
+email-derived memory arrives flagged. On the Mac the sheet has three columns:
+a group sidebar on deep paper (Review: Needs review; Browse: All memories, each
+belief type and the People directory; Maintenance: Synthesis), the list, and
+the detail; it replaces the collection picker and the review and type
+filters, and counts wait on a server summary (ADR-0214, proposed). A flagged
+memory asks "Is this right?" in an amber-edged card with Looks right (the
+`dismiss` outcome) as the filled capsule and Not true and Not relevant here as
+quiet ones; the Review menu offers the same with Delete memory, and a row can
+be swiped to delete after a confirmation (ADR-0117, under `memory.write`).
+Fixing a memory's wording, editing it and showing evidence quotes are held for
+the owner in ADR-0214. A
 deleted statement does not form again; its original messages stay at their
 source.
 

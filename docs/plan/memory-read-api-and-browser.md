@@ -381,8 +381,11 @@ the device surface.
   working with the browser entry point absent.
 - **Review and deletion (ADR-0117).** A "Needs review" filter asks for the
   review queue through the `flagged` parameter. A row can be swiped to delete,
-  behind a confirmation, and the detail view carries a Review menu with Mark
-  reviewed, Not true, Not relevant here, and Delete. Each action sends a fresh
+  behind a confirmation, and the detail view carries a Review menu with Looks
+  right (the `dismiss` outcome), Not true, Not relevant here, and Delete; a
+  flagged belief also asks "Is this right?" with those three as buttons. On the
+  Mac a group sidebar (Review, Browse by type, Maintenance) replaces the
+  collection picker and the review and type filters. Each action sends a fresh
   idempotency key, removes or replaces the row from the server's response, and
   reloads on a revision conflict. A server that answers not-found or
   method-not-allowed on a write is presented as *this server does not support

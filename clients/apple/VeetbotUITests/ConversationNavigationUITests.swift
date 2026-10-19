@@ -1649,7 +1649,8 @@ final class ConversationNavigationUITests: XCTestCase {
         let memory = app.buttons["sidebar.memory"]
         XCTAssertTrue(memory.waitForExistence(timeout: 10))
         activate(memory)
-        let collection = app.sheets.radioButtons["Synthesis"]
+        // The Mac sheet's group sidebar holds Synthesis under Maintenance.
+        let collection = app.buttons["memory.group.synthesis"]
         #else
         openSidebarDestination(identifier: "sidebar.memory")
         let collection = app.segmentedControls.buttons["Synthesis"]
@@ -1820,8 +1821,8 @@ final class ConversationNavigationUITests: XCTestCase {
         let memory = app.buttons["sidebar.memory"]
         XCTAssertTrue(memory.waitForExistence(timeout: 10))
         activate(memory)
-        // The Mac sheet exposes the collection picker but not the browser's identifier.
-        let peopleCollection = app.sheets.radioButtons["People"]
+        // The Mac sheet's group sidebar lists the People directory under Browse.
+        let peopleCollection = app.buttons["memory.group.people"]
         #else
         openSidebarDestination(identifier: "sidebar.memory")
         XCTAssertTrue(app.descendants(matching: .any)["memory.browser"].waitForExistence(timeout: 5))

@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — Memory groups on the Mac and "Is this right?"
+
+- On the Mac, Memory lists its groups in a sidebar: Needs review, then all
+  memories and each kind, the People directory, and Synthesis. A memory that
+  needs review asks "Is this right?" with Looks right, Not true and Not
+  relevant here. Correcting a memory's wording, editing it and showing the
+  quotes it came from need a server change and wait for the owner (ADR-0214).
+
 ## 2026-10-19 — Settings by group, notifications and devices, theme, and Connect's last steps
 
 - Settings shows one group at a time: a sidebar on Mac and iPad, a list on

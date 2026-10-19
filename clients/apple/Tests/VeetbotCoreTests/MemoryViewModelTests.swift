@@ -509,6 +509,46 @@ import Testing
     }
 
     @Test
+    func testChoosingASidebarGroupSetsTheQueryWithOneRequest() async throws {
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let model = try makeModel { request in
+            lock.withLock { requests.append(request) }
+            return try self.response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+        }
+        await model.reload()
+
+        func query(after count: Int) async throws -> [URLQueryItem] {
+            for _ in 0 ..< 600 where lock.withLock({ requests.count }) < count {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            try #require(lock.withLock { requests.count } == count)
+            let request = try #require(lock.withLock { requests.last })
+            return URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        }
+
+        model.selectGroup(.review)
+        var items = try await query(after: 2)
+        #expect(model.group == .review)
+        #expect(items.contains(URLQueryItem(name: "flagged", value: "true")))
+        #expect(!items.contains { $0.name == "belief_type" })
+
+        model.selectGroup(.type(.preference))
+        items = try await query(after: 3)
+        #expect(model.group == .type(.preference))
+        #expect(items.contains(URLQueryItem(name: "belief_type", value: "preference")))
+        #expect(!items.contains { $0.name == "flagged" })
+
+        model.selectGroup(.all)
+        items = try await query(after: 4)
+        #expect(model.group == .all)
+        #expect(!items.contains { $0.name == "flagged" || $0.name == "belief_type" })
+        #expect(MemoryBrowseGroup.browseTypes.map(\.title) == [
+            "Preferences", "Facts", "Relationships", "About you", "Procedures",
+        ])
+    }
+
+    @Test
     func testEachReviewOutcomeAndDeletionConfirmsWithAToast() async throws {
         let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000531"))
         let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000532"))
