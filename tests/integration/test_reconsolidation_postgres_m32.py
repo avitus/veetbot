@@ -59,6 +59,67 @@ class RecallStores(Stores):
     traces: TraceStore
 
 
+async def test_source_selection_releases_neighbor_locks_before_owner_guard(
+    postgres_stores: Factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime
+
+    from agent_core.adapters.persistence.reconsolidation_sources import lock_owner
+    from agent_core.domain.agents import Principal
+    from agent_core.domain.reconsolidation import SourceVersion
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.reconsolidation_admission_cases import model, policy
+    from tests.contract.reconsolidation_execution_cases import ExecutionProvider, TrackedFactory
+    from tests.contract.reconsolidation_source_cases import seed_sources
+
+    async with postgres_stores() as uow:
+        await seed_sources(uow)
+        job = await uow.reconsolidation.claim_due(principal(), NOW, "source-locks")
+        assert job is not None
+        page = await uow.reconsolidation.inventory(principal(), job.lease_token, NOW)
+        original = await uow.memories.get(page.sources[0].belief_id, principal())
+    neighbors_read, writer_guard = asyncio.Event(), asyncio.Event()
+    neighbors = PostgresReconsolidationStore.neighbors
+
+    async def paused_neighbors(
+        store: PostgresReconsolidationStore,
+        owner: Principal,
+        source: SourceVersion,
+        now: datetime,
+    ) -> tuple[SourceVersion, ...]:
+        result = await neighbors(store, owner, source, now)
+        neighbors_read.set()
+        await writer_guard.wait()
+        return result
+
+    monkeypatch.setattr(PostgresReconsolidationStore, "neighbors", paused_neighbors)
+    tracked = TrackedFactory(postgres_stores)
+    worker = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        FixedClock(NOW),
+        principal(),
+        worker_id="source-locks",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(tracked),
+        egress_policy=policy,
+    )
+
+    async def writer() -> None:
+        await neighbors_read.wait()
+        async with postgres_stores() as uow:
+            store = cast(PostgresReconsolidationStore, uow.reconsolidation)
+            await lock_owner(store._session, principal())
+            writer_guard.set()
+            await uow.memories.reinforce(original.model_copy(update={"statement": "Changed claim"}))
+
+    async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+        tasks.create_task(writer())
+        selection = tasks.create_task(worker._neighbors(page.sources[0]))
+    assert {s.belief_id for s in selection.result()} == {page.sources[1].belief_id}
+
+
 async def test_summary_snapshot_erasure() -> None:
     from agent_core.bootstrap import build
     from tests.contract.reconsolidation_summary_context_cases import summary_snapshot_erasure

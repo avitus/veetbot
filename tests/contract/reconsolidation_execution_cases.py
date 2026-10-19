@@ -27,7 +27,7 @@ from agent_core.memory.reconsolidation_execution import ReconsolidationBatchExec
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.reconsolidation_admission_cases import model, policy
 from tests.contract.reconsolidation_cases import Factory, Stores
-from tests.contract.reconsolidation_source_cases import seed
+from tests.contract.reconsolidation_source_cases import configured, seed
 from tests.contract.support import NOW, principal
 
 
@@ -349,3 +349,100 @@ async def execution_failed_settlement_commit_preserves_full_charge(factory: Fact
 
 
 EXECUTION_SCENARIOS.append(execution_failed_settlement_commit_preserves_full_charge)
+
+
+async def execution_filters_unusable_neighbors(
+    factory: Factory, *, variant: str, usable: int = 2
+) -> None:
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.domain.events import NewEvent
+    from agent_core.domain.memory import Sensitivity
+    from agent_core.domain.people import PeopleSource
+    from agent_core.domain.people_sources import source_id
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.memory_fixtures import memory
+    from tests.contract.support import SESSION_ID
+
+    owner = principal()
+    originals = []
+    async with factory() as uow:
+        for sequence in (1, 2):
+            content: object = "I prefer concise answers."
+            if sequence == 1 and variant == "attachment":
+                content = [
+                    {"kind": "text", "text": "I prefer concise answers."},
+                    {"kind": "file", "artifact_id": str(UUID(int=800))},
+                ]
+            await uow.events.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=owner.principal_id,
+                    payload={"content": content},
+                )
+            )
+        if variant == "hidden_attribution":
+            async with uow.people.lock(owner):
+                await uow.people.put(
+                    PeopleSource(
+                        id=source_id(owner, SESSION_ID, 1),
+                        tenant_id=owner.tenant_id,
+                        principal_id=owner.principal_id,
+                        created_at=NOW,
+                        updated_at=NOW,
+                        sensitivity=Sensitivity.SENSITIVE,
+                        session_id=SESSION_ID,
+                        event_sequence=1,
+                        source_kind="owner",
+                        evidence_at=NOW,
+                        source_revision="source@1",
+                    ),
+                    expected_revision=0,
+                )
+        for i in range(2 + usable):
+            original = memory(belief_id=501 + i).model_copy(
+                update={"store_position": i + 1, "source_event_ids": [1 if i < 2 else 2]}
+            )
+            originals.append(original)
+            await uow.memories.upsert_belief(original)
+    tracked = TrackedFactory(factory)
+    provider = ExecutionProvider(tracked)
+    worker = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        FixedClock(NOW),
+        owner,
+        worker_id="mixed-sources",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=policy,
+    )
+    queued = await worker.run_once()
+    assert len(provider.requests) == (2 if usable >= 2 else 0), (
+        "Unusable neighbors must not prevent valid originals reaching provider review"
+    )
+    assert queued == (1 if usable >= 2 else 0), "Never queue an invalid or singleton group"
+    if provider.requests:
+        message = provider.requests[0].conversation[1]
+        assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+        payload = json.loads(message.content[0].text)
+        assert len(payload["groups"]) == 1
+        assert len(payload["groups"][0]["sources"]) == usable
+    async with factory() as uow:
+        for original in originals:
+            assert await uow.memories.get(original.id, owner) == original
+
+
+EXECUTION_SCENARIOS += [
+    configured(
+        f"execution_mixed_{variant}_{usable}",
+        execution_filters_unusable_neighbors,
+        variant=variant,
+        usable=usable,
+    )
+    for variant in ("attachment", "hidden_attribution")
+    for usable in (0, 1, 2)
+]

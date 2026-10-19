@@ -313,6 +313,12 @@ class ReconsolidationStore(Protocol):
         self, principal: Principal, token: UUID, now: datetime
     ) -> InventoryPage: ...
 
+    async def selectable_sources(
+        self, principal: Principal, sources: tuple[SourceVersion, ...], now: datetime
+    ) -> tuple[SourceVersion, ...]:
+        """Filter at most 32 candidates independently before queuing; revalidate on use."""
+        ...
+
     async def neighbors(
         self, principal: Principal, source: SourceVersion, now: datetime
     ) -> tuple[SourceVersion, ...]: ...
