@@ -1673,15 +1673,20 @@ final class ConversationNavigationUITests: XCTestCase {
 
     private func revealSynthesisAction(_ element: XCUIElement) {
         #if os(macOS)
-        // Scroll until the control lies inside the detail column: macOS 26 reports
-        // a control just below the viewport, but still inside the window, as hittable.
-        let scroll = app.scrollViews["memory.synthesis.detail"]
+        // Scroll until the control lies inside the detail column's viewport: macOS 26
+        // reports a control just below it, but still inside the window, as hittable.
+        // The identifier sits on the column's content; its scroll view is the viewport.
+        let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let column = app.scrollViews.containing(.any, identifier: "memory.synthesis.detail").firstMatch
+        XCTAssertTrue(column.waitForExistence(timeout: 5), app.debugDescription)
+        let viewport = column.frame
         for _ in 0..<16 {
-            if element.exists && scroll.frame.contains(element.frame) && element.isHittable { break }
-            let down = element.exists && element.frame.minY < scroll.frame.minY
-            scroll.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
+            if element.exists && viewport.contains(element.frame) && element.isHittable { break }
+            let down = element.exists && element.frame.minY < viewport.minY
+            column.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
         }
-        XCTAssertTrue(scroll.frame.contains(element.frame), element.debugDescription)
+        XCTAssertTrue(viewport.contains(element.frame), element.debugDescription)
         #else
         let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
