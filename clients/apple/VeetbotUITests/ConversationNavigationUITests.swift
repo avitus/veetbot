@@ -2636,9 +2636,13 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5), app.debugDescription)
         checkHandledActionInDetail()
         let review = app.buttons["email.review-send"]
-        for _ in 0..<8 where !review.isHittable {
-            app.scrollViews["email.detail"].scroll(byDeltaX: 0, deltaY: -350)
+        // Scroll until the button lies inside the reading column: macOS 26 reports a
+        // control just below the viewport, but still inside the window, as hittable.
+        let reading = app.scrollViews["email.detail"]
+        for _ in 0..<8 where !reading.frame.contains(review.frame) {
+            reading.scroll(byDeltaX: 0, deltaY: -350)
         }
+        XCTAssertTrue(reading.frame.contains(review.frame), app.debugDescription)
         XCTAssertTrue(review.isHittable)
         review.click()
         let send = app.buttons["email.approve-send"]

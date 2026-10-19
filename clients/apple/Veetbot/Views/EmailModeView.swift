@@ -597,6 +597,14 @@ private struct EmailThreadScreen: View {
     @State private var peopleLookup: PeopleLookup?
     @FocusState private var focusedField: Field?
 
+    private var replyScrollAnimation: Animation? {
+        #if os(macOS)
+        nil
+        #else
+        reduceMotion ? nil : .easeInOut(duration: 0.2)
+        #endif
+    }
+
     /// Keeps reading scrollable while reply and Chat actions remain reachable at the bottom edge.
     var body: some View {
         Group {
@@ -631,7 +639,10 @@ private struct EmailThreadScreen: View {
                             .accessibilityIdentifier("email.discuss")
                             Spacer(minLength: 0)
                             Button {
-                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                                // The Mac jumps: after an animated scrollTo, macOS 26 keeps a
+                                // stale transform for accessibility hit-testing, so the controls
+                                // it just brought on screen cannot be clicked.
+                                withAnimation(replyScrollAnimation) {
                                     proxy.scrollTo("reply", anchor: .top)
                                 }
                             } label: {
