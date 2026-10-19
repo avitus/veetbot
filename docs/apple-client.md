@@ -134,9 +134,11 @@ paper behind a small teal mark; the owner's messages in `tealWash` capsules; eac
 tool run one sentence that opens into a monospaced ledger; a pending approval or
 clarifying question docked above a translucent composer while the transcript
 shows one amber "Waiting for your approval" line. On a compact window the chat
-list slides over the conversation from the leading edge. Email, Memory, People,
-Schedules, Persona, Settings and Connect read the same tokens but keep their
-earlier layouts until their own restyle.
+list slides over the conversation from the leading edge. Email follows (see
+"Email mode" below). Memory, People, Schedules, Persona, Settings and Connect
+read the same tokens but keep their earlier layouts until their own restyle.
+`HairlineDivider`, `FilterPillButtonStyle` and the `a2Field` modifier join the
+shared controls for the surfaces that follow.
 
 Website Access lists the authenticated principal's browser profiles and lets the
 user choose one `READY` profile for new conversations. Adding access, or
@@ -536,10 +538,35 @@ Mac uses a native draggable split divider: the inbox can grow from 280 to 560
 points while retaining at least 360 points for reading. Its width and selected
 thread survive Chat / Email switching. Compact iPhone navigation and regular
 iPad navigation retain their platform layouts.
-Rows distinguish correspondent, subject, a one-line attention summary, account
-and reply state; full text stays available in the reading column. The five
+Rows follow the A2 Email reference: a Handled circle leads each row (empty
+while the conversation is in the Inbox, a filled teal check once Gmail has
+archived it, the same reversible label change under the same Archive in Gmail
+name), then the correspondent in semibold with the date in faint ink, the
+subject, Veetbot's one-line gist, and one line of state: an attention state
+("Needs reply", "For your attention", "Check send status") carries its reason in
+amber, a draft state reads in teal, and a handled, archived or reported
+conversation reads in soft ink. The account label appears only when more than
+one account is connected. On the Mac the selected row takes the `selected`
+tint with no border; on touch the rows run full width above hairlines. The
+Important / Other mail control is a segmented control on the Mac and filter
+pills on touch. Full text stays available in the reading column. The five
 initial priorities fit without scrolling in a 1200 by 900 Mac window at the
 default text size. Larger accessibility text can expand rows naturally.
+
+Thread detail opens with the subject in the display face and "sender · date"
+under it, with the Archive in Gmail capsule and the thread menu on the line
+above. Veetbot's gist sits behind a two-point teal rule with the state line and
+its reason; the messages follow as prose, each under its sender's line and
+parted by hairlines, with View in People and Message details kept beside the
+sender. A "Teach Veetbot" card on `paperDeep` opens into the same scoped
+feedback (thread, person, kind of content; Important / Less important; reply
+need) and reports what was applied with Undo. The reply is "Your reply, drafted
+by Veetbot": the envelope and body share one surface box behind a strong
+hairline, Review & Send is the filled capsule and Draft options the quiet one.
+The bottom bar keeps Discuss in Chat and the reply shortcut on the material
+edge. The Email learning, Draft history, Review & Send and unsubscribe sheets
+share `EmailSheetHeader` (a display-face title and a quiet way out); the
+Subscriptions census takes the same row and capsule styles.
 A compact mailbox-status disclosure retains
 per-account freshness; incomplete scans and account failures remain visible in
 its collapsed label. Archive guidance lives inside that disclosure and each
@@ -574,8 +601,9 @@ primary composer action and opens a separate, scrollable exact-message review.
 Native interaction coverage checks the five-row inbox, divider dragging and
 width preservation across mode changes, the reply shortcut, optional feedback,
 recipient-field discovery and separation of Chat and Email toolbar actions in
-light and dark appearance. Email uses adaptive surfaces and text accents while
-filled action buttons retain contrasting text.
+light and dark appearance. Email draws on the A2 tokens: paper behind the
+list and the reading column, teal for the gist rule and draft states, amber
+for attention, and filled capsules that keep contrasting text.
 
 Thread detail renders text and attachment metadata without remote content.
 Feedback distinguishes people, topics, thread importance and reply need, reports

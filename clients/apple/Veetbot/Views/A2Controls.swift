@@ -20,6 +20,7 @@ enum A2Metrics {
 /// A filled teal capsule: the one action the owner most likely takes.
 struct PrimaryCapsuleButtonStyle: ButtonStyle {
     var expands = false
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -29,7 +30,7 @@ struct PrimaryCapsuleButtonStyle: ButtonStyle {
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(AppTheme.onTeal)
             .background(Capsule().fill(AppTheme.tealFill))
-            .opacity(configuration.isPressed ? 0.85 : 1)
+            .opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.85 : 1)
             .contentShape(Capsule())
     }
 }
@@ -37,6 +38,7 @@ struct PrimaryCapsuleButtonStyle: ButtonStyle {
 /// A hairline capsule: an alternative that still deserves a border.
 struct SecondaryCapsuleButtonStyle: ButtonStyle {
     var expands = false
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -49,6 +51,7 @@ struct SecondaryCapsuleButtonStyle: ButtonStyle {
                 Capsule().fill(configuration.isPressed ? AppTheme.field : Color.clear)
             )
             .overlay(Capsule().stroke(AppTheme.hairlineStrong))
+            .opacity(isEnabled ? 1 : 0.45)
             .contentShape(Capsule())
     }
 }
@@ -56,6 +59,9 @@ struct SecondaryCapsuleButtonStyle: ButtonStyle {
 /// Text only, in soft ink: the quiet way out.
 struct QuietCapsuleButtonStyle: ButtonStyle {
     var expands = false
+    /// A colour other than soft ink, for a destructive or teal action.
+    var tint: Color? = nil
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -63,11 +69,59 @@ struct QuietCapsuleButtonStyle: ButtonStyle {
             .lineLimit(1)
             .padding(.horizontal, 12)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
-            .foregroundColor(configuration.isPressed ? AppTheme.ink : AppTheme.inkSoft)
+            .foregroundColor(tint ?? (configuration.isPressed ? AppTheme.ink : AppTheme.inkSoft))
             .background(
                 Capsule().fill(configuration.isPressed ? AppTheme.field : Color.clear)
             )
+            .opacity(isEnabled ? 1 : 0.45)
             .contentShape(Capsule())
+    }
+}
+
+/// A filter pill on a touch surface: field-coloured at rest, ink when chosen.
+struct FilterPillButtonStyle: ButtonStyle {
+    let selected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .appFont(.subheadline, weight: .medium)
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 32)
+            .foregroundColor(selected ? AppTheme.paper : AppTheme.inkSoft)
+            .background(Capsule().fill(selected ? AppTheme.ink : AppTheme.field))
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .contentShape(Capsule())
+    }
+}
+
+/// A one-point rule in the hairline colour.
+struct HairlineDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(AppTheme.hairline)
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A text field or box on the surface colour behind a strong hairline.
+struct A2FieldModifier: ViewModifier {
+    var radius: CGFloat = 8
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(AppTheme.surface))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(AppTheme.hairlineStrong))
+    }
+}
+
+extension View {
+    /// Draws the view as an A2 field: surface colour, strong hairline, small radius.
+    func a2Field(radius: CGFloat = 8) -> some View {
+        modifier(A2FieldModifier(radius: radius))
     }
 }
 

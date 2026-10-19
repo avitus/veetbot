@@ -8,19 +8,19 @@ import UIKit
 
 // MARK: - Tokens
 
-/// The People palette. Accent and surfaces follow Email mode; text colors keep
-/// at least 4.5:1 contrast on cards and canvas in both appearances, which the
-/// Mac Large text accessibility audit checks.
+/// The People palette. Accent and surfaces come from the A2 tokens; text colors
+/// keep at least 4.5:1 contrast on cards and canvas in both appearances, which
+/// the Mac Large text accessibility audit checks.
 enum PeopleSurface {
-    static var accent: Color { EmailSurface.accent }
+    static var accent: Color { AppTheme.teal }
     /// Unconfirmed identities and questions waiting on the owner.
     static let attention = peopleAdaptiveColor(light: (167, 62, 0), dark: (255, 158, 98))
     /// Forgetting and other removals.
     static let destructive = peopleAdaptiveColor(light: (180, 35, 24), dark: (255, 138, 125))
     /// Initials on the monogram's tinted wash.
     static let monogramInk = peopleAdaptiveColor(light: (0, 84, 81), dark: (97, 209, 196))
-    static var canvas: Color { EmailSurface.canvas }
-    static var card: Color { EmailSurface.card }
+    static var canvas: Color { AppTheme.paper }
+    static var card: Color { AppTheme.surface }
     /// Dates, sources and other supporting text.
     static let muted = Color.primary.opacity(0.75)
     static let hairline = Color.primary.opacity(0.09)

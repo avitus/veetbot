@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-18 — Email wears the A2 Dock design
+
+- Email on iPhone, iPad and Mac takes the same warm-paper design as Chat.
+  Each row leads with a Handled circle (the Archive in Gmail checkbox under its
+  reference look), then who wrote and when, the subject, Veetbot's gist, and
+  one line that says what the conversation needs, in amber when it needs you.
+  A thread opens with its subject in the serif face, Veetbot's reading behind a
+  teal rule, the messages as plain prose, a "Teach Veetbot" card for the same
+  feedback as before, and your reply in one bordered box with Review & Send as
+  the filled capsule. On an iPhone the Important / Other mail switch becomes
+  two pills. Nothing about handling, drafts or sending changed: Handled is still
+  reversible, drafts still autosave, and a send still needs your approval.
+- The Subscriptions census and the Email learning, Draft history and
+  Review & Send sheets share the same rows, titles and capsule buttons.
+
 ## 2026-10-17 — Veetbot for iPhone, iPad and Mac needs iOS 27 or macOS 26
 
 - The app now requires iOS 27 on iPhone and iPad and macOS 26 on the Mac;
