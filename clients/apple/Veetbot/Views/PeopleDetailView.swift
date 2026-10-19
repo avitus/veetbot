@@ -145,17 +145,39 @@ private struct PeopleProfile: View {
         let person = profile.person
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 16) { PeopleMonogram(name: person.displayName); identity(profile) }
-            headerActions(person)
+            headerActions(profile)
         }
     }
 
-    /// One row where it fits; otherwise the conversation on its own line above
-    /// the smaller actions, and at accessibility sizes one action per line.
-    @ViewBuilder private func headerActions(_ person: PersonView) -> some View {
-        let prepare = Button { conversation = PeopleConversationSelection(person: person) } label: {
-            Label("Prepare for a conversation", systemImage: "text.bubble")
+    /// Ask Veetbot first, then Email and Call where the person has a current
+    /// address or number, then Pin and Rename; one row where it fits,
+    /// otherwise Ask on its own line, and one action per line at accessibility
+    /// sizes (MagicPath keen-earth-6102).
+    @ViewBuilder private func headerActions(_ profile: PersonProfileView) -> some View {
+        let person = profile.person
+        let ask = Button { conversation = PeopleConversationSelection(person: person, intent: .ask) } label: {
+            Label(PeopleConversationIntent.ask.buttonTitle(for: person.displayName), systemImage: "text.bubble")
         }
         .primaryCapsule()
+        .accessibilityIdentifier("people.action.ask")
+        let contact = HStack(spacing: 8) {
+            if profile.contactActions.contains(.email) {
+                Button { conversation = PeopleConversationSelection(person: person, intent: .email) } label: {
+                    Label("Email", systemImage: "envelope")
+                }
+                .buttonStyle(SecondaryCapsuleButtonStyle())
+                .accessibilityLabel("Email \(person.displayName)")
+                .accessibilityIdentifier("people.action.email")
+            }
+            if profile.contactActions.contains(.call) {
+                Button { conversation = PeopleConversationSelection(person: person, intent: .call) } label: {
+                    Label("Call", systemImage: "phone")
+                }
+                .buttonStyle(SecondaryCapsuleButtonStyle())
+                .accessibilityLabel("Call \(person.displayName)")
+                .accessibilityIdentifier("people.action.call")
+            }
+        }
         let pin = Button { Task { await model.setPinned(!person.pinned, sessionID: sessionID) } } label: {
             Label(person.pinned ? "Unpin" : "Pin", systemImage: person.pinned ? "pin.slash" : "pin")
         }
@@ -166,11 +188,12 @@ private struct PeopleProfile: View {
             .buttonStyle(QuietCapsuleButtonStyle())
             .disabled(locked || renaming)
         if typeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 8) { prepare; pin; rename }
+            VStack(alignment: .leading, spacing: 8) { ask; contact; pin; rename }
         } else {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { prepare; pin; rename }
-                VStack(alignment: .leading, spacing: 8) { prepare; HStack(spacing: 8) { pin; rename } }
+                HStack(spacing: 8) { ask; contact; pin; rename }
+                VStack(alignment: .leading, spacing: 8) { ask; HStack(spacing: 8) { contact; pin; rename } }
+                VStack(alignment: .leading, spacing: 8) { ask; contact; HStack(spacing: 8) { pin; rename } }
             }
         }
     }
@@ -543,8 +566,13 @@ private struct PeopleProfile: View {
             }
             PeopleRow(divided: !profile.automaticMerges.isEmpty || identityReceipt) {
                 PeopleActionRow {
-                    Button("Repair identity…") { showingIdentity = true }
+                    // The repair sheet opens on "Combine duplicate people": the
+                    // owner picks the other entry and sees a preview first.
+                    Button("Merge with another entry…") { showingIdentity = true }
                         .buttonStyle(SecondaryCapsuleButtonStyle())
+                        .accessibilityIdentifier("people.action.merge")
+                    Button("Repair identity…") { showingIdentity = true }
+                        .buttonStyle(QuietCapsuleButtonStyle())
                     Button("Forget person…", role: .destructive) { Task { await model.previewForget(sessionID: sessionID) } }
                         .buttonStyle(QuietCapsuleButtonStyle(tint: PeopleSurface.destructive))
                 }

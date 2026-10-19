@@ -549,13 +549,19 @@ deleted statement does not form again; its original messages stay at their
 source.
 
 **People** (Milestone 28, under `people.read` and `people.write`) lists the
-people the owner knows or writes to (ADR-0121), with Pinned and Needs review
-collections. Needs review holds people known only by a name or role and each
-possible duplicate, answered with Merge or Not the same (ADR-0125). A person's
-profile shows names and contact details, relationships, a history timeline
-that includes email summaries (ADR-0126), open threads, and facts with Inspect
-evidence and correction actions; Manage person holds Repair identity and
-Forget person. Import history analyses selected chats or mail accounts under a
+people the owner knows or writes to (ADR-0121) in the A2 sections: Needs you
+(the server's review filter: people known only by a name or role), Recent (the
+server's newest-interaction order), Everyone and Pinned, then Possible
+duplicates (each pair answered with Merge or Keep separate, ADR-0125) and All
+identities. Counts and a last-contact time on each row wait on a server change
+(ADR-0217, proposed). A person's profile leads with Ask Veetbot about the
+person, then Email and Call when a current address or number is known: each
+opens Chat with a request naming the person, so sending keeps its confirmation
+and a call its card (a number from People never counts as the owner's own,
+ADR-0213). It shows names and contact details, relationships, a history
+timeline that includes email summaries (ADR-0126), open threads, and facts
+with Inspect evidence and correction actions; Manage person holds Merge with
+another entry (a previewed merge), Repair identity and Forget person. Import history analyses selected chats or mail accounts under a
 date range, record limit and spending cap; see
 [People operations](people-operations.md).
 

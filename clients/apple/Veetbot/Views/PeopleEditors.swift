@@ -139,6 +139,51 @@ struct PeopleConversationSelection: Identifiable {
     let id = UUID()
     var person: PersonView?
     var source: PeopleEvidenceView?
+    var intent: PeopleConversationIntent = .ask
+}
+
+/// What a person's Chat opens for. Each writes a request that names the
+/// person and nothing else: Chat finds the address or number in People, so
+/// an email still waits for the send confirmation and a call keeps its
+/// confirmation card, because a number from People never counts as the
+/// owner's own (ADR-0213).
+enum PeopleConversationIntent: Equatable {
+    case ask, email, call
+
+    func prompt(for name: String) -> String {
+        switch self {
+        case .ask: return "Help me prepare for my next conversation with \(name)."
+        case .email: return "Draft an email to \(name) about "
+        case .call: return "Call \(name) about "
+        }
+    }
+
+    func buttonTitle(for name: String) -> String {
+        switch self {
+        case .ask: return "Ask Veetbot about \(name.split(separator: " ").first.map(String.init) ?? name)"
+        case .email: return "Email"
+        case .call: return "Call"
+        }
+    }
+
+    func windowTitle(for name: String) -> String {
+        switch self {
+        case .ask: return "Ask about \(name)"
+        case .email: return "Email \(name)"
+        case .call: return "Call \(name)"
+        }
+    }
+}
+
+extension PersonProfileView {
+    /// Email when the person has a current address, Call when a current number.
+    var contactActions: [PeopleConversationIntent] {
+        let current = aliases.filter { $0.validTo == nil }
+        var actions: [PeopleConversationIntent] = []
+        if current.contains(where: { $0.identifierKind == "email" }) { actions.append(.email) }
+        if current.contains(where: { $0.identifierKind == "phone" }) { actions.append(.call) }
+        return actions
+    }
 }
 
 /// A separate presentation preserves the existing Chat and Email drafts and streams.
@@ -164,7 +209,7 @@ struct PeopleConversationView: View {
                 }
             }
             .background(AppTheme.paper)
-            .navigationTitle(selection.person.map { "Prepare: \($0.displayName)" } ?? "Source conversation")
+            .navigationTitle(selection.person.map { selection.intent.windowTitle(for: $0.displayName) } ?? "Source conversation")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() }.accessibilityIdentifier("people.conversation.close") } }
         }
         .peopleModalFrame(.reading, minHeight: 450, idealHeight: 640)
@@ -179,7 +224,7 @@ struct PeopleConversationView: View {
             else if let person = selection.person {
                 let session = try await api.createSession(metadata: ["people_person_ids": .array([.string(person.id.uuidString)])])
                 await chat.openSharedSession(session.id)
-                chat.composerText = "Help me prepare for my next conversation with \(person.displayName)."
+                chat.composerText = selection.intent.prompt(for: person.displayName)
             }
             error = nil
         } catch { self.error = error.localizedDescription; prepared = false }

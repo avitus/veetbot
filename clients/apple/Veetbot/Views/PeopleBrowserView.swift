@@ -77,8 +77,9 @@ public struct PeopleBrowserView: View {
                     #if os(macOS)
                     VStack(alignment: .leading, spacing: 10) {
                         PeopleFilter(title: "Show", selection: model.collection, options: PeopleCollection.allCases, label: { $0.rawValue }) { value in Task { await model.selectCollection(value) } }
-                        PeopleFilter(title: "Relationship with you", selection: model.relationship, options: PeopleRelationshipFilter.allCases, label: { $0.label }) { value in Task { await model.selectRelationship(value) } }
-                        recentFirstToggle
+                        if model.collection != .duplicates {
+                            PeopleFilter(title: "Relationship with you", selection: model.relationship, options: PeopleRelationshipFilter.allCases, label: { $0.label }) { value in Task { await model.selectRelationship(value) } }
+                        }
                     }
                     .padding(.bottom, 12)
                     #else
@@ -87,15 +88,16 @@ public struct PeopleBrowserView: View {
                             ForEach(PeopleCollection.allCases) { Text($0.rawValue).tag($0) }
                         }
                     } label: { filterLabel("Show", value: model.collection.rawValue) }
-                    Menu {
-                        Picker("Relationship with you", selection: Binding(get: { model.relationship }, set: { value in Task { await model.selectRelationship(value) } })) {
-                            ForEach(PeopleRelationshipFilter.allCases) { Text($0.label).tag($0) }
-                        }
-                    } label: { filterLabel("Relationship with you", value: model.relationship.label) }
-                    recentFirstToggle
+                    if model.collection != .duplicates {
+                        Menu {
+                            Picker("Relationship with you", selection: Binding(get: { model.relationship }, set: { value in Task { await model.selectRelationship(value) } })) {
+                                ForEach(PeopleRelationshipFilter.allCases) { Text($0.label).tag($0) }
+                            }
+                        } label: { filterLabel("Relationship with you", value: model.relationship.label) }
+                    }
                     #endif
-                    if model.collection == .review && !model.suggestions.isEmpty {
-                        // Only Needs review shows this, so no asserted People row moves (ADR-0125).
+                    if model.collection == .duplicates && !model.suggestions.isEmpty {
+                        // Its own page (MagicPath keen-earth-6102), so no asserted People row moves (ADR-0125).
                         Section {
                             ForEach(model.suggestions) { suggestion in
                                 VStack(alignment: .leading, spacing: 8) {
@@ -107,7 +109,7 @@ public struct PeopleBrowserView: View {
                                         Button("Merge") { Task { await model.resolveSuggestion(suggestion, decision: "merge") } }
                                             .primaryCapsule()
                                             .accessibilityLabel("Merge \(suggestion.source.displayName) into \(suggestion.target.displayName)")
-                                        Button("Not the same") { Task { await model.resolveSuggestion(suggestion, decision: "separate") } }
+                                        Button("Keep separate") { Task { await model.resolveSuggestion(suggestion, decision: "separate") } }
                                             .buttonStyle(SecondaryCapsuleButtonStyle())
                                             .accessibilityLabel("\(suggestion.source.displayName) and \(suggestion.target.displayName) are different people")
                                     }
@@ -120,16 +122,26 @@ public struct PeopleBrowserView: View {
                                 .a2ListRow()
                             }
                         } header: {
-                            Text("Possible duplicates")
-                                .appFont(.subheadline, weight: .semibold)
+                            Text("Two entries that may be one person. Merging keeps both addresses and all history under one name; Veetbot never merges people on a name alone.")
+                                .appFont(.caption)
                                 .foregroundColor(AppTheme.inkSoft)
                                 .textCase(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    if model.items.isEmpty && model.errorMessage == nil && (model.collection != .review || model.suggestions.isEmpty) {
-                        if model.collection == .review {
+                    if model.items.isEmpty && model.errorMessage == nil && (model.collection != .duplicates || model.suggestions.isEmpty) {
+                        if model.collection == .duplicates {
                             Section {
-                                Label("Nothing needs review.", systemImage: "checkmark.circle")
+                                Label("No possible duplicates.", systemImage: "checkmark.circle")
+                                    .foregroundColor(AppTheme.ink)
+                                    .a2ListRow()
+                                Text("When two entries may be one person, Veetbot asks here before anything is merged.")
+                                    .foregroundColor(AppTheme.inkSoft)
+                                    .a2ListRow()
+                            }
+                        } else if model.collection == .review {
+                            Section {
+                                Label("Nothing needs you.", systemImage: "checkmark.circle")
                                     .foregroundColor(AppTheme.ink)
                                     .a2ListRow()
                                 Text("Someone Veetbot knows only by a name or role appears here until you confirm or remove them.")
@@ -178,10 +190,6 @@ public struct PeopleBrowserView: View {
         .task { await model.reload() }
         .sheet(isPresented: $showingImport) { PeopleImportHistoryView(initialSessionID: sessionID) }
         .sheet(isPresented: $showingAdd) { AddPersonView(sessionID: sessionID) { _ in Task { await model.reload() } } }
-    }
-
-    private var recentFirstToggle: some View {
-        Toggle("Recent interactions first", isOn: Binding(get: { model.recentFirst }, set: { value in Task { await model.setRecentFirst(value) } }))
     }
 
     @ViewBuilder private var directoryActions: some View {

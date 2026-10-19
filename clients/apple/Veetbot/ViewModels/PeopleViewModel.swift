@@ -6,13 +6,20 @@ extension Notification.Name { static let peopleConnectionChanged = Notification.
 public enum PeopleAvailability: Equatable, Sendable { case available, disabled, denied, changed, failed }
 
 public enum PeopleCollection: String, CaseIterable, Identifiable, Sendable {
-    case people = "People", pinned = "Pinned", review = "Needs review", all = "All identities"
+    case review = "Needs you", recent = "Recent", people = "Everyone", pinned = "Pinned"
+    case duplicates = "Possible duplicates", all = "All identities"
     public var id: String { rawValue }
-    /// People holds everyone the owner knows or writes to, confirmed or not;
-    /// Needs review is the server's own filter (ADR-0121).
-    var states: [String] { self == .people || self == .pinned ? ["active", "provisional"] : [] }
+    /// Possible duplicates and every identity, merged ones included, are
+    /// upkeep rather than the directory (MagicPath keen-earth-6102).
+    var isMaintenance: Bool { self == .duplicates || self == .all }
+    /// Everyone holds everyone the owner knows or writes to, confirmed or not;
+    /// Needs you is the server's review filter (ADR-0121): people known only
+    /// by a name or a role, waiting for the owner to say who they are.
+    var states: [String] { [.people, .pinned, .recent].contains(self) ? ["active", "provisional"] : [] }
     var review: Bool { self == .review }
     var pinnedOnly: Bool? { self == .pinned ? true : nil }
+    /// Recent is the server's newest-interaction order (`sort=recent`).
+    var sort: String { self == .recent ? "recent" : "id" }
 }
 
 public enum PeopleRelationshipFilter: String, CaseIterable, Identifiable, Sendable {
@@ -41,9 +48,8 @@ public final class PeopleViewModel: ObservableObject {
     @Published public private(set) var availability: PeopleAvailability = .available
     @Published public private(set) var searchText = ""
     @Published public private(set) var collection: PeopleCollection
-    @Published public private(set) var recentFirst = false
     @Published public private(set) var relationship: PeopleRelationshipFilter = .all
-    /// Possible duplicates shown with Needs review (ADR-0125).
+    /// The open possible duplicates, on their own page (ADR-0125).
     @Published public private(set) var suggestions: [PeopleMergeSuggestionView] = []
     private var isConnectionValid = true
     private var connectionObserver: AnyCancellable?
@@ -119,14 +125,6 @@ public final class PeopleViewModel: ObservableObject {
         await reload()
     }
 
-    public func setRecentFirst(_ value: Bool) async {
-        guard isConnectionValid else { return }
-        guard value != recentFirst else { return }
-        recentFirst = value
-        items = []; nextCursor = nil
-        await reload()
-    }
-
     public func setSearchText(_ value: String) {
         guard isConnectionValid else { return }
         guard value != searchText else { return }
@@ -155,13 +153,22 @@ public final class PeopleViewModel: ObservableObject {
         do {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             guard isConnectionValid else { return }
-            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
-            // A server without duplicate handling answers with an error; Needs review
-            // then simply shows no duplicate questions.
-            let duplicates = collection.review ? ((try? await api.listMergeSuggestions())?.items ?? []) : []
+            if collection == .duplicates {
+                // A server without duplicate handling answers with an error;
+                // the page then simply shows no pairs.
+                let duplicates = (try? await api.listMergeSuggestions())?.items ?? []
+                guard isConnectionValid, listRequest == request else { return }
+                suggestions = duplicates
+                items = []
+                nextCursor = nil
+                errorMessage = nil
+                availability = .available
+                return
+            }
+            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: collection.sort, relationship: relationship.queryValue)
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
-            suggestions = duplicates
+            suggestions = []
             var seen: Set<UUID> = []
             items = page.items.filter { seen.insert($0.id).inserted }
             seenCursors = []
@@ -185,7 +192,7 @@ public final class PeopleViewModel: ObservableObject {
         do {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             guard isConnectionValid else { return }
-            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), cursor: cursor, asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
+            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), cursor: cursor, asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: collection.sort, relationship: relationship.queryValue)
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
             var seen = Set(items.map(\.id))

@@ -18,13 +18,13 @@ visible interaction's `occurred_at` but does not return it; `review=true`
 ADR-0121); `pinned`, `relationship` and `state`. `PersonView` in
 `src/agent_core/domain/people_public.py` has no last-interaction time,
 attention reason or count. `GET /v1/people/merge-suggestions` is paged with no
-count (people-and-relationships.md:640).
+count (people-and-relationships.md:641).
 
 The design names list filters, pins and recent-interaction sorting, and a
 **Needs review** collection holding review people and possible duplicates
-(people-and-relationships.md:587-596). Open threads are commitments and
+(people-and-relationships.md:588-598). Open threads are commitments and
 unresolved topics with "no automatic sends or reminders"
-(people-and-relationships.md:607-608). Commitments are `proposed`, `open`,
+(people-and-relationships.md:608-609). Commitments are `proposed`, `open`,
 `completed`, `cancelled` or `uncertain`, with debtor, beneficiary and any
 supported deadline (people-and-relationships.md:394-398); `CommitmentView`
 carries `due_at` and `due_precision`. ADR-0125 deferred notifying about merge
@@ -118,8 +118,8 @@ prominence, C is declined and Needs you stays the review set.
   suppression and ceiling exclusion; C's commitment-state, debtor and window
   rules; route ordering.
 - Specs: people-and-relationships.md *Native experience*
-  (people-and-relationships.md:587-608) and the route table
-  (people-and-relationships.md:629-647); C records the reading of "no
+  (people-and-relationships.md:588-609) and the route table
+  (people-and-relationships.md:630-648); C records the reading of "no
   automatic sends or reminders" stated above.
 - Client: counts in the sidebar, last-contact text on Recent rows, Needs you
   subtitles and in-row thread corrections; older servers keep today's

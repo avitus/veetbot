@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — People sections, possible duplicates and profile actions
+
+- People lists Needs you, Recent, Everyone and Pinned, with Possible
+  duplicates on a page of its own where each pair is merged or kept separate.
+  A profile now offers Ask Veetbot, Email and Call (each opens Chat with the
+  request ready; nothing is sent or dialled without your confirmation) and
+  Merge with another entry.
+
 ## 2026-10-19 — Memory groups on the Mac and "Is this right?"
 
 - On the Mac, Memory lists its groups in a sidebar: Needs review, then all

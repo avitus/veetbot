@@ -315,7 +315,57 @@ import Testing
     }
     /// People lists everyone known or written to; Needs review is the server's
     /// own filter rather than every provisional person (ADR-0121).
-    @Test(arguments: PeopleCollection.allCases) func eachCollectionSendsItsDirectoryQuery(collection: PeopleCollection) async throws {
+    /// The A2 directory (MagicPath keen-earth-6102): Needs you, Recent and
+    /// Everyone, then Pinned; Possible duplicates and All identities are
+    /// maintenance. Needs you is the server's review filter (ADR-0121).
+    @Test func theSectionsFollowTheDesign() {
+        #expect(PeopleCollection.allCases.map(\.rawValue) == [
+            "Needs you", "Recent", "Everyone", "Pinned", "Possible duplicates", "All identities",
+        ])
+        #expect(PeopleCollection.allCases.filter(\.isMaintenance) == [.duplicates, .all])
+    }
+
+    /// Recent is the server's own interaction order over everyone.
+    @Test func recentAsksForTheInteractionOrder() async throws {
+        let lock = NSLock()
+        var queries: [[URLQueryItem]] = []
+        let client = try makePeopleClient { request in
+            if request.url?.path == "/v1/people" {
+                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                lock.withLock { queries.append(query) }
+            }
+            return (200, #"{"items":[],"next_cursor":null}"#)
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        await model.selectCollection(.recent)
+        let sent = try #require(lock.withLock { queries.last })
+        #expect(sent.contains(URLQueryItem(name: "sort", value: "recent")))
+        #expect(sent.filter { $0.name == "state" }.compactMap(\.value) == ["active", "provisional"])
+        await model.selectCollection(.people)
+        let everyone = try #require(lock.withLock { queries.last })
+        #expect(everyone.contains(URLQueryItem(name: "sort", value: "id")))
+    }
+
+    /// Possible duplicates is its own page: it reads the suggestions and no directory page.
+    @Test func possibleDuplicatesReadOnlyTheSuggestions() async throws {
+        let sourceID = UUID(), targetID = UUID(), suggestionID = UUID()
+        let lock = NSLock()
+        var paths: [String] = []
+        let client = try makePeopleClient { request in
+            lock.withLock { paths.append(request.url?.path ?? "") }
+            if request.url?.path == "/v1/people/merge-suggestions" {
+                return (200, "{\"items\":[\(suggestionJSON(suggestionID, source: sourceID, target: targetID))],\"next_cursor\":null}")
+            }
+            return (200, #"{"items":[],"next_cursor":null}"#)
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        await model.selectCollection(.duplicates)
+        #expect(model.suggestions.map(\.id) == [suggestionID])
+        #expect(model.items.isEmpty)
+        #expect(lock.withLock { paths } == ["/v1/people/merge-suggestions"])
+    }
+
+    @Test(arguments: PeopleCollection.allCases.filter { $0 != .duplicates }) func eachCollectionSendsItsDirectoryQuery(collection: PeopleCollection) async throws {
         let lock = NSLock()
         var queries: [[URLQueryItem]] = []
         let client = try makePeopleClient { request in
@@ -330,7 +380,7 @@ import Testing
         if collection == .people { await model.reload() } else { await model.selectCollection(collection) }
         let sent = try #require(lock.withLock { queries.last })
         let states = sent.filter { $0.name == "state" }.compactMap(\.value)
-        #expect(states == (collection == .people || collection == .pinned ? ["active", "provisional"] : []))
+        #expect(states == ([.people, .pinned, .recent].contains(collection) ? ["active", "provisional"] : []))
         #expect(sent.contains(URLQueryItem(name: "review", value: "true")) == (collection == .review))
         #expect(sent.contains(URLQueryItem(name: "pinned", value: "true")) == (collection == .pinned))
     }
@@ -493,7 +543,7 @@ import Testing
         #expect(lock.withLock { Set(writes).count } == 1)
     }
 
-    /// Needs review asks about possible duplicates; an answer sends the exact revision.
+    /// Possible duplicates asks about each pair; an answer sends the exact revision.
     @Test func needsReviewListsMergeSuggestionsAndAnswersThem() async throws {
         let sourceID = UUID(), targetID = UUID(), suggestionID = UUID(), sessionID = UUID()
         let lock = NSLock()
@@ -515,7 +565,7 @@ import Testing
         }
         let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
         let model = PeopleViewModel(makeAPIClient: { client }, toasts: toasts)
-        await model.selectCollection(.review)
+        await model.selectCollection(.duplicates)
         #expect(model.suggestions.map(\.id) == [suggestionID])
         #expect(model.suggestions.first?.explanation == "Same first name and your family name")
         let suggestion = try #require(model.suggestions.first)

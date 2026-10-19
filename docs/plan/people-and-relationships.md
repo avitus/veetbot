@@ -591,9 +591,10 @@ evidence. The default People collection lists active and provisional people:
 everyone admitted is known to the owner or written to. **Needs review** lists
 provisional, unpinned people with no owner-confirmed or channel-observed
 identifier, such as a person known only as “My brother”; a correspondent
-identified by address never lands there (ADR-0121). Needs review also lists
-possible duplicates, each with Merge and Not the same, and a person's detail
-asks about its own and lists merges made without asking, with an undo
+identified by address never lands there (ADR-0121); the native directory
+labels it **Needs you**, beside **Recent** and **Everyone**. **Possible
+duplicates** lists each pair with Merge and Keep separate, and a person's
+detail asks about its own and lists merges made without asking, with an undo
 (ADR-0125).
 
 Person detail has five sections:
@@ -605,7 +606,7 @@ Person detail has five sections:
 3. **History:** dated exchanges and reported events, source channel, direction,
    participants, decisions, and source navigation.
 4. **Open threads:** commitments and unresolved topics; no automatic sends or
-   reminders. “Prepare for a conversation” starts ordinary Chat with this person.
+   reminders. “Ask Veetbot about …” starts ordinary Chat with this person.
 5. **Facts and evidence:** inspect, correct, mark changed, reject, remove,
    affirm where supported, and inspect identity assignments.
 
