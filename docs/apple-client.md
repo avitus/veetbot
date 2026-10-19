@@ -81,9 +81,14 @@ server's site scope, limits and exceptions beside that choice. An active task pe
 above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 
-Settings use a compact header and a scrolling body. Connection, Models, Website
+Settings are an A2 page: "Settings" in the serif face under a small brand
+mark, then a scrolling body on paper. Connection, Models, Website
 Access, Appearance, and Data & Privacy cards group controls by user intent, and
-iOS adds SMS Integration. The Models card (ADR-0119) reads and saves
+iOS adds SMS Integration; each card is a surface with hairline rows, fields in
+the `a2Field` well, the one primary action as a filled capsule and the rest as
+hairline or quiet capsules. First-run setup shows the same body under "Connect
+this Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token
+is kept. The Models card (ADR-0119) reads and saves
 `/v1/settings/models` under `settings.read` and `settings.write`: a chat model
 and reasoning effort, which apply to new chats and to the next message, and a
 memory model and effort limited to the evaluated combinations the server
@@ -119,7 +124,7 @@ chooses a colour by mode. The tokens are:
 | `field` | a sunken input or segment | ink at 5 % | ink at 8 % |
 | `ink`, `inkSoft`, `inkFaint` | text in three weights | `#102923`, `#2f4640`, `#566a64` | `#ece6d8`, `#bccbc5`, `#95a8a1` |
 | `teal`, `tealFill`, `tealText`, `tealWash` | marks, filled buttons, links, the owner's capsule | `#0e8b78`, `#0b7a69`, `#086657`, teal at 10 % | `#36d5bb`, `#36d5bb`, `#5ee3c9`, teal at 12 % |
-| `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)` | `#f2a93b` throughout |
+| `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border, a wash | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)`, `rgba(242,169,59,.12)` | `#f2a93b`, `#f2a93b`, `#f2a93b` at 50 %, `#f2a93b` at 10 % |
 | `red` | failure | `#b4452e` | `#e07a62` |
 | `hairline`, `hairlineStrong`, `selected` | dividers, borders, the chosen row | ink at 14 %, 28 %, 9 % | ink at 10 %, 22 %, 12 % |
 
@@ -136,8 +141,10 @@ clarifying question docked above a translucent composer while the transcript
 shows one amber "Waiting for your approval" line. On a compact window the chat
 list slides over the conversation from the leading edge. Email follows (see
 "Email mode" below), then Memory, People and Schedules (see "Memory and
-People" below). Persona, Settings and Connect read the same tokens but keep
-their earlier layouts until their own restyle. `HairlineDivider`,
+People" below), and Persona, Settings and Connect complete the set: the
+persona's entries as a card of hairline rows of fields, a server conflict and
+each nomination from memory in an amber-edged card with Affirm as the filled
+capsule and Decline as a quiet one. `HairlineDivider`,
 `FilterPillButtonStyle`, the `a2Field`, `a2List` and `a2Card` modifiers, and
 the reading-page pieces `A2SectionHeading`, `A2KindLabel`, `A2RecordGroup`,
 `A2Quote`, `A2EmptyState` and `A2SheetHeader` join the shared controls for the
@@ -376,7 +383,9 @@ Approvals, questions, and scheduled outcomes wait thirty seconds before push
 delivery, giving you time to handle them on another device. A loaded conversation
 visible in the active Chat window suppresses its foreground alerts. Active clients
 also clear delivered alerts once the server confirms they are obsolete, and
-viewing a terminal result acknowledges it across devices. Covered or background
+viewing a terminal result acknowledges it across devices. Dismissing the compact
+conversation drawer also clears coverage from its removed sidebar sheets;
+notification navigation can then acknowledge the visible report. Covered or background
 conversations do not count as viewed. Sleeping devices clear obsolete alerts
 when next active; a banner already shown cannot be recalled (ADR-0143).
 

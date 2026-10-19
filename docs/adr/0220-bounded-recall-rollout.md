@@ -45,7 +45,11 @@ Access boundaries, erasure, correction and lifecycle enforcement are unchanged.
 No observed access-boundary failure is admissible. Context, search/round and
 latency limits remain enforced; known-incident answers must still succeed. Every
 charge and uncertain reservation remains counted. A measured per-case cost
-exception is not permission to increase runtime work budgets or forgive a bill.
+exception is not permission to increase runtime work budgets or forgive a bill. A failed
+operational gate additionally requires its exact hash-bound original report,
+matching identity and check counts, with only the measured per-answer cost check
+failing. Missing evidence or any retry, deadline, cancellation, partial-failure,
+context, search or latency failure refuses bounded admission.
 
 Use the ADR-0218 compatibility inventory to enumerate all measured/target input
 differences with individual hash pairs, dispositions and actual verification.

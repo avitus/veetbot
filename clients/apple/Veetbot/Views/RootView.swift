@@ -375,6 +375,10 @@ public struct RootView: View {
             }
         }
         .environment(\.chatListOverlayPresented, chatListPresented)
+        // Removing the drawer also dismisses sheets owned by its sidebar.
+        .onChange(of: chatListPresented) { _, presented in
+            if !presented { model.notificationOverlayPresented = false }
+        }
         .onAppear {
             var opensList = model.selectedSessionID == nil
             #if DEBUG && !SWIFT_PACKAGE

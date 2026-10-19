@@ -81,6 +81,7 @@ class CompatibilityAssessment(ReleaseValue):
 class BoundedRecallEvidence(ReleaseValue):
     version: Literal["recall-bounded-evidence@1"]
     bundle: CheckpointReleaseBundle
+    operational_gate_report: str | None = Field(default=None, max_length=2 * 1024 * 1024)
     review_items: tuple[dict[str, Any], ...] = Field(max_length=20000)
     human_review: BoundedHumanReview
     owner_authorization_sha256: Digest
@@ -128,7 +129,9 @@ def validate_bounded_evidence(
     """Recompute benefit and require explicit findings and complete dispositions."""
     evidence = BoundedRecallEvidence.model_validate(evidence.model_dump())
     bundle, review, compatibility = evidence.bundle, evidence.human_review, evidence.compatibility
-    report = assess_bounded_comparison(bundle)
+    report = assess_bounded_comparison(
+        bundle, operational_gate_report=evidence.operational_gate_report
+    )
     _require(report["comparative_benefit_satisfied"], "bounded rollout has no comparative benefit")
     _require(
         evidence.measured_inputs.digest == bundle.lineage.evaluated_inputs_sha256,

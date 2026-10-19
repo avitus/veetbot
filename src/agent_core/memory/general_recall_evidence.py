@@ -161,6 +161,7 @@ def _score_measurements(
     bundle: RecallReleaseBundle | CheckpointReleaseBundle,
     *,
     quality_exceptions: list[dict[str, Any]] | None = None,
+    operational_gate_cost_exception: bool = False,
 ) -> dict[str, Any]:
     """Shared arithmetic; only the explicit bounded assessor collects exceptions.
 
@@ -209,7 +210,7 @@ def _score_measurements(
         "incomplete or failing gate receipts",
     )
     for gate in bundle.gates:
-        if gate.gate in {9, 10}:
+        if gate.gate == 9 or (gate.gate == 10 and operational_gate_cost_exception):
             quality(gate.failed == 0, "gate_receipt", "failing gate receipt", gate=gate.gate)
         else:
             _require(gate.failed == 0, "failing security, integrity or regression gate receipt")

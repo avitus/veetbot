@@ -1,5 +1,8 @@
 """Synthetic bounded-rollout arithmetic; never an actual human acceptance."""
 
+import hashlib
+import json
+
 import pytest
 
 from agent_core.domain.general_recall_checkpoint_release import CheckpointReleaseBundle
@@ -165,3 +168,101 @@ def test_candidate_omitted_from_context_receives_no_rank_render_or_answer_credit
     for key in ("ranked_recall_at_20", "rendered_recall", "answer_success"):
         assert other[key] == cell[key]
     assert bundle.model_dump_json() == original
+
+
+def test_failed_operational_gate_requires_cost_only_original_report() -> None:
+    value = fixture().model_dump(mode="json")
+    value["gates"][9]["failed"] = 1
+    with pytest.raises(ValueError, match="operational gate"):
+        assess_bounded_comparison(CheckpointReleaseBundle.model_validate(value))
+
+
+def cost_only_gate_fixture() -> tuple[CheckpointReleaseBundle, str]:
+    value = with_quality_failures().model_dump(mode="json")
+    gate = next(g for g in value["gates"] if g["gate"] == 10)
+    report = {
+        "version": "recall-gate-report@1",
+        "identity_sha256": gate["identity_sha256"],
+        "gate": 10,
+        "checks": [
+            {"id": "per-answer-cost", "passed": False},
+            {"id": "per-answer-context", "passed": True},
+            {"id": "bounded-search-and-rounds", "passed": True},
+            {"id": "latency-ceiling", "passed": True},
+            {"id": "finite-retries-deadlines-cancellation", "passed": True},
+        ],
+    }
+    raw = json.dumps(report) + "\n"
+    gate.update(report_sha256=hashlib.sha256(raw.encode()).hexdigest(), passed=4, failed=1)
+    return CheckpointReleaseBundle.model_validate(value), raw
+
+
+def test_cost_only_gate_report_preserves_failure_without_relaxing_other_operations() -> None:
+    bundle, raw = cost_only_gate_fixture()
+    original = bundle.model_dump_json()
+    with pytest.raises(ValueError):
+        score_checkpoint_release(bundle)
+    report = assess_bounded_comparison(bundle, operational_gate_report=raw)
+    assert report["original_quality_gates_satisfied"] is False
+    assert any(e.get("gate") == 10 for e in report["exceptions"])
+    assert bundle.model_dump_json() == original
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "hash",
+        "identity",
+        "gate",
+        "counts",
+        "duplicate",
+        "missing",
+        "retry",
+        "deadline",
+        "partial-failure",
+        "cancellation",
+        "latency",
+        "no-cost",
+    ],
+)
+def test_operational_gate_rejects_unbound_or_non_cost_failures(change: str) -> None:
+    bundle, raw = cost_only_gate_fixture()
+    value = bundle.model_dump(mode="json")
+    gate = next(g for g in value["gates"] if g["gate"] == 10)
+    report = json.loads(raw)
+    if change == "hash":
+        raw += " "
+    else:
+        if change == "identity":
+            report["identity_sha256"] = "9" * 64
+        elif change == "gate":
+            report["gate"] = 9
+        elif change == "counts":
+            gate["passed"] += 1
+        elif change == "duplicate":
+            report["checks"][-1] = report["checks"][1]
+        elif change == "missing":
+            report["checks"] = report["checks"][:1]
+        elif change == "no-cost":
+            for row in value["observations"]:
+                row["cost_usd"] = 0
+        else:
+            report["checks"][-1] = {"id": change, "passed": False}
+            gate.update(passed=3, failed=2)
+        raw = json.dumps(report) + "\n"
+        gate["report_sha256"] = hashlib.sha256(raw.encode()).hexdigest()
+    with pytest.raises(ValueError, match="operational gate"):
+        assess_bounded_comparison(
+            CheckpointReleaseBundle.model_validate(value), operational_gate_report=raw
+        )
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_operational_gate_receipt_must_be_present_exactly_once(duplicate: bool) -> None:
+    value = fixture().model_dump(mode="json")
+    if duplicate:
+        value["gates"][0] = value["gates"][9]
+    else:
+        value["gates"][9] = value["gates"][0]
+    with pytest.raises(ValueError, match="operational gate"):
+        assess_bounded_comparison(CheckpointReleaseBundle.model_validate(value))

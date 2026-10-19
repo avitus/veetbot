@@ -175,6 +175,7 @@ def test_public_manifest_router_requires_real_owner_and_clock(tmp_path: Path) ->
     "change",
     [
         "human",
+        "operational-gate",
         "findings",
         "decision",
         "review-time",
@@ -203,7 +204,9 @@ def test_bounded_admission_refuses_missing_review_and_unassessed_inputs(
     tmp_path: Path, change: str
 ) -> None:
     kwargs, admission, evidence = files(tmp_path)
-    if change == "human":
+    if change == "operational-gate":
+        evidence["bundle"]["gates"][9]["failed"] = 1
+    elif change == "human":
         evidence["human_review"]["reviewer_kind"] = "agent"
     elif change == "findings":
         evidence["human_review"]["findings"] = " "
