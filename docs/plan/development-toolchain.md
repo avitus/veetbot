@@ -490,9 +490,22 @@ two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it, then runs the macOS UI cases with
 `make test-apple-ui-macos`. Job 6b runs `make test-apple-ui-ios` on available
-iPhone and iPad simulators. Locally, `make test-apple-ui` runs the macOS target
-and then the simulator target, never both at once, because the macOS cases
-drive the real desktop. The macOS case resizes the
+iPhone and iPad simulators. The macOS cases synthesize real pointer and
+keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
+VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
+both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM
+(`veetbot-macos-ui`, cloned once from
+`ghcr.io/cirruslabs/macos-tahoe-xcode:27`, the macOS 26 and Xcode 27 pairing
+CircleCI uses) without a window and with the checkout shared read-only. It
+switches the guest to a 1728×1117-point display on every boot, because the
+guest otherwise starts at 1024×768, where seven Mac cases fail on window
+geometry. It then copies the checkout to the guest disk, where the guest's build cache persists,
+and runs the unchanged `make test-apple-ui-macos` there, or the command given
+to the script as arguments, such as one `xcodebuild test -only-testing:` case. It writes the result
+bundle back to `APPLE_TEST_RESULTS_DIR` and stops the VM, and a second run
+waits for the first. Tart is an optional local tool that no other target
+needs. `make test-apple-ui-macos` on the host remains the target CI runs. The
+macOS case resizes the
 real SwiftUI window, terminates the application, and asserts that its size is
 restored after relaunch; a second Mac case verifies Email mode and exact draft
 approval. The simulator cases use a debug-only in-process

@@ -32,8 +32,11 @@ in-process fixture to verify that historical rows open and switch conversations,
 new-conversation rows open the chat surface, and selected transcripts render.
 Email journeys cover mode switching, feedback, editing, learning controls and
 compact-trait navigation on both simulator families.
-`make test-apple-ui` runs `make test-apple-ui-macos`, then
-`make test-apple-ui-ios`. CircleCI runs `make test-apple` and the Mac cases in
+`make test-apple-ui` runs the Mac cases inside a local Tart macOS VM with
+`make test-apple-ui-macos-vm`, so they never take over your desktop, then
+runs `make test-apple-ui-ios`. Set the VM up once with
+`tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:27 veetbot-macos-ui`.
+CircleCI runs `make test-apple` and the Mac cases in
 the required `apple` job, and the simulator cases in the required `apple-ios`
 job at the same time.
 

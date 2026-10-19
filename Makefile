@@ -14,7 +14,8 @@ endif
 
 .PHONY: install format lint typecheck test check db-up migrate env-pull client-build \
 	test-static test-contract test-fast test-integration test-live browser-install test-browser \
-	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-ios \
+	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-macos-vm \
+	test-apple-ui-ios \
 	test-deploy sandbox-image browser-image test-browser-image \
 	production-check \
 	docs docs-serve docs-check citations-fix website-install test-website
@@ -114,10 +115,11 @@ test-apple:
 	@$(APPLE_FULL_XCODE); \
 	DEVELOPER_DIR="$$apple_developer_dir" swift test --package-path clients/apple
 
-# Mac UI tests drive the real desktop, so the families never overlap locally;
-# CI runs each target on its own executor at the same time.
+# Mac UI tests drive the real desktop, so locally they run inside a Tart macOS
+# VM and the families never overlap; CI runs each target on its own executor
+# at the same time.
 test-apple-ui:
-	@$(MAKE) --no-print-directory test-apple-ui-macos
+	@$(MAKE) --no-print-directory test-apple-ui-macos-vm
 	@$(MAKE) --no-print-directory test-apple-ui-ios
 
 test-apple-ui-macos:
@@ -184,6 +186,11 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSuspectedSpamReportSpamRemovesTheConversation \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
+
+# The same target inside a local Tart macOS VM, so the cases synthesize input
+# on the guest's display instead of the owner's.
+test-apple-ui-macos-vm:
+	@scripts/run_apple_ui_macos_vm.sh
 
 # Xcode 27.0 installs the UI-test runner about four seconds into a boot it
 # starts itself. Two cold boots at once bring SpringBoard up after that, it

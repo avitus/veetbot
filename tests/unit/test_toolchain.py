@@ -124,6 +124,19 @@ def _make_target(makefile: str, target: str) -> str:
     return match.group(0)
 
 
+def test_local_mac_ui_lane_runs_the_unchanged_target_inside_a_vm() -> None:
+    """Keep the local macOS UI cases off the owner's desktop."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "scripts/run_apple_ui_macos_vm.sh" in _make_target(makefile, "test-apple-ui-macos-vm")
+    aggregate = _make_target(makefile, "test-apple-ui")
+    assert "test-apple-ui-macos-vm" in aggregate
+    assert "test-apple-ui-macos\n" not in aggregate
+    script = (ROOT / "scripts" / "run_apple_ui_macos_vm.sh").read_text(encoding="utf-8")
+    # The guest runs the same target CI runs; the host never opens a VM window.
+    assert "set -- make test-apple-ui-macos" in script
+    assert "tart run --no-graphics" in script
+
+
 def test_env_pull_writes_the_dotenv_from_doppler_without_exposing_values() -> None:
     body = _make_target((ROOT / "Makefile").read_text(encoding="utf-8"), "env-pull")
     # Doppler is the source of truth. The fetch prints to a redirected file
