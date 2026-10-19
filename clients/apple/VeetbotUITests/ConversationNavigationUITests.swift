@@ -1386,7 +1386,13 @@ final class ConversationNavigationUITests: XCTestCase {
             XCTAssertTrue(scroll.waitForExistence(timeout: 5), app.debugDescription)
             for _ in 0..<12 {
                 let viewport = scroll.frame.insetBy(dx: 0, dy: 20)
-                if element.exists && element.isHittable && viewport.contains(element.frame) { return }
+                if element.exists && element.isHittable && viewport.contains(element.frame) {
+                    // A synthesized scroll keeps decelerating after the
+                    // events; a click computed before it stops lands ~20 pt
+                    // off, so wait for half a second of stillness.
+                    waitForSettledFrame(of: element, stableFor: 5)
+                    return
+                }
                 let delta: CGFloat = element.exists && element.frame.minY < viewport.minY ? 180 : -180
                 scroll.scroll(byDeltaX: 0, deltaY: delta)
             }
@@ -1397,15 +1403,34 @@ final class ConversationNavigationUITests: XCTestCase {
         let disclosure = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Task approval websites")).firstMatch
         reveal(disclosure)
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        let field = app.textFields["task-scopes.url"]
         #if os(macOS)
-        disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0.13, dy: 0.5)).click()
+        // Only the chevron toggles a Mac disclosure group, and its glyph sits
+        // a point or two further right on a 2x display than on CI's 1x one,
+        // so try a few offsets along the row until the content appears.
+        for dx in [0.13, 0.16, 0.10, 0.19] as [CGFloat] {
+            waitForSettledFrame(of: disclosure, stableFor: 5)
+            disclosure.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).click()
+            if field.waitForExistence(timeout: 2) { break }
+        }
         #else
         activate(disclosure)
         #endif
-        let field = app.textFields["task-scopes.url"]
         reveal(field)
         XCTAssertTrue(field.waitForExistence(timeout: 5))
+        #if os(macOS)
+        // Typing needs the field focused; a click that landed while the
+        // disclosure was still opening leaves it unfocused, so click again.
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<3 {
+            waitForSettledFrame(of: field, stableFor: 5)
+            field.click()
+            if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focused, object: field)], timeout: 2) == .completed { break }
+        }
+        XCTAssertTrue(field.value(forKey: "hasKeyboardFocus") as? Bool ?? false, "The website field never took keyboard focus")
+        #else
         activate(field)
+        #endif
         field.typeText("https://www.duolingo.com/lesson")
         if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
         let add = app.buttons["task-scopes.add"]
@@ -2771,6 +2796,25 @@ final class ConversationNavigationUITests: XCTestCase {
     }
     #endif
 
+    /// Waits until the element stops moving: a click computed from a frame
+    /// that a scroll or an expanding disclosure is still animating lands
+    /// beside the control.
+    private func waitForSettledFrame(of element: XCUIElement, stableFor samples: Int = 1) {
+        var frame = element.frame
+        var stable = 0
+        for _ in 0..<40 {
+            Thread.sleep(forTimeInterval: 0.1)
+            let next = element.frame
+            if next == frame {
+                stable += 1
+                if stable >= samples { return }
+            } else {
+                stable = 0
+                frame = next
+            }
+        }
+    }
+
     #if os(iOS)
     private func openSidebarDestination(identifier: String) {
         let moreButton = app.buttons["sidebar.more"]
@@ -2796,16 +2840,6 @@ final class ConversationNavigationUITests: XCTestCase {
             if destination.waitForNonExistence(timeout: 2) { return }
         }
         XCTFail("The menu stayed open after three taps on \(identifier)")
-    }
-
-    private func waitForSettledFrame(of element: XCUIElement) {
-        var frame = element.frame
-        for _ in 0..<20 {
-            Thread.sleep(forTimeInterval: 0.1)
-            let next = element.frame
-            if next == frame { return }
-            frame = next
-        }
     }
 
     /// Brings the chat list back over an open conversation. On a compact
