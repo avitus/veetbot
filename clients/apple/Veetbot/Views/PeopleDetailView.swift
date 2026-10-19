@@ -63,6 +63,13 @@ private struct PeopleProfile: View {
                 .frame(maxWidth: .infinity)
         }
         .background(PeopleSurface.canvas)
+        #if os(macOS)
+        // An opaque deep-paper title bar: on a 1x display the Mac
+        // accessibility audit fails the sheet title's contrast when the
+        // translucent bar sits over the paper canvas.
+        .toolbarBackground(AppTheme.paperDeep, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        #endif
         .tint(PeopleSurface.fill)
         // A capsule clips a label that wraps at accessibility sizes.
         .buttonBorderShape(typeSize.isAccessibilitySize ? .roundedRectangle : .automatic)

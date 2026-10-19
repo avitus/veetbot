@@ -19,20 +19,38 @@ enum A2Metrics {
     static let transcriptMaxWidth: CGFloat = 760
 }
 
+/// The outline of an A2 button: a capsule, or a rounded rectangle at the
+/// accessibility sizes, where a label wraps and a capsule's ends would cut
+/// into its first and last lines.
+struct A2ButtonShape {
+    let typeSize: DynamicTypeSize
+
+    var shape: AnyShape {
+        typeSize.isAccessibilitySize
+            ? AnyShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            : AnyShape(Capsule())
+    }
+
+    var verticalPadding: CGFloat { typeSize.isAccessibilitySize ? 8 : 0 }
+}
+
 /// A filled teal capsule: the one action the owner most likely takes.
 struct PrimaryCapsuleButtonStyle: ButtonStyle {
     var expands = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let outline = A2ButtonShape(typeSize: typeSize)
+        return configuration.label
             .appFont(.callout, weight: .medium)
             .padding(.horizontal, 14)
+            .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(AppTheme.onTeal)
-            .background(Capsule().fill(AppTheme.tealFill))
+            .background(outline.shape.fill(AppTheme.tealFill))
             .opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.85 : 1)
-            .contentShape(Capsule())
+            .contentShape(outline.shape)
     }
 }
 
@@ -40,19 +58,22 @@ struct PrimaryCapsuleButtonStyle: ButtonStyle {
 struct SecondaryCapsuleButtonStyle: ButtonStyle {
     var expands = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let outline = A2ButtonShape(typeSize: typeSize)
+        return configuration.label
             .appFont(.callout, weight: .medium)
             .padding(.horizontal, 14)
+            .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(AppTheme.ink)
             .background(
-                Capsule().fill(configuration.isPressed ? AppTheme.field : Color.clear)
+                outline.shape.fill(configuration.isPressed ? AppTheme.field : Color.clear)
             )
-            .overlay(Capsule().stroke(AppTheme.hairlineStrong))
+            .overlay(outline.shape.stroke(AppTheme.hairlineStrong))
             .opacity(isEnabled ? 1 : 0.45)
-            .contentShape(Capsule())
+            .contentShape(outline.shape)
     }
 }
 
@@ -62,18 +83,21 @@ struct QuietCapsuleButtonStyle: ButtonStyle {
     /// A colour other than soft ink, for a destructive or teal action.
     var tint: Color? = nil
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let outline = A2ButtonShape(typeSize: typeSize)
+        return configuration.label
             .appFont(.callout, weight: .medium)
             .padding(.horizontal, 12)
+            .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(tint ?? (configuration.isPressed ? AppTheme.ink : AppTheme.inkSoft))
             .background(
-                Capsule().fill(configuration.isPressed ? AppTheme.field : Color.clear)
+                outline.shape.fill(configuration.isPressed ? AppTheme.field : Color.clear)
             )
             .opacity(isEnabled ? 1 : 0.45)
-            .contentShape(Capsule())
+            .contentShape(outline.shape)
     }
 }
 
@@ -127,15 +151,26 @@ extension View {
     /// 26 a custom-styled button that a scroll brought on screen reports a
     /// stale frame to accessibility, so a click lands beside it. Touch keeps
     /// the custom capsule.
-    @ViewBuilder
     func primaryCapsule(expands: Bool = false) -> some View {
+        modifier(PrimaryCapsuleModifier(expands: expands))
+    }
+}
+
+/// `primaryCapsule()`: the platform's prominent button on the Mac, the
+/// custom capsule elsewhere, both rounded rectangles at accessibility sizes.
+private struct PrimaryCapsuleModifier: ViewModifier {
+    let expands: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    func body(content: Content) -> some View {
         #if os(macOS)
-        buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
+        content
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(typeSize.isAccessibilitySize ? .roundedRectangle : .capsule)
             .tint(AppTheme.tealFill)
             .controlSize(.large)
         #else
-        buttonStyle(PrimaryCapsuleButtonStyle(expands: expands))
+        content.buttonStyle(PrimaryCapsuleButtonStyle(expands: expands))
         #endif
     }
 }
