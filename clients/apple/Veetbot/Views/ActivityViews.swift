@@ -56,7 +56,8 @@ struct WorkStrip: View {
                         ToolLedgerRow(
                             index: index + 1,
                             activity: activity,
-                            approval: isBundle ? approvals.first { $0.id == activity.approvalID } : nil,
+                            approval: isBundle
+                                ? approvals.first { $0.id == activity.approvalID && !$0.status.isPending } : nil,
                             openArtifact: openArtifact
                         )
                     }

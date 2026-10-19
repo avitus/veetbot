@@ -40,7 +40,7 @@ import AppKit
 
         #expect(
             normalizedSource.contains(
-                "#if os(macOS) .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
+                "#if os(macOS) // The ideal height sizes the fitted sheet before a saved size exists; // without it a column whose content wants all the height it is offered // (an empty or unavailable state) lays out at the screen's height and // is cut off above the sheet. .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, idealHeight: 600, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
             )
         )
         #expect(source.contains(".background(MemoryBrowserWindowResizeView())"))

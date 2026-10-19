@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — Memory, People and Schedules wear the A2 Dock design
+
+- Memory, People and Schedules on iPhone, iPad and Mac take the same
+  warm-paper design as Chat and Email. Lists sit on paper with hairline rows: a
+  memory row leads with its kind and the day it last changed, with "Needs
+  review" in amber; the People directory shows initials on a teal wash beside
+  each name; a schedule row leads with its name, state and next run. A memory
+  or a schedule opens as a page with its statement or name in the serif face
+  and its record in titled groups on surface cards. A person's profile keeps
+  its sections, with Prepare for a conversation as the filled capsule and Pin,
+  Rename, Repair identity and Forget person as hairline or quiet ones. Nothing
+  about reviewing, deleting, merging, repairing, importing or forgetting
+  changed.
+
 ## 2026-10-18 — Email wears the A2 Dock design
 
 - Email on iPhone, iPad and Mac takes the same warm-paper design as Chat.

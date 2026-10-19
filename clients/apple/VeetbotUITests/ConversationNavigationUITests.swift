@@ -1750,6 +1750,31 @@ final class ConversationNavigationUITests: XCTestCase {
         app.descendants(matching: .any)["people.row.\(id)"]
     }
 
+    #if os(macOS)
+    /// Scrolls the directory column until the row sits inside it. A row the
+    /// column has scrolled past keeps a frame outside the column, and a click
+    /// on that frame lands on whatever the sheet shows there instead.
+    private func revealDirectoryRow(_ row: XCUIElement, above: Bool) {
+        let column = macDirectoryColumn
+        XCTAssertTrue(column.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<16 {
+            if row.exists && column.frame.contains(row.frame) { return }
+            let up = row.exists ? row.frame.minY < column.frame.minY : above
+            column.scroll(byDeltaX: 0, deltaY: up ? 150 : -150)
+        }
+    }
+
+    /// The directory's scroll view: the element that carries `people.browser`
+    /// when that is the scroll view, otherwise the scroll view inside it.
+    private var macDirectoryColumn: XCUIElement {
+        let browser = app.descendants(matching: .any)["people.browser"].firstMatch
+        if browser.exists && browser.elementType == .scrollView { return browser }
+        let inner = browser.scrollViews.firstMatch
+        if inner.exists { return inner }
+        return app.sheets.firstMatch.scrollViews.containing(.any, identifier: "people.browser").firstMatch
+    }
+    #endif
+
     #if os(iOS)
     /// Drags the lazily rendered directory until the row sits clear of the
     /// search field that floats over its lower edge. A row above the rows in
@@ -1777,8 +1802,8 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(iOS)
         // The sheet's back button, not the first button of the window's bar behind it.
         if detail.exists && !row.isHittable { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
-        revealDirectoryRow(row, above: above)
         #endif
+        revealDirectoryRow(row, above: above)
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         activate(row)
         XCTAssertTrue(
@@ -2755,6 +2780,10 @@ final class ConversationNavigationUITests: XCTestCase {
 
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        // The item exists before the menu has finished opening; on the iPad it
+        // reports unhittable for a moment after that, so give it a few seconds.
+        let hittableBy = Date().addingTimeInterval(3)
+        while !destination.isHittable && Date() < hittableBy { usleep(100_000) }
         XCTAssertTrue(destination.isHittable)
         // The iOS 27.0 iPad simulator swallows XCUITest's element tap on the
         // menu's first item and leaves the menu open; a touch at the item's

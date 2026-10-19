@@ -2,7 +2,9 @@ import SwiftUI
 
 /// The shared controls of the A2 Dock design: capsule buttons in three
 /// weights, the teal mark beside an answer, the amber line that says what the
-/// transcript is waiting for, and the sidebar's section headers.
+/// transcript is waiting for, and the sidebar's section headers. No capsule
+/// limits its label to one line: the Dynamic Type audit reads a one-line
+/// limit as text that larger sizes would clip.
 enum A2Metrics {
     #if os(macOS)
     static let controlHeight: CGFloat = 28
@@ -17,21 +19,38 @@ enum A2Metrics {
     static let transcriptMaxWidth: CGFloat = 760
 }
 
+/// The outline of an A2 button: a capsule, or a rounded rectangle at the
+/// accessibility sizes, where a label wraps and a capsule's ends would cut
+/// into its first and last lines.
+struct A2ButtonShape {
+    let typeSize: DynamicTypeSize
+
+    var shape: AnyShape {
+        typeSize.isAccessibilitySize
+            ? AnyShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            : AnyShape(Capsule())
+    }
+
+    var verticalPadding: CGFloat { typeSize.isAccessibilitySize ? 8 : 0 }
+}
+
 /// A filled teal capsule: the one action the owner most likely takes.
 struct PrimaryCapsuleButtonStyle: ButtonStyle {
     var expands = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let outline = A2ButtonShape(typeSize: typeSize)
+        return configuration.label
             .appFont(.callout, weight: .medium)
-            .lineLimit(1)
             .padding(.horizontal, 14)
+            .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(AppTheme.onTeal)
-            .background(Capsule().fill(AppTheme.tealFill))
+            .background(outline.shape.fill(AppTheme.tealFill))
             .opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.85 : 1)
-            .contentShape(Capsule())
+            .contentShape(outline.shape)
     }
 }
 
@@ -39,20 +58,22 @@ struct PrimaryCapsuleButtonStyle: ButtonStyle {
 struct SecondaryCapsuleButtonStyle: ButtonStyle {
     var expands = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let outline = A2ButtonShape(typeSize: typeSize)
+        return configuration.label
             .appFont(.callout, weight: .medium)
-            .lineLimit(1)
             .padding(.horizontal, 14)
+            .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(AppTheme.ink)
             .background(
-                Capsule().fill(configuration.isPressed ? AppTheme.field : Color.clear)
+                outline.shape.fill(configuration.isPressed ? AppTheme.field : Color.clear)
             )
-            .overlay(Capsule().stroke(AppTheme.hairlineStrong))
+            .overlay(outline.shape.stroke(AppTheme.hairlineStrong))
             .opacity(isEnabled ? 1 : 0.45)
-            .contentShape(Capsule())
+            .contentShape(outline.shape)
     }
 }
 
@@ -62,19 +83,21 @@ struct QuietCapsuleButtonStyle: ButtonStyle {
     /// A colour other than soft ink, for a destructive or teal action.
     var tint: Color? = nil
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let outline = A2ButtonShape(typeSize: typeSize)
+        return configuration.label
             .appFont(.callout, weight: .medium)
-            .lineLimit(1)
             .padding(.horizontal, 12)
+            .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(tint ?? (configuration.isPressed ? AppTheme.ink : AppTheme.inkSoft))
             .background(
-                Capsule().fill(configuration.isPressed ? AppTheme.field : Color.clear)
+                outline.shape.fill(configuration.isPressed ? AppTheme.field : Color.clear)
             )
             .opacity(isEnabled ? 1 : 0.45)
-            .contentShape(Capsule())
+            .contentShape(outline.shape)
     }
 }
 
@@ -85,7 +108,6 @@ struct FilterPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .appFont(.subheadline, weight: .medium)
-            .lineLimit(1)
             .padding(.horizontal, 14)
             .frame(minHeight: 32)
             .foregroundColor(selected ? AppTheme.paper : AppTheme.inkSoft)
@@ -129,15 +151,26 @@ extension View {
     /// 26 a custom-styled button that a scroll brought on screen reports a
     /// stale frame to accessibility, so a click lands beside it. Touch keeps
     /// the custom capsule.
-    @ViewBuilder
     func primaryCapsule(expands: Bool = false) -> some View {
+        modifier(PrimaryCapsuleModifier(expands: expands))
+    }
+}
+
+/// `primaryCapsule()`: the platform's prominent button on the Mac, the
+/// custom capsule elsewhere, both rounded rectangles at accessibility sizes.
+private struct PrimaryCapsuleModifier: ViewModifier {
+    let expands: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    func body(content: Content) -> some View {
         #if os(macOS)
-        buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
+        content
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(typeSize.isAccessibilitySize ? .roundedRectangle : .capsule)
             .tint(AppTheme.tealFill)
             .controlSize(.large)
         #else
-        buttonStyle(PrimaryCapsuleButtonStyle(expands: expands))
+        content.buttonStyle(PrimaryCapsuleButtonStyle(expands: expands))
         #endif
     }
 }
@@ -207,5 +240,216 @@ struct AttentionDot: View {
             .fill(kind == .approval ? AppTheme.amber : AppTheme.teal)
             .frame(width: 7, height: 7)
             .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Reading pages and lists
+
+/// A section heading on a reading page: small, semibold, soft ink.
+struct A2SectionHeading: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .appFont(.subheadline, weight: .semibold)
+            .foregroundColor(AppTheme.inkSoft)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A short uppercase label naming a row's kind.
+struct A2KindLabel: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .textCase(.uppercase)
+            .appFont(.caption2, weight: .bold)
+            .tracking(0.6)
+            .foregroundColor(AppTheme.inkSoft)
+    }
+}
+
+/// The top of a sheet: its title in the serif face and a quiet way out.
+struct A2SheetHeader: View {
+    let title: String
+    var dismissTitle = "Done"
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).appDisplayFont(.title2)
+            Spacer()
+            Button(dismissTitle, action: dismiss).buttonStyle(QuietCapsuleButtonStyle())
+        }
+    }
+}
+
+/// One line of a record: a key in soft ink and its value.
+struct A2Record: Identifiable {
+    let key: String
+    let value: String
+    var id: String { key }
+
+    init(_ key: String, _ value: String) {
+        self.key = key
+        self.value = value
+    }
+}
+
+/// A titled card of rows on the surface colour, parted by hairlines.
+struct A2Group<Content: View>: View {
+    var title: String? = nil
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title { A2SectionHeading(title: title) }
+            VStack(alignment: .leading, spacing: 0) { content() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .a2Card()
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A titled card of key-value lines.
+struct A2RecordGroup: View {
+    let title: String
+    let rows: [A2Record]
+
+    var body: some View {
+        A2Group(title: title) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 { HairlineDivider().padding(.leading, 14) }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(row.key)
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .frame(minWidth: 96, alignment: .leading)
+                    Spacer(minLength: 0)
+                    Text(row.value)
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.ink)
+                        .multilineTextAlignment(.trailing)
+                        .textSelection(.enabled)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+}
+
+/// A quoted original behind a teal rule, with where it came from beneath.
+struct A2Quote<Content: View>: View {
+    var cite: String? = nil
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Rectangle().fill(AppTheme.teal).frame(width: 2).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                content()
+                if let cite {
+                    Text(cite).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(AppTheme.surface)
+        .clipShape(
+            UnevenRoundedRectangle(
+                cornerRadii: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 10, topTrailing: 10),
+                style: .continuous
+            )
+        )
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A centred message for a list with nothing to show, with any way forward
+/// beneath it.
+struct A2EmptyState<Actions: View>: View {
+    let systemImage: String
+    let title: String
+    var message: String? = nil
+    @ViewBuilder let actions: () -> Actions
+
+    init(
+        systemImage: String,
+        title: String,
+        message: String? = nil,
+        @ViewBuilder actions: @escaping () -> Actions
+    ) {
+        self.systemImage = systemImage
+        self.title = title
+        self.message = message
+        self.actions = actions
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28, weight: .light))
+                .foregroundColor(AppTheme.tealText)
+                .frame(width: 60, height: 60)
+                .background(Circle().fill(AppTheme.tealWash))
+                .accessibilityHidden(true)
+            Text(title)
+                .appFont(.body, weight: .medium)
+                .foregroundColor(AppTheme.ink)
+                .multilineTextAlignment(.center)
+            if let message {
+                Text(message)
+                    .appFont(.callout)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .multilineTextAlignment(.center)
+            }
+            actions()
+        }
+        .frame(maxWidth: 360)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(24)
+        // The ideal height bounds the intrinsic size a Mac sheet column reports
+        // for this state: without it the column lays out at the screen's
+        // height and the title above it is cut off.
+        .frame(maxWidth: .infinity, minHeight: 0, idealHeight: 320, maxHeight: .infinity)
+    }
+}
+
+extension A2EmptyState where Actions == EmptyView {
+    init(systemImage: String, title: String, message: String? = nil) {
+        self.init(systemImage: systemImage, title: title, message: message) { EmptyView() }
+    }
+}
+
+extension View {
+    /// A card on the page: the surface colour behind a hairline.
+    func a2Card(border: Color = AppTheme.hairline) -> some View {
+        background(
+            RoundedRectangle(cornerRadius: A2Metrics.cardRadius, style: .continuous)
+                .fill(AppTheme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: A2Metrics.cardRadius, style: .continuous)
+                .stroke(border)
+        )
+    }
+
+    /// A list on paper with hairline separators and no system backdrop.
+    func a2List() -> some View {
+        listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.paper)
+    }
+
+    /// A row of an A2 list: paper behind it, a hairline beneath.
+    func a2ListRow() -> some View {
+        listRowBackground(AppTheme.paper)
+            .listRowSeparatorTint(AppTheme.hairline)
     }
 }

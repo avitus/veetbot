@@ -109,8 +109,8 @@ public enum AppPalette {
     )
 }
 
-/// The semantic colours every screen draws with. Chat uses them as the A2
-/// reference does; Email, Memory, People, Schedules, Persona, Settings and
+/// The semantic colours every screen draws with. Chat, Email, Memory, People
+/// and Schedules use them as the A2 reference does; Persona, Settings and
 /// Connect read the same tokens until their own restyle.
 enum AppTheme {
     /// The page: the transcript and every reading surface.
