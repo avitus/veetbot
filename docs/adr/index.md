@@ -248,3 +248,7 @@ implementation without one.
 - [ADR-0210: OpenAI opaque credential boundary](0210-openai-opaque-credential-boundary.md)
 - [ADR-0211: Apple client deployment floors rise to iOS 27 and macOS 26, toward macOS 27 (Accepted)](0211-apple-client-deployment-floors.md)
 - [ADR-0213: Owner-requested calls without confirmation](0213-owner-requested-calls-without-confirmation.md)
+- [ADR-0214: Memory corrections, evidence excerpts and review counts over HTTP (Proposed)](0214-memory-corrections-evidence-and-counts-over-http.md)
+- [ADR-0215: Native schedule lifecycle, plain-words creation, Run now and delivery preference (Proposed)](0215-native-schedule-lifecycle-and-plain-words-creation.md)
+- [ADR-0216: Persona voice, lean-towards traits, entry switches, sample reply and boundaries (Proposed)](0216-persona-voice-traits-entry-switches-and-boundaries.md)
+- [ADR-0217: People directory attention, last contact and section counts (Proposed)](0217-people-directory-attention-recent-and-counts.md)
