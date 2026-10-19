@@ -5,7 +5,9 @@ import SwiftUI
 import AppKit
 #endif
 
-/// Read-only schedule index over the existing principal-scoped control plane.
+/// Read-only schedule index over the existing principal-scoped control plane,
+/// drawn as an A2 list: a calendar glyph, the name, the preview in soft ink,
+/// and the cadence with the next run on one line.
 public struct ScheduleBrowserView: View {
     @ObservedObject var model: ScheduleViewModel
     @Environment(\.dismiss) private var dismiss
@@ -16,36 +18,87 @@ public struct ScheduleBrowserView: View {
     }
 
     public var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                Picker("Schedule view", selection: $section) {
-                    Text("Current").tag(ScheduleBrowserSection.current)
-                    Text("Recent History").tag(ScheduleBrowserSection.recentHistory)
-                }
-                .pickerStyle(.segmented)
-                .padding()
-                .accessibilityIdentifier("schedule.section")
-                content
-            }
-                .navigationTitle("Schedules")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
-                    }
-                }
-        }
+        navigationContainer
+        .tint(AppTheme.tealFill)
         .accessibilityIdentifier("schedule.browser")
         .task(id: section) { await model.reload(section) }
         #if os(macOS)
+        // The ideal height sizes the fitted sheet before a saved size exists;
+        // without it a column whose content wants all the height it is offered
+        // (an empty or unavailable state) lays out at the screen's height and
+        // is cut off above the sheet.
         .frame(
             minWidth: 560,
             maxWidth: .infinity,
             minHeight: 520,
+            idealHeight: 600,
             maxHeight: .infinity
         )
         .background(ScheduleBrowserWindowResizeView())
         .scheduleBrowserPresentationSizing()
         #endif
+    }
+
+    /// The Mac keeps the index beside the detail column, as the Memory browser
+    /// does; elsewhere the index is the root of a stack. A NavigationView in a
+    /// Mac sheet laid its first column out at the presenting window's height
+    /// and cut the title and the section picker off above the sheet.
+    @ViewBuilder
+    private var navigationContainer: some View {
+        #if os(macOS)
+        NavigationSplitView {
+            column
+        } detail: {
+            Text("Select a schedule to read its instruction.")
+                .appFont(.callout)
+                .foregroundColor(AppTheme.inkSoft)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .background(AppTheme.paper)
+        }
+        #else
+        NavigationStack {
+            column
+        }
+        #endif
+    }
+
+    private var column: some View {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Schedules").appDisplayFont(.title2)
+                Text("Work Veetbot does on its own, on a rhythm you set.")
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            #endif
+            Picker("Schedule view", selection: $section) {
+                Text("Current").tag(ScheduleBrowserSection.current)
+                Text("Recent History").tag(ScheduleBrowserSection.recentHistory)
+            }
+            .pickerStyle(.segmented)
+            // The Mac draws a picker's label beside the control; in this column
+            // it wrapped letter by letter into a tall sliver.
+            .labelsHidden()
+            .accessibilityLabel("Schedule view")
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .accessibilityIdentifier("schedule.section")
+            content
+        }
+        .background(AppTheme.paper)
+        .navigationTitle("Schedules")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close") { dismiss() }
+            }
+        }
     }
 
     @ViewBuilder
@@ -70,8 +123,9 @@ public struct ScheduleBrowserView: View {
                 NavigationLink {
                     ScheduleDetailView(model: model, summary: item)
                 } label: {
-                    row(item)
+                    ScheduleRow(item: item)
                 }
+                .a2ListRow()
                 .accessibilityIdentifier("schedule.row.\(item.id.uuidString)")
                 .onAppear {
                     guard item.id == model.items.last?.id else { return }
@@ -84,93 +138,94 @@ public struct ScheduleBrowserView: View {
                     ProgressView()
                     Spacer()
                 }
+                .a2ListRow()
             } else if let errorMessage = model.errorMessage {
                 loadMoreFailureFooter(errorMessage)
+                    .a2ListRow()
             }
         }
-    }
-
-    private func row(_ item: ScheduleListItemView) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(item.title)
-                    .appFont(.body, weight: .semibold)
-                Spacer()
-                ScheduleStateBadge(state: item.state, kind: item.stateKind)
-            }
-            Text(item.instructionPreview)
-                .appFont(.body)
-                .foregroundColor(.secondary)
-                .lineLimit(3)
-            Label(scheduleCadenceSummary(item.cadence), systemImage: "repeat")
-                .appFont(.caption)
-                .foregroundColor(.secondary)
-            if let nextFireAt = item.nextFireAt {
-                Label("Next \(nextFireAt.formatted())", systemImage: "clock")
-                    .appFont(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
+        .a2List()
     }
 
     private func loadMoreFailureFooter(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Label(message, systemImage: "exclamationmark.triangle")
                 .appFont(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(AppTheme.inkSoft)
             Button("Retry") {
                 Task { await model.retry() }
             }
-            .appFont(.caption)
+            .buttonStyle(SecondaryCapsuleButtonStyle())
         }
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var unavailableState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "calendar.badge.exclamationmark")
-                .font(.largeTitle)
-                .foregroundColor(.secondary)
-            Text("This server does not support schedule browsing yet.")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        A2EmptyState(
+            systemImage: "calendar.badge.exclamationmark",
+            title: "This server does not support schedule browsing yet."
+        )
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundColor(.secondary)
-            Text(message)
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
+        A2EmptyState(systemImage: "exclamationmark.triangle", title: message) {
             Button("Retry") {
                 Task { await model.retry() }
             }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "calendar")
-                .font(.largeTitle)
-                .foregroundColor(.secondary)
-            Text(
-                section == .current
-                    ? "No current schedules."
-                    : "No completed or cancelled schedules in the last 30 days."
-            )
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        A2EmptyState(
+            systemImage: "calendar",
+            title: section == .current
+                ? "No current schedules."
+                : "No completed or cancelled schedules in the last 30 days.",
+            message: section == .current ? "Describe one in plain words in Chat and Veetbot will keep it." : nil
+        )
     }
+}
+
+/// One schedule in the list: the name beside its state, the instruction's
+/// preview, and when it runs.
+struct ScheduleRow: View {
+    let item: ScheduleListItemView
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "calendar")
+                .foregroundColor(AppTheme.tealText)
+                .frame(width: 20)
+                .padding(.top, 2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(item.title)
+                        .appFont(.body, weight: .semibold)
+                        .foregroundColor(AppTheme.ink)
+                    Spacer()
+                    ScheduleStateBadge(state: item.state, kind: item.stateKind)
+                }
+                Text(item.instructionPreview)
+                    .appFont(.callout)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .lineLimit(3)
+                Text(scheduleTiming(item.cadence, nextFireAt: item.nextFireAt))
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+/// "Daily · 09:00 · Next Oct 20, 2026 at 9:00 AM", or the cadence alone.
+func scheduleTiming(_ cadence: ScheduleCadenceView, nextFireAt: Date?) -> String {
+    let summary = scheduleCadenceSummary(cadence)
+    guard let nextFireAt else { return summary }
+    return "\(summary) · Next \(nextFireAt.formatted())"
 }
 
 struct ScheduleStateBadge: View {
@@ -183,7 +238,7 @@ struct ScheduleStateBadge: View {
             .foregroundColor(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.12))
+            .background(color.opacity(0.1))
             .clipShape(Capsule())
     }
 
@@ -191,13 +246,12 @@ struct ScheduleStateBadge: View {
         switch kind {
         case .active: return AppTheme.tealText
         case .paused: return AppTheme.amberText
-        case .completed: return .secondary
-        case .cancelled: return .red
-        case nil: return .secondary
+        case .completed: return AppTheme.inkSoft
+        case .cancelled: return AppTheme.red
+        case nil: return AppTheme.inkSoft
         }
     }
 }
-
 func scheduleDisplayText(_ raw: String) -> String {
     raw.replacingOccurrences(of: "_", with: " ").capitalized
 }

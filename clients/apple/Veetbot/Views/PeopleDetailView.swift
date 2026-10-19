@@ -63,7 +63,7 @@ private struct PeopleProfile: View {
                 .frame(maxWidth: .infinity)
         }
         .background(PeopleSurface.canvas)
-        .tint(PeopleSurface.accent)
+        .tint(PeopleSurface.fill)
         // A capsule clips a label that wraps at accessibility sizes.
         .buttonBorderShape(typeSize.isAccessibilitySize ? .roundedRectangle : .automatic)
         .accessibilityElement(children: .contain)
@@ -148,15 +148,15 @@ private struct PeopleProfile: View {
         let prepare = Button { conversation = PeopleConversationSelection(person: person) } label: {
             Label("Prepare for a conversation", systemImage: "text.bubble")
         }
-        .buttonStyle(.borderedProminent)
+        .primaryCapsule()
         let pin = Button { Task { await model.setPinned(!person.pinned, sessionID: sessionID) } } label: {
             Label(person.pinned ? "Unpin" : "Pin", systemImage: person.pinned ? "pin.slash" : "pin")
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(SecondaryCapsuleButtonStyle())
         .accessibilityLabel(person.pinned ? "Unpin person" : "Pin person")
         .disabled(locked)
         let rename = Button { startRenaming(person) } label: { Label("Rename", systemImage: "pencil") }
-            .buttonStyle(.bordered)
+            .buttonStyle(QuietCapsuleButtonStyle())
             .disabled(locked || renaming)
         if typeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 8) { prepare; pin; rename }
@@ -185,18 +185,21 @@ private struct PeopleProfile: View {
                 renameField(person)
             } else {
                 Text(person.displayName)
-                    .appFont(.title, weight: .bold)
+                    .appDisplayFont(.title)
+                    .foregroundColor(AppTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .accessibilityAddTraits(.isHeader)
             }
             if let summary = profile.relationshipSummary {
-                Text(summary).appFont(.body).foregroundColor(PeopleSurface.muted)
+                Text(summary).appFont(.callout).foregroundColor(PeopleSurface.muted)
             }
             if let contact = profile.primaryContact {
                 Label(contact.value, systemImage: contact.symbolName)
                     .appFont(PeopleMetrics.meta)
                     .foregroundColor(PeopleSurface.muted)
+                    // Selectable text detects the address as a link; keep it in the palette.
+                    .tint(PeopleSurface.accent)
                     .textSelection(.enabled)
             }
             if person.pinned || person.state != "active" {
@@ -222,17 +225,17 @@ private struct PeopleProfile: View {
         let unchanged = trimmed.isEmpty || trimmed == person.displayName
         return VStack(alignment: .leading, spacing: 8) {
             TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .appFont(.title3)
+                .a2Field()
                 .focused($nameFocused)
                 .onSubmit { if !unchanged && !locked { Task { await saveName(trimmed) } } }
             HStack(spacing: 8) {
                 Button("Save name") { Task { await saveName(trimmed) } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(PeopleSurface.accent)
+                    .primaryCapsule()
                     .disabled(unchanged || locked)
                 Button("Cancel") { renaming = false }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(QuietCapsuleButtonStyle())
             }
         }
     }
@@ -258,10 +261,9 @@ private struct PeopleProfile: View {
             let other = suggestion.other(than: profile.person.id)
             PeopleCallout(systemImage: "person.2", title: "May be the same person as \(other.displayName)", message: suggestion.explanation) {
                 Button("Merge") { Task { await model.resolveSuggestion(suggestion, decision: "merge", sessionID: sessionID) } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(PeopleSurface.accent)
+                    .primaryCapsule()
                 Button("Not the same") { Task { await model.resolveSuggestion(suggestion, decision: "separate", sessionID: sessionID) } }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(SecondaryCapsuleButtonStyle())
             }
             .disabled(locked)
             .accessibilityIdentifier("people.detail.suggestion.\(suggestion.id.uuidString)")
@@ -272,11 +274,10 @@ private struct PeopleProfile: View {
         PeopleCallout(systemImage: "exclamationmark.triangle", title: message) {
             if model.canRetrySave {
                 Button("Retry save") { Task { await model.retrySave() } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(PeopleSurface.accent)
+                    .primaryCapsule()
             }
             Button("Refresh") { Task { await model.reload(discardPending: true) } }
-                .buttonStyle(.bordered)
+                .buttonStyle(SecondaryCapsuleButtonStyle())
         }
     }
 
@@ -300,7 +301,8 @@ private struct PeopleProfile: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(alias.value)
                     .appFont(.body)
-                    .foregroundColor(ended ? PeopleSurface.muted : .primary)
+                    .foregroundColor(ended ? PeopleSurface.muted : AppTheme.ink)
+                    .tint(PeopleSurface.accent)
                     .textSelection(.enabled)
                 PeopleMeta(alias.validTo.map { "Assignment ended \($0.formatted(date: .abbreviated, time: .omitted))" } ?? alias.provenance)
             }
@@ -329,7 +331,7 @@ private struct PeopleProfile: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(relationship.phrase(in: profile))
                                 .appFont(.body)
-                                .foregroundColor(relationship.validTo == nil ? .primary : PeopleSurface.muted)
+                                .foregroundColor(relationship.validTo == nil ? AppTheme.ink : PeopleSurface.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                             if !relationship.qualifier.isEmpty { PeopleMeta(relationship.qualifier) }
                             if let since = relationship.sinceLabel { PeopleMeta(since) }
@@ -355,13 +357,14 @@ private struct PeopleProfile: View {
                 if model.history.isEmpty {
                     Text("No recorded interactions. Earlier history may not have been imported.")
                         .appFont(.body)
+                        .foregroundColor(AppTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(model.history.enumerated()), id: \.element.id) { index, interaction in
                             PeopleTimelineRow(systemImage: interaction.symbolName, symbolLabel: interaction.channelDescription,
                                               isLast: index == model.history.count - 1) {
-                                Text(interaction.summary).appFont(.body).fixedSize(horizontal: false, vertical: true)
+                                Text(interaction.summary).appFont(.body).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                                 PeopleMeta(interaction.dateLabel)
                                 // Observed mail and messages already say how they arrived.
                                 if interaction.direction == "reported" || interaction.attribution != "observed" {
@@ -398,7 +401,7 @@ private struct PeopleProfile: View {
                         rowSymbol(commitment.state == "uncertain" ? "questionmark.circle" : "circle",
                                   tint: commitment.state == "uncertain" ? PeopleSurface.attention : PeopleSurface.accent)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(commitment.description).appFont(.body).fixedSize(horizontal: false, vertical: true)
+                            Text(commitment.description).appFont(.body).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                             PeopleMeta(commitment.parties(in: profile))
                             if let due = commitment.dueLabel { PeopleMeta(due) }
                             evidenceButton(commitment.supportIDs)
@@ -417,7 +420,7 @@ private struct PeopleProfile: View {
             if let receipt = factReceipt {
                 PeopleRow {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Fact removed").appFont(.headline)
+                        Text("Fact removed").appFont(.headline).foregroundColor(AppTheme.ink)
                         Text(receipt.state == "cleanup_pending" ? "The fact has been removed. Generated replies and files are still being cleaned up." : "The fact and its generated copies have been removed. Original messages remain at their source.")
                             .appFont(.body)
                             .fixedSize(horizontal: false, vertical: true)
@@ -433,6 +436,7 @@ private struct PeopleProfile: View {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(fact.statement)
                                 .appFont(.body)
+                                .foregroundColor(AppTheme.ink)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                             Spacer(minLength: 8)
@@ -470,6 +474,7 @@ private struct PeopleProfile: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("No \(peopleList(missing, conjunction: "or")) recorded yet.")
                     .appFont(.body)
+                    .foregroundColor(AppTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 // Empty states keep primary text: the Mac audit at Large text
                 // fails muted supporting text here, as it failed secondary text.
@@ -483,7 +488,7 @@ private struct PeopleProfile: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(
                 RoundedRectangle(cornerRadius: PeopleMetrics.cardRadius, style: .continuous)
-                    .stroke(PeopleSurface.hairline, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    .stroke(AppTheme.hairlineStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             )
         }
     }
@@ -508,7 +513,7 @@ private struct PeopleProfile: View {
                 PeopleRow(divided: index > 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Merged with \(merge.merged.displayName)").appFont(.body)
+                            Text("Merged with \(merge.merged.displayName)").appFont(.body).foregroundColor(AppTheme.ink)
                             PeopleMeta("Combined automatically \(merge.mergedAt.formatted(date: .abbreviated, time: .omitted))")
                         }
                         Spacer(minLength: 8)
@@ -522,7 +527,7 @@ private struct PeopleProfile: View {
                 PeopleRow(divided: !profile.automaticMerges.isEmpty) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Image(systemName: "checkmark.circle").foregroundColor(PeopleSurface.accent).accessibilityHidden(true)
-                        Text("Identity change saved.").appFont(.body)
+                        Text("Identity change saved.").appFont(.body).foregroundColor(AppTheme.ink)
                         Spacer(minLength: 8)
                         Button("Preview undo") { Task { await model.undoIdentity(sessionID: sessionID) } }
                             .buttonStyle(PeopleInlineButtonStyle())
@@ -532,10 +537,10 @@ private struct PeopleProfile: View {
             PeopleRow(divided: !profile.automaticMerges.isEmpty || identityReceipt) {
                 PeopleActionRow {
                     Button("Repair identity…") { showingIdentity = true }
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
                     Button("Forget person…", role: .destructive) { Task { await model.previewForget(sessionID: sessionID) } }
-                        .tint(PeopleSurface.destructive)
+                        .buttonStyle(QuietCapsuleButtonStyle(tint: PeopleSurface.destructive))
                 }
-                .buttonStyle(.bordered)
             }
         }
         .disabled(locked)
@@ -545,18 +550,18 @@ private struct PeopleProfile: View {
         let pending = model.receipt?.state == "cleanup_pending"
         return VStack(spacing: 14) {
             Image(systemName: "person.crop.circle.badge.xmark")
-                .font(.system(size: 30, weight: .light))
+                .font(.system(size: 28, weight: .light))
                 .foregroundColor(PeopleSurface.accent)
-                .frame(width: 72, height: 72)
-                .background(PeopleSurface.accent.opacity(0.08))
-                .clipShape(Circle())
+                .frame(width: 60, height: 60)
+                .background(Circle().fill(AppTheme.tealWash))
                 .accessibilityHidden(true)
-            Text("Forgotten").appFont(.title3, weight: .semibold).accessibilityAddTraits(.isHeader)
+            Text("Forgotten").appDisplayFont(.title3).foregroundColor(AppTheme.ink).accessibilityAddTraits(.isHeader)
             Text(pending ? "Derived memories have been removed. Generated replies and files are still being cleaned up." : "Derived memories and history have been removed. Original messages remain at their source.")
                 .appFont(.body)
+                .foregroundColor(AppTheme.ink)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            if pending { Button("Check cleanup") { Task { await model.refreshReceipt() } }.buttonStyle(.bordered) }
+            if pending { Button("Check cleanup") { Task { await model.refreshReceipt() } }.buttonStyle(SecondaryCapsuleButtonStyle()) }
         }
         .padding(.vertical, 40)
         .padding(.horizontal, 20)
@@ -601,6 +606,7 @@ private struct PeopleFactEvidenceSheet: View {
 
     var body: some View {
         NavigationStack { record }
+        .tint(AppTheme.tealFill)
         .environment(\.peopleSelection, nil)
         .peopleModalFrame(.reading, minHeight: 450, idealHeight: 620)
     }

@@ -37,10 +37,11 @@ struct PeopleFactEditor: View {
                 if operation == "changed" {
                     DatePicker("When did it change?", selection: $effectiveAt, in: Self.effectiveDateRange(validFrom: fact.validFrom), displayedComponents: [.date, .hourAndMinute])
                 }
-                Text(operation == "changed" ? "The earlier fact stays in dated history." : "The previous fact is marked incorrect and replaced.").foregroundColor(.secondary)
-                if let error = model.errorMessage { Text(error).foregroundColor(.red) }
+                Text(operation == "changed" ? "The earlier fact stays in dated history." : "The previous fact is marked incorrect and replaced.").foregroundColor(AppTheme.inkSoft)
+                if let error = model.errorMessage { Text(error).foregroundColor(AppTheme.red) }
                 if model.canRetrySave { Button("Retry save") { Task { await model.retrySave(); if model.errorMessage == nil { dismiss() } } } }
             }
+            .tint(AppTheme.tealFill)
             .navigationTitle("Correct fact")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.isSaving) }
@@ -77,7 +78,7 @@ struct PeopleIdentityRepairView: View {
                         Text("Combine duplicate people").tag("merge")
                         Text("Move evidence to another person").tag("split")
                     }
-                    Text(operation == "merge" ? "Choose the person these records should belong to. You will review the change before applying it." : "Select only the evidence that belongs to the other person. Facts with mixed evidence remain unresolved.").foregroundColor(.secondary)
+                    Text(operation == "merge" ? "Choose the person these records should belong to. You will review the change before applying it." : "Select only the evidence that belongs to the other person. Facts with mixed evidence remain unresolved.").foregroundColor(AppTheme.inkSoft)
                 }
                 Section("Destination person") {
                     if let target { Label("Selected: \(target.displayName)", systemImage: "checkmark.circle") }
@@ -88,7 +89,7 @@ struct PeopleIdentityRepairView: View {
                             .accessibilityAddTraits(target?.id == person.id ? .isSelected : [])
                             .accessibilityIdentifier("people.identity.destination.\(person.id.uuidString)")
                     }
-                    if let error = people.errorMessage { Text(error).foregroundColor(.secondary) }
+                    if let error = people.errorMessage { Text(error).foregroundColor(AppTheme.inkSoft) }
                     Button("More people") { Task { await people.loadMore() } }
                 }
                 if operation == "split" {
@@ -96,23 +97,24 @@ struct PeopleIdentityRepairView: View {
                         ForEach(model.identityEvidence) { row in
                             VStack(alignment: .leading) {
                                 evidenceToggle(row.id, label: row.label)
-                                Text(memoryDisplayText(row.kind) + (row.unresolved ? " · Unresolved" : "")).appFont(.caption).foregroundColor(.secondary)
+                                Text(memoryDisplayText(row.kind) + (row.unresolved ? " · Unresolved" : "")).appFont(.caption).foregroundColor(AppTheme.inkSoft)
                                 ForEach(row.supportIDs, id: \.self) { reference in
                                     Button("View source") { Task { if let source = await model.evidence(reference) { sourceSelection = PeopleConversationSelection(source: source) } } }
                                 }
                             }
                         }
                         if model.isLoadingIdentityEvidence { ProgressView("Loading evidence…") }
-                        if let error = model.identityEvidenceError { Text(error).foregroundColor(.secondary) }
+                        if let error = model.identityEvidenceError { Text(error).foregroundColor(AppTheme.inkSoft) }
                         if model.hasMoreIdentityEvidence && !model.requiresRefresh {
                             Button(model.identityEvidenceError == nil ? "More evidence" : "Retry evidence") { Task { await model.loadIdentityEvidence() } }.disabled(model.isLoadingIdentityEvidence)
                         }
-                        if let error = model.evidenceError { Text(error).foregroundColor(.secondary) }
+                        if let error = model.evidenceError { Text(error).foregroundColor(AppTheme.inkSoft) }
                     }
                 }
-                if let error = model.errorMessage { Text(error).foregroundColor(.red) }
+                if let error = model.errorMessage { Text(error).foregroundColor(AppTheme.red) }
                 if model.canRetrySave { Button("Retry preview") { Task { await model.retrySave(); if model.preview != nil { dismiss() } } } }
             }
+            .tint(AppTheme.tealFill)
             .navigationTitle("Repair identity")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.isSaving) }
@@ -150,14 +152,18 @@ struct PeopleConversationView: View {
         NavigationView {
             VStack(spacing: 0) {
                 if let source = selection.source {
-                    Text("\(memoryDisplayText(source.sourceKind)) evidence · \(source.evidenceAt.formatted(date: .abbreviated, time: .shortened))").appFont(.caption).foregroundColor(.secondary).padding()
+                    Text("\(memoryDisplayText(source.sourceKind)) evidence · \(source.evidenceAt.formatted(date: .abbreviated, time: .shortened))").appFont(.caption).foregroundColor(AppTheme.inkSoft).padding()
                 }
                 if let source = selection.source { PeopleSourceReader(source: source) }
                 else {
-                    if let error { Text(error).foregroundColor(.red).padding(); Button("Retry") { Task { await prepare() } } }
+                    if let error {
+                        Text(error).foregroundColor(AppTheme.red).padding()
+                        Button("Retry") { Task { await prepare() } }.buttonStyle(SecondaryCapsuleButtonStyle())
+                    }
                     ChatView(model: chat)
                 }
             }
+            .background(AppTheme.paper)
             .navigationTitle(selection.person.map { "Prepare: \($0.displayName)" } ?? "Source conversation")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() }.accessibilityIdentifier("people.conversation.close") } }
         }
@@ -200,10 +206,11 @@ struct PeopleAliasEditor: View {
                 }
                 TextField("Name or contact", text: $value)
                 TextField("Context", text: $context)
-                Text("This confirms that the alias belongs to this person in the stated context. Phone numbers need an international prefix. End an assignment when an address or number changes hands.").appFont(.caption).foregroundColor(.secondary)
-                if let error = model.errorMessage { Text(error).foregroundColor(.red) }
+                Text("This confirms that the alias belongs to this person in the stated context. Phone numbers need an international prefix. End an assignment when an address or number changes hands.").appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                if let error = model.errorMessage { Text(error).foregroundColor(AppTheme.red) }
                 if model.canRetrySave { Button("Retry save") { Task { await model.retrySave(); if model.errorMessage == nil { dismiss() } } } }
             }
+            .tint(AppTheme.tealFill)
             .navigationTitle("Add alias")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -227,19 +234,27 @@ private struct PeopleSourceReader: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if model.isLoading { ProgressView("Loading source…") }
-                if let heading = model.heading { Text(heading).font(.headline) }
-                if model.partial { Text("Only part of the original message is retained.").foregroundColor(.secondary) }
-                if let text = model.text { Text(text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                if let heading = model.heading { Text(heading).appDisplayFont(.title3).foregroundColor(AppTheme.ink) }
+                if model.partial { Text("Only part of the original message is retained.").foregroundColor(AppTheme.inkSoft) }
+                if let text = model.text {
+                    A2Quote {
+                        Text(text).foregroundColor(AppTheme.ink).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
                 if model.hasMoreHistory {
-                    Text("The source is further into this conversation’s history.").foregroundColor(.secondary)
-                    Button("Continue searching history") { Task { await model.loadMoreHistory() } }.disabled(model.isLoading)
+                    Text("The source is further into this conversation’s history.").foregroundColor(AppTheme.inkSoft)
+                    Button("Continue searching history") { Task { await model.loadMoreHistory() } }
+                        .buttonStyle(SecondaryCapsuleButtonStyle()).disabled(model.isLoading)
                 }
                 if let error = model.errorMessage {
-                    Text(error).foregroundColor(.secondary)
+                    Text(error).foregroundColor(AppTheme.inkSoft)
                     Button("Retry source") { Task { if model.hasMoreHistory { await model.loadMoreHistory() } else { await model.load() } } }
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
                 }
             }.padding()
-        }.task { await model.load() }
+        }
+        .background(AppTheme.paper)
+        .task { await model.load() }
         .accessibilityIdentifier("people.source")
     }
 }

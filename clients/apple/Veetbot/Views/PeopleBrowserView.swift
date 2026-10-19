@@ -74,7 +74,7 @@ public struct PeopleBrowserView: View {
             } else {
                 PeopleList(label: "People and filters") {
                     #if os(macOS)
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
                         PeopleFilter(title: "Show", selection: model.collection, options: PeopleCollection.allCases, label: { $0.rawValue }) { value in Task { await model.selectCollection(value) } }
                         PeopleFilter(title: "Relationship with you", selection: model.relationship, options: PeopleRelationshipFilter.allCases, label: { $0.label }) { value in Task { await model.selectRelationship(value) } }
                         recentFirstToggle
@@ -95,63 +95,83 @@ public struct PeopleBrowserView: View {
                     #endif
                     if model.collection == .review && !model.suggestions.isEmpty {
                         // Only Needs review shows this, so no asserted People row moves (ADR-0125).
-                        Section("Possible duplicates") {
+                        Section {
                             ForEach(model.suggestions) { suggestion in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("\(suggestion.source.displayName) and \(suggestion.target.displayName)").appFont(.headline)
-                                    Text(suggestion.explanation).appFont(.caption).foregroundColor(.secondary)
-                                    HStack {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("\(suggestion.source.displayName) and \(suggestion.target.displayName)")
+                                        .appFont(.body, weight: .semibold)
+                                        .foregroundColor(AppTheme.ink)
+                                    Text(suggestion.explanation).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                                    HStack(spacing: 8) {
                                         Button("Merge") { Task { await model.resolveSuggestion(suggestion, decision: "merge") } }
+                                            .primaryCapsule()
                                             .accessibilityLabel("Merge \(suggestion.source.displayName) into \(suggestion.target.displayName)")
                                         Button("Not the same") { Task { await model.resolveSuggestion(suggestion, decision: "separate") } }
+                                            .buttonStyle(SecondaryCapsuleButtonStyle())
                                             .accessibilityLabel("\(suggestion.source.displayName) and \(suggestion.target.displayName) are different people")
                                     }
-                                    .buttonStyle(.borderless)
                                 }
+                                .padding(PeopleMetrics.rowPadding)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .a2Card(border: AppTheme.amberLine)
                                 .padding(.vertical, 4)
                                 .accessibilityIdentifier("people.suggestion.\(suggestion.id.uuidString)")
+                                .a2ListRow()
                             }
+                        } header: {
+                            Text("Possible duplicates")
+                                .appFont(.subheadline, weight: .semibold)
+                                .foregroundColor(AppTheme.inkSoft)
+                                .textCase(nil)
                         }
                     }
                     if model.items.isEmpty && model.errorMessage == nil && (model.collection != .review || model.suggestions.isEmpty) {
                         if model.collection == .review {
                             Section {
                                 Label("Nothing needs review.", systemImage: "checkmark.circle")
+                                    .foregroundColor(AppTheme.ink)
+                                    .a2ListRow()
                                 Text("Someone Veetbot knows only by a name or role appears here until you confirm or remove them.")
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(AppTheme.inkSoft)
+                                    .a2ListRow()
                             }
                         } else {
                             Section {
                                 Label("People you remember", systemImage: "person.2")
+                                    .foregroundColor(AppTheme.ink)
+                                    .a2ListRow()
                                 Text("People you know and people you write to appear here. You can also add someone.")
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(AppTheme.inkSoft)
+                                    .a2ListRow()
                             }
                         }
                     }
                     ForEach(model.items) { person in
                         personRow(person)
+                            .a2ListRow()
                             .accessibilityIdentifier("people.row.\(person.id.uuidString)")
                             .onAppear { if person.id == model.items.last?.id { Task { await model.loadMore() } } }
                     }
-                    if model.isLoadingMore { ProgressView("Loading more people…") }
+                    if model.isLoadingMore { ProgressView("Loading more people…").a2ListRow() }
                     if let error = model.errorMessage {
                         Section {
                             Label(error, systemImage: model.availability == .denied ? "lock" : "exclamationmark.triangle")
+                                .foregroundColor(AppTheme.inkSoft)
+                                .a2ListRow()
                             Button(model.availability == .changed ? "Refresh people" : "Retry") { Task { await model.retry() } }
+                                .buttonStyle(SecondaryCapsuleButtonStyle())
+                                .a2ListRow()
                         }
                     }
                     if model.availability != .disabled && model.availability != .denied {
-                        #if os(macOS)
-                        VStack(alignment: .leading, spacing: 10) { directoryActions }.padding(.top, 12)
-                        #else
-                        directoryActions
-                        #endif
+                        HStack(spacing: 8) { directoryActions }
+                            .padding(.top, 12)
+                            .a2ListRow()
                     }
                 }
             }
         }
-        // The adaptive accent keeps bordered controls legible in dark appearance.
-        .tint(PeopleSurface.accent)
+        .tint(PeopleSurface.fill)
         .accessibilityIdentifier("people.browser")
         .accessibilityLabel("People directory")
         .task { await model.reload() }
@@ -165,7 +185,9 @@ public struct PeopleBrowserView: View {
 
     @ViewBuilder private var directoryActions: some View {
         Button { showingImport = true } label: { Label("Import history", systemImage: "clock.arrow.circlepath") }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
         Button { showingAdd = true } label: { Label("Add person", systemImage: "person.badge.plus") }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
     }
 
     @ViewBuilder private func personRow(_ person: PersonView) -> some View {
@@ -173,11 +195,11 @@ public struct PeopleBrowserView: View {
             let selected = selection.wrappedValue == person.id
             Button { selection.wrappedValue = person.id } label: {
                 PeopleDirectoryRow(person: person)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selected ? PeopleSurface.accent.opacity(0.14) : Color.clear)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(selected ? AppTheme.selected : Color.clear)
                     )
                     .contentShape(Rectangle())
             }
@@ -189,8 +211,8 @@ public struct PeopleBrowserView: View {
             } label: {
                 PeopleDirectoryRow(person: person)
                     #if os(macOS)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .contentShape(Rectangle())
                     #endif
             }
@@ -202,11 +224,11 @@ public struct PeopleBrowserView: View {
 
     private func filterLabel(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).foregroundColor(.primary).fixedSize(horizontal: false, vertical: true)
+            Text(title).appFont(.caption).foregroundColor(AppTheme.inkSoft).fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .firstTextBaseline) {
-                Text(value).fixedSize(horizontal: false, vertical: true)
+                Text(value).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.up.chevron.down").accessibilityHidden(true)
+                Image(systemName: "chevron.up.chevron.down").foregroundColor(AppTheme.inkSoft).accessibilityHidden(true)
             }
         }
         .accessibilityElement(children: .combine)
@@ -228,9 +250,10 @@ struct AddPersonView: View {
         NavigationView {
             Form {
                 TextField("Name", text: $name).disabled(pendingName != nil)
-                Text("Use a name or a description you recognize, such as ‘my sister in Canada’.").foregroundColor(.secondary)
-                if let error { Text(error).foregroundColor(.red) }
+                Text("Use a name or a description you recognize, such as ‘my sister in Canada’.").foregroundColor(AppTheme.inkSoft)
+                if let error { Text(error).foregroundColor(AppTheme.red) }
             }
+            .tint(AppTheme.tealFill)
             .navigationTitle("Add person")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
@@ -314,7 +337,7 @@ struct PeopleImportHistoryView: View {
                         Button { Task { await model.restore(saved.id) } } label: {
                             VStack(alignment: .leading) {
                                 Text(memoryDisplayText(saved.state))
-                                Text("\(saved.recordsProcessed) processed · $\(saved.spentUSD)").font(.caption).foregroundColor(.secondary)
+                                Text("\(saved.recordsProcessed) processed · $\(saved.spentUSD)").appFont(.caption).foregroundColor(AppTheme.inkSoft)
                             }
                         }.disabled(model.canRetry)
                     }
@@ -350,24 +373,22 @@ struct PeopleImportHistoryView: View {
                     Button("Preview import") { Task { await model.preview(sessionIDs: selected, accountIDs: selectedAccounts, fetchMailbox: fetchMailbox, since: since, until: until, maxRecords: maximum, maxCost: budget) } }.disabled(selected.isEmpty && selectedAccounts.isEmpty)
                 }.disabled(model.canRetry)
             }
-            if let error = model.errorMessage { Text(error).foregroundColor(.red) }
+            if let error = model.errorMessage { Text(error).foregroundColor(AppTheme.red) }
             if model.canRetry { Button("Retry request") { Task { await model.retry() } } }
             if model.isBusy { ProgressView() }
         }
+    .tint(AppTheme.tealFill)
     .disabled(model.isBusy)
     }
     var body: some View {
         Group {
             #if os(macOS)
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("Import People history").font(.headline)
-                    Spacer()
-                    Button("Close") { dismiss() }
-                }
+                A2SheetHeader(title: "Import People history", dismissTitle: "Close") { dismiss() }
                 ScrollView { importForm }
             }
             .padding()
+            .background(AppTheme.paper)
             #else
             NavigationView {
                 importForm
@@ -410,9 +431,11 @@ struct PeopleList<Content: View>: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(label)
         }
+        .background(AppTheme.paper)
         .accessibilityElement(children: .contain)
         #else
         List { content() }
+            .a2List()
         #endif
     }
 }
@@ -423,9 +446,9 @@ private struct PeopleDirectoryRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            PeopleMonogram(name: person.displayName, size: 30)
+            PeopleMonogram(name: person.displayName, size: PeopleMetrics.rowAvatar)
             VStack(alignment: .leading, spacing: 2) {
-                Text(person.displayName).appFont(.headline)
+                Text(person.displayName).appFont(.body, weight: .semibold).foregroundColor(AppTheme.ink)
                 if person.state == "merged" {
                     Text("Combined identity").appFont(.caption).foregroundColor(PeopleSurface.muted)
                 }
@@ -490,7 +513,7 @@ private struct PeopleFilter<Option: Identifiable & Equatable>: View {
             .accessibilityValue(label(selection))
             .popover(isPresented: $isPresented) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                    Text(title).appFont(.headline).accessibilityAddTraits(.isHeader)
                     ForEach(options) { option in
                         Button {
                             select(option)

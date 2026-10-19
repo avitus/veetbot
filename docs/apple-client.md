@@ -135,10 +135,13 @@ tool run one sentence that opens into a monospaced ledger; a pending approval or
 clarifying question docked above a translucent composer while the transcript
 shows one amber "Waiting for your approval" line. On a compact window the chat
 list slides over the conversation from the leading edge. Email follows (see
-"Email mode" below). Memory, People, Schedules, Persona, Settings and Connect
-read the same tokens but keep their earlier layouts until their own restyle.
-`HairlineDivider`, `FilterPillButtonStyle` and the `a2Field` modifier join the
-shared controls for the surfaces that follow.
+"Email mode" below), then Memory, People and Schedules (see "Memory and
+People" below). Persona, Settings and Connect read the same tokens but keep
+their earlier layouts until their own restyle. `HairlineDivider`,
+`FilterPillButtonStyle`, the `a2Field`, `a2List` and `a2Card` modifiers, and
+the reading-page pieces `A2SectionHeading`, `A2KindLabel`, `A2RecordGroup`,
+`A2Quote`, `A2EmptyState` and `A2SheetHeader` join the shared controls for the
+surfaces that follow.
 
 Website Access lists the authenticated principal's browser profiles and lets the
 user choose one `READY` profile for new conversations. Adding access, or
@@ -500,6 +503,24 @@ evidence and correction actions; Manage person holds Repair identity and
 Forget person. Import history analyses selected chats or mail accounts under a
 date range, record limit and spending cap; see
 [People operations](people-operations.md).
+
+Memory, People and Schedules draw with the A2 tokens. Each list sits on paper
+with hairline rows. A memory row leads with its kind in small capitals and the
+day it last changed, then the statement and where it came from, with "Needs
+review" in amber; the People directory shows initials on a teal wash beside
+each name and, on the Mac, marks the chosen person with the selected tint; a
+schedule row leads with a calendar glyph, the name beside its state, the
+instruction's preview and the cadence with the next run. A memory or a
+schedule opens as a reading page: the statement, or the schedule's name on the
+Mac, in the serif face, then its record as titled groups of key-value lines on
+surface cards, the schedule's instruction on a deep-paper block, and a flagged
+memory's reason in an amber-edged card. On the Mac the Schedules sheet keeps
+its index beside the detail column, as the Memory sheet does. The synthesis journal keeps its list
+with teal text for its actions. A person's profile keeps its sections and
+actions: Prepare for a conversation is the filled capsule, Pin and Repair
+identity hairline capsules, Rename and Forget person quiet ones. The Review
+menu, swipe-to-delete, the Mac collection picker and every People journey keep
+their controls; only the drawing changed.
 
 ## Milestone 26 client modes
 
