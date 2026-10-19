@@ -1419,12 +1419,14 @@ final class ConversationNavigationUITests: XCTestCase {
         reveal(field)
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         #if os(macOS)
-        // Typing needs the field focused; a click that landed while the
-        // disclosure was still opening leaves it unfocused, so click again.
+        // Typing needs the field focused. On a 1x display the element's own
+        // click lands about 20 pt above an A2 field (its hit point, not its
+        // frame, is off), so click the frame's centre, and again if the
+        // field still reports no keyboard focus.
         let focused = NSPredicate(format: "hasKeyboardFocus == true")
         for _ in 0..<3 {
             waitForSettledFrame(of: field, stableFor: 5)
-            field.click()
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
             if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focused, object: field)], timeout: 2) == .completed { break }
         }
         XCTAssertTrue(field.value(forKey: "hasKeyboardFocus") as? Bool ?? false, "The website field never took keyboard focus")
