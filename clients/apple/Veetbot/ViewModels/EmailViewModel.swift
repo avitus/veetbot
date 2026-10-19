@@ -181,6 +181,8 @@ public final class EmailViewModel: ObservableObject {
     public var draftActionMessage: String? { draftActionError }
     /// A failed mail read, reported with the conversation it could not refresh.
     public var threadReadMessage: String? { threadReadError }
+    /// Says where held edits are while a stale draft waits for the owner's review of the new mail.
+    static let staleEditMessage = "Your edits are kept on this device until you confirm you've reviewed the updated thread."
     public var canReview: Bool {
         guard let draft else { return false }
         return draft.canEdit && !draft.stale && conflict == nil && !isSaving && !isPerformingAction
@@ -698,6 +700,12 @@ public final class EmailViewModel: ObservableObject {
         guard let id = id ?? draft?.id, let edit = edits[id], let api = makeAPIClient() else { return false }
         guard edit.isDirty else { return true }
         guard !isSaving, !(conflict?.id == id) else { return false }
+        // The server refuses edits to a stale draft until the owner confirms the
+        // updated thread, so hold them here instead of sending a save it must refuse.
+        if draft?.id == id, draft?.stale == true, edit.reviewedSourceRevision == nil {
+            draftActionError = Self.staleEditMessage
+            return false
+        }
         isSaving = true
         draftActionError = nil
         let connection = generation
@@ -727,8 +735,22 @@ public final class EmailViewModel: ObservableObject {
         } catch {
             guard generation == connection else { return false }
             if case HTTPTransportError.api(let failure) = error, failure.statusCode == 409,
-                let server = try? await api.emailDraft(id), generation == connection {
-                if draft?.id == id { conflict = server; draft = server }
+                let server = try? await api.emailDraft(id), generation == connection, draft?.id == id {
+                draft = server
+                // Only a newer revision is another device's edit. New mail marks the
+                // draft stale at its own revision; calling that a conflict disabled the
+                // very confirmation the server is waiting for.
+                if server.revision != edit.base.revision { conflict = server }
+                if server.stale {
+                    // The confirmation records the thread revision on screen, so show
+                    // the mail that made the draft stale before asking for it.
+                    if selectedThreadID == server.threadID { await openThread(server.threadID, refreshOnly: true) }
+                    guard generation == connection else { return false }
+                    if conflict == nil {
+                        draftActionError = Self.staleEditMessage
+                        return false
+                    }
+                }
             }
             report(error, draft: true)
             return false

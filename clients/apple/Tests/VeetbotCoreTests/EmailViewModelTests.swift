@@ -1391,6 +1391,58 @@ import SwiftUI
         #expect(model.conflict == nil)
     }
 
+    /// New mail marks a draft stale at its current revision, and the server refuses edits until the
+    /// owner confirms the updated thread. That refusal is not another device's edit: reporting it as a
+    /// conflict disabled the confirmation, leaving Review & Send unreachable.
+    @Test func testStaleDraftRefusalIsNotAConflictAndReviewConfirmationSavesTheEdit() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.httpMethod == "PUT" { return try self.staleDraftSave(request, revision: 2) }
+            if request.url!.path.contains("/drafts/") { return (200, self.staleDraftJSON()) }
+            return (200, self.newMailThreadJSON(draft: self.staleDraftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My reply")
+        #expect(await model.saveDraft() == false)
+        #expect(model.conflict == nil)
+        #expect(model.currentEdit?.body == "My reply")
+        await model.confirmCurrentSourceReviewed()
+        #expect(model.conflict == nil)
+        #expect(model.draft?.stale == false)
+        #expect(model.currentEdit?.isDirty == false)
+        #expect(model.canReview)
+    }
+
+    /// The owner's reported path: a real edit conflict on a stale draft. Keeping the local version
+    /// must leave the review confirmation usable instead of reopening the same conflict.
+    @Test func testSavingMyVersionOfAStaleConflictLeavesReviewConfirmationUsable() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.httpMethod == "PUT" { return try self.staleDraftSave(request, revision: 3) }
+            let other = self.staleDraftJSON(revision: 2, body: "Other device edit")
+            if request.url!.path.contains("/drafts/") { return (200, other) }
+            let threadReads = requests.snapshot.filter { $0.url!.path.hasSuffix(self.threadID.uuidString) }.count
+            return (200, threadReads > 1 ? self.newMailThreadJSON(draft: other) : self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My reply")
+        #expect(await model.saveDraft() == false)
+        #expect(model.conflict?.body == "Other device edit")
+        await model.keepLocalDraft()
+        #expect(model.conflict == nil)
+        #expect(model.currentEdit?.body == "My reply")
+        await model.confirmCurrentSourceReviewed()
+        #expect(model.conflict == nil)
+        #expect(model.draft?.revision == 3)
+        #expect(model.canReview)
+        let save = try #require(requests.snapshot.last { $0.httpMethod == "PUT" })
+        let body = try Self.archiveRequestBody(save)
+        #expect(body["expected_revision"] as? Double == 2)
+        #expect(body["source_revision"] as? Double == 2)
+    }
+
     @Test func testNoRefreshAdmissionAfterEmailLeavesForeground() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel(refreshNanoseconds: 10_000_000) { request in
@@ -2387,6 +2439,22 @@ import SwiftUI
         """
         {"id":"\(draftID)","thread_id":"\(threadID)","account_id":"personal","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)","status":"\(status)","stale":false,"run_id":"\(runID)","approval_id":"\(approvalID)","session_id":"\(threadID)","updated_at":"2026-09-11T00:00:00Z"}
         """
+    }
+    /// The thread after new mail arrived: its revision advanced past the draft's source revision.
+    private func newMailThreadJSON(draft: String) -> String {
+        threadJSON(draft: draft).replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"revision\":2,\"summary\"")
+    }
+    private func staleDraftJSON(revision: Int = 1, body: String = "Thanks, I will review the agenda.") -> String {
+        draftJSON(revision: revision, body: body).replacingOccurrences(of: "\"stale\":false", with: "\"stale\":true")
+    }
+    /// Mirrors the server: a stale draft accepts an edit only with the reviewed thread revision.
+    private func staleDraftSave(_ request: URLRequest, revision: Int) throws -> (Int, String) {
+        let body = try Self.archiveRequestBody(request)
+        guard body["source_revision"] as? Double == 2 else {
+            return (409, Self.error("invalid_state", "review the changed thread before updating this draft"))
+        }
+        let saved = draftJSON(revision: revision, body: body["body"] as? String ?? "")
+        return (200, saved.replacingOccurrences(of: "\"source_revision\":1", with: "\"source_revision\":2"))
     }
     private func approvalJSON(body: String, digests: String = "{}") -> String {
         """
