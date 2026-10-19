@@ -2,15 +2,31 @@ import SwiftUI
 
 enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case connection
-    // Above the website form: content added below it lets a UI test's swipe
-    // carry the lazy stack past the form's button on an iPad sheet.
     case models
     case websiteAccess
-    case smsIntegration
+    case notifications
     case appearance
+    case smsIntegration
     case dataAndPrivacy
 
     var id: String { rawValue }
+
+    var title: String { Self.titles[self] ?? rawValue }
+    var systemImage: String { Self.systemImages[self] ?? "gearshape" }
+
+    // Dictionaries rather than switches: the layout tests slice this file
+    // at each group's `case` in the page switch below.
+    private static let titles: [ConnectionSettingsSection: String] = [
+        .connection: "Connection", .models: "Models", .websiteAccess: "Website access",
+        .notifications: "Notifications", .appearance: "Appearance",
+        .smsIntegration: "SMS integration", .dataAndPrivacy: "Data & privacy",
+    ]
+
+    private static let systemImages: [ConnectionSettingsSection: String] = [
+        .connection: "key", .models: "wand.and.stars", .websiteAccess: "globe",
+        .notifications: "bell", .appearance: "paintpalette",
+        .smsIntegration: "message", .dataAndPrivacy: "lock.shield",
+    ]
 
     /// The sections this platform offers. Sending a text rides the phone's own
     /// compose sheet, so the SMS integration exists only where that sheet does.
@@ -56,40 +72,30 @@ public struct ConnectionSettingsView: View {
     @State private var websiteURL = ""
     @State private var taskScopeURL = ""
     @State private var confirmingTaskScope = false
+    @State private var selectedSection: ConnectionSettingsSection = .connection
+    @State private var showsToken = false
+    @State private var confirmingClearCache = false
+    @StateObject private var notificationSettings: NotificationSettingsViewModel
+    private let onConnecting: (() -> Void)?
 
     public init(
         model: ChatViewModel,
         embedded: Bool,
-        onClose: (() -> Void)? = nil
+        onClose: (() -> Void)? = nil,
+        onConnecting: (() -> Void)? = nil
     ) {
         self.model = model
         self.embedded = embedded
         closeAction = onClose
+        self.onConnecting = onConnecting
+        _notificationSettings = StateObject(wrappedValue: NotificationSettingsViewModel(
+            makeAPIClient: { [weak model] in model?.currentAPIClient },
+            installationID: { try? await KeychainInstallationIdentityStore().readOrCreateInstallationID() }
+        ))
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            header
-            HairlineDivider()
-            ScrollView {
-                // Six cards need no laziness, and a lazy stack under the
-                // column frame looped in placement while a Mac journey
-                // scrolled (2026-10-19: the Settings window hung for two
-                // minutes with the main thread in LazySubviewPlacements).
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(ConnectionSettingsSection.visibleCases) { section in
-                        sectionView(section)
-                    }
-                }
-                .frame(maxWidth: embedded ? 560 : 680, alignment: .leading)
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-            if !embedded {
-                HairlineDivider()
-                actionBar
-            }
-        }
+        content
         .background(AppTheme.paper)
         .tint(AppTheme.tealFill)
         .toastHost()
@@ -122,6 +128,190 @@ public struct ConnectionSettingsView: View {
             }
         }
         .deviceSignInPresentation(model: model)
+    }
+
+    /// First run is Connect's first step alone. Once connected, each group
+    /// is a page of its own: picked from a sidebar on the Mac and iPad, and
+    /// pushed from a list of groups on the iPhone.
+    @ViewBuilder
+    private var content: some View {
+        if embedded {
+            VStack(spacing: 0) {
+                header
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) { sectionView(.connection) }
+                        .frame(maxWidth: 560, alignment: .leading)
+                        .padding(24)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
+        } else if usesGroupSidebar {
+            HStack(spacing: 0) {
+                groupSidebar
+                Rectangle().fill(AppTheme.hairline).frame(width: 1).accessibilityHidden(true)
+                VStack(spacing: 0) {
+                    groupPage(selectedSection)
+                    HairlineDivider()
+                    actionBar
+                }
+            }
+        } else {
+            VStack(spacing: 0) {
+                NavigationStack {
+                    groupList
+                        .navigationDestination(for: ConnectionSettingsSection.self) { section in
+                            groupPage(section)
+                                .background(AppTheme.paper)
+                                .navigationTitle(section.title)
+                                #if os(iOS)
+                                .navigationBarTitleDisplayMode(.inline)
+                                #endif
+                        }
+                }
+                HairlineDivider()
+                actionBar
+            }
+        }
+    }
+
+    /// The Mac and the iPad pick a group from a sidebar; the iPhone pushes it.
+    private var usesGroupSidebar: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return UIDevice.current.userInterfaceIdiom == .pad
+        #endif
+    }
+
+    /// A website login that waits for the owner marks its group with amber.
+    private var websiteAccessNeedsAttention: Bool {
+        model.browserProfiles.contains { $0.status == .needsUser || $0.status == .authenticationRequired }
+    }
+
+    private var groupSidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Settings").appDisplayFont(.title3)
+                Text("This \(deviceName) and your Veetbot server.")
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 12)
+            Text("Groups")
+                .appFont(.caption, weight: .semibold)
+                .foregroundColor(AppTheme.inkSoft)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(ConnectionSettingsSection.visibleCases) { section in
+                Button { selectedSection = section } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: section.systemImage)
+                            .frame(width: 18)
+                            .foregroundColor(AppTheme.inkSoft)
+                            .accessibilityHidden(true)
+                        Text(section.title).foregroundColor(AppTheme.ink)
+                        Spacer(minLength: 6)
+                        if section == .websiteAccess && websiteAccessNeedsAttention {
+                            Circle().fill(AppTheme.amber).frame(width: 7, height: 7)
+                                .accessibilityLabel("Needs sign-in")
+                        }
+                    }
+                    .appFont(.body)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: A2Metrics.rowHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(selectedSection == section ? AppTheme.selected : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
+                .accessibilityIdentifier("settings.group.\(section.rawValue)")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(width: 232, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(AppTheme.paperDeep)
+    }
+
+    private var groupList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                header
+                VStack(spacing: 0) {
+                    ForEach(Array(ConnectionSettingsSection.visibleCases.enumerated()), id: \.element) { index, section in
+                        if index > 0 { HairlineDivider() }
+                        NavigationLink(value: section) {
+                            HStack(spacing: 12) {
+                                Image(systemName: section.systemImage)
+                                    .frame(width: 22)
+                                    .foregroundColor(AppTheme.inkSoft)
+                                    .accessibilityHidden(true)
+                                Text(section.title).foregroundColor(AppTheme.ink)
+                                Spacer(minLength: 8)
+                                Text(groupSummary(section))
+                                    .foregroundColor(AppTheme.inkSoft)
+                                    .lineLimit(1)
+                                if section == .websiteAccess && websiteAccessNeedsAttention {
+                                    Circle().fill(AppTheme.amber).frame(width: 7, height: 7)
+                                        .accessibilityLabel("Needs sign-in")
+                                }
+                                Image(systemName: "chevron.right")
+                                    .appFont(.caption, weight: .semibold)
+                                    .foregroundColor(AppTheme.inkFaint)
+                                    .accessibilityHidden(true)
+                            }
+                            .appFont(.body)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: A2Metrics.rowHeight)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.group.\(section.rawValue)")
+                    }
+                }
+                .a2Card()
+                .padding(.horizontal, 16)
+                Text("Models and website access are saved on the server; everything else stays on this \(deviceName).")
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .padding(.horizontal, 20)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.bottom, 24)
+        }
+        .background(AppTheme.paper)
+    }
+
+    /// The short value the iPhone list shows beside a group.
+    private func groupSummary(_ section: ConnectionSettingsSection) -> String {
+        if section == .connection { return model.baseURL?.host ?? "" }
+        if section == .websiteAccess {
+            let count = model.browserProfiles.count
+            return count == 0 ? "" : "\(count) \(count == 1 ? "site" : "sites")"
+        }
+        if section == .appearance { return appearance.theme.label }
+        #if os(iOS)
+        if section == .smsIntegration { return smsIntegration.integrationEnabled ? "On" : "Off" }
+        #endif
+        if section == .dataAndPrivacy { return ClientBuildIdentity.current.version }
+        return ""
+    }
+
+    private func groupPage(_ section: ConnectionSettingsSection) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) { sectionView(section) }
+                .frame(maxWidth: 680, alignment: .leading)
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .background(AppTheme.paper)
     }
 
     private var taskApprovalWebsites: some View {
@@ -243,6 +433,7 @@ public struct ConnectionSettingsView: View {
                 tint: AppTheme.tealText
             ) {
                 VStack(alignment: .leading, spacing: 16) {
+                    if model.isConfigured { connectionStatusRows }
                     settingsField(
                         title: "Server address",
                         help:
@@ -263,10 +454,29 @@ public struct ConnectionSettingsView: View {
                         title: "Bearer token",
                         help: "Stored only in Keychain; it is never written to preferences."
                     ) {
-                        SecureField("Static bearer token", text: $token)
+                        HStack(spacing: 6) {
+                            Group {
+                                if showsToken {
+                                    TextField("Static bearer token", text: $token)
+                                        .appCodeFont(.body)
+                                        .autocorrectionDisabled()
+                                        #if os(iOS)
+                                        .textInputAutocapitalization(.never)
+                                        #endif
+                                } else {
+                                    SecureField("Static bearer token", text: $token)
+                                }
+                            }
                             .textContentType(.password)
                             .textFieldStyle(.plain)
-                            .a2Field(radius: 12)
+                            Button { showsToken.toggle() } label: {
+                                Image(systemName: showsToken ? "eye.slash" : "eye")
+                            }
+                            .buttonStyle(QuietIconButtonStyle())
+                            .accessibilityLabel(showsToken ? "Hide token" : "Show token")
+                            .accessibilityIdentifier("settings.token.visibility")
+                        }
+                        .a2Field(radius: 12)
                     }
 
                     if model.requiresReauthentication {
@@ -450,14 +660,45 @@ public struct ConnectionSettingsView: View {
         case .smsIntegration:
             smsIntegrationSection
 
+        case .notifications:
+            SettingsCard(
+                title: "Notifications",
+                summary: "The devices your Veetbot notifies when an approval, a question or a report is waiting.",
+                systemImage: "bell",
+                tint: AppTheme.tealText
+            ) {
+                if model.isConfigured {
+                    NotificationDevicesSection(model: notificationSettings, chat: model)
+                } else {
+                    Text("Connect this app to Veetbot before managing notifications.")
+                        .appFont(.body)
+                        .foregroundColor(AppTheme.inkSoft)
+                }
+            }
+
         case .appearance:
             SettingsCard(
                 title: "Appearance",
-                summary: "Typography changes are saved automatically and apply immediately.",
+                summary: "Saved on this device and applied at once.",
                 systemImage: "textformat",
                 tint: AppTheme.amberText
             ) {
                 VStack(alignment: .leading, spacing: 16) {
+                    settingsField(
+                        title: "Theme",
+                        help: "System follows this device's light or dark setting."
+                    ) {
+                        Picker("Theme", selection: $appearance.theme) {
+                            ForEach(AppThemePreference.allCases) { theme in
+                                Text(theme.label).tag(theme)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 320)
+                        .accessibilityIdentifier("settings.appearance.theme")
+                    }
+
                     settingsField(
                         title: "Text size",
                         help: "System follows the device accessibility setting."
@@ -527,8 +768,15 @@ public struct ConnectionSettingsView: View {
                         detail: ClientBuildIdentity.current.displayName
                     )
 
+                    SettingsInfoRow(
+                        icon: "clock.arrow.circlepath",
+                        title: "Local history",
+                        detail: "A cache of the server's chats, reconciled when this app connects."
+                    )
+
                     if model.isConfigured {
                         HairlineDivider()
+                        clearCacheControl
                         Button(role: .destructive) {
                             forgetConnection()
                         } label: {
@@ -583,6 +831,73 @@ public struct ConnectionSettingsView: View {
         #endif
     }
 
+    /// Where this device talks to, and when the token last worked.
+    private var connectionStatusRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            statusRow("Server") {
+                Text(model.baseURL?.absoluteString ?? "").appCodeFont(.callout).textSelection(.enabled)
+            }
+            HairlineDivider()
+            statusRow("Token") {
+                Text(["Saved in Keychain", ConnectionVerification.phrase(for: model.lastVerifiedAt, now: Date())]
+                    .compactMap { $0 }.joined(separator: " · "))
+            }
+            HairlineDivider()
+            statusRow("Status") {
+                if model.requiresReauthentication {
+                    Label("The server rejected the token", systemImage: "exclamationmark.triangle")
+                        .foregroundColor(AppTheme.red)
+                } else {
+                    Label("Connected", systemImage: "checkmark").foregroundColor(AppTheme.ink)
+                }
+            }
+        }
+        .a2Card()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings.connection.status")
+    }
+
+    private func statusRow<Value: View>(_ key: String, @ViewBuilder value: () -> Value) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(key).foregroundColor(AppTheme.inkSoft).frame(width: 72, alignment: .leading)
+            value().frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .appFont(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// Clearing asks first, in place: Clear in red, Keep beside it.
+    @ViewBuilder
+    private var clearCacheControl: some View {
+        if confirmingClearCache {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Clear the local cache? Chats stay on the server and reload.")
+                    .appFont(.callout)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("Clear") {
+                        confirmingClearCache = false
+                        Task { await model.clearLocalCache() }
+                    }
+                    .buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red))
+                    .accessibilityIdentifier("settings.clear-cache.confirm")
+                    Button("Keep") { confirmingClearCache = false }
+                        .buttonStyle(QuietCapsuleButtonStyle())
+                }
+            }
+        } else {
+            Button {
+                confirmingClearCache = true
+            } label: {
+                Label("Clear local cache", systemImage: "arrow.counterclockwise")
+            }
+            .buttonStyle(QuietCapsuleButtonStyle())
+            .accessibilityIdentifier("settings.clear-cache")
+        }
+    }
+
     private func settingsField<Content: View>(
         title: String,
         help: String,
@@ -629,7 +944,7 @@ public struct ConnectionSettingsView: View {
                         .appFont(.caption, weight: .semibold)
                         .foregroundColor(AppTheme.tealText)
                 } else {
-                    Button("Use") {
+                    Button("Use for new chats") {
                         Task { await model.selectBrowserProfile(profile.id) }
                     }
                     .buttonStyle(QuietCapsuleButtonStyle())
@@ -697,6 +1012,7 @@ public struct ConnectionSettingsView: View {
 
     private func saveConnection() {
         isSaving = true
+        if embedded { onConnecting?() }
         Task {
             let configured = await model.configure(baseURLString: baseURL, token: token)
             isSaving = false

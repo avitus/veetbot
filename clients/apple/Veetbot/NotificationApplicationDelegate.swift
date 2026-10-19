@@ -8,6 +8,18 @@ import UIKit
 import AppKit
 #endif
 
+/// Connect's second step asks before the system prompt appears. While the
+/// owner has not chosen, or chose Not now, connecting does not prompt;
+/// Allow notifications here or in Settings clears it.
+enum NotificationPermissionGate {
+    private static let key = "veetbot.notifications.askLater"
+
+    static var askLater: Bool {
+        get { UserDefaults.standard.bool(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
 @MainActor
 class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotificationCenterDelegate,
     PushRegistrationRequesting
@@ -61,12 +73,18 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
                 }
                 guard self.requestedServer != baseURL else { return }
                 self.requestedServer = baseURL
-                self.requestRemoteNotificationsAfterConnection()
+                self.requestRemoteNotificationsAfterConnection(ownerAsked: false)
             }
     }
 
-    private func requestRemoteNotificationsAfterConnection() {
+    /// Registers for pushes once the system allows notifications. Connecting
+    /// asks for permission unless Connect's notification step is still
+    /// waiting for the owner's choice (`NotificationPermissionGate`); a
+    /// device that already allows them registers either way.
+    private func requestRemoteNotificationsAfterConnection(ownerAsked: Bool) {
         guard remoteRegistrationEnabled else { return }
+        if ownerAsked { NotificationPermissionGate.askLater = false }
+        let mayPrompt = ownerAsked || !NotificationPermissionGate.askLater
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         #if os(iOS)
@@ -84,6 +102,7 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
                 let settings = await center.notificationSettings()
                 switch settings.authorizationStatus {
                 case .notDetermined:
+                    guard mayPrompt else { return }
                     let granted = try await center.requestAuthorization(
                         options: [.alert, .badge, .sound]
                     )
@@ -114,7 +133,7 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
     /// a capability lands here, and the redelivered token re-registers the
     /// device with the capability set it now declares.
     func requestPushRegistration() {
-        requestRemoteNotificationsAfterConnection()
+        requestRemoteNotificationsAfterConnection(ownerAsked: true)
     }
 
     /// This device as the next registration will describe it, including the

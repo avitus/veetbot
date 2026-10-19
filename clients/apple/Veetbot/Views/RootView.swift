@@ -25,6 +25,8 @@ struct VeetbotSceneRoot: View {
     /// Applies shared appearance and platform bounds without changing the scene's autosave identity.
     var body: some View {
         RootView(model: model)
+            .onAppear { AppThemeApplier.apply(appearance.theme) }
+            .onChange(of: appearance.theme) { AppThemeApplier.apply(appearance.theme) }
             .environmentObject(appearance)
             .environmentObject(smsIntegration)
             .environmentObject(folderSidebar)
@@ -60,6 +62,8 @@ public struct RootView: View {
     @State private var showingGlobalMemory = false
     @State private var showingGlobalPersona = false
     @State private var showingGlobalSchedules = false
+    /// Connect's steps 2 and 3, shown once the first-run connection succeeds.
+    @State private var onboarding: ConnectOnboardingStep?
     #if !os(macOS)
     @State private var showingSettings = false
     @State private var chatListPresented = false
@@ -88,10 +92,17 @@ public struct RootView: View {
 
     public var body: some View {
         Group {
-            if model.isBootstrapping || model.isConfigured {
+            if onboarding != nil, model.isConfigured {
+                ConnectOnboardingView(model: model, step: $onboarding)
+            } else if model.isBootstrapping || model.isConfigured {
                 configuredContent
             } else {
-                ConnectionSettingsView(model: model, embedded: true)
+                ConnectionSettingsView(model: model, embedded: true, onConnecting: {
+                    // Step 2 asks about notifications, so connecting must not
+                    // raise the system prompt first.
+                    NotificationPermissionGate.askLater = true
+                    onboarding = .notifications
+                })
             }
         }
         // Clears the composer at the foot of Chat.
@@ -129,7 +140,9 @@ public struct RootView: View {
         }
         #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
+            // The iPad gives the group sidebar and its page a full page.
             ConnectionSettingsView(model: model, embedded: false)
+                .presentationSizing(.page)
         }
         #endif
         #if os(iOS)
@@ -1170,8 +1183,9 @@ enum MainWindowConfiguration {
 enum SettingsWindowConfiguration {
     static let frameName: NSWindow.FrameAutosaveName = "VeetbotSettingsWindow"
     static let storageKey = "veetbot.settingsWindow.contentSize"
-    static let minimumSize = NSSize(width: 520, height: 440)
-    static let initialSize = NSSize(width: 720, height: 680)
+    // The group sidebar (232 pt) sits beside each group's page.
+    static let minimumSize = NSSize(width: 720, height: 480)
+    static let initialSize = NSSize(width: 920, height: 680)
     static let maximumSize = NSSize(width: 10_000, height: 10_000)
 
     @MainActor

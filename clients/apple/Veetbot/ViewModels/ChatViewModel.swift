@@ -210,6 +210,10 @@ public final class ChatViewModel: ObservableObject {
     private let configurationStore: ConnectionConfigurationStore
     private let historyStore: any SessionHistoryStore
     private let artifactCache: ArtifactCache
+    private let toasts: ToastCenter
+    /// When an authenticated request last succeeded: the session list that
+    /// connecting and the ten-second refresh both read.
+    @Published public private(set) var lastVerifiedAt: Date?
     private let deviceRegistrationCoordinator: DeviceRegistrationCoordinator
     private let urlSession: URLSession?
     private let deviceHandoffClient: DeviceSignInHandoffClient
@@ -347,8 +351,10 @@ public final class ChatViewModel: ObservableObject {
         urlSession: URLSession? = nil,
         deviceHandoffClient: DeviceSignInHandoffClient? = nil,
         deviceSignInTiming: DeviceSignInTiming = .standard,
-        titleRefreshDelay: TimeInterval = 10
+        titleRefreshDelay: TimeInterval = 10,
+        toasts: ToastCenter? = nil
     ) {
+        self.toasts = toasts ?? .shared
         self.titleRefreshDelay = titleRefreshDelay
         self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
@@ -482,6 +488,12 @@ public final class ChatViewModel: ObservableObject {
     /// The registration digest covers the capability set, so the repost is a
     /// real update rather than an idempotent replay.
     public func requestDeviceCapabilityRegistration() {
+        pushRegistrar?.requestPushRegistration()
+    }
+
+    /// The owner chose Allow notifications: ask the system now and register
+    /// this device for pushes if it agrees.
+    public func requestNotificationPermission() {
         pushRegistrar?.requestPushRegistration()
     }
 
@@ -1151,6 +1163,29 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Empties this device's cache of the server's chats and artifacts, then
+    /// reloads the list from the server. Conversations stay on the server;
+    /// a failure leaves its error in place of the confirmation.
+    @discardableResult
+    public func clearLocalCache() async -> Bool {
+        guard isConfigured else { return false }
+        do {
+            for entry in try await historyStore.list() {
+                try await historyStore.delete(sessionID: entry.sessionID)
+            }
+            await artifactCache.removeAll()
+            history = []
+            try await reconcileHistory()
+            history = try await historyStore.list()
+            toasts.show("Cleared. Chats reload from the server.")
+            return true
+        } catch {
+            history = (try? await historyStore.list()) ?? history
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func refreshScheduledReportHistory() async {
         guard isConfigured, notificationSyncActive, !isReconfiguring,
             historyReconciliationID == nil else { return }
@@ -1174,6 +1209,7 @@ public final class ChatViewModel: ObservableObject {
         var serverSpeaksFolders = false
         repeat {
             let page = try await api.listSessions(cursor: cursor)
+            lastVerifiedAt = Date()
             guard historyReconciliationID == reconciliationID else { return }
             for session in page.items {
                 // A cached internal session left unlisted is pruned below.

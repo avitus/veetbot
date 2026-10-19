@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — Settings by group, notifications and devices, theme, and Connect's last steps
+
+- Settings shows one group at a time: a sidebar on Mac and iPad, a list on
+  iPhone. A new Notifications group shows whether this device may notify you
+  and lists every device your Veetbot notifies, with Send test and Remove.
+  Appearance gains a System, Light or Dark theme. Data & privacy can clear the
+  local cache; chats reload from the server. The Connection group says when the
+  token was last verified, and the token field can show what you typed. A ready
+  website login offers "Use for new chats".
+- Connecting a new device continues with two short steps: whether to allow
+  notifications, then a summary before Chat opens.
+
 ## 2026-10-19 — Toasts confirm what just happened
 
 - A short line in a dark capsule now appears at the bottom of the window or

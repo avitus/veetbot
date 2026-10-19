@@ -216,14 +216,66 @@ enum AppFontStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// The owner's light or dark choice; System follows the device.
+enum AppThemePreference: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+/// Applies the theme to every window the app owns, sheets and the Mac
+/// Settings window included; System hands the choice back to the device.
+enum AppThemeApplier {
+    @MainActor
+    static func apply(_ theme: AppThemePreference) {
+        #if os(macOS)
+        switch theme {
+        case .system: NSApp?.appearance = nil
+        case .light: NSApp?.appearance = NSAppearance(named: .aqua)
+        case .dark: NSApp?.appearance = NSAppearance(named: .darkAqua)
+        }
+        #else
+        let style: UIUserInterfaceStyle
+        switch theme {
+        case .system: style = .unspecified
+        case .light: style = .light
+        case .dark: style = .dark
+        }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows { window.overrideUserInterfaceStyle = style }
+        }
+        #endif
+    }
+}
+
 final class AppearancePreferences: ObservableObject {
     private enum Key {
         static let textSize = "veetbot.appearance.textSize"
         static let fontStyle = "veetbot.appearance.fontStyle"
+        static let theme = "veetbot.appearance.theme"
     }
 
     @Published var textSize: AppTextSize {
         didSet { defaults.set(textSize.rawValue, forKey: Key.textSize) }
+    }
+
+    @Published var theme: AppThemePreference {
+        didSet { defaults.set(theme.rawValue, forKey: Key.theme) }
     }
 
     @Published var fontStyle: AppFontStyle {
@@ -235,6 +287,7 @@ final class AppearancePreferences: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         textSize = AppTextSize(rawValue: defaults.string(forKey: Key.textSize) ?? "") ?? .system
+        theme = AppThemePreference(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .system
         // The rounded face stays the default: the system face runs about two
         // points wider per toolbar label, which folds the iPhone Subscriptions
         // toolbar into an overflow menu. The Email restyle may revisit this.

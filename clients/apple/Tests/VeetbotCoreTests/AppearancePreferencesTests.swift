@@ -27,6 +27,21 @@ import Testing
     }
 
     @Test
+    func testThemeDefaultsToSystemAndPersists() throws {
+        let defaults = try isolatedDefaults()
+        let preferences = AppearancePreferences(defaults: defaults)
+        #expect(preferences.theme == .system)
+        #expect(preferences.theme.colorScheme == nil)
+
+        preferences.theme = .dark
+        let reloaded = AppearancePreferences(defaults: defaults)
+
+        #expect(reloaded.theme == .dark)
+        #expect(reloaded.theme.colorScheme == .dark)
+        #expect(AppThemePreference.allCases.map(\.label) == ["System", "Light", "Dark"])
+    }
+
+    @Test
     func testTextSizeChoicesProduceDistinctIncreasingScales() throws {
         let compact = try #require(appPointSize(for: .body, textSize: .compact))
         let comfortable = try #require(appPointSize(for: .body, textSize: .comfortable))

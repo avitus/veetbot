@@ -334,6 +334,19 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    /// Queues a content-free test notification for one device (202; a
+    /// replayed key answers 200). The body names only the notification id.
+    public func sendTestNotification(to deviceID: UUID, idempotencyKey: String) async throws {
+        _ = try await transport.sendData(
+            TransportRequest(
+                method: .post,
+                path: "/v1/devices/\(deviceID.uuidString)/test-notification",
+                headers: ["Idempotency-Key": idempotencyKey],
+                retryAttempts: 2
+            )
+        )
+    }
+
     public func revokeDevice(_ deviceID: UUID) async throws -> DeviceView {
         try await transport.send(
             TransportRequest(

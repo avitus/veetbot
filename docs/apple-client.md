@@ -84,14 +84,34 @@ server's site scope, limits and exceptions beside that choice. An active task pe
 above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 
-Settings are an A2 page: "Settings" in the serif face under a small brand
-mark, then a scrolling body on paper. Connection, Models, Website
-Access, Appearance, and Data & Privacy cards group controls by user intent, and
-iOS adds SMS Integration; each card is a surface with hairline rows, fields in
-the `a2Field` well, the one primary action as a filled capsule and the rest as
-hairline or quiet capsules. First-run setup shows the same body under "Connect
-this Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token
-is kept. The Models card (ADR-0119) reads and saves
+Settings are A2 pages, one per group: Connection, Models, Website access,
+Notifications, Appearance, iOS's SMS integration, and Data & privacy. On the
+Mac and iPad a sidebar on deep paper lists the groups under "Settings" in the
+serif face, the chosen row in the selected tint and Website access marked with
+an amber dot while a login needs the owner; the iPhone lists the groups with a
+short value beside each and pushes the chosen one. Each group is a card on
+paper with hairline rows, fields in the `a2Field` well, the one primary action
+as a filled capsule and the rest as
+hairline or quiet capsules. Connection opens with the server, the token
+("Saved in Keychain · verified 2 min ago", from the last authenticated session
+list) and the status, and the token field has a show/hide control.
+Notifications says whether this device may show them (with Allow
+notifications or Open System Settings), then lists the devices the server
+notifies from `GET /v1/devices`, this one first, each with Send test (a
+content-free test notification) and, for other devices, Remove after a
+confirmation, which revokes it; both need `device.write`, and a server without
+the routes says so. Muting kinds per device has no update route and is not
+offered. Appearance adds a System, Light or Dark theme, applied to every window.
+Data & privacy adds Clear local cache, which asks first and then empties this
+device's cached chat list and artifacts and reloads them from the server; chats
+stay on the server. Website rows offer "Use for new chats".
+
+First-run setup is Connect: step 1 is the Connection group under "Connect this
+Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token is
+kept. Once the server accepts the token, step 2 explains notifications and
+asks Allow notifications or Not now (connecting raises no system prompt before
+this choice; Not now leaves it to Settings), and step 3, "Ready.", summarises
+the server, the token, notifications and websites before Open Chat. The Models card (ADR-0119) reads and saves
 `/v1/settings/models` under `settings.read` and `settings.write`: a chat model
 and reasoning effort, which apply to new chats and to the next message, and a
 memory model and effort limited to the evaluated combinations the server

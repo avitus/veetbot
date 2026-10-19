@@ -1272,6 +1272,24 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
     }
 
+    /// Settings shows one group per page: the Mac and iPad pick it from a
+    /// sidebar, the iPhone pushes it from the list of groups, going back to
+    /// that list first when another group is open.
+    private func openSettingsGroup(_ group: String) {
+        let row = app.buttons["settings.group.\(group)"]
+        #if os(iOS)
+        // A pushed group leaves the list's rows out of the tree; its own
+        // navigation bar's Back returns to them (the Chat bar behind the
+        // sheet has no Back button).
+        if !(row.waitForExistence(timeout: 2) && row.isHittable) {
+            let back = app.buttons["BackButton"].firstMatch
+            if back.waitForExistence(timeout: 2) { back.tap() }
+        }
+        #endif
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        activate(row)
+    }
+
     /// Retains the synthetic mailbox rendering for visual verification even when the test passes.
     private func attachEmailScreenshot(_ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -1436,6 +1454,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         openSidebarDestination(identifier: "sidebar.settings")
         #endif
+        openSettingsGroup("websiteAccess")
         func reveal(_ element: XCUIElement) {
             #if os(macOS)
             let scroll = app.scrollViews.firstMatch
@@ -2499,6 +2518,7 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         openSidebarDestination(identifier: "sidebar.settings")
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        openSettingsGroup("models")
         let chatModel = app.buttons["settings.models.chat.model"]
         let memoryModel = app.buttons["settings.models.memory.model"]
         let memoryEffort = app.buttons["settings.models.memory.effort"]
@@ -2521,6 +2541,7 @@ final class ConversationNavigationUITests: XCTestCase {
         close.tap()
         XCTAssertTrue(close.waitForNonExistence(timeout: 5))
         openSidebarDestination(identifier: "sidebar.settings")
+        openSettingsGroup("models")
         scrollUntilVisible(memoryEffort)
         waitForSavedLabel("Chat model, Claude Fable 5.1", on: chatModel)
         XCTAssertEqual(memoryModel.label, "Memory model, GPT-6 Astra")
@@ -2547,6 +2568,7 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         openSidebarDestination(identifier: "sidebar.settings")
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        openSettingsGroup("websiteAccess")
 
         let websiteAccess = app.staticTexts["Website Access"]
         scrollUntilVisible(websiteAccess)
@@ -2577,6 +2599,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(continueInBrowser.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Start over"].exists)
 
+        openSettingsGroup("dataAndPrivacy")
         let clientBuild = app.staticTexts["Client build"]
         scrollUntilVisible(clientBuild)
         XCTAssertTrue(clientBuild.exists)

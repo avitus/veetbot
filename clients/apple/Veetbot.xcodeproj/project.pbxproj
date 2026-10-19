@@ -26,6 +26,8 @@
 		100000000000000000000011 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* ActivityViews.swift */; };
 		1000000000000000000000F3 /* A2Controls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F3 /* A2Controls.swift */; };
 		1000000000000000000000F6 /* A2Toast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F6 /* A2Toast.swift */; };
+		1000000000000000000000F9 /* ConnectOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F9 /* ConnectOnboardingView.swift */; };
+		1000000000000000000000F8 /* NotificationDevicesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F8 /* NotificationDevicesSection.swift */; };
 		100000000000000000000012 /* ArtifactViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* ArtifactViewerView.swift */; };
 		100000000000000000000013 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* ChatView.swift */; };
 		100000000000000000000014 /* ConnectionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* ConnectionSettingsView.swift */; };
@@ -56,6 +58,7 @@
 		1000000000000000000000D1 /* ConversationFolders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D1 /* ConversationFolders.swift */; };
 		1000000000000000000000F4 /* SidebarAttention.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F4 /* SidebarAttention.swift */; };
 		1000000000000000000000F5 /* ToastCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F5 /* ToastCenter.swift */; };
+		1000000000000000000000F7 /* NotificationSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F7 /* NotificationSettingsViewModel.swift */; };
 		1000000000000000000000D2 /* ConversationFolderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000D2 /* ConversationFolderViews.swift */; };
 		10000000000000000000D3 /* EmailSubscriptionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000D3 /* EmailSubscriptionModels.swift */; };
 		10000000000000000000D4 /* EmailSubscriptionAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000D4 /* EmailSubscriptionAPIClient.swift */; };
@@ -126,6 +129,8 @@
 		200000000000000000000011 /* ActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViews.swift; sourceTree = "<group>"; };
 		2000000000000000000000F3 /* A2Controls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2Controls.swift; sourceTree = "<group>"; };
 		2000000000000000000000F6 /* A2Toast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2Toast.swift; sourceTree = "<group>"; };
+		2000000000000000000000F9 /* ConnectOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectOnboardingView.swift; sourceTree = "<group>"; };
+		2000000000000000000000F8 /* NotificationDevicesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDevicesSection.swift; sourceTree = "<group>"; };
 		200000000000000000000012 /* ArtifactViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactViewerView.swift; sourceTree = "<group>"; };
 		200000000000000000000013 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		200000000000000000000014 /* ConnectionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSettingsView.swift; sourceTree = "<group>"; };
@@ -158,6 +163,7 @@
 		2000000000000000000000D1 /* ConversationFolders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolders.swift; sourceTree = "<group>"; };
 		2000000000000000000000F4 /* SidebarAttention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarAttention.swift; sourceTree = "<group>"; };
 		2000000000000000000000F5 /* ToastCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastCenter.swift; sourceTree = "<group>"; };
+		2000000000000000000000F7 /* NotificationSettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSettingsViewModel.swift; sourceTree = "<group>"; };
 		2000000000000000000000D2 /* ConversationFolderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFolderViews.swift; sourceTree = "<group>"; };
 		20000000000000000000D3 /* EmailSubscriptionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSubscriptionModels.swift; sourceTree = "<group>"; };
 		20000000000000000000D4 /* EmailSubscriptionAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSubscriptionAPIClient.swift; sourceTree = "<group>"; };
@@ -323,6 +329,7 @@
 				2000000000000000000000D1 /* ConversationFolders.swift */,
 				2000000000000000000000F4 /* SidebarAttention.swift */,
 				2000000000000000000000F5 /* ToastCenter.swift */,
+				2000000000000000000000F7 /* NotificationSettingsViewModel.swift */,
 				200000000000000000000026 /* ScheduleViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
 				2000000000000000000000A3 /* EmailViewModel.swift */,
@@ -347,6 +354,8 @@
 				200000000000000000000011 /* ActivityViews.swift */,
 				2000000000000000000000F3 /* A2Controls.swift */,
 				2000000000000000000000F6 /* A2Toast.swift */,
+				2000000000000000000000F9 /* ConnectOnboardingView.swift */,
+				2000000000000000000000F8 /* NotificationDevicesSection.swift */,
 				200000000000000000000012 /* ArtifactViewerView.swift */,
 				200000000000000000000013 /* ChatView.swift */,
 				200000000000000000000019 /* ComposerTextEditor.swift */,
@@ -542,11 +551,14 @@
 				1000000000000000000000D1 /* ConversationFolders.swift in Sources */,
 				1000000000000000000000F4 /* SidebarAttention.swift in Sources */,
 				1000000000000000000000F5 /* ToastCenter.swift in Sources */,
+				1000000000000000000000F7 /* NotificationSettingsViewModel.swift in Sources */,
 				100000000000000000000025 /* ScheduleViewModel.swift in Sources */,
 				100000000000000000000010 /* RunStateReducer.swift in Sources */,
 				100000000000000000000011 /* ActivityViews.swift in Sources */,
 				1000000000000000000000F3 /* A2Controls.swift in Sources */,
 				1000000000000000000000F6 /* A2Toast.swift in Sources */,
+				1000000000000000000000F9 /* ConnectOnboardingView.swift in Sources */,
+				1000000000000000000000F8 /* NotificationDevicesSection.swift in Sources */,
 				100000000000000000000012 /* ArtifactViewerView.swift in Sources */,
 				100000000000000000000013 /* ChatView.swift in Sources */,
 				10000000000000000000001A /* AppTheme.swift in Sources */,
