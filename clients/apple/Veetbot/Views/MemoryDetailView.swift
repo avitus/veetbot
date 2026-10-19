@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// One belief's full exposure-list projection, sectioned to mirror the
-/// server's `MemoryView` fields (memory-read-api-and-browser.md). Rows for a
-/// nil or empty field are omitted rather than shown blank. With a browsing
-/// model attached, the view also carries the review and deletion actions of
-/// ADR-0117; People's evidence inspection opens it without one.
+/// One belief's full exposure-list projection (memory-read-api-and-browser.md),
+/// read as an A2 page: its kind, the statement in the serif face, where it
+/// came from, then its classification, provenance and lifecycle as record
+/// groups. Rows for a nil or empty field are omitted rather than shown blank.
+/// With a browsing model attached, the view also carries the review and
+/// deletion actions of ADR-0117; People's evidence inspection opens it
+/// without one.
 public struct MemoryDetailView: View {
     @State private var memory: MemoryView
     private let model: MemoryViewModel?
@@ -17,112 +19,27 @@ public struct MemoryDetailView: View {
     }
 
     public var body: some View {
-        List {
-            Section("Original memory") {
-                Text(memory.statement)
-                if let person = memory.personLink {
-                    NavigationLink {
-                        PeopleDetailView(personID: person.id)
-                    } label: {
-                        Label(person.name, systemImage: "person")
-                            .appFont(.caption)
-                    }
-                    .accessibilityIdentifier("memory.detail.person")
-                } else {
-                    Text(memory.subject)
-                        .appFont(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Section("Classification") {
-                KeyValueRow(key: "Belief type", value: memoryDisplayText(memory.beliefType))
-                KeyValueRow(key: "Status", value: memoryDisplayText(memory.status))
-                KeyValueRow(key: "Polarity", value: memoryDisplayText(memory.polarity))
-                KeyValueRow(key: "Portability", value: memoryDisplayText(memory.portability))
-                KeyValueRow(key: "Authority", value: memoryDisplayText(memory.authority))
-                KeyValueRow(
-                    key: "Confidence",
-                    value: String(format: "%.0f%%", memory.confidence * 100)
-                )
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Sensitivity").appFont(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    MemorySensitivityBadge(
-                        sensitivity: memory.sensitivity,
-                        kind: memory.sensitivityKind
-                    )
-                }
-            }
-
-            Section("Provenance") {
-                KeyValueRow(key: "Source session", value: memory.sourceSessionID.uuidString)
-                if !memory.sourceEventIDs.isEmpty {
-                    KeyValueRow(
-                        key: "Source events",
-                        value: memory.sourceEventIDs.map(String.init).joined(separator: ", ")
-                    )
-                }
-                KeyValueRow(key: "Formation run", value: memory.formationRunID.uuidString)
-                if !memory.consolidationPolicyVersion.isEmpty {
-                    KeyValueRow(
-                        key: "Consolidation policy version",
-                        value: memory.consolidationPolicyVersion
-                    )
-                }
-                if !memory.originScopes.isEmpty {
-                    KeyValueRow(
-                        key: "Origin scopes",
-                        value: memory.originScopes.joined(separator: ", ")
-                    )
-                }
-                if !memory.conflictsWith.isEmpty {
-                    KeyValueRow(
-                        key: "Conflicts with",
-                        value: memory.conflictsWith.map(\.uuidString).joined(separator: ", ")
-                    )
-                }
-                if let supersededBy = memory.supersededBy {
-                    KeyValueRow(key: "Superseded by", value: supersededBy.uuidString)
-                }
-                if memory.flaggedForReview {
-                    Label("Flagged for review", systemImage: "flag.fill")
-                        .foregroundColor(AppTheme.orange)
-                    if model != nil {
-                        Text("Formation committed this memory without an explicit statement from you. Use Review to confirm, correct, or remove it.")
-                            .appFont(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                heading
+                if memory.flaggedForReview { reviewCard }
                 if let message = model?.errorMessage {
-                    Text(message).appFont(.caption).foregroundColor(.secondary)
+                    Text(message).appFont(.caption).foregroundColor(AppTheme.inkSoft)
                 }
+                A2RecordGroup(title: "Classification", rows: classification)
+                A2RecordGroup(title: "Provenance", rows: provenance)
+                A2RecordGroup(title: "Lifecycle", rows: lifecycle)
             }
-
-            Section("Lifecycle") {
-                KeyValueRow(key: "Claim kind", value: memory.claimKind)
-                KeyValueRow(key: "Derivation", value: memory.derivation)
-                KeyValueRow(key: "Longevity", value: memory.longevity)
-                KeyValueRow(key: "Valid from", value: memory.validFrom.formatted())
-                if let validTo = memory.validTo {
-                    KeyValueRow(key: "Valid to", value: validTo.formatted())
-                }
-                if let expiresAt = memory.expiresAt {
-                    KeyValueRow(key: "Expires", value: expiresAt.formatted())
-                }
-                KeyValueRow(key: "Last evidence", value: memory.lastEvidenceAt.formatted())
-                if let lastUsedAt = memory.lastUsedAt {
-                    KeyValueRow(key: "Last used", value: lastUsedAt.formatted())
-                }
-                KeyValueRow(
-                    key: "Legacy reinforcement",
-                    value: memory.lastReinforcedAt.formatted()
-                )
-                KeyValueRow(key: "Created", value: memory.createdAt.formatted())
-                KeyValueRow(key: "Updated", value: memory.updatedAt.formatted())
-            }
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(AppTheme.paper)
         .navigationTitle("Memory")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .accessibilityIdentifier("memory.detail")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -144,9 +61,131 @@ public struct MemoryDetailView: View {
         }
     }
 
+    // MARK: Heading
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                A2KindLabel(text: memoryDisplayText(memory.beliefType))
+                if memory.flaggedForReview {
+                    Text("· Needs review")
+                        .appFont(.caption, weight: .medium)
+                        .foregroundColor(AppTheme.amberText)
+                }
+            }
+            Text(memory.statement)
+                .appDisplayFont(.title2)
+                .foregroundColor(AppTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if let person = memory.personLink {
+                NavigationLink {
+                    PeopleDetailView(personID: person.id)
+                } label: {
+                    Label(person.name, systemImage: "person")
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.tealText)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("memory.detail.person")
+            } else {
+                Text(memory.subject)
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+            }
+            Text(
+                "Formed \(memory.createdAt.formatted(date: .abbreviated, time: .omitted)) · Last evidence \(memory.lastEvidenceAt.formatted(date: .abbreviated, time: .omitted))"
+            )
+            .appFont(.caption)
+            .foregroundColor(AppTheme.inkSoft)
+            HStack(spacing: 8) {
+                MemorySensitivityBadge(sensitivity: memory.sensitivity, kind: memory.sensitivityKind)
+                if memory.statusKind != .active {
+                    MemoryStatusTag(status: memory.status)
+                }
+            }
+        }
+    }
+
+    /// The amber-edged card that says why this memory waits on the owner.
+    private var reviewCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Needs review", systemImage: "flag.fill")
+                .appFont(.caption, weight: .semibold)
+                .foregroundColor(AppTheme.amberText)
+            if model != nil {
+                Text("Formation committed this memory without an explicit statement from you. Use Review to confirm, correct, or remove it.")
+                    .appFont(.callout)
+                    .foregroundColor(AppTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .a2Card(border: AppTheme.amberLine)
+    }
+
+    // MARK: Records
+
+    private var classification: [A2Record] {
+        [
+            A2Record("Belief type", memoryDisplayText(memory.beliefType)),
+            A2Record("Status", memoryDisplayText(memory.status)),
+            A2Record("Polarity", memoryDisplayText(memory.polarity)),
+            A2Record("Portability", memoryDisplayText(memory.portability)),
+            A2Record("Authority", memoryDisplayText(memory.authority)),
+            A2Record("Confidence", String(format: "%.0f%%", memory.confidence * 100)),
+            A2Record("Sensitivity", memoryDisplayText(memory.sensitivity)),
+        ]
+    }
+
+    private var provenance: [A2Record] {
+        var rows = [A2Record("Source session", memory.sourceSessionID.uuidString)]
+        if !memory.sourceEventIDs.isEmpty {
+            rows.append(A2Record("Source events", memory.sourceEventIDs.map(String.init).joined(separator: ", ")))
+        }
+        rows.append(A2Record("Formation run", memory.formationRunID.uuidString))
+        if !memory.consolidationPolicyVersion.isEmpty {
+            rows.append(A2Record("Consolidation policy version", memory.consolidationPolicyVersion))
+        }
+        if !memory.originScopes.isEmpty {
+            rows.append(A2Record("Origin scopes", memory.originScopes.joined(separator: ", ")))
+        }
+        if !memory.conflictsWith.isEmpty {
+            rows.append(A2Record("Conflicts with", memory.conflictsWith.map(\.uuidString).joined(separator: ", ")))
+        }
+        if let supersededBy = memory.supersededBy {
+            rows.append(A2Record("Superseded by", supersededBy.uuidString))
+        }
+        return rows
+    }
+
+    private var lifecycle: [A2Record] {
+        var rows = [
+            A2Record("Claim kind", memory.claimKind),
+            A2Record("Derivation", memory.derivation),
+            A2Record("Longevity", memory.longevity),
+            A2Record("Valid from", memory.validFrom.formatted()),
+        ]
+        if let validTo = memory.validTo {
+            rows.append(A2Record("Valid to", validTo.formatted()))
+        }
+        if let expiresAt = memory.expiresAt {
+            rows.append(A2Record("Expires", expiresAt.formatted()))
+        }
+        rows.append(A2Record("Last evidence", memory.lastEvidenceAt.formatted()))
+        if let lastUsedAt = memory.lastUsedAt {
+            rows.append(A2Record("Last used", lastUsedAt.formatted()))
+        }
+        rows.append(A2Record("Legacy reinforcement", memory.lastReinforcedAt.formatted()))
+        rows.append(A2Record("Created", memory.createdAt.formatted()))
+        rows.append(A2Record("Updated", memory.updatedAt.formatted()))
+        return rows
+    }
+
     /// The review outcomes of ADR-0117, offered only when a browsing model can
-    /// carry them out. A toolbar menu rather than a list section, so the
-    /// belief's own rows keep their places on every layout. Each action sends
+    /// carry them out. A toolbar menu rather than a card of buttons, so the
+    /// belief's own lines keep their places on every layout. Each action sends
     /// a fresh idempotency key and replaces this view's belief with the
     /// server's answer.
     private func reviewMenu(_ model: MemoryViewModel) -> some View {
@@ -193,20 +232,5 @@ public struct MemoryDetailView: View {
         }
         .accessibilityLabel("Review this memory")
         .accessibilityIdentifier("memory.detail.review")
-    }
-}
-
-private struct KeyValueRow: View {
-    let key: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(key).appFont(.caption).foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .appFont(.caption)
-                .multilineTextAlignment(.trailing)
-        }
     }
 }

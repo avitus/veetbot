@@ -37,7 +37,7 @@ private struct AttachmentChip: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: attachment.isImage ? "photo" : "doc")
-                .foregroundColor(AppTheme.turquoise)
+                .foregroundColor(AppTheme.teal)
             VStack(alignment: .leading, spacing: 3) {
                 Text(attachment.filename)
                     .appFont(.caption)
@@ -55,20 +55,20 @@ private struct AttachmentChip: View {
             }
             Button(action: remove) {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkFaint)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Remove \(attachment.filename)")
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(AppTheme.turquoise.opacity(0.12))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(AppTheme.field)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isFailed ? Color.red.opacity(0.5) : AppTheme.turquoise.opacity(0.35))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isFailed ? AppTheme.red.opacity(0.6) : Color.clear)
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
@@ -149,10 +149,10 @@ struct AttachmentDropDelegate: DropDelegate {
 struct AttachmentDropHighlight: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 14)
-            .stroke(AppTheme.orange, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+            .stroke(AppTheme.teal, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
             .background(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(AppTheme.orange.opacity(0.06))
+                    .fill(AppTheme.tealWash)
             )
             .overlay(
                 Label("Drop files to attach", systemImage: "paperclip")

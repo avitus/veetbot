@@ -1,71 +1,55 @@
 import SwiftUI
 
-#if os(macOS)
-import AppKit
-#else
-import UIKit
-#endif
-
 // MARK: - Tokens
 
-/// The People palette. Accent and surfaces follow Email mode; text colors keep
-/// at least 4.5:1 contrast on cards and canvas in both appearances, which the
-/// Mac Large text accessibility audit checks.
+/// The People palette, drawn from the A2 Dock tokens. Links and glyphs use the
+/// teal text colour: the mark colour reads 4.2:1 on white and fails the Mac
+/// Large text accessibility audit. Amber is what waits on the owner, red is a
+/// removal, and the page and its cards are paper and surface.
 enum PeopleSurface {
-    static var accent: Color { EmailSurface.accent }
+    static let accent = AppTheme.tealText
+    /// Filled buttons and switches.
+    static let fill = AppTheme.tealFill
     /// Unconfirmed identities and questions waiting on the owner.
-    static let attention = peopleAdaptiveColor(light: (167, 62, 0), dark: (255, 158, 98))
+    static let attention = AppTheme.amberText
     /// Forgetting and other removals.
-    static let destructive = peopleAdaptiveColor(light: (180, 35, 24), dark: (255, 138, 125))
-    /// Initials on the monogram's tinted wash.
-    static let monogramInk = peopleAdaptiveColor(light: (0, 84, 81), dark: (97, 209, 196))
-    static var canvas: Color { EmailSurface.canvas }
-    static var card: Color { EmailSurface.card }
+    static let destructive = AppTheme.red
+    /// Initials on the monogram's teal wash.
+    static let monogramInk = AppTheme.tealText
+    static let canvas = AppTheme.paper
+    static let card = AppTheme.surface
     /// Dates, sources and other supporting text.
-    static let muted = Color.primary.opacity(0.75)
-    static let hairline = Color.primary.opacity(0.09)
+    static let muted = AppTheme.inkSoft
+    static let hairline = AppTheme.hairline
 }
 
 enum PeopleMetrics {
     #if os(macOS)
     static let pagePadding: CGFloat = 24
     static let sectionSpacing: CGFloat = 22
-    static let avatar: CGFloat = 60
+    static let avatar: CGFloat = 56
+    static let rowAvatar: CGFloat = 32
     static let meta: Font.TextStyle = .subheadline
     #else
     static let pagePadding: CGFloat = 16
     static let sectionSpacing: CGFloat = 20
-    static let avatar: CGFloat = 68
+    static let avatar: CGFloat = 64
+    static let rowAvatar: CGFloat = 40
     static let meta: Font.TextStyle = .footnote
     #endif
     /// A readable measure for statements and summaries at any window width.
-    static let readableWidth: CGFloat = 700
-    static let cardRadius: CGFloat = 14
+    static let readableWidth: CGFloat = 680
+    static let cardRadius: CGFloat = A2Metrics.cardRadius
     static let rowPadding: CGFloat = 14
-}
-
-private func peopleAdaptiveColor(light: (Double, Double, Double), dark: (Double, Double, Double)) -> Color {
-    #if os(macOS)
-    Color(nsColor: NSColor(name: nil) { appearance in
-        let rgb = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
-        return NSColor(srgbRed: rgb.0 / 255, green: rgb.1 / 255, blue: rgb.2 / 255, alpha: 1)
-    })
-    #else
-    Color(uiColor: UIColor { traits in
-        let rgb = traits.userInterfaceStyle == .dark ? dark : light
-        return UIColor(red: rgb.0 / 255, green: rgb.1 / 255, blue: rgb.2 / 255, alpha: 1)
-    })
-    #endif
 }
 
 // MARK: - Building blocks
 
-/// A person's initials on the brand's teal-to-orange wash. Decorative: the
+/// A person's initials on the teal wash, in the display face. Decorative: the
 /// name beside it carries the meaning, so accessibility sizes leave it out.
 struct PeopleMonogram: View {
     let name: String
     var size: CGFloat = PeopleMetrics.avatar
-    @Environment(\.appFontStyle) private var fontStyle
     @Environment(\.dynamicTypeSize) private var typeSize
     /// Grows the circle with the text style its initials use.
     @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
@@ -74,12 +58,11 @@ struct PeopleMonogram: View {
         if !typeSize.isAccessibilitySize {
             let initials = Self.initials(of: name)
             ZStack {
-                Circle().fill(AppTheme.brandGradient)
-                Circle().strokeBorder(PeopleSurface.accent.opacity(0.22), lineWidth: 1)
+                Circle().fill(AppTheme.tealWash)
                 if initials.isEmpty {
-                    Image(systemName: "person.fill").font(.system(style, design: fontStyle.design))
+                    Image(systemName: "person.fill").font(.system(style, design: .serif))
                 } else {
-                    Text(initials).font(.system(style, design: fontStyle.design).weight(.semibold))
+                    Text(initials).font(.system(style, design: .serif).weight(.medium))
                 }
             }
             .foregroundColor(PeopleSurface.monogramInk)
@@ -106,7 +89,7 @@ struct PeopleMonogram: View {
     }
 }
 
-/// A titled profile section: the title sits on the canvas, the rows on a card.
+/// A titled profile section: the heading sits on the page, the rows on a card.
 struct PeopleSection<Content: View>: View {
     let title: String
     let content: Content
@@ -118,9 +101,7 @@ struct PeopleSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .appFont(.headline)
-                .accessibilityAddTraits(.isHeader)
+            A2SectionHeading(title: title)
                 .padding(.horizontal, 4)
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -138,7 +119,7 @@ struct PeopleRow<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if divided { Divider().padding(.leading, PeopleMetrics.rowPadding) }
+            if divided { HairlineDivider().padding(.leading, PeopleMetrics.rowPadding) }
             content()
                 .padding(PeopleMetrics.rowPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -165,7 +146,8 @@ struct PeopleBadge: View {
     }
 }
 
-/// A question or status that sits above the profile's sections.
+/// A question or status that sits above the profile's sections: a surface
+/// card whose edge takes the tint, amber by default.
 struct PeopleCallout<Actions: View>: View {
     let systemImage: String
     let title: String
@@ -180,7 +162,7 @@ struct PeopleCallout<Actions: View>: View {
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).appFont(.headline).fixedSize(horizontal: false, vertical: true)
+                Text(title).appFont(.headline).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                 if let message {
                     Text(message).appFont(.callout).foregroundColor(PeopleSurface.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -191,12 +173,7 @@ struct PeopleCallout<Actions: View>: View {
         }
         .padding(PeopleMetrics.rowPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: PeopleMetrics.cardRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: PeopleMetrics.cardRadius, style: .continuous)
-                .stroke(tint.opacity(0.28), lineWidth: 1)
-        )
+        .a2Card(border: tint.opacity(0.45))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }
@@ -234,10 +211,10 @@ struct PeopleTimelineRow<Content: View>: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(PeopleSurface.accent)
                     .frame(width: 28, height: 28)
-                    .background(Circle().fill(PeopleSurface.accent.opacity(0.12)))
+                    .background(Circle().fill(AppTheme.tealWash))
                     .accessibilityLabel(symbolLabel)
                 if !isLast {
-                    Rectangle().fill(PeopleSurface.hairline).frame(width: 2).frame(maxHeight: .infinity)
+                    Rectangle().fill(AppTheme.hairlineStrong).frame(width: 1).frame(maxHeight: .infinity)
                         .accessibilityHidden(true)
                 }
             }
@@ -253,23 +230,11 @@ struct PeopleTimelineRow<Content: View>: View {
 /// The profile column before anyone is chosen.
 struct PeoplePlaceholder: View {
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "person.2")
-                .font(.system(size: 30, weight: .light))
-                .foregroundColor(PeopleSurface.accent)
-                .frame(width: 72, height: 72)
-                .background(PeopleSurface.accent.opacity(0.08))
-                .clipShape(Circle())
-                .accessibilityHidden(true)
-            Text("Choose a person").appFont(.title3, weight: .semibold)
-            Text("Their relationship to you, your history together, and what Veetbot knows about them appear here.")
-                .appFont(.callout)
-                .foregroundColor(PeopleSurface.muted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(24)
+        A2EmptyState(
+            systemImage: "person.2",
+            title: "Choose a person",
+            message: "Their relationship to you, your history together, and what Veetbot knows about them appear here."
+        )
         // A zero minimum keeps the Mac split view at the sheet's height; a
         // column that cannot shrink makes it grow to the directory's length.
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
@@ -294,12 +259,7 @@ struct PeopleMeta: View {
 extension View {
     /// The profile's card surface: a hairline edge instead of a shadow.
     func peopleCard() -> some View {
-        background(PeopleSurface.card)
-            .clipShape(RoundedRectangle(cornerRadius: PeopleMetrics.cardRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: PeopleMetrics.cardRadius, style: .continuous)
-                    .stroke(PeopleSurface.hairline, lineWidth: 1)
-            )
+        a2Card()
     }
 
     /// Gives a compact control the 44-point target touch needs; the Mac keeps its size.
@@ -319,7 +279,7 @@ extension View {
     }
 }
 
-/// A compact text action inside a row, in the accent color while it can act.
+/// A compact text action inside a row, in teal text while it can act.
 struct PeopleInlineButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         PeopleInlineButtonLabel(configuration: configuration)
@@ -339,7 +299,6 @@ private struct PeopleInlineButtonLabel: View {
             .contentShape(Rectangle())
     }
 }
-
 // MARK: - Navigation within a directory
 
 /// Set by a directory that shows profiles beside it. Opening a related person

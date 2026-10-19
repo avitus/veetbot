@@ -27,7 +27,7 @@ import AppKit
             source.contains(
                 "}\n        .accessibilityIdentifier(\"memory.browser\")\n        .task { await model.reload() }"
             ),
-            "memory.browser must be attached to the NavigationView result, not nested inside its searchable/toolbar content chain"
+            "memory.browser must be attached to the navigation container, not nested inside its searchable/toolbar content chain"
         )
     }
 
@@ -40,7 +40,7 @@ import AppKit
 
         #expect(
             normalizedSource.contains(
-                "#if os(macOS) .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
+                "#if os(macOS) // The ideal height sizes the fitted sheet before a saved size exists; // without it a column whose content wants all the height it is offered // (an empty or unavailable state) lays out at the screen's height and // is cut off above the sheet. .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, idealHeight: 600, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
             )
         )
         #expect(source.contains(".background(MemoryBrowserWindowResizeView())"))

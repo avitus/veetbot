@@ -62,6 +62,9 @@ struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
+    /// The height the text needs at the current width, so the composer can
+    /// hug one line and grow with the draft.
+    var onContentHeightChange: (CGFloat) -> Void = { _ in }
     @Environment(\.appFontStyle) private var appFontStyle
     @Environment(\.appTextSize) private var appTextSize
 
@@ -81,6 +84,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onDropFiles = onDropFiles
+        textView.onContentHeight = onContentHeightChange
         textView.string = text
         installFontRefresh(on: textView)
         applyFont(to: textView)
@@ -114,11 +118,13 @@ struct ComposerTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
         textView.onSubmit = onSubmit
         textView.onDropFiles = onDropFiles
+        textView.onContentHeight = onContentHeightChange
         installFontRefresh(on: textView)
         applyFont(to: textView)
         if textView.string != text {
             textView.string = text
         }
+        textView.reportContentHeight()
     }
 
     private func applyFont(to textView: NSTextView) {
@@ -153,8 +159,33 @@ struct ComposerTextEditor: NSViewRepresentable {
 final class ComposerNSTextView: NSTextView {
     var onSubmit: () -> Void = {}
     var onDropFiles: ([URL]) -> Void = { _ in }
+    var onContentHeight: (CGFloat) -> Void = { _ in }
     let fontRefreshController = ComposerFontRefreshController()
     private var observesSystemTextSize = false
+    private var reportedContentHeight: CGFloat = -1
+
+    /// Tells the composer how tall the draft is; only a change is reported,
+    /// and after the current layout pass, so SwiftUI is never updated mid-draw.
+    func reportContentHeight() {
+        guard let layoutManager, let textContainer else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        let used = layoutManager.usedRect(for: textContainer).height
+        let height = ceil(used + textContainerInset.height * 2)
+        guard abs(height - reportedContentHeight) > 0.5 else { return }
+        reportedContentHeight = height
+        let report = onContentHeight
+        DispatchQueue.main.async { report(height) }
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        reportContentHeight()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        reportContentHeight()
+    }
 
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
         super.readablePasteboardTypes + [.fileURL, .tiff, .png]
@@ -288,6 +319,9 @@ struct ComposerTextEditor: UIViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     var onDropItems: ([NSItemProvider]) -> Void = { _ in }
+    /// The height the text needs at the current width, so the composer can
+    /// hug one line and grow with the draft.
+    var onContentHeightChange: (CGFloat) -> Void = { _ in }
     @Environment(\.appFontStyle) private var appFontStyle
     @Environment(\.appTextSize) private var appTextSize
 
@@ -299,6 +333,7 @@ struct ComposerTextEditor: UIViewRepresentable {
         let textView = ComposerUITextView()
         textView.delegate = context.coordinator
         textView.textDropDelegate = context.coordinator
+        textView.onContentHeight = onContentHeightChange
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
         installFontRefresh(on: textView)
         textView.text = text
@@ -313,12 +348,14 @@ struct ComposerTextEditor: UIViewRepresentable {
 
     func updateUIView(_ textView: ComposerUITextView, context: Context) {
         context.coordinator.parent = self
+        textView.onContentHeight = onContentHeightChange
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
         installFontRefresh(on: textView)
         applyFont(to: textView)
         if textView.text != text {
             textView.text = text
         }
+        textView.reportContentHeight()
     }
 
     private func applyFont(to textView: UITextView) {
@@ -388,6 +425,7 @@ struct ComposerTextEditor: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+            (textView as? ComposerUITextView)?.reportContentHeight()
         }
 
         func textView(
@@ -417,6 +455,24 @@ struct ComposerTextEditor: UIViewRepresentable {
 final class ComposerUITextView: UITextView {
     var commandReturnHandler: () -> Void = {}
     var isInsertingCommandNewline = false
+    var onContentHeight: (CGFloat) -> Void = { _ in }
+    private var reportedContentHeight: CGFloat = -1
+
+    /// Tells the composer how tall the draft is; only a change is reported,
+    /// and after the current layout pass, so SwiftUI is never updated mid-draw.
+    func reportContentHeight() {
+        guard bounds.width > 0 else { return }
+        let height = ceil(sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height)
+        guard abs(height - reportedContentHeight) > 0.5 else { return }
+        reportedContentHeight = height
+        let report = onContentHeight
+        DispatchQueue.main.async { report(height) }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        reportContentHeight()
+    }
     let fontRefreshController = ComposerFontRefreshController()
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {

@@ -9,178 +9,156 @@ private enum ServerContractIdentifier {
     static let taskBlocked = "blocked"
 }
 
-struct ToolActivityCard: View {
-    let activity: ToolActivity
-    let approval: ApprovalView?
-    var activeTaskGrant: BrowserTaskGrantView? = nil
-    /// The decision on its way for this card's approval, if any.
-    var approvalInFlight: ApprovalDecision? = nil
-    let resolve: (ApprovalView, ApprovalDecision, String?, TaskGrantEcho?) -> Void
-    let openArtifact: (UUID) -> Void
-    @State private var expanded = false
-
-    /// Present the individual tool status, risk, result, and available approval controls.
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                expanded.toggle()
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: taxonomy.icon)
-                        .foregroundColor(taxonomy.color)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(activity.name).appFont(.headline)
-                        Text(activity.presentationStatus.rawValue.capitalized)
-                            .appFont(.caption)
-                            .foregroundColor(taxonomy.color)
-                        if activity.allowedByTaskGrant {
-                            Label("Allowed by task permission", systemImage: "checkmark.shield")
-                                .appFont(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    Spacer()
-                    if let risk = activity.risk {
-                        RiskBadge(risk: risk, color: taxonomy.color)
-                    }
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-
-            if expanded {
-                if let summary = activity.taskGrantSummary {
-                    DetailBlock(title: "What it did", text: summary)
-                }
-                if let diagnostics = activity.browserDiagnostics {
-                    DetailBlock(title: "Browser activity", text: diagnostics.summary + "\n" + diagnostics.detail)
-                }
-                if !activity.arguments.isEmpty {
-                    DetailBlock(
-                        title: "Arguments", text: JSONValue.object(activity.arguments).prettyPrinted
-                    )
-                }
-                if let result = activity.result {
-                    ToolResultContent(
-                        toolName: activity.name,
-                        result: result,
-                        openArtifact: openArtifact
-                    )
-                }
-            }
-            if let approval {
-                ApprovalCardView(
-                    approval: approval, activeTaskGrant: activeTaskGrant, inFlight: approvalInFlight
-                ) { decision, reason, taskGrant in
-                    resolve(approval, decision, reason, taskGrant)
-                }
-            }
-        }
-        .padding(12)
-        .background(Color.secondary.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+/// What a run did, in one sentence the owner can open: a single tool call or
+/// a bundle of adjacent settled ones. Open, it is a monospace ledger, one row
+/// per call, each opening again onto its arguments and result. A pending
+/// approval is never here; the transcript says it is waiting and the card
+/// sits above the composer. A settled approval stays with its call, folded.
+struct WorkStrip: View {
+    enum Content {
+        case single(ToolActivity)
+        case bundle(ToolActivityBundle)
     }
 
-    private var taxonomy: TaxonomyStyle {
-        TaxonomyStyle(sideEffect: activity.sideEffect, risk: activity.risk)
-    }
-}
-
-struct ToolActivityBundleCard: View {
-    let bundle: ToolActivityBundle
-    /// The settled approvals some bundled calls carry.
+    let content: Content
+    /// The settled approvals the calls carry.
     var approvals: [ApprovalView] = []
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
-    /// Present an expandable group of terminal tool outcomes.
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             Button {
-                expanded.toggle()
+                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: taxonomy.icon)
-                        .foregroundColor(taxonomy.color)
-                    Text(bundle.summary).appFont(.subheadline)
-                    Spacer()
-                    if let risk = bundle.highestRisk {
-                        RiskBadge(risk: risk, color: taxonomy.color)
-                    }
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .frame(width: 12)
+                    Text(sentence)
+                        .appFont(.callout)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .foregroundColor(AppTheme.inkSoft)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            .accessibilityIdentifier("tool.bundle.\(bundle.id)")
+            .accessibilityIdentifier(summaryIdentifier)
 
             if expanded {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(bundle.activities.enumerated()), id: \.element.id) {
-                        index, activity in
-                        BundledToolActivityRow(
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
+                        // A single call's settled approval is the row under the
+                        // strip, so its ledger row does not repeat it.
+                        ToolLedgerRow(
                             index: index + 1,
                             activity: activity,
-                            approval: approvals.first { $0.id == activity.approvalID },
+                            approval: isBundle
+                                ? approvals.first { $0.id == activity.approvalID && !$0.status.isPending } : nil,
                             openArtifact: openArtifact
                         )
                     }
                 }
+                .padding(.leading, 14)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(AppTheme.hairlineStrong).frame(width: 1).padding(.leading, 5)
+                }
+                .padding(.leading, 4)
+            }
+            if case .single(let activity) = content,
+                let approval = approvals.first(where: { $0.id == activity.approvalID }),
+                !approval.status.isPending
+            {
+                ApprovalCardView(approval: approval) { _, _, _ in }
             }
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    private var taxonomy: TaxonomyStyle {
-        let first = bundle.activities[0]
-        let sharedEffect = bundle.activities.allSatisfy { $0.sideEffect == first.sideEffect }
-        return TaxonomyStyle(sideEffect: sharedEffect ? first.sideEffect : nil, risk: bundle.highestRisk)
+    private var isBundle: Bool {
+        if case .bundle = content { return true }
+        return false
+    }
+
+    private var activities: [ToolActivity] {
+        switch content {
+        case .single(let activity): return [activity]
+        case .bundle(let bundle): return bundle.activities
+        }
+    }
+
+    private var summaryIdentifier: String {
+        switch content {
+        case .single(let activity): return "tool.run.\(activity.id)"
+        case .bundle(let bundle): return "tool.bundle.\(bundle.id)"
+        }
+    }
+
+    /// One sentence: the call and its outcome, or the bundle's count and outcomes.
+    private var sentence: String {
+        switch content {
+        case .bundle(let bundle):
+            return bundle.summary
+        case .single(let activity):
+            var parts = [activity.name]
+            if let detail = ToolLedgerRow.detail(for: activity) { parts.append(detail) }
+            if activity.allowedByTaskGrant { parts.append("Allowed by task permission") }
+            parts.append(activity.presentationStatus.rawValue.capitalized)
+            return parts.joined(separator: " · ")
+        }
     }
 }
 
-private struct BundledToolActivityRow: View {
+/// One call in the ledger: its name, what it was asked, its outcome and risk,
+/// in the monospace face; opening it shows arguments and the result.
+struct ToolLedgerRow: View {
     let index: Int
     let activity: ToolActivity
     let approval: ApprovalView?
     let openArtifact: (UUID) -> Void
     @State private var expanded = false
 
-    /// Present one bundled tool result with its own outcome and risk label.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                expanded.toggle()
+                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("\(index). \(activity.name)")
-                            .appFont(.subheadline)
-                        if let detail = rowDetail {
-                            Text(detail).appFont(.caption).lineLimit(1)
+                            .appCodeFont(.caption)
+                            .foregroundColor(AppTheme.ink)
+                        Spacer(minLength: 8)
+                        if let risk = activity.risk, risk == .high || risk == .critical {
+                            Text(risk.rawValue.uppercased())
+                                .appFont(.caption2, weight: .semibold)
+                                .foregroundColor(taxonomy.color)
                         }
-                        if activity.allowedByTaskGrant {
-                            Text("Allowed by task permission")
-                                .appFont(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        if let approval {
-                            Text(approval.settledTitle)
-                                .appFont(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Text(activity.presentationStatus.rawValue.capitalized)
+                        Text(statusText)
                             .appFont(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(
+                                activity.presentationStatus == .failed
+                                    || activity.presentationStatus == .denied
+                                    ? AppTheme.red : AppTheme.inkSoft
+                            )
                     }
-                    Spacer()
-                    if let risk = activity.risk {
-                        let taxonomy = TaxonomyStyle(sideEffect: activity.sideEffect, risk: risk)
-                        RiskBadge(risk: risk, color: taxonomy.color)
+                    if let detail = Self.detail(for: activity) {
+                        Text(detail)
+                            .appCodeFont(.caption)
+                            .foregroundColor(AppTheme.inkSoft)
+                            .lineLimit(1)
+                    }
+                    if activity.allowedByTaskGrant {
+                        Text("Allowed by task permission")
+                            .appFont(.caption)
+                            .foregroundColor(AppTheme.inkFaint)
+                    }
+                    if let approval {
+                        Text(approval.settledTitle)
+                            .appFont(.caption)
+                            .foregroundColor(AppTheme.inkFaint)
                     }
                 }
                 .contentShape(Rectangle())
@@ -210,42 +188,35 @@ private struct BundledToolActivityRow: View {
                     )
                 }
                 if let approval {
-                    // A bundle holds only settled approvals, which offer no controls.
+                    // A ledger holds only settled approvals, which offer no controls.
                     ApprovalCardView(approval: approval) { _, _, _ in }
                 }
             }
         }
+        .padding(.vertical, 2)
     }
 
-    /// Identify a bundled web call by query or URL when available.
-    private var rowDetail: String? {
-        if let query = activity.arguments["query"]?.stringValue, !query.isEmpty {
-            return query
-        }
-        if let url = activity.arguments["url"]?.stringValue, !url.isEmpty {
-            return url
+    private var statusText: String {
+        activity.presentationStatus.rawValue.capitalized
+    }
+
+    private var taxonomy: TaxonomyStyle {
+        TaxonomyStyle(sideEffect: activity.sideEffect, risk: activity.risk)
+    }
+
+    /// Identify a call by its query, URL or path when it carries one.
+    static func detail(for activity: ToolActivity) -> String? {
+        for key in ["query", "url", "path"] {
+            if let value = activity.arguments[key]?.stringValue, !value.isEmpty { return value }
         }
         return nil
     }
 }
 
-private struct RiskBadge: View {
-    let risk: RiskLevel
-    let color: Color
-
-    var body: some View {
-        Text(risk.rawValue.uppercased())
-            .appFont(.caption, weight: .semibold)
-            .foregroundColor(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.14))
-            .clipShape(Capsule())
-    }
-}
-
 /// A `browser.act` approval with a described view gets its own card
-/// (ADR-0129); every other approval keeps the generic one.
+/// (ADR-0129); every other approval keeps the generic one. Pending, the card
+/// is the whole thing, docked above the composer; settled, it is one quiet
+/// row that opens onto what was decided.
 struct ApprovalCardView: View {
     let approval: ApprovalView
     var activeTaskGrant: BrowserTaskGrantView? = nil
@@ -261,21 +232,23 @@ struct ApprovalCardView: View {
                 Button {
                     expanded.toggle()
                 } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         Image(systemName: approval.settledSymbol)
                             .foregroundColor(approval.settledColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(approval.settledTitle)
-                                .appFont(.subheadline, weight: .semibold)
-                            Text(verbatim: approval.actionSummary)
-                                .appFont(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        Text(approval.settledTitle)
+                            .appFont(.callout, weight: .medium)
+                            .foregroundColor(AppTheme.inkSoft)
+                        Text(verbatim: "· " + approval.actionSummary)
+                            .appFont(.callout)
+                            .foregroundColor(AppTheme.inkFaint)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(AppTheme.inkFaint)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
                     }
-                    .padding(12)
+                    .padding(.vertical, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -286,8 +259,8 @@ struct ApprovalCardView: View {
                 details
             }
         }
-        .onChange(of: approval.status) { _ in expanded = false }
-        .onChange(of: approval.id) { _ in expanded = false }
+        .onChange(of: approval.status) { expanded = false }
+        .onChange(of: approval.id) { expanded = false }
     }
 
     @ViewBuilder
@@ -318,21 +291,60 @@ private extension ApprovalView {
 
     var settledSymbol: String {
         switch status {
-        case .approved: "checkmark.circle.fill"
-        case .denied: "xmark.circle.fill"
+        case .approved: "checkmark"
+        case .denied: "xmark"
         case .expired: "clock"
         case .cancelled: "slash.circle"
-        case .pending: "hand.raised.fill"
+        case .pending: "flag"
         }
     }
 
     var settledColor: Color {
         switch status {
-        case .approved: .green
-        case .denied: .red
-        case .expired, .cancelled: .secondary
-        case .pending: AppTheme.orange
+        case .approved: AppTheme.teal
+        case .denied: AppTheme.red
+        case .expired, .cancelled: AppTheme.inkFaint
+        case .pending: AppTheme.amberText
         }
+    }
+}
+
+/// The surface, border and padding every card that needs the owner shares:
+/// white on paper, an amber hairline, and room to breathe.
+struct AttentionCardSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: A2Metrics.cardRadius, style: .continuous)
+                    .fill(AppTheme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: A2Metrics.cardRadius, style: .continuous)
+                    .stroke(AppTheme.amberLine)
+            )
+    }
+}
+
+extension View {
+    func attentionCard() -> some View { modifier(AttentionCardSurface()) }
+}
+
+/// The amber eyebrow of a card that needs the owner.
+struct AttentionCardLabel: View {
+    let title: String
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: "flag")
+        }
+        .appFont(.caption, weight: .semibold)
+        .foregroundColor(AppTheme.amberText)
     }
 }
 
@@ -344,15 +356,21 @@ struct ApprovalCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Approval checkpoint", systemImage: "hand.raised.fill")
-                .appFont(.headline)
-                .foregroundColor(AppTheme.orange)
+            AttentionCardLabel(title: "Approval checkpoint")
             Text(approval.actionSummary)
-            if let toolName = approval.toolName {
-                KeyValueRow(key: "Tool", value: toolName)
+                .appFont(.body, weight: .semibold)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                if let toolName = approval.toolName {
+                    Text(toolName).appCodeFont(.caption)
+                    Text("·")
+                }
+                Text("\(approval.risk.capitalized) risk")
+                Text("·")
+                Text(approval.expiresAt.map { "Expires \($0.formatted())" } ?? "No expiry")
             }
-            KeyValueRow(key: "Risk", value: approval.risk.uppercased())
-            KeyValueRow(key: "Expires", value: approval.expiresAt?.formatted() ?? "No expiry")
+            .appFont(.caption)
+            .foregroundColor(AppTheme.inkSoft)
             if !approval.arguments.isEmpty {
                 DetailBlock(
                     title: "Arguments",
@@ -360,13 +378,15 @@ struct ApprovalCard: View {
                 )
             }
             if approval.status.isPending {
-                TextField("Reason for denial (optional)", text: $denialReason)
+                DenialReasonField(text: $denialReason)
                     .disabled(inFlight != nil)
-                HStack {
+                ApprovalDecisionButtons {
                     Button { resolve(.approveOnce, nil) } label: {
                         ApprovalDecisionLabel(title: "Approve once", decision: .approveOnce, inFlight: inFlight)
                     }
-                    .buttonStyle(.borderedProminent)
+                } secondary: {
+                    EmptyView()
+                } deny: {
                     Button(role: .destructive) {
                         let reason = denialReason.trimmingCharacters(in: .whitespacesAndNewlines)
                         resolve(.deny, reason.isEmpty ? nil : reason)
@@ -374,19 +394,30 @@ struct ApprovalCard: View {
                         ApprovalDecisionLabel(title: "Deny", decision: .deny, inFlight: inFlight)
                     }
                 }
+                .padding(.top, 4)
                 .disabled(inFlight != nil)
             } else {
                 Text("Resolved: \(approval.decision?.rawValue ?? approval.status.displayName)")
                     .appFont(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
             }
         }
-        .padding(12)
-        .background(AppTheme.orange.opacity(0.08))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(AppTheme.orange.opacity(0.45))
-        )
+        .attentionCard()
+    }
+}
+
+/// The optional reason behind a denial, as one quiet line.
+struct DenialReasonField: View {
+    @Binding var text: String
+
+    var body: some View {
+        TextField("Reason for denial (optional)", text: $text)
+            .textFieldStyle(.plain)
+            .appFont(.callout)
+            .padding(.vertical, 6)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(AppTheme.hairline).frame(height: 1)
+            }
     }
 }
 
@@ -416,79 +447,107 @@ struct ClarifyingQuestionCard: View {
     @State private var isSubmitting = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Clarifying question", systemImage: "questionmark.bubble.fill")
-                .appFont(.headline)
-                .foregroundColor(AppTheme.turquoise)
+        VStack(alignment: .leading, spacing: 8) {
+            AttentionCardLabel(title: "Clarifying question")
             Text(prompt.question)
+                .appFont(.body, weight: .semibold)
+                .fixedSize(horizontal: false, vertical: true)
             TextField("Your answer", text: $answer)
-            Button("Answer") {
-                let value = answer
-                Task {
-                    isSubmitting = true
-                    defer { isSubmitting = false }
-                    if await submit(value) {
-                        answer = ""
-                    }
+                .textFieldStyle(.plain)
+                .appFont(.body)
+                .padding(.vertical, 6)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(AppTheme.hairline).frame(height: 1)
                 }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                isSubmitting
-                    || answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
+                .onSubmit(send)
+            Button("Answer", action: send)
+                .buttonStyle(PrimaryCapsuleButtonStyle())
+                .padding(.top, 4)
+                .disabled(
+                    isSubmitting
+                        || answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
         }
-        .padding(12)
-        .background(AppTheme.turquoise.opacity(0.08))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(AppTheme.turquoise.opacity(0.4))
-        )
+        .attentionCard()
+    }
+
+    private func send() {
+        let value = answer
+        guard !isSubmitting, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Set before the Task so a Return and a tap in the same turn cannot both pass the guard.
+        isSubmitting = true
+        Task {
+            defer { isSubmitting = false }
+            if await submit(value) {
+                answer = ""
+            }
+        }
     }
 }
 
 struct WorkingStatePanel: View {
     let state: WorkingStateView
-    @State private var expanded = true
+    @State private var expanded = false
 
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 9) {
-                if let objective = state.objective {
-                    DetailBlock(title: "Objective", text: objective)
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .frame(width: 12)
+                    Text(summary)
+                        .appFont(.callout)
+                        .lineLimit(expanded ? nil : 1)
                 }
-                if !state.tasks.isEmpty {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Tasks")
-                            .appFont(.caption, weight: .semibold)
-                            .foregroundColor(.secondary)
-                        ForEach(state.tasks) { task in
-                            Label(task.description, systemImage: icon(for: task.status))
-                        }
-                    }
-                }
-                if !state.establishedFacts.isEmpty {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Facts")
-                            .appFont(.caption, weight: .semibold)
-                            .foregroundColor(.secondary)
-                        ForEach(state.establishedFacts) { fact in
-                            Text("• \(fact.statement)")
-                        }
-                    }
-                }
-                if let nextAction = state.nextAction {
-                    DetailBlock(title: "Next action", text: nextAction)
-                }
+                .foregroundColor(AppTheme.inkSoft)
+                .contentShape(Rectangle())
             }
-            .padding(.top, 8)
-        } label: {
-            Label("Working state", systemImage: "checklist")
-                .appFont(.headline)
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("chat.working-state")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 9) {
+                    if let objective = state.objective {
+                        DetailBlock(title: "Objective", text: objective)
+                    }
+                    if !state.tasks.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Tasks")
+                                .appFont(.caption, weight: .semibold)
+                                .foregroundColor(AppTheme.inkSoft)
+                            ForEach(state.tasks) { task in
+                                Label(task.description, systemImage: icon(for: task.status))
+                                    .appFont(.callout)
+                            }
+                        }
+                    }
+                    if !state.establishedFacts.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Facts")
+                                .appFont(.caption, weight: .semibold)
+                                .foregroundColor(AppTheme.inkSoft)
+                            ForEach(state.establishedFacts) { fact in
+                                Text("• \(fact.statement)").appFont(.callout)
+                            }
+                        }
+                    }
+                    if let nextAction = state.nextAction {
+                        DetailBlock(title: "Next action", text: nextAction)
+                    }
+                }
+                .padding(.leading, 18)
+            }
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var summary: String {
+        if let objective = state.objective, !objective.isEmpty { return "Working state · \(objective)" }
+        return "Working state"
     }
 
     private func icon(for status: String) -> String {
@@ -511,12 +570,12 @@ private struct ToolResultContent: View {
             HStack {
                 Text("Result")
                     .appFont(.caption, weight: .semibold)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
                 Spacer()
                 if let trust = result.trust {
                     Text(trust.rawValue.replacingOccurrences(of: "_", with: " ").uppercased())
-                        .appFont(.caption)
-                        .foregroundColor(trust == .externalUntrusted ? .orange : .secondary)
+                        .appFont(.caption2, weight: .semibold)
+                        .foregroundColor(trust == .externalUntrusted ? AppTheme.amberText : AppTheme.inkFaint)
                 }
             }
             if toolName == ServerContractIdentifier.sandboxRunCommand {
@@ -529,7 +588,7 @@ private struct ToolResultContent: View {
                 ForEach(Array(result.content.enumerated()), id: \.offset) { _, block in
                     switch block {
                     case .text(let text):
-                        Text(text).textSelection(.enabled)
+                        Text(text).appFont(.callout).textSelection(.enabled)
                     case .image(let artifactID, let mediaType, _):
                         artifactButton("Image · \(mediaType)", id: artifactID)
                     case .file(let artifactID, _, let filename):
@@ -546,6 +605,7 @@ private struct ToolResultContent: View {
         } label: {
             Label(label, systemImage: "doc")
         }
+        .buttonStyle(SecondaryCapsuleButtonStyle())
     }
 
     private var terminalTranscript: some View {
@@ -558,21 +618,20 @@ private struct ToolResultContent: View {
             Text(stdout.isEmpty ? "(no stdout)" : stdout)
             if !stderr.isEmpty {
                 Divider()
-                Text(stderr).foregroundColor(.red)
+                Text(stderr).foregroundColor(AppTheme.red)
             }
             if let exitCode = result.structured?["exit_code"]?.intValue {
-                Text("exit_code: \(exitCode)").foregroundColor(.secondary)
+                Text("exit_code: \(exitCode)").foregroundColor(AppTheme.inkSoft)
             }
             if let files = result.structured?["files_changed"]?.arrayValue, !files.isEmpty {
                 Text("files_changed: \(JSONValue.array(files).prettyPrinted)")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
             }
         }
         .appCodeFont()
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black.opacity(0.88))
-        .foregroundColor(.white)
+        .background(AppTheme.field)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .textSelection(.enabled)
     }
@@ -585,7 +644,7 @@ private struct ToolResultContent: View {
             .appCodeFont()
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.08))
+            .background(AppTheme.field)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .textSelection(.enabled)
     }
@@ -599,25 +658,12 @@ struct DetailBlock: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .appFont(.caption, weight: .semibold)
-                .foregroundColor(.secondary)
+                .foregroundColor(AppTheme.inkSoft)
             Text(text)
                 .appCodeFont()
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct KeyValueRow: View {
-    let key: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(key).appFont(.caption).foregroundColor(.secondary)
-            Spacer()
-            Text(value).appFont(.caption)
-        }
     }
 }
 
@@ -639,11 +685,11 @@ private struct TaxonomyStyle {
         case nil: icon = "wrench.and.screwdriver"
         }
         switch risk {
-        case .critical: color = .red
-        case .high: color = .orange
-        case .medium: color = .yellow
-        case .low: color = .green
-        case nil: color = AppTheme.turquoise
+        case .critical: color = AppTheme.red
+        case .high: color = AppTheme.amberText
+        case .medium: color = AppTheme.amberText
+        case .low: color = AppTheme.inkSoft
+        case nil: color = AppTheme.teal
         }
     }
 }

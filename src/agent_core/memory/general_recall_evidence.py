@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from agent_core.domain.general_recall_checkpoint_release import CheckpointReleaseBundle
 from agent_core.domain.general_recall_release import (
     RecallExpectedSource,
     RecallObservation,
@@ -99,7 +100,9 @@ def _answer(row: RecallObservation, scenario: RecallScenario) -> bool:
     )
 
 
-def _validate_corpus(bundle: RecallReleaseBundle) -> dict[str, RecallScenario]:
+def _validate_corpus(
+    bundle: RecallReleaseBundle | CheckpointReleaseBundle,
+) -> dict[str, RecallScenario]:
     scenarios = {s.id: s for s in bundle.scenarios}
     _require(len(scenarios) == len(bundle.scenarios), "duplicate scenario")
     _require(
@@ -151,6 +154,26 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
     """
     # model_copy/model_construct are not validation, including for nested values.
     bundle = RecallReleaseBundle.model_validate(bundle.model_dump())
+    return _score_measurements(bundle)
+
+
+def _score_measurements(
+    bundle: RecallReleaseBundle | CheckpointReleaseBundle,
+    *,
+    quality_exceptions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Shared arithmetic; only the explicit bounded assessor collects exceptions.
+
+    Legacy callers still fail on every original threshold. Collecting exceptions
+    never grants activation and cannot relax provenance, security or work limits.
+    """
+
+    def quality(condition: bool, kind: str, reason: str, **facts: Any) -> None:
+        if quality_exceptions is None:
+            _require(condition, reason)
+        elif not condition:
+            quality_exceptions.append({"kind": kind, "reason": reason, **facts})
+
     if bundle.version == "general-recall-release@1":
         _require(
             not any(s.evidence_sources for s in bundle.scenarios)
@@ -163,7 +186,7 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
     else:
         _require(
             all(r.rendered_noise_items is not None for r in bundle.observations),
-            "version two requires measured noise counts",
+            "source-accounted evidence requires measured noise counts",
         )
     scenarios = _validate_corpus(bundle)
     identity_hash = hashlib.sha256(bundle.identity.model_dump_json().encode()).hexdigest()
@@ -182,23 +205,28 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
         "preregistration tuple mismatch",
     )
     _require(
-        {g.gate for g in bundle.gates} == set(range(1, 12))
-        and all(g.failed == 0 for g in bundle.gates),
+        {g.gate for g in bundle.gates} == set(range(1, 12)),
         "incomplete or failing gate receipts",
     )
+    for gate in bundle.gates:
+        if gate.gate in {9, 10}:
+            quality(gate.failed == 0, "gate_receipt", "failing gate receipt", gate=gate.gate)
+        else:
+            _require(gate.failed == 0, "failing security, integrity or regression gate receipt")
+    reduced = isinstance(bundle, CheckpointReleaseBundle)
     expected = {
         (s.id, path, pipeline, channel)
         for s in bundle.scenarios
         for path in ("automatic", "deliberate")
-        for pipeline in ("seeded", "formation")
-        for channel in ("sparse", "dense", "hybrid")
+        for pipeline in (("formation",) if reduced else ("seeded", "formation"))
+        for channel in (("sparse", "hybrid") if reduced else ("sparse", "dense", "hybrid"))
     }
     rows: dict[tuple[str, str, str, str], RecallObservation] = {
         (r.scenario_id, r.path, r.pipeline, r.channel): r for r in bundle.observations
     }
     _require(
         set(rows) == expected and len(rows) == len(bundle.observations),
-        "observation coverage differs from the full experiment",
+        "observation coverage differs from the registered experiment",
     )
     grouped: dict[tuple[str, str, str, str, str], list[RecallObservation]] = defaultdict(list)
     for row in bundle.observations:
@@ -219,20 +247,36 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
             and len(row.recovered_sources) <= row.searches * 3,
             "invalid recovered source provenance or work bound",
         )
-        if bundle.version == "general-recall-release@2":
+        if bundle.version != "general-recall-release@1":
             _require(
                 row.global_rank_certifiable is True
-                and all(source.anchor_rank is not None for source in row.recovered_sources),
+                and all(
+                    source.anchor_rank is not None
+                    or (quality_exceptions is not None and not source.rendered)
+                    for source in row.recovered_sources
+                ),
                 "global ranking was not observed",
             )
         else:
             _require(row.global_rank_certifiable is None, "version one has no global ranking field")
         _require(row.observed_at > bundle.preregistration.registered_at, "late preregistration")
         _require(row.context_tokens <= bundle.preregistration.context_tokens, "context budget")
-        _require(row.cost_usd <= bundle.preregistration.maximum_case_usd, "cost ceiling")
-        _require(
-            not row.boundary_failures and not row.invalid_current_ids,
-            "boundary or invalid-current-fact failure",
+        position = {"scenario_id": row.scenario_id, "path": row.path, "channel": row.channel}
+        quality(
+            row.cost_usd <= bundle.preregistration.maximum_case_usd,
+            "case_cost",
+            "cost ceiling",
+            **position,
+            actual=row.cost_usd,
+            ceiling=bundle.preregistration.maximum_case_usd,
+        )
+        _require(not row.boundary_failures, "boundary failure")
+        quality(
+            not row.invalid_current_ids,
+            "invalid_current_fact",
+            "invalid-current-fact failure",
+            **position,
+            ids=list(row.invalid_current_ids),
         )
         for field in ("formed", "candidates", "ranked", "rendered", "answer_atoms"):
             _require(_unique(getattr(row, field)), "duplicate stage evidence")
@@ -288,16 +332,32 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
         p95 = times[math.ceil(len(times) * 0.95) - 1]
         if channel == "hybrid":
             minimum = 0.95 if family == "all" else 0.90
-            _require(
+            cell = {"split": split, "path": path, "pipeline": pipeline, "family": family}
+            quality(
                 recall["ranked"] + 1e-12 >= minimum and recall["rendered"] + 1e-12 >= minimum,
+                "recall_floor",
                 "required-evidence recall floor",
+                **cell,
+                ranked=recall["ranked"],
+                rendered=recall["rendered"],
+                minimum=minimum,
             )
             _require(p95 <= bundle.preregistration.p95_latency_ms, "latency ceiling")
             if split == "holdout" and pipeline == "formation":
-                _require(family == "all" or lift + 1e-12 >= -0.02, "held-out family regression")
-                _require(
+                quality(
+                    family == "all" or lift + 1e-12 >= -0.02,
+                    "family_regression",
+                    "held-out family regression",
+                    **cell,
+                    lift=lift,
+                )
+                quality(
                     implicit_lift + 1e-12 >= (0.10 if family == "all" else -0.02),
+                    "implicit_lift",
                     "held-out implicit answer lift or family regression",
+                    **cell,
+                    lift=implicit_lift,
+                    minimum=0.10 if family == "all" else -0.02,
                 )
         cells.append(
             {
@@ -363,7 +423,7 @@ def score_release(bundle: RecallReleaseBundle) -> dict[str, Any]:
         )
     return {
         "version": bundle.version,
-        "activation_eligible": True,
+        "activation_eligible": quality_exceptions is None,
         "ci_method": "paired normal approximation, 95 percent",
         "scenarios": len(scenarios),
         "observations": len(rows),

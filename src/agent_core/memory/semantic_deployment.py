@@ -16,6 +16,7 @@ from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.general_recall_release import RecallReleaseIdentity
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig, local_execution
 from agent_core.domain.semantic_work import EmbeddingConfig
+from agent_core.memory.bounded_recall_admission import BoundedAdmission, bind_bounded_recall
 from agent_core.memory.general_recall_evidence import (
     _read_bounded,
     _unique_object,
@@ -141,6 +142,9 @@ def bind_index_manifest(
     evidence: Path,
     release_id: str,
     dependencies: Mapping[str, str],
+    *,
+    principal: Principal | None = None,
+    clock: Clock | None = None,
 ) -> Callable[[], bool]:
     """Both independently reviewed manifest and measured evidence must remain bound."""
     required = {
@@ -151,6 +155,12 @@ def bind_index_manifest(
     }
     raw = _read_bounded(manifest)
     document = json.loads(raw, object_pairs_hook=_unique_object)
+    if isinstance(document, dict) and document.get("version") == "recall-bounded-admission@1":
+        if principal is None or clock is None:
+            raise ValueError("Bounded recall requires actual owner and clock")
+        return bind_bounded_recall(
+            root, manifest, evidence, release_id, dependencies, principal=principal, clock=clock
+        )
     binding = (
         RecallDeploymentBinding.model_validate(document)
         if isinstance(document, dict) and "version" in document
@@ -273,7 +283,15 @@ async def compose_indexing(
             settings.memory_semantic_index_evidence,
             settings.release_id,
             dependencies,
+            principal=principal,
+            clock=clock,
         )
+        if isinstance(admitted, BoundedAdmission) and (
+            profile.local is None or not query_enabled or settings.memory_reconsolidation_enabled
+        ):
+            raise ValueError(
+                "Bounded recall requires local interactive recall without unattended application"
+            )
     except (OSError, ValueError, ConfigurationError):
         raise ConfigurationError(
             "Semantic index configuration or release evidence is invalid"
@@ -304,6 +322,7 @@ async def compose_indexing(
                     policy_version=str(configuration["policy_version"]),
                     retrieval_policy=configuration_digest(configuration),
                     reader_sha256=profile.reader_sha256,
+                    interactive_only=isinstance(admitted, BoundedAdmission),
                 ),
             )
     else:

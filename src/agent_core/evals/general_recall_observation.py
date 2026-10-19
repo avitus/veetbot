@@ -126,7 +126,7 @@ def compile_runtime_observation(
             "formation bank changed",
         )
         bank = _Bank.model_validate_json(bank_bytes)
-        replayed = tuple(call.completion.turn.usage for call in bank.calls)
+        replayed = tuple(call.usage for call in bank.calls)
         _require(
             observed.pipeline == "formation" and len(replayed) == observed.formation_replayed_calls,
             "replayed formation call count differs from its bank",

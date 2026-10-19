@@ -6,7 +6,9 @@ import AppKit
 
 /// Browses the calling principal's beliefs (memory-read-api-and-browser.md).
 /// A peer of the conversation list rather than a mode inside a conversation,
-/// because a belief outlives the session that formed it.
+/// because a belief outlives the session that formed it. Drawn with the A2
+/// Dock tokens: the list on paper, a kind line over each statement, and amber
+/// for what still needs review.
 public struct MemoryBrowserView: View {
     @ObservedObject var model: MemoryViewModel
     @StateObject private var people = PeopleViewModel()
@@ -23,50 +25,7 @@ public struct MemoryBrowserView: View {
     }
 
     public var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                Picker("Memory collection", selection: $collection) {
-                    Text("Memories").tag("memories")
-                    Text("People").tag("people")
-                    Text("Synthesis").tag("synthesis")
-                }.pickerStyle(.segmented).padding()
-                if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
-                else if collection == "synthesis" { MemorySynthesisBrowserView() }
-                else { content }
-            }
-                .navigationTitle("Memory")
-                // No accessibility identifier is attached here: `.searchable`
-                // hoists its field into the navigation bar chrome, which is
-                // not a descendant of this content view, so an identifier
-                // placed on this chain would land on the content underneath
-                // it instead of the field itself. XCUITest reaches the field
-                // the way it reaches any search bar: `app.searchFields`.
-                .memoryCollectionSearch(
-                    text: Binding(
-                        get: { collection == "people" ? people.searchText : model.searchText },
-                        set: { if collection == "people" { people.setSearchText($0) } else { model.setSearchText($0) } }
-                    ),
-                    prompt: collection == "people" ? "Search people" : "Search memories",
-                    enabled: collection != "synthesis"
-                )
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        if collection == "memories" { reviewQueueToggle }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        if collection == "memories" { statusFilterMenu }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        if collection == "memories" { typeFilterMenu }
-                    }
-                }
-            #if os(macOS)
-            detailColumn
-            #endif
-        }
+        navigationContainer
         .confirmationDialog(
             "Delete this memory?",
             isPresented: Binding(
@@ -89,15 +48,106 @@ public struct MemoryBrowserView: View {
         .task { await model.reload() }
         .onReceive(NotificationCenter.default.publisher(for: .peopleConnectionChanged)) { _ in dismiss() }
         #if os(macOS)
+        // The ideal height sizes the fitted sheet before a saved size exists;
+        // without it a column whose content wants all the height it is offered
+        // (an empty or unavailable state) lays out at the screen's height and
+        // is cut off above the sheet.
         .frame(
             minWidth: 560,
             maxWidth: .infinity,
             minHeight: 520,
+            idealHeight: 600,
             maxHeight: .infinity
         )
         .background(MemoryBrowserWindowResizeView())
         .memoryBrowserPresentationSizing()
         #endif
+    }
+
+    /// The Mac keeps the collection beside its detail column; elsewhere the
+    /// collection is the root of a stack. Either way the synthesis journal can
+    /// present its detail with `navigationDestination(isPresented:)`.
+    @ViewBuilder
+    private var navigationContainer: some View {
+        #if os(macOS)
+        NavigationSplitView {
+            collectionColumn
+        } detail: {
+            // A stack, so the synthesis detail can push the originals it cites.
+            NavigationStack { detailColumn }
+                .background(AppTheme.paper)
+        }
+        .tint(AppTheme.tealFill)
+        #else
+        NavigationStack {
+            collectionColumn
+        }
+        .tint(AppTheme.tealFill)
+        #endif
+    }
+
+    private var collectionColumn: some View {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Memory").appDisplayFont(.title2)
+                Text("What Veetbot has learned and may rely on.")
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            #endif
+            Picker("Memory collection", selection: $collection) {
+                Text("Memories").tag("memories")
+                Text("People").tag("people")
+                Text("Synthesis").tag("synthesis")
+            }
+            .pickerStyle(.segmented)
+            // The Mac draws a picker's label beside the control; in this column
+            // it wrapped letter by letter into a tall sliver.
+            .labelsHidden()
+            .accessibilityLabel("Memory collection")
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
+            else if collection == "synthesis" { MemorySynthesisBrowserView() }
+            else { content }
+        }
+            .background(AppTheme.paper)
+            .navigationTitle("Memory")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            // No accessibility identifier is attached here: `.searchable`
+            // hoists its field into the navigation bar chrome, which is
+            // not a descendant of this content view, so an identifier
+            // placed on this chain would land on the content underneath
+            // it instead of the field itself. XCUITest reaches the field
+            // the way it reaches any search bar: `app.searchFields`.
+            .memoryCollectionSearch(
+                text: Binding(
+                    get: { collection == "people" ? people.searchText : model.searchText },
+                    set: { if collection == "people" { people.setSearchText($0) } else { model.setSearchText($0) } }
+                ),
+                prompt: collection == "people" ? "Search people" : "Search memories",
+                enabled: collection != "synthesis"
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if collection == "memories" { reviewQueueToggle }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if collection == "memories" { statusFilterMenu }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if collection == "memories" { typeFilterMenu }
+                }
+            }
     }
 
     /// On the Mac the directory selects the person its adjacent column shows;
@@ -120,8 +170,14 @@ public struct MemoryBrowserView: View {
                 .environment(\.peopleSelection, PeopleSelectionAction { self.selectedPersonID = $0 })
         } else if collection == "people" {
             PeoplePlaceholder()
+        } else if collection == "memories" {
+            Text("Select a memory to see where it came from.")
+                .appFont(.callout)
+                .foregroundColor(AppTheme.inkSoft)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .background(AppTheme.paper)
         } else {
-            Color.clear
+            AppTheme.paper
         }
     }
     #endif
@@ -153,8 +209,9 @@ public struct MemoryBrowserView: View {
                 NavigationLink {
                     MemoryDetailView(memory: item, model: model)
                 } label: {
-                    row(item)
+                    MemoryRow(memory: item)
                 }
+                .a2ListRow()
                 .accessibilityIdentifier("memory.row.\(item.id.uuidString)")
                 .onAppear {
                     guard item.id == model.items.last?.id else { return }
@@ -176,67 +233,27 @@ public struct MemoryBrowserView: View {
                     ProgressView()
                     Spacer()
                 }
+                .a2ListRow()
             } else if let errorMessage = model.errorMessage {
                 loadMoreFailureFooter(errorMessage)
+                    .a2ListRow()
             }
         }
+        .a2List()
     }
 
     private func loadMoreFailureFooter(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Label(message, systemImage: "exclamationmark.triangle")
                 .appFont(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(AppTheme.inkSoft)
             Button("Retry") {
                 Task { await model.retry() }
             }
-            .appFont(.caption)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func row(_ item: MemoryView) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(item.statement)
-                .appFont(.body)
-                .lineLimit(3)
-            HStack(spacing: 6) {
-                Text("Original")
-                Text("\u{00B7}")
-                Text(item.displaySubject)
-                Text("\u{00B7}")
-                Text(memoryDisplayText(item.beliefType))
-            }
-            .appFont(.caption)
-            .foregroundColor(.secondary)
-            HStack(spacing: 8) {
-                MemorySensitivityBadge(sensitivity: item.sensitivity, kind: item.sensitivityKind)
-                if item.statusKind != .active {
-                    statusTag(item)
-                }
-                if item.flaggedForReview {
-                    Label("Flagged", systemImage: "flag.fill")
-                        .appFont(.caption2, weight: .semibold)
-                        .foregroundColor(AppTheme.orange)
-                }
-                if !item.conflictsWith.isEmpty {
-                    Label("Conflicts", systemImage: "exclamationmark.triangle.fill")
-                        .appFont(.caption2, weight: .semibold)
-                        .foregroundColor(.red)
-                }
-            }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
         }
         .padding(.vertical, 4)
-    }
-
-    private func statusTag(_ item: MemoryView) -> some View {
-        Text(memoryDisplayText(item.status))
-            .appFont(.caption2, weight: .semibold)
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.12))
-            .clipShape(Capsule())
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Asks the server for the review queue only (ADR-0117).
@@ -304,44 +321,85 @@ public struct MemoryBrowserView: View {
     }
 
     private var unavailableState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "brain.head.profile")
-                .font(.largeTitle)
-                .foregroundColor(.secondary)
-            Text("This server does not support memory browsing yet.")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        A2EmptyState(
+            systemImage: "brain.head.profile",
+            title: "This server does not support memory browsing yet."
+        )
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundColor(.secondary)
-            Text(message)
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
+        A2EmptyState(systemImage: "exclamationmark.triangle", title: message) {
             Button("Retry") {
                 Task { await model.retry() }
             }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: model.flaggedOnly ? "checkmark.circle" : "tray")
-                .font(.largeTitle)
-                .foregroundColor(.secondary)
-            Text(model.flaggedOnly ? "Nothing needs review." : "No memories found.")
-                .foregroundColor(.secondary)
+        A2EmptyState(
+            systemImage: model.flaggedOnly ? "checkmark.circle" : "tray",
+            title: model.flaggedOnly ? "Nothing needs review." : "No memories found.",
+            message: model.flaggedOnly ? "Veetbot will flag new memories here." : nil
+        )
+    }
+}
+
+/// One belief in the list: its kind and the day it last changed over the
+/// statement, then where it came from and how far it may travel.
+struct MemoryRow: View {
+    let memory: MemoryView
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                A2KindLabel(text: memoryDisplayText(memory.beliefType))
+                if memory.flaggedForReview {
+                    Label("Needs review", systemImage: "flag.fill")
+                        .appFont(.caption2, weight: .semibold)
+                        .foregroundColor(AppTheme.amberText)
+                }
+                Spacer(minLength: 0)
+                Text(memory.updatedAt.formatted(date: .abbreviated, time: .omitted))
+                    .appFont(.caption2)
+                    .foregroundColor(AppTheme.inkFaint)
+            }
+            Text(memory.statement)
+                .appFont(.body)
+                .foregroundColor(AppTheme.ink)
+                .lineLimit(2)
+            HStack(spacing: 8) {
+                Text("From \(memory.displaySubject)")
+                    .appFont(.caption)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .lineLimit(1)
+                MemorySensitivityBadge(sensitivity: memory.sensitivity, kind: memory.sensitivityKind)
+                if memory.statusKind != .active {
+                    MemoryStatusTag(status: memory.status)
+                }
+                if !memory.conflictsWith.isEmpty {
+                    Label("Conflicts", systemImage: "exclamationmark.triangle.fill")
+                        .appFont(.caption2, weight: .semibold)
+                        .foregroundColor(AppTheme.red)
+                }
+            }
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 6)
+    }
+}
+
+/// A belief's status when it is anything but active.
+struct MemoryStatusTag: View {
+    let status: String
+
+    var body: some View {
+        Text(memoryDisplayText(status))
+            .appFont(.caption2, weight: .semibold)
+            .foregroundColor(AppTheme.inkSoft)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(AppTheme.field)
+            .clipShape(Capsule())
     }
 }
 
@@ -444,17 +502,17 @@ struct MemorySensitivityBadge: View {
             .foregroundColor(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.12))
+            .background(color.opacity(0.1))
             .clipShape(Capsule())
     }
 
     private var color: Color {
         switch kind {
-        case .public: return AppTheme.turquoise
-        case .internal: return .secondary
-        case .sensitive: return AppTheme.orange
-        case .restricted: return .red
-        case nil: return .secondary
+        case .public: return AppTheme.tealText
+        case .internal: return AppTheme.inkSoft
+        case .sensitive: return AppTheme.amberText
+        case .restricted: return AppTheme.red
+        case nil: return AppTheme.inkSoft
         }
     }
 

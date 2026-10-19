@@ -706,7 +706,7 @@ workflows:
           context: veetbot-apple-signing
           filters:
             branches:
-              only: dev
+              only: [dev, codex/recall-production-release]
       - public-site
       # Production runs x86_64; Playwright installs another Chromium build on arm64.
       - browser-image:

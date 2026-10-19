@@ -1673,12 +1673,20 @@ final class ConversationNavigationUITests: XCTestCase {
 
     private func revealSynthesisAction(_ element: XCUIElement) {
         #if os(macOS)
-        let scroll = app.scrollViews["memory.synthesis.detail"]
+        // Scroll until the control lies inside the detail column's viewport: macOS 26
+        // reports a control just below it, but still inside the window, as hittable.
+        // The identifier sits on the column's content; its scroll view is the viewport.
+        let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let column = app.scrollViews.containing(.any, identifier: "memory.synthesis.detail").firstMatch
+        XCTAssertTrue(column.waitForExistence(timeout: 5), app.debugDescription)
+        let viewport = column.frame
         for _ in 0..<16 {
-            if element.exists && element.isHittable { break }
-            let down = element.exists && element.frame.minY < scroll.frame.minY
-            scroll.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
+            if element.exists && viewport.contains(element.frame) && element.isHittable { break }
+            let down = element.exists && element.frame.minY < viewport.minY
+            column.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
         }
+        XCTAssertTrue(viewport.contains(element.frame), element.debugDescription)
         #else
         let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
@@ -1742,6 +1750,31 @@ final class ConversationNavigationUITests: XCTestCase {
         app.descendants(matching: .any)["people.row.\(id)"]
     }
 
+    #if os(macOS)
+    /// Scrolls the directory column until the row sits inside it. A row the
+    /// column has scrolled past keeps a frame outside the column, and a click
+    /// on that frame lands on whatever the sheet shows there instead.
+    private func revealDirectoryRow(_ row: XCUIElement, above: Bool) {
+        let column = macDirectoryColumn
+        XCTAssertTrue(column.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<16 {
+            if row.exists && column.frame.contains(row.frame) { return }
+            let up = row.exists ? row.frame.minY < column.frame.minY : above
+            column.scroll(byDeltaX: 0, deltaY: up ? 150 : -150)
+        }
+    }
+
+    /// The directory's scroll view: the element that carries `people.browser`
+    /// when that is the scroll view, otherwise the scroll view inside it.
+    private var macDirectoryColumn: XCUIElement {
+        let browser = app.descendants(matching: .any)["people.browser"].firstMatch
+        if browser.exists && browser.elementType == .scrollView { return browser }
+        let inner = browser.scrollViews.firstMatch
+        if inner.exists { return inner }
+        return app.sheets.firstMatch.scrollViews.containing(.any, identifier: "people.browser").firstMatch
+    }
+    #endif
+
     #if os(iOS)
     /// Drags the lazily rendered directory until the row sits clear of the
     /// search field that floats over its lower edge. A row above the rows in
@@ -1769,8 +1802,8 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(iOS)
         // The sheet's back button, not the first button of the window's bar behind it.
         if detail.exists && !row.isHittable { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
-        revealDirectoryRow(row, above: above)
         #endif
+        revealDirectoryRow(row, above: above)
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         activate(row)
         XCTAssertTrue(
@@ -2636,9 +2669,13 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5), app.debugDescription)
         checkHandledActionInDetail()
         let review = app.buttons["email.review-send"]
-        for _ in 0..<8 where !review.isHittable {
-            app.scrollViews["email.detail"].scroll(byDeltaX: 0, deltaY: -350)
+        // Scroll until the button lies inside the reading column: macOS 26 reports a
+        // control just below the viewport, but still inside the window, as hittable.
+        let reading = app.scrollViews["email.detail"]
+        for _ in 0..<8 where !reading.frame.contains(review.frame) {
+            reading.scroll(byDeltaX: 0, deltaY: -350)
         }
+        XCTAssertTrue(reading.frame.contains(review.frame), app.debugDescription)
         XCTAssertTrue(review.isHittable)
         review.click()
         let send = app.buttons["email.approve-send"]
@@ -2743,6 +2780,10 @@ final class ConversationNavigationUITests: XCTestCase {
 
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        // The item exists before the menu has finished opening; on the iPad it
+        // reports unhittable for a moment after that, so give it a few seconds.
+        let hittableBy = Date().addingTimeInterval(3)
+        while !destination.isHittable && Date() < hittableBy { usleep(100_000) }
         XCTAssertTrue(destination.isHittable)
         // The iOS 27.0 iPad simulator swallows XCUITest's element tap on the
         // menu's first item and leaves the menu open; a touch at the item's
@@ -2767,7 +2808,23 @@ final class ConversationNavigationUITests: XCTestCase {
         }
     }
 
+    /// Brings the chat list back over an open conversation. On a compact
+    /// window the list slides over the conversation and slides away as a
+    /// conversation opens, so a row that is still hittable may be mid-slide:
+    /// the list is reopened from the navigation bar's toggle once the row
+    /// has gone, and left alone if it stays. The pushed list of a window
+    /// without the toggle comes back through the navigation bar's back button.
     private func revealSidebarIfNeeded(for row: XCUIElement) {
+        let toggle = app.buttons["sidebar.toggle"]
+        if toggle.exists {
+            let gone = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "hittable == false"), object: row
+            )
+            guard XCTWaiter().wait(for: [gone], timeout: 1.5) == .completed else { return }
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            toggle.tap()
+            return
+        }
         guard !row.isHittable else { return }
         let backButton = app.navigationBars.buttons.element(boundBy: 0)
         XCTAssertTrue(backButton.waitForExistence(timeout: 5))

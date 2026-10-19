@@ -69,7 +69,18 @@ import SwiftUI
         )
         let toolbar = source[toolbarStart.lowerBound ..< firstSheet.lowerBound]
         let iosEnd = try #require(toolbar.range(of: "#endif"))
-        let iosToolbar = toolbar[..<iosEnd.lowerBound]
+        // The navigation bar places the one menu outside the compact drawer,
+        // whose own header places it instead (A2 Dock).
+        #expect(toolbar[..<iosEnd.lowerBound].contains("if activeMode == .chat, !inDrawer { moreMenu }"))
+        let menuStart = try #require(
+            source.range(of: "private var moreMenu: some View", range: sidebarStart.upperBound ..< source.endIndex)
+        )
+        let menuEnd = try #require(
+            source.range(of: "#endif", range: menuStart.upperBound ..< source.endIndex)
+        )
+        let iosToolbar = source[menuStart.lowerBound ..< menuEnd.lowerBound]
+        #expect(source[sidebarStart.upperBound ..< menuStart.lowerBound].contains("if inDrawer { drawerHeader }"))
+        #expect(source[sidebarStart.upperBound ..< menuEnd.lowerBound].contains("moreMenu\n        }\n        .padding(.leading"))
 
         #expect(iosToolbar.contains("Menu"))
         #expect(iosToolbar.contains("ellipsis.circle"))
@@ -200,7 +211,7 @@ import SwiftUI
         #expect(navigationList.contains("historySections {"))
         #expect(!directList.contains("ForEach(model.history)"))
         #expect(!navigationList.contains("ForEach(model.history)"))
-        #expect(source.contains("Section(\"Suggested folders\")"))
+        #expect(source.contains("SidebarSectionLabel(title: \"Suggested folders\")"))
         // A folder expands from the device's remembered state, never from a
         // list control's own, so a proposal or refresh cannot reopen it.
         #expect(source.contains("FolderHeaderRow("))

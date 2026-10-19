@@ -69,8 +69,8 @@ struct MessageActionBar: View {
             .help("Select any part of the message")
         }
         .buttonStyle(.plain)
-        .appFont(.caption, weight: .semibold)
-        .foregroundColor(.secondary)
+        .appFont(.caption, weight: .medium)
+        .foregroundColor(AppTheme.inkFaint)
         .task(id: copied) {
             guard copied else { return }
             try? await Task.sleep(nanoseconds: 2_000_000_000)

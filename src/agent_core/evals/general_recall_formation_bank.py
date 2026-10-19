@@ -11,8 +11,9 @@ import os
 import stat
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.domain.messages import (
     ModelAttempt,
@@ -34,12 +35,40 @@ class _Call(BaseModel):
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     completion: ModelCompletedEvent
 
+    @property
+    def usage(self) -> ModelUsage:
+        return self.completion.turn.usage
+
+
+class _TokenLimitRefusal(BaseModel):
+    """A known bank refusal; no partial response is presented as a completion."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    kind: Literal["token_limit_refusal"] = "token_limit_refusal"
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    stop_reason: Literal[StopReason.MAX_TOKENS] = StopReason.MAX_TOKENS
+    internal_retry_count: Literal[0] = 0
+    usage: ModelUsage
+
+    @model_validator(mode="after")
+    def known_usage(self) -> Self:
+        if not self.usage.cost.is_finite() or self.usage.cost < 0:
+            raise ValueError("A recorded formation refusal requires valid final usage")
+        return self
+
 
 class _Bank(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+    version: Literal["paired-formation-bank@2"] | None = None
     identity: str = Field(pattern=r"^[0-9a-f]{64}$")
     state_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    calls: tuple[_Call, ...] = Field(max_length=128)
+    calls: tuple[_Call | _TokenLimitRefusal, ...] = Field(max_length=128)
+
+    @model_validator(mode="after")
+    def versioned_refusal(self) -> Self:
+        if self.version is None and any(isinstance(c, _TokenLimitRefusal) for c in self.calls):
+            raise ValueError("A legacy formation bank cannot contain a terminal refusal")
+        return self
 
 
 def _read_bank(path: Path) -> bytes:
@@ -92,11 +121,25 @@ def _completion(event: ModelCompletedEvent) -> ModelCompletedEvent:
     )
 
 
+def _token_limit(event: ModelCompletedEvent) -> bool:
+    return (
+        event.stop_reason is StopReason.MAX_TOKENS
+        and event.turn.stop_reason is StopReason.MAX_TOKENS
+        and not event.internal_retry_count
+        and not event.turn.tool_calls
+        and all(
+            isinstance(part, TextPart)
+            for message in event.turn.assistant_messages
+            for part in message.content
+        )
+    )
+
+
 class FormationBank(BorrowedProvider):
     def __init__(self, provider: ModelProvider, path: Path, identity: str) -> None:
         super().__init__(provider)
         self.path, self.identity = path, identity
-        self._calls: list[_Call] = []
+        self._calls: list[_Call | _TokenLimitRefusal] = []
         self._cursor = 0
         self._failed = self._finished = False
         self._pending = path.with_suffix(path.suffix + ".pending.jsonl")
@@ -124,7 +167,7 @@ class FormationBank(BorrowedProvider):
     @property
     def usages(self) -> tuple[ModelUsage, ...]:
         calls = self._calls if self._recorded is None else self._recorded.calls
-        return tuple(call.completion.turn.usage for call in calls)
+        return tuple(call.usage for call in calls)
 
     @property
     def digest(self) -> str:
@@ -156,7 +199,10 @@ class FormationBank(BorrowedProvider):
             ):
                 self._failed = True
                 raise ValueError("The formation bank request sequence changed")
-            recorded_event = self._recorded.calls[index].completion
+            recorded = self._recorded.calls[index]
+            if isinstance(recorded, _TokenLimitRefusal):
+                raise ValueError("A formation bank requires one ordinary structured completion")
+            recorded_event = recorded.completion
             yield recorded_event.model_copy(
                 update={
                     "attempt_id": attempt.attempt_id,
@@ -168,6 +214,7 @@ class FormationBank(BorrowedProvider):
             )
             return
         completed = False
+        recorded_refusal = False
         with self._pending.open("a") as stream:
             stream.write(json.dumps({"request_sha256": key, "state": "reserved"}) + "\n")
             stream.flush()
@@ -177,7 +224,11 @@ class FormationBank(BorrowedProvider):
                 if isinstance(event, ModelCompletedEvent):
                     if completed:
                         raise ValueError("The formation bank received duplicate completion")
-                    call = _Call(request_sha256=key, completion=_completion(event))
+                    call: _Call | _TokenLimitRefusal = (
+                        _TokenLimitRefusal(request_sha256=key, usage=event.turn.usage)
+                        if _token_limit(event)
+                        else _Call(request_sha256=key, completion=_completion(event))
+                    )
                     self._calls.append(call)
                     completed = True
                     with self._pending.open("a") as stream:
@@ -186,9 +237,15 @@ class FormationBank(BorrowedProvider):
                         os.fsync(stream.fileno())
                     if self._pending.stat().st_size > 8 * 1024 * 1024:
                         raise ValueError("The formation bank exceeded its size bound")
+                    if isinstance(call, _TokenLimitRefusal):
+                        recorded_refusal = True
+                        raise ValueError(
+                            "A formation bank requires one ordinary structured completion"
+                        )
                 yield event
         except BaseException:
-            self._failed = True
+            if not recorded_refusal:
+                self._failed = True
             raise
         finally:
             if not completed:
@@ -206,7 +263,10 @@ class FormationBank(BorrowedProvider):
                 raise ValueError("The formation bank did not reproduce every call and formed state")
         else:
             bank = _Bank(
-                identity=self.identity, state_sha256=state_sha256, calls=tuple(self._calls)
+                version="paired-formation-bank@2",
+                identity=self.identity,
+                state_sha256=state_sha256,
+                calls=tuple(self._calls),
             )
             with self.path.open("x") as stream:
                 os.chmod(self.path, 0o600)

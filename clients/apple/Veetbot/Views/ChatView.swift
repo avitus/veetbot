@@ -21,8 +21,27 @@ enum ConversationScrollTarget: Equatable {
     }
 }
 
+private struct ChatListOverlayPresentedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Whether the compact chat list is sliding over the conversation, which
+    /// covers it for notification attention as a sheet would.
+    var chatListOverlayPresented: Bool {
+        get { self[ChatListOverlayPresentedKey.self] }
+        set { self[ChatListOverlayPresentedKey.self] = newValue }
+    }
+}
+
+/// The conversation in the A2 Dock design: answers on bare paper behind a
+/// teal mark, the owner's messages in teal-wash capsules, each tool run one
+/// sentence that opens into a ledger, and whatever needs the owner docked
+/// above a translucent composer, with one amber line in the transcript saying
+/// so.
 public struct ChatView: View {
     @Environment(\.activeClientMode) private var activeMode
+    @Environment(\.chatListOverlayPresented) private var chatListOverlayPresented
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
@@ -31,6 +50,10 @@ public struct ChatView: View {
     @State private var showingFileImporter = false
     @State private var showingWebsiteAccess = false
     @State private var transcriptProbe = TranscriptProbe()
+    /// What the draft needs; the field hugs one line and grows to a cap.
+    @State private var composerContentHeight: CGFloat = 0
+    /// The dock's laid-out height, kept free at the end of the transcript.
+    @State private var dockHeight: CGFloat = 0
     #if os(iOS)
     @State private var showingPhotoPicker = false
     #endif
@@ -49,14 +72,15 @@ public struct ChatView: View {
     private var notificationCovered: Bool {
         var covered = artifactSelection != nil || textSelection != nil || model.isPeopleLookupPresented
             || showingWebsiteAccess || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
+            || chatListOverlayPresented
         #if os(iOS)
         covered = covered || showingPhotoPicker || model.pendingSmsInvocation != nil
         #endif
         return covered
     }
 
-    /// An `onChange` action is the closure built for the previous body, so the
-    /// environment it reads still holds the old mode: callers pass the new value.
+    /// `onChange` callers pass the changed mode from the action's `newValue`, so
+    /// the result never depends on which render's environment the closure read.
     private func updateNotificationVisibility(mode: ClientMode? = nil, covered: Bool? = nil) {
         model.notificationTranscriptVisible = (mode ?? activeMode) == .chat && !(covered ?? notificationCovered)
         if model.notificationTranscriptVisible { Task { await model.synchronizeNotifications() } }
@@ -64,156 +88,72 @@ public struct ChatView: View {
 
     /// Renders the live conversation and composer while the active mode controls the window title.
     public var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Button { showingWebsiteAccess = true } label: {
-                    Label("Website Access", systemImage: "globe")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("chat.websiteAccess")
-            }.padding(.horizontal).padding(.top, 8)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        if let workingState = state.workingState {
-                            WorkingStatePanel(state: workingState)
-                        }
-                        ForEach(state.activityTimeline) { item in
-                            switch item {
-                            case .message(let message):
-                                TimelineBubble(
-                                    item: message,
-                                    openArtifact: { artifactID in
-                                        artifactSelection = ArtifactSelection(id: artifactID)
-                                    },
-                                    selectText: { textSelection = $0 }
-                                )
-                            case .tool(let activity):
-                                ToolActivityCard(
-                                    activity: activity,
-                                    approval: state.approvals.first {
-                                        $0.id == activity.approvalID
-                                    },
-                                    activeTaskGrant: model.activeTaskGrant,
-                                    approvalInFlight: activity.approvalID.flatMap {
-                                        model.approvalsInFlight[$0]
-                                    },
-                                    resolve: { approval, decision, reason, taskGrant in
-                                        Task {
-                                            await model.resolveApproval(
-                                                approval,
-                                                decision: decision,
-                                                reason: reason,
-                                                taskGrant: taskGrant
-                                            )
-                                        }
-                                    },
-                                    openArtifact: { artifactID in
-                                        artifactSelection = ArtifactSelection(id: artifactID)
+        ScrollViewReader { proxy in
+            // The dock and composer float over the end of the transcript, which
+            // scrolls up from beneath them: the transcript keeps the dock's
+            // measured height clear at its end, and the scroll anchor sits
+            // below that clearance. (A bottom safe-area inset holding the
+            // approval card left the whole window undrawn on macOS 26.)
+            GeometryReader { pane in
+                ZStack(alignment: .bottom) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            #if os(macOS)
+                            header
+                            #endif
+                            transcript
+                                .padding(.top, 8)
+                                .background(
+                                    GeometryReader { geometry in
+                                        Color.clear
+                                            .onAppear { transcriptProbe.contentHeight = geometry.size.height }
+                                            .onChange(of: geometry.size.height) { _, height in transcriptProbe.contentHeight = height }
                                     }
                                 )
-                                .id(
-                                    activity.approvalID.map {
-                                        NotificationFocus.approval($0).scrollID
-                                    } ?? activity.id
-                                )
-                            case .toolBundle(let bundle):
-                                ToolActivityBundleCard(
-                                    bundle: bundle,
-                                    approvals: state.approvals,
-                                    openArtifact: { artifactID in
-                                        artifactSelection = ArtifactSelection(id: artifactID)
-                                    }
-                                )
-                                .id(scrollID(for: bundle, fallback: item.id))
-                            }
                         }
-                        ForEach(
-                            state.approvals.filter { approval in
-                                !state.tools.contains { $0.approvalID == approval.id }
-                            }
-                        ) { approval in
-                            ApprovalCardView(
-                                approval: approval, activeTaskGrant: model.activeTaskGrant,
-                                inFlight: model.approvalsInFlight[approval.id]
-                            ) { decision, reason, taskGrant in
-                                Task {
-                                    await model.resolveApproval(
-                                        approval,
-                                        decision: decision,
-                                        reason: reason,
-                                        taskGrant: taskGrant
-                                    )
-                                }
-                            }
-                            .id(NotificationFocus.approval(approval.id).scrollID)
-                        }
-                        if let prompt = state.clarifyingQuestion {
-                            ClarifyingQuestionCard(prompt: prompt) { answer in
-                                await model.answerQuestion(prompt, answer: answer)
-                            }
-                            .id(NotificationFocus.question(prompt.questionID).scrollID)
-                        }
-                        if let failure = state.failure {
-                            RunFailureCard(failure: failure)
-                        }
-                        Color.clear.frame(height: 1).id(Self.bottomAnchorID)
+                        .padding(.horizontal, Self.transcriptHorizontalPadding)
+                        .frame(maxWidth: A2Metrics.transcriptMaxWidth)
+                        .frame(maxWidth: .infinity)
+                        Color.clear
+                            .frame(height: max(dockHeight + 8, 1))
+                            .id(Self.bottomAnchorID)
                     }
-                    .padding(.vertical)
-                    .padding(.horizontal, Self.transcriptHorizontalPadding)
-                    .frame(maxWidth: .infinity)
                     .background(
                         GeometryReader { geometry in
                             Color.clear
-                                .onAppear { transcriptProbe.contentHeight = geometry.size.height }
-                                .onChange(of: geometry.size.height) { transcriptProbe.contentHeight = $0 }
+                                .onAppear { transcriptProbe.viewportHeight = geometry.size.height }
+                                .onChange(of: geometry.size.height) { _, height in transcriptProbe.viewportHeight = height }
                         }
                     )
-                }
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear
-                            .onAppear { transcriptProbe.viewportHeight = geometry.size.height }
-                            .onChange(of: geometry.size.height) { transcriptProbe.viewportHeight = $0 }
-                    }
-                )
-                .onChange(of: scrollChangeToken) { _ in
-                    scroll(proxy)
-                }
-                .onChange(of: model.notificationFocus) { _ in
-                    scroll(proxy)
-                }
-                .onAppear {
-                    scroll(proxy)
+                    bottomDock(maxCardHeight: pane.size.height * 0.55)
+                        .background(
+                            GeometryReader { geometry in
+                                Color.clear.preference(key: DockHeightKey.self, value: geometry.size.height)
+                            }
+                        )
                 }
             }
-            if let activityLabel {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(activityLabel)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .padding(.horizontal, Self.transcriptHorizontalPadding)
-                .padding(.vertical, 8)
-                .accessibilityIdentifier("chat.activity")
+            .onPreferenceChange(DockHeightKey.self) { dockHeight = $0 }
+            .onChange(of: scrollChangeToken) {
+                scroll(proxy)
             }
-            if model.activeTaskGrant != nil {
-                TaskGrantBanner(model: model) {
-                    Task { await model.stopTaskGrant() }
-                }
-                .padding(.horizontal, Self.transcriptHorizontalPadding)
-                .padding(.vertical, 6)
+            // A dock that just grew would otherwise cover the end of the
+            // transcript; the clearance below the anchor has to be laid out first.
+            .onChange(of: dockHeight) {
+                DispatchQueue.main.async { scroll(proxy) }
             }
-            Divider()
-            composer
+            .onChange(of: model.notificationFocus) {
+                scroll(proxy)
+            }
+            .onAppear {
+                scroll(proxy)
+            }
         }
+        .background(AppTheme.paper.ignoresSafeArea())
         .onAppear { updateNotificationVisibility() }
         .onDisappear { model.notificationTranscriptVisible = false }
-        .onChange(of: notificationCovered) { covered in updateNotificationVisibility(covered: covered) }
-        .onChange(of: activeMode) { mode in updateNotificationVisibility(mode: mode) }
+        .onChange(of: notificationCovered) { _, covered in updateNotificationVisibility(covered: covered) }
+        .onChange(of: activeMode) { _, mode in updateNotificationVisibility(mode: mode) }
         // While the conversation is on screen, its task permission is re-read
         // every 30 seconds; a revoke or sweep elsewhere reaches no run stream.
         // One diagnostic line per opened conversation once its load settles:
@@ -273,7 +213,10 @@ public struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) { titleBlock }
-            ToolbarItemGroup(placement: .primaryAction) { ChatToolbarActions(model: model) }
+            ToolbarItemGroup(placement: .primaryAction) {
+                websiteAccessButton
+                ChatToolbarActions(model: model)
+            }
         }
         #endif
         .sheet(item: Binding(get: { model.callResult }, set: { if $0 == nil { model.dismissCallResult() } })) { result in
@@ -301,48 +244,252 @@ public struct ChatView: View {
             PeopleLookupSheet(lookup: PeopleLookup(), sessionID: model.selectedSessionID)
         }
         #endif
-        .onChange(of: model.connectionGeneration) { _ in model.isPeopleLookupPresented = false }
+        .onChange(of: model.connectionGeneration) { model.isPeopleLookupPresented = false }
     }
+
+    // MARK: - Header
+
+    #if os(macOS)
+    /// The conversation's title in the display face, with what the run needs
+    /// from the owner beneath it, or else where the conversation is filed and
+    /// when it last moved.
+    private var header: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.selectedConversationTitle)
+                    .appDisplayFont(.title2)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("chat.heading")
+                if let statusLabel {
+                    Text(statusLabel)
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.amberText)
+                        .accessibilityIdentifier("chat.status")
+                } else if let entry = selectedEntry {
+                    ConversationMetaLine(prefix: metaPrefix(for: entry), updatedAt: entry.updatedAt)
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.inkSoft)
+                }
+            }
+            Spacer(minLength: 8)
+            websiteAccessButton
+        }
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    private var selectedEntry: SessionHistoryEntry? {
+        guard let selectedSessionID = model.selectedSessionID else { return nil }
+        return model.history.first { $0.sessionID == selectedSessionID }
+    }
+
+    private func metaPrefix(for entry: SessionHistoryEntry) -> String {
+        if entry.scheduleID != nil { return "Scheduled" }
+        if let folderID = entry.folderID, let folder = model.folders.first(where: { $0.id == folderID }) {
+            return folder.name
+        }
+        return "Chat"
+    }
+    #endif
 
     #if os(iOS)
     /// The conversation's title and, beneath it, only what the run needs from the owner.
     private var titleBlock: some View {
         VStack(spacing: 1) {
             Text(model.selectedConversationTitle)
-                .appFont(.headline)
+                .appDisplayFont(.headline)
                 .lineLimit(1)
                 .accessibilityIdentifier("chat.heading")
             if let statusLabel {
                 Text(statusLabel)
                     .appFont(.caption)
-                    .foregroundColor(AppTheme.orange)
+                    .foregroundColor(AppTheme.amberText)
                     .accessibilityIdentifier("chat.status")
             }
         }
     }
     #endif
 
+    private var websiteAccessButton: some View {
+        Button { showingWebsiteAccess = true } label: {
+            Image(systemName: "globe")
+        }
+        .buttonStyle(QuietIconButtonStyle())
+        .help("Website Access")
+        .accessibilityLabel("Website Access")
+        .accessibilityIdentifier("chat.websiteAccess")
+    }
+
     private var statusLabel: String? {
         ConversationStatus.label(runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval)
     }
 
+    // MARK: - Transcript
+
+    private var transcript: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            if let workingState = state.workingState {
+                WorkingStatePanel(state: workingState)
+                    .padding(.bottom, 16)
+            }
+            ForEach(Array(state.activityTimeline.enumerated()), id: \.element.id) { index, item in
+                row(for: item)
+                    .padding(.top, index == 0 ? 0 : spacingBefore(item))
+            }
+            ForEach(detachedApprovals) { approval in
+                Group {
+                    if approval.status.isPending {
+                        WaitingLine(text: "Waiting for your approval. See below.")
+                    } else {
+                        ApprovalCardView(approval: approval) { _, _, _ in }
+                    }
+                }
+                .padding(.top, 12)
+                .id(NotificationFocus.approval(approval.id).scrollID)
+            }
+            if let prompt = state.clarifyingQuestion {
+                WaitingLine(text: "Waiting for your answer. See below.")
+                    .padding(.top, 12)
+                    .id(NotificationFocus.question(prompt.questionID).scrollID)
+            }
+            if let failure = state.failure {
+                RunFailureCard(failure: failure)
+                    .padding(.top, 16)
+            }
+        }
+    }
+
+    /// Approvals no tool call carries, such as one restored ahead of its call.
+    private var detachedApprovals: [ApprovalView] {
+        state.approvals.filter { approval in
+            !state.tools.contains { $0.approvalID == approval.id }
+        }
+    }
+
+    private func spacingBefore(_ item: ConversationActivity) -> CGFloat {
+        switch item {
+        case .message: return 24
+        case .tool, .toolBundle: return 12
+        }
+    }
+
+    @ViewBuilder
+    private func row(for item: ConversationActivity) -> some View {
+        switch item {
+        case .message(let message):
+            TimelineBubble(
+                item: message,
+                openArtifact: { artifactID in
+                    artifactSelection = ArtifactSelection(id: artifactID)
+                },
+                selectText: { textSelection = $0 }
+            )
+        case .tool(let activity):
+            VStack(alignment: .leading, spacing: 12) {
+                WorkStrip(
+                    content: .single(activity),
+                    approvals: state.approvals,
+                    openArtifact: { artifactID in
+                        artifactSelection = ArtifactSelection(id: artifactID)
+                    }
+                )
+                if let approval = state.approvals.first(where: { $0.id == activity.approvalID }),
+                    approval.status.isPending
+                {
+                    WaitingLine(text: "Waiting for your approval. See below.")
+                }
+            }
+            .id(
+                activity.approvalID.map {
+                    NotificationFocus.approval($0).scrollID
+                } ?? activity.id
+            )
+        case .toolBundle(let bundle):
+            WorkStrip(
+                content: .bundle(bundle),
+                approvals: state.approvals,
+                openArtifact: { artifactID in
+                    artifactSelection = ArtifactSelection(id: artifactID)
+                }
+            )
+            .id(scrollID(for: bundle, fallback: item.id))
+        }
+    }
+
+    // MARK: - Dock and composer
+
+    /// What sits over the end of the transcript: the card the run waits on,
+    /// the activity line, the task permission, and the composer.
+    private func bottomDock(maxCardHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AttentionDock(model: model, state: state, maxHeight: maxCardHeight)
+            if let activityLabel {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(activityLabel)
+                        .appFont(.callout)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .accessibilityIdentifier("chat.activity")
+            }
+            if model.activeTaskGrant != nil {
+                TaskGrantBanner(model: model) {
+                    Task { await model.stopTaskGrant() }
+                }
+            }
+            composer
+        }
+        .padding(.horizontal, Self.transcriptHorizontalPadding)
+        .padding(.top, 12)
+        .padding(.bottom, 12)
+        .frame(maxWidth: A2Metrics.transcriptMaxWidth)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(
+                stops: [
+                    .init(color: AppTheme.paper.opacity(0), location: 0),
+                    .init(color: AppTheme.paper, location: 0.45),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.top, -24)
+            .allowsHitTesting(false)
+        )
+    }
+
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             if !model.attachments.isEmpty {
                 AttachmentChipsView(
                     attachments: model.attachments,
                     remove: { model.removeAttachment($0) },
                     retry: { model.retryAttachment($0) }
                 )
+                .padding(.horizontal, 6)
+                .padding(.top, 4)
             }
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 4) {
                 attachButton
                 messageField
                 sendButton
+                    .padding(.bottom, 4)
             }
         }
-        .padding()
-        .background(AppTheme.turquoise.opacity(0.055))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: A2Metrics.composerRadius, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: A2Metrics.composerRadius, style: .continuous)
+                .stroke(AppTheme.hairline)
+        )
+        .shadow(color: AppTheme.ink.opacity(0.10), radius: 18, x: 0, y: 8)
     }
 
     @ViewBuilder
@@ -361,9 +508,12 @@ public struct ChatView: View {
             }
         } label: {
             Image(systemName: "paperclip")
-                .font(.title3)
-                .frame(minWidth: 32, minHeight: 42)
+                .font(.system(size: 17))
+                .frame(width: 36, height: 36)
+                .foregroundColor(AppTheme.inkSoft)
+                .contentShape(Rectangle())
         }
+        .padding(.bottom, 3)
         .disabled(!model.isConfigured)
         .accessibilityLabel("Attach files")
         .accessibilityIdentifier("chat.attach")
@@ -372,10 +522,10 @@ public struct ChatView: View {
             showingFileImporter = true
         } label: {
             Image(systemName: "paperclip")
-                .font(.title3)
-                .frame(minWidth: 28, minHeight: 42)
+                .font(.system(size: 15))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietIconButtonStyle())
+        .padding(.bottom, 4)
         .disabled(!model.isConfigured)
         .help("Attach files")
         .accessibilityLabel("Attach files")
@@ -389,36 +539,44 @@ public struct ChatView: View {
         ComposerTextEditor(
             text: $model.composerText,
             onSubmit: submitDraft,
-            onDropFiles: { urls in Task { await model.attach(fileURLs: urls) } }
+            onDropFiles: { urls in Task { await model.attach(fileURLs: urls) } },
+            onContentHeightChange: { composerContentHeight = $0 }
         )
-        .frame(minHeight: 42, maxHeight: 120)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(AppTheme.turquoise.opacity(0.42))
-        )
+        .frame(height: composerHeight)
         .accessibilityLabel("Message")
         .accessibilityIdentifier("chat.composer")
         #else
         ComposerTextEditor(
             text: $model.composerText,
             onSubmit: submitDraft,
-            onDropItems: { providers in Task { await model.attach(itemProviders: providers) } }
+            onDropItems: { providers in Task { await model.attach(itemProviders: providers) } },
+            onContentHeightChange: { composerContentHeight = $0 }
         )
-        .frame(minHeight: 42, maxHeight: 120)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(AppTheme.turquoise.opacity(0.42))
-        )
+        .frame(height: composerHeight)
         .accessibilityLabel("Message")
         .accessibilityIdentifier("chat.composer")
         #endif
     }
 
+    #if os(macOS)
+    private static let composerLineHeight: CGFloat = 36
+    #else
+    private static let composerLineHeight: CGFloat = 42
+    #endif
+
+    /// One line at rest, up to about six lines, then the draft scrolls inside.
+    private var composerHeight: CGFloat {
+        min(max(composerContentHeight, Self.composerLineHeight), 140)
+    }
+
     private var sendButton: some View {
         Button(action: submitDraft) {
-            Image(systemName: "arrow.up.circle.fill")
-                .font(.title2)
-                .foregroundColor(canSendDraft ? AppTheme.orange : .secondary)
+            Image(systemName: "arrow.up")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(canSendDraft ? AppTheme.onTeal : AppTheme.inkFaint)
+                .frame(width: A2Metrics.controlHeight, height: A2Metrics.controlHeight)
+                .background(Circle().fill(canSendDraft ? AppTheme.tealFill : AppTheme.field))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(!canSendDraft)
@@ -495,6 +653,93 @@ public struct ChatView: View {
     }
 }
 
+private struct DockHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// The card the run waits on, docked above the composer until the owner
+/// answers it: every pending approval in order, or else the clarifying
+/// question. Nothing shows while nothing is waiting.
+private struct AttentionDock: View {
+    @ObservedObject var model: ChatViewModel
+    @ObservedObject var state: RunStateReducer
+    /// The most of the pane the cards may take before they scroll.
+    let maxHeight: CGFloat
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        let pending = state.approvals.filter { $0.status.isPending }
+        if !pending.isEmpty || state.clarifyingQuestion != nil {
+            // The dock scrolls like the transcript: it hugs the cards up to the
+            // pane's share and scrolls past it, and a card laid out outside a
+            // scroll container left the whole window undrawn on macOS 26. The
+            // cards report their height; a fixed-size scroll view would keep
+            // its full content height past the cap and overlap the composer.
+            ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(pending) { approval in
+                    ApprovalCardView(
+                        approval: approval, activeTaskGrant: model.activeTaskGrant,
+                        inFlight: model.approvalsInFlight[approval.id]
+                    ) { decision, reason, taskGrant in
+                        Task {
+                            await model.resolveApproval(
+                                approval,
+                                decision: decision,
+                                reason: reason,
+                                taskGrant: taskGrant
+                            )
+                        }
+                    }
+                    .shadow(color: AppTheme.ink.opacity(0.12), radius: 20, x: 0, y: 10)
+                }
+                if pending.isEmpty, let prompt = state.clarifyingQuestion {
+                    ClarifyingQuestionCard(prompt: prompt) { answer in
+                        await model.answerQuestion(prompt, answer: answer)
+                    }
+                    .shadow(color: AppTheme.ink.opacity(0.12), radius: 20, x: 0, y: 10)
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("chat.attention-dock")
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: DockContentHeightKey.self, value: proxy.size.height)
+                }
+            )
+            }
+            .onPreferenceChange(DockContentHeightKey.self) { height in
+                DispatchQueue.main.async { contentHeight = height }
+            }
+            .frame(height: contentHeight > 0 ? min(contentHeight, max(maxHeight, 120)) : nil)
+            .fixedSize(horizontal: false, vertical: contentHeight == 0)
+        }
+    }
+}
+
+/// The height of the dock's cards, so the dock can hug them below the cap.
+private struct DockContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Where a conversation is filed and when it last moved: "Home · Updated 2 min ago".
+private struct ConversationMetaLine: View {
+    let prefix: String
+    let updatedAt: Date
+
+    var body: some View {
+        TimelineView(ConversationAgeSchedule(updatedAt: updatedAt)) { context in
+            Text(
+                "\(prefix) · Updated \(ConversationAgeFormatter.string(since: updatedAt, relativeTo: context.date))"
+            )
+        }
+    }
+}
+
 /// The open conversation's task permission, above the composer: where it
 /// allows Veetbot to act, how many actions it has used and how long is left,
 /// and Stop, which needs no confirmation (ADR-0129).
@@ -506,20 +751,23 @@ private struct TaskGrantBanner: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             if let text = model.taskGrantBannerText(now: context.date) {
                 HStack(spacing: 10) {
-                    Image(systemName: "checkmark.shield.fill")
-                        .foregroundColor(AppTheme.turquoise)
+                    Image(systemName: "checkmark.shield")
+                        .foregroundColor(AppTheme.teal)
                     Text(text)
-                        .appFont(.caption, weight: .semibold)
+                        .appFont(.caption, weight: .medium)
+                        .foregroundColor(AppTheme.inkSoft)
                         .lineLimit(2)
                         .accessibilityIdentifier("task-grant.banner.text")
                     Spacer(minLength: 8)
                     Button("Stop", role: .destructive, action: stop)
+                        .buttonStyle(QuietCapsuleButtonStyle())
                         .accessibilityIdentifier("task-grant.banner.stop")
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(AppTheme.turquoise.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.tealWash)
+                )
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("task-grant.banner")
             }
@@ -536,54 +784,78 @@ private struct RunFailureCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Conversation failed", systemImage: "exclamationmark.triangle.fill")
-                .appFont(.headline)
-                .foregroundColor(.red)
+            Label("Conversation failed", systemImage: "exclamationmark.triangle")
+                .appFont(.caption, weight: .semibold)
+                .foregroundColor(AppTheme.red)
             Text(failure.userFacingMessage)
                 .appFont(.body)
                 .textSelection(.enabled)
             Text(failure.diagnosticSummary)
                 .textSelection(.enabled)
-                .appFont(.caption)
-                .foregroundColor(.secondary)
+                .appCodeFont()
+                .foregroundColor(AppTheme.inkSoft)
         }
-        .padding(12)
-        .frame(maxWidth: 680, alignment: .leading)
+        .padding(.leading, 14)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(AppTheme.red).frame(width: 2)
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.red.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.red.opacity(0.35))
-        )
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("conversation.failure")
     }
 }
 
+/// One message: the owner's in a teal-wash capsule at the trailing edge, the
+/// assistant's on bare paper behind a small teal mark.
 private struct TimelineBubble: View {
     let item: TimelineItem
     let openArtifact: (UUID) -> Void
     let selectText: (MessageTextSelection) -> Void
 
     var body: some View {
-        VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
-            bubble
-            if item.offersMessageActions {
-                MessageActionBar(
-                    messageID: item.id,
-                    role: item.role,
-                    markdown: item.copyableMarkdown,
-                    selectText: selectText
-                )
+        if item.role == .user {
+            HStack(alignment: .bottom, spacing: 0) {
+                Spacer(minLength: 48)
+                VStack(alignment: .trailing, spacing: 4) {
+                    content
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(AppTheme.tealWash)
+                        )
+                    actions
+                }
+                .frame(maxWidth: 560, alignment: .trailing)
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                AssistantMark()
+                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 6) {
+                    content
+                    actions
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
     }
 
-    private var bubble: some View {
+    @ViewBuilder
+    private var actions: some View {
+        if item.offersMessageActions {
+            MessageActionBar(
+                messageID: item.id,
+                role: item.role,
+                markdown: item.copyableMarkdown,
+                selectText: selectText
+            )
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(item.content.enumerated()), id: \.offset) { _, block in
                 switch block {
@@ -599,22 +871,20 @@ private struct TimelineBubble: View {
                 ProgressView().controlSize(.small)
             }
         }
-        .padding(item.role == .user ? 12 : 0)
-        .background {
-            if item.role == .user {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(AppTheme.turquoise.opacity(0.18))
-            }
-        }
-        .frame(maxWidth: item.role == .user ? 680 : .infinity, alignment: .leading)
     }
 
+    /// A file the reply carries, as a chip that opens it.
     private func artifactButton(_ label: String, id: UUID) -> some View {
         Button {
             openArtifact(id)
         } label: {
-            Label(label, systemImage: "doc")
+            Label {
+                Text(label).lineLimit(1)
+            } icon: {
+                Image(systemName: "doc.text").foregroundColor(AppTheme.teal)
+            }
         }
+        .buttonStyle(SecondaryCapsuleButtonStyle())
     }
 }
 
