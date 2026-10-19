@@ -711,11 +711,10 @@ private struct EmailThreadScreen: View {
                     }
                     Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
                 } label: {
-                    Image(systemName: "ellipsis")
+                    // The system menu button: a styled Menu hit-tests differently on
+                    // macOS 26 and the journeys click what sits beside it.
+                    Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
                 }
-                .menuStyle(.button)
-                .buttonStyle(QuietIconButtonStyle())
-                .menuIndicator(.hidden)
                 .accessibilityLabel("Thread actions").help("Thread actions")
                 .disabled(model.isPerformingAction)
             }
@@ -961,9 +960,7 @@ private struct EmailThreadScreen: View {
                     } label: {
                         Label("Draft options", systemImage: "ellipsis.circle")
                     }
-                    .menuStyle(.button)
-                    .buttonStyle(QuietCapsuleButtonStyle())
-                    .menuIndicator(.hidden)
+                    .appFont(.callout)
                     Spacer(minLength: 0)
                 }
                 // A refused send belongs next to the control that asked for it; above the

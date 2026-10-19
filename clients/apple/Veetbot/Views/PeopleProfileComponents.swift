@@ -8,19 +8,47 @@ import UIKit
 
 // MARK: - Tokens
 
-/// The People palette. Accent and surfaces come from the A2 tokens; text colors
-/// keep at least 4.5:1 contrast on cards and canvas in both appearances, which
-/// the Mac Large text accessibility audit checks.
+/// The People palette, unchanged until People's own A2 restyle: the Mac Large
+/// text accessibility audit reads these system surfaces, and text colors keep
+/// at least 4.5:1 contrast on cards and canvas in both appearances.
 enum PeopleSurface {
-    static var accent: Color { AppTheme.teal }
+    static let accent: Color = {
+        #if os(macOS)
+            Color(
+                nsColor: NSColor(name: nil) { appearance in
+                    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                        ? NSColor(srgbRed: 0.38, green: 0.82, blue: 0.77, alpha: 1)
+                        : NSColor(srgbRed: 0, green: 112.0 / 255, blue: 109.0 / 255, alpha: 1)
+                })
+        #else
+            Color(
+                uiColor: UIColor { traits in
+                    traits.userInterfaceStyle == .dark
+                        ? UIColor(red: 0.38, green: 0.82, blue: 0.77, alpha: 1)
+                        : UIColor(red: 0, green: 112.0 / 255, blue: 109.0 / 255, alpha: 1)
+                })
+        #endif
+    }()
     /// Unconfirmed identities and questions waiting on the owner.
     static let attention = peopleAdaptiveColor(light: (167, 62, 0), dark: (255, 158, 98))
     /// Forgetting and other removals.
     static let destructive = peopleAdaptiveColor(light: (180, 35, 24), dark: (255, 138, 125))
     /// Initials on the monogram's tinted wash.
     static let monogramInk = peopleAdaptiveColor(light: (0, 84, 81), dark: (97, 209, 196))
-    static var canvas: Color { AppTheme.paper }
-    static var card: Color { AppTheme.surface }
+    static var canvas: Color {
+        #if os(macOS)
+            Color(nsColor: .windowBackgroundColor)
+        #else
+            Color(uiColor: .systemGroupedBackground)
+        #endif
+    }
+    static var card: Color {
+        #if os(macOS)
+            Color(nsColor: .controlBackgroundColor)
+        #else
+            Color(uiColor: .secondarySystemGroupedBackground)
+        #endif
+    }
     /// Dates, sources and other supporting text.
     static let muted = Color.primary.opacity(0.75)
     static let hairline = Color.primary.opacity(0.09)
