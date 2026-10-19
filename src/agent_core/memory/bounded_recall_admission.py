@@ -154,6 +154,7 @@ def validate_bounded_evidence(
             difficult.add(item["attempt"]["key"][0])
         elif item.get("kind") == "parent_preparation_replacement":
             difficult.add(item["approval"]["scenario_id"])
+    difficult.update(item["scenario_id"] for item in report["exceptions"] if "scenario_id" in item)
     item_hashes = {_digest(_encoded(item)) for item in evidence.review_items}
     _require(
         review.reviewer.strip() != ""

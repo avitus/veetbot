@@ -34,6 +34,8 @@ numerical goals and all deviations remain reported, including family regressions
 invalid-current flags, and attributed per-case cost overruns. The human must
 explicitly accept their bounded residual risks; an empty review or aggregate
 approval without the linked failed evidence cannot supply that decision.
+Every scenario with a row-level quality exception requires explicit review,
+including an otherwise correct answer that exceeds the per-answer cost ceiling.
 
 An exact source found during search but omitted from a certified final context
 is candidate evidence only. Its original absent rank and unrendered status stay

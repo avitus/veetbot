@@ -171,6 +171,41 @@ def test_public_manifest_router_requires_real_owner_and_clock(tmp_path: Path) ->
         bind_index_manifest(**kwargs)
 
 
+@pytest.mark.parametrize("channel", ["sparse", "hybrid"])
+def test_correct_answer_with_cost_exception_requires_linked_human_review(
+    tmp_path: Path, channel: str
+) -> None:
+    kwargs, admission, evidence = files(tmp_path)
+    scenario_id = "attributes-2"
+    rows = evidence["bundle"]["observations"]
+    for row in rows:
+        if row["scenario_id"] == scenario_id:
+            for stage in ("formed", "candidates", "ranked", "rendered", "answer_atoms"):
+                row[stage] = [scenario_id]
+    review = evidence["human_review"]
+    review["reviewed_scenarios"].remove(scenario_id)
+
+    def retain_observations() -> None:
+        bundle = CheckpointReleaseBundle.model_validate(evidence["bundle"])
+        review["observations_sha256"] = digest(
+            b"".join(row.model_dump_json().encode() + b"\n" for row in bundle.observations)
+        )
+        write(kwargs, admission, evidence)
+
+    retain_observations()
+    assert bind_bounded_recall(**kwargs)(), "A fully successful scenario need not be reviewed"
+    expensive = next(
+        row for row in rows if row["scenario_id"] == scenario_id and row["channel"] == channel
+    )
+    expensive["cost_usd"] = evidence["bundle"]["preregistration"]["maximum_case_usd"] + 1
+    retain_observations()
+    with pytest.raises(ValueError, match="human findings omit failed evidence"):
+        bind_bounded_recall(**kwargs)
+    review["reviewed_scenarios"].append(scenario_id)
+    write(kwargs, admission, evidence)
+    assert bind_bounded_recall(**kwargs)()
+
+
 @pytest.mark.parametrize(
     "change",
     [
