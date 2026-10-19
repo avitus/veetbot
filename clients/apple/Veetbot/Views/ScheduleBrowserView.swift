@@ -189,7 +189,7 @@ struct ScheduleStateBadge: View {
 
     private var color: Color {
         switch kind {
-        case .active: return AppTheme.teal
+        case .active: return AppTheme.tealText
         case .paused: return AppTheme.amberText
         case .completed: return .secondary
         case .cancelled: return .red

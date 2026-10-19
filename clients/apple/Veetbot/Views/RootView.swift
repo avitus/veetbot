@@ -1513,6 +1513,7 @@ struct ChatListDrawer<Content: View>: View {
                                 }
                         )
                         .transition(.move(edge: .leading))
+                        .accessibilityAction(.escape) { close() }
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)

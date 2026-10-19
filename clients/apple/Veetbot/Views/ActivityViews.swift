@@ -473,8 +473,9 @@ struct ClarifyingQuestionCard: View {
     private func send() {
         let value = answer
         guard !isSubmitting, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Set before the Task so a Return and a tap in the same turn cannot both pass the guard.
+        isSubmitting = true
         Task {
-            isSubmitting = true
             defer { isSubmitting = false }
             if await submit(value) {
                 answer = ""

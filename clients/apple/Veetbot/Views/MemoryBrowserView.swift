@@ -468,7 +468,7 @@ struct MemorySensitivityBadge: View {
 
     private var color: Color {
         switch kind {
-        case .public: return AppTheme.teal
+        case .public: return AppTheme.tealText
         case .internal: return .secondary
         case .sensitive: return AppTheme.amberText
         case .restricted: return .red

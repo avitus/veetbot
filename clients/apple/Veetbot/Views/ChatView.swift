@@ -666,13 +666,16 @@ private struct AttentionDock: View {
     @ObservedObject var state: RunStateReducer
     /// The most of the pane the cards may take before they scroll.
     let maxHeight: CGFloat
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         let pending = state.approvals.filter { $0.status.isPending }
         if !pending.isEmpty || state.clarifyingQuestion != nil {
-            // The dock scrolls like the transcript: a card taller than the
-            // window's share stays reachable, and a card laid out outside a
-            // scroll container left the whole window undrawn on macOS 26.
+            // The dock scrolls like the transcript: it hugs the cards up to the
+            // pane's share and scrolls past it, and a card laid out outside a
+            // scroll container left the whole window undrawn on macOS 26. The
+            // cards report their height; a fixed-size scroll view would keep
+            // its full content height past the cap and overlap the composer.
             ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(pending) { approval in
@@ -700,10 +703,26 @@ private struct AttentionDock: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("chat.attention-dock")
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: DockContentHeightKey.self, value: proxy.size.height)
+                }
+            )
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxHeight: max(maxHeight, 120))
+            .onPreferenceChange(DockContentHeightKey.self) { height in
+                DispatchQueue.main.async { contentHeight = height }
+            }
+            .frame(height: contentHeight > 0 ? min(contentHeight, max(maxHeight, 120)) : nil)
+            .fixedSize(horizontal: false, vertical: contentHeight == 0)
         }
+    }
+}
+
+/// The height of the dock's cards, so the dock can hug them below the cap.
+private struct DockContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
