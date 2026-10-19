@@ -40,6 +40,8 @@ import Testing
 
         #expect(source.contains("struct WorkStrip"))
         #expect(source.contains("struct ToolLedgerRow"))
+        // A bundle's ledger names settled outcomes only; a pending approval is the dock's.
+        #expect(source.contains("$0.id == activity.approvalID && !$0.status.isPending"))
         #expect(source.contains(".appCodeFont("))
         #expect(source.contains("\"tool.bundle.\\(bundle.id)\""))
         #expect(source.contains(".accessibilityIdentifier(summaryIdentifier)"))
