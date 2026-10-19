@@ -81,9 +81,14 @@ server's site scope, limits and exceptions beside that choice. An active task pe
 above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 
-Settings use a compact header and a scrolling body. Connection, Models, Website
+Settings are an A2 page: "Settings" in the serif face under a small brand
+mark, then a scrolling body on paper. Connection, Models, Website
 Access, Appearance, and Data & Privacy cards group controls by user intent, and
-iOS adds SMS Integration. The Models card (ADR-0119) reads and saves
+iOS adds SMS Integration; each card is a surface with hairline rows, fields in
+the `a2Field` well, the one primary action as a filled capsule and the rest as
+hairline or quiet capsules. First-run setup shows the same body under "Connect
+this Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token
+is kept. The Models card (ADR-0119) reads and saves
 `/v1/settings/models` under `settings.read` and `settings.write`: a chat model
 and reasoning effort, which apply to new chats and to the next message, and a
 memory model and effort limited to the evaluated combinations the server
@@ -136,8 +141,10 @@ clarifying question docked above a translucent composer while the transcript
 shows one amber "Waiting for your approval" line. On a compact window the chat
 list slides over the conversation from the leading edge. Email follows (see
 "Email mode" below), then Memory, People and Schedules (see "Memory and
-People" below). Persona, Settings and Connect read the same tokens but keep
-their earlier layouts until their own restyle. `HairlineDivider`,
+People" below), and Persona, Settings and Connect complete the set: the
+persona's entries as a card of hairline rows of fields, a server conflict and
+each nomination from memory in an amber-edged card with Affirm as the filled
+capsule and Decline as a quiet one. `HairlineDivider`,
 `FilterPillButtonStyle`, the `a2Field`, `a2List` and `a2Card` modifiers, and
 the reading-page pieces `A2SectionHeading`, `A2KindLabel`, `A2RecordGroup`,
 `A2Quote`, `A2EmptyState` and `A2SheetHeader` join the shared controls for the
