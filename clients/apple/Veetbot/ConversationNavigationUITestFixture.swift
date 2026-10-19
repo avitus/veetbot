@@ -83,6 +83,31 @@ enum ConversationNavigationUITestFixture {
         return FolderSidebarPreferences(defaults: defaults)
     }
 
+    /// Whether a launch asked for one conversation to open by itself.
+    static var opensSessionAtLaunch: Bool {
+        ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_OPEN_SESSION"] != nil
+    }
+
+    /// Opens one conversation once the fixture's history has loaded, for a
+    /// look at a transcript without driving the sidebar.
+    @MainActor
+    static func openSessionIfRequested(_ model: ChatViewModel) {
+        guard let value = ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_OPEN_SESSION"],
+            let sessionID = UUID(uuidString: value)
+        else { return }
+        let delay = Double(ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_OPEN_SESSION_DELAY"] ?? "") ?? 0
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            for _ in 0..<50 {
+                if let entry = model.history.first(where: { $0.sessionID == sessionID }) {
+                    await model.selectSession(entry)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+    }
+
     @MainActor
     static func makeModelIfRequested() -> ChatViewModel? {
         guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
@@ -124,12 +149,14 @@ enum ConversationNavigationUITestFixture {
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ConversationNavigationUITestURLProtocol.self]
-        return ChatViewModel(
+        let model = ChatViewModel(
             tokenStore: InMemoryTokenStore(token: "ui-test-token"),
             configurationStore: ConnectionConfigurationStore(defaults: defaults),
             historyStore: VolatileSessionHistoryStore(),
             urlSession: URLSession(configuration: configuration)
         )
+        openSessionIfRequested(model)
+        return model
     }
 
     @MainActor

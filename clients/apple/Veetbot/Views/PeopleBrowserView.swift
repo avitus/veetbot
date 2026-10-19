@@ -387,10 +387,10 @@ struct PeopleImportHistoryView: View {
                 if model.errorMessage != nil { return }
             }
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { if model.job != nil { await model.refresh() } else { await model.loadImports() } } }
         }
-        .onChange(of: model.job?.id) { _ in
+        .onChange(of: model.job?.id) {
             if case .string(let saved)? = model.job?.scope?["max_cost_usd"] { budget = saved }
         }
         .accessibilityIdentifier("people.import")

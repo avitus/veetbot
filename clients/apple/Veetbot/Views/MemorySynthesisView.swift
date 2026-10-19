@@ -67,16 +67,14 @@ struct MemorySynthesisBrowserView: View {
             }
         }
         .accessibilityIdentifier("memory.synthesis")
-        .background {
-            NavigationLink(isActive: Binding(get: { selectedID != nil }, set: { if !$0 { selectedID = nil } })) {
-                if let selectedID { MemorySynthesisDetailView(id: selectedID) }
-            } label: { EmptyView() }
+        .navigationDestination(isPresented: Binding(get: { selectedID != nil }, set: { if !$0 { selectedID = nil } })) {
+            if let selectedID { MemorySynthesisDetailView(id: selectedID) }
         }
         .task { await model.reload() }
-        .onChange(of: selectedID) { selection in
+        .onChange(of: selectedID) { _, selection in
             if selection == nil { Task { await model.reload() } }
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.reload() } } else { model.clearContent() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .memorySynthesisChanged)) { _ in
@@ -175,7 +173,7 @@ struct MemorySynthesisDetailView: View {
         .safeAreaInset(edge: .bottom) { actionFeedback }
         .navigationTitle("Synthesis")
         .task { await model.open(id) }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.open(id) } }
             else { previewUndo = false; confirmDelete = false; model.clearContent() }
         }
@@ -283,7 +281,7 @@ private struct MemorySynthesisOriginalView: View {
         .task { await refresh() }
         .onDisappear { clear() }
         .onReceive(NotificationCenter.default.publisher(for: .peopleConnectionChanged)) { _ in clear() }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await refresh() } } else { clear() }
         }
     }

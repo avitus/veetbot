@@ -84,7 +84,7 @@ public struct PersonaEditorView: View {
                         HStack(alignment: .top) {
                             if draft.sourceBeliefID != nil {
                                 Image(systemName: "checkmark.seal")
-                                    .foregroundColor(AppTheme.turquoise)
+                                    .foregroundColor(AppTheme.teal)
                                     .accessibilityLabel("Affirmed from memory")
                             }
                             TextField("A standing truth", text: $draft.text)

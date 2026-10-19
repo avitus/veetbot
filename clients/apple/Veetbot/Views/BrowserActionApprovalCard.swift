@@ -17,25 +17,22 @@ struct BrowserActionApprovalCard: View {
     /// Show the action and server-provided permission scope before an owner decides.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Website action", systemImage: "hand.raised.fill")
-                .appFont(.headline)
-                .foregroundColor(AppTheme.orange)
-            HStack(spacing: 8) {
-                Text(presentation.verb)
-                    .appFont(.body, weight: .semibold)
-                if let detail = presentation.detail {
-                    Text(verbatim: detail)
-                        .appFont(.body)
-                }
+            AttentionCardLabel(title: "Needs your approval")
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("""
+                    \(Text(presentation.verb).fontWeight(.semibold))\
+                    \(Text(verbatim: presentation.detail.map { " " + $0 } ?? "").foregroundColor(AppTheme.inkSoft))
+                    """)
+                    .appFont(.body)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 if let badge = presentation.consequenceBadge {
                     Text(badge)
                         .appFont(.caption, weight: .semibold)
-                        .foregroundColor(.red)
+                        .foregroundColor(AppTheme.red)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.red.opacity(0.12))
-                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(AppTheme.red.opacity(0.5)))
                         .accessibilityIdentifier("approval.browser.consequence")
                 }
             }
@@ -47,12 +44,12 @@ struct BrowserActionApprovalCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Text from the website")
                         .appFont(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppTheme.inkSoft)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         if let role = presentation.elementRole {
                             Text(verbatim: role)
                                 .appFont(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(AppTheme.inkSoft)
                         }
                         if let name = presentation.elementName {
                             WebsiteQuote(text: name)
@@ -70,7 +67,7 @@ struct BrowserActionApprovalCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("Page")
                         .appFont(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppTheme.inkSoft)
                     Text(verbatim: location)
                         .appFont(.caption)
                         .lineLimit(2)
@@ -84,7 +81,7 @@ struct BrowserActionApprovalCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Types")
                         .appFont(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppTheme.inkSoft)
                     Text(verbatim: text)
                         .appCodeFont()
                         .textSelection(.enabled)
@@ -92,44 +89,26 @@ struct BrowserActionApprovalCard: View {
             case .hidden:
                 Text("Hidden: sensitive field")
                     .appFont(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
             case nil:
                 EmptyView()
             }
             if let refused = presentation.refusedNotice {
                 Label(refused, systemImage: "nosign")
                     .appFont(.caption, weight: .semibold)
-                    .foregroundColor(.red)
+                    .foregroundColor(AppTheme.red)
             }
             if let notCovered = presentation.notCoveredText {
                 Text(notCovered)
                     .appFont(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("approval.browser.not-covered")
             }
             if approval.status.isPending {
-                TextField("Reason for denial (optional)", text: $denialReason)
+                DenialReasonField(text: $denialReason)
                     .disabled(inFlight != nil)
-                if presentation.offersTaskGrant, let offer = approval.taskGrantOffer {
-                    Text(verbatim: offer.summary)
-                        .appFont(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("approval.task-scope")
-                    Button {
-                        confirmingTask = true
-                    } label: {
-                        ApprovalDecisionLabel(
-                            title: "Allow all actions for this task", decision: .approveForTask,
-                            inFlight: inFlight, websiteCard: true
-                        )
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(inFlight != nil)
-                    .accessibilityIdentifier("approval.allow-for-task")
-                }
-                HStack {
+                ApprovalDecisionButtons {
                     Button {
                         resolve(.approveOnce, nil, nil)
                     } label: {
@@ -137,8 +116,20 @@ struct BrowserActionApprovalCard: View {
                             title: "Allow once", decision: .approveOnce, inFlight: inFlight, websiteCard: true
                         )
                     }
-                    .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("approval.allow-once")
+                } secondary: {
+                    if presentation.offersTaskGrant, approval.taskGrantOffer != nil {
+                        Button {
+                            confirmingTask = true
+                        } label: {
+                            ApprovalDecisionLabel(
+                                title: "Allow all actions for this task", decision: .approveForTask,
+                                inFlight: inFlight, websiteCard: true
+                            )
+                        }
+                        .accessibilityIdentifier("approval.allow-for-task")
+                    }
+                } deny: {
                     Button(role: .destructive) {
                         let reason = denialReason.trimmingCharacters(in: .whitespacesAndNewlines)
                         resolve(.deny, reason.isEmpty ? nil : reason, nil)
@@ -147,19 +138,23 @@ struct BrowserActionApprovalCard: View {
                     }
                     .accessibilityIdentifier("approval.deny")
                 }
+                .padding(.top, 4)
                 .disabled(inFlight != nil)
+                if presentation.offersTaskGrant, let offer = approval.taskGrantOffer {
+                    // The offer's own words, beneath the decisions, as the reference places its limits.
+                    Text(verbatim: offer.summary)
+                        .appFont(.caption)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("approval.task-scope")
+                }
             } else {
                 Text(resolutionText)
                     .appFont(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
             }
         }
-        .padding(12)
-        .background(AppTheme.orange.opacity(0.08))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(AppTheme.orange.opacity(0.45))
-        )
+        .attentionCard()
         .sheet(isPresented: $confirmingTask) {
             if let offer = approval.taskGrantOffer {
                 TaskGrantConfirmation(
@@ -187,7 +182,7 @@ struct BrowserActionApprovalCard: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .appFont(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(AppTheme.inkSoft)
             WebsiteQuote(text: text)
         }
     }
@@ -213,8 +208,9 @@ struct WebsiteQuote: View {
                 Button(expanded ? "Show less" : "Show more") {
                     expanded.toggle()
                 }
-                .buttonStyle(.borderless)
-                .appFont(.caption)
+                .buttonStyle(.plain)
+                .appFont(.caption, weight: .medium)
+                .foregroundColor(AppTheme.tealText)
             }
         }
     }
@@ -240,11 +236,14 @@ struct WebsiteQuote: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// Heights land after the layout pass that measured them: written during
+    /// it, from a card docked outside the transcript, they left the whole
+    /// window undrawn on macOS 26.
     private func heightReader(_ update: @escaping (CGFloat) -> Void) -> some View {
         GeometryReader { proxy in
             Color.clear
-                .onAppear { update(proxy.size.height) }
-                .onChange(of: proxy.size.height) { update($0) }
+                .onAppear { let height = proxy.size.height; DispatchQueue.main.async { update(height) } }
+                .onChange(of: proxy.size.height) { _, height in DispatchQueue.main.async { update(height) } }
         }
     }
 }
@@ -267,16 +266,44 @@ private struct TaskGrantConfirmation: View {
             HStack {
                 Spacer()
                 Button("Cancel") { cancel() }
+                    .buttonStyle(QuietCapsuleButtonStyle())
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("task-grant.confirm.cancel")
                 Button("Allow") { allow() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.turquoise)
+                    .buttonStyle(PrimaryCapsuleButtonStyle())
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("task-grant.confirm.allow")
             }
         }
         .padding(24)
         .sheetFrame(minWidth: 300, macMinWidth: 420, idealWidth: 480, minHeight: 0)
+    }
+}
+
+/// The decisions of a card that needs the owner, in the reference order: the
+/// filled primary, the bordered alternative when there is one, and a quiet
+/// Deny. One row on the Mac; on iOS the primary spans the card and the other
+/// two share the row beneath it.
+struct ApprovalDecisionButtons<Primary: View, Secondary: View, Deny: View>: View {
+    @ViewBuilder let primary: () -> Primary
+    @ViewBuilder let secondary: () -> Secondary
+    @ViewBuilder let deny: () -> Deny
+
+    var body: some View {
+        #if os(iOS)
+        VStack(spacing: 8) {
+            primary().buttonStyle(PrimaryCapsuleButtonStyle(expands: true))
+            HStack(spacing: 8) {
+                secondary().buttonStyle(SecondaryCapsuleButtonStyle(expands: true))
+                deny().buttonStyle(QuietCapsuleButtonStyle(expands: true))
+            }
+        }
+        #else
+        HStack(spacing: 8) {
+            primary().buttonStyle(PrimaryCapsuleButtonStyle())
+            secondary().buttonStyle(SecondaryCapsuleButtonStyle())
+            deny().buttonStyle(QuietCapsuleButtonStyle())
+        }
+        #endif
     }
 }

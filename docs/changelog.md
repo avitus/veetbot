@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-18 — Email wears the A2 Dock design
+
+- Email on iPhone, iPad and Mac takes the same warm-paper design as Chat.
+  Each row leads with a Handled circle (the Archive in Gmail checkbox under its
+  reference look), then who wrote and when, the subject, Veetbot's gist, and
+  one line that says what the conversation needs, in amber when it needs you.
+  A thread opens with its subject in the serif face, Veetbot's reading behind a
+  teal rule, the messages as plain prose, a "Teach Veetbot" card for the same
+  feedback as before, and your reply in one bordered box with Review & Send as
+  the filled capsule. On an iPhone the Important / Other mail switch becomes
+  two pills. Nothing about handling, drafts or sending changed: Handled is still
+  reversible, drafts still autosave, and a send still needs your approval.
+- The Subscriptions census and the Email learning, Draft history and
+  Review & Send sheets share the same rows, titles and capsule buttons.
+
 ## 2026-10-17 — Veetbot for iPhone, iPad and Mac needs iOS 27 or macOS 26
 
 - The app now requires iOS 27 on iPhone and iPad and macOS 26 on the Mac;
@@ -14,6 +29,20 @@ title: Changelog
   that older systems used is no longer written; if the SwiftData store cannot
   be opened, history stays in memory for that launch and refills from the
   server.
+## 2026-10-17 — Chat wears the A2 Dock design
+
+- The Apple apps take the warm-paper palette, serif titles and capsule
+  controls the owner chose on MagicPath, in light and a night-green dark
+  mode; the body face keeps its rounded default. Chat is restyled first: the sidebar lists what needs you (an approval
+  waiting, a report not yet read) ahead of Recent, folders and Scheduled;
+  answers sit on bare paper behind a teal mark and your own messages in teal
+  capsules; each tool run is one sentence that opens into a monospaced ledger;
+  a pending approval or question docks above a translucent composer, and the
+  transcript says "Waiting for your approval" in one amber line. On an iPhone
+  the chat list slides over the conversation. Email, Memory, People, Schedules,
+  Persona, Settings and Connect keep their layouts in the new colours for now.
+- The sidebar's Needs you group reads the server's pending approvals every ten
+  seconds, so an approval waiting in another conversation is one tap away.
 
 ## 2026-10-08 — Veetbot flags suspected spam
 

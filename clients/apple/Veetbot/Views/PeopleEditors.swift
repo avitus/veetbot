@@ -163,7 +163,7 @@ struct PeopleConversationView: View {
         }
         .peopleModalFrame(.reading, minHeight: 450, idealHeight: 640)
         .task { if chat.isConfigured && selection.source == nil { await prepare() } }
-        .onChange(of: chat.isConfigured) { configured in if configured && selection.source == nil { Task { await prepare() } } }
+        .onChange(of: chat.isConfigured) { _, configured in if configured && selection.source == nil { Task { await prepare() } } }
     }
     private func prepare() async {
         guard !prepared, let api = chat.currentAPIClient else { return }

@@ -238,9 +238,48 @@ public final class ChatViewModel: ObservableObject {
     private var observedTerminalNotificationRunID: UUID?
     private var notificationSyncInProgress = false
     @Published private(set) var unreadScheduledRunIDs: Set<UUID> = []
+    /// Every conversation whose run waits on an approval the owner has not
+    /// answered, as the server last listed them, for the sidebar's Needs you
+    /// group. The open conversation's own stream is the fresher source for it.
+    @Published private(set) var sessionsAwaitingApproval: Set<UUID> = []
 
     func hasUnreadReport(_ entry: SessionHistoryEntry) -> Bool {
         entry.scheduleID != nil && entry.lastRunID.map { unreadScheduledRunIDs.contains($0) } == true
+    }
+
+    /// The listed set, corrected by what the open conversation's stream knows.
+    var sessionsNeedingApproval: Set<UUID> {
+        var sessions = sessionsAwaitingApproval
+        if let selectedSessionID {
+            if awaitingOwnerApproval {
+                sessions.insert(selectedSessionID)
+            } else {
+                sessions.remove(selectedSessionID)
+            }
+        }
+        return sessions
+    }
+
+    /// Reads the server's pending approvals across every conversation. A
+    /// background attention read: a failure keeps the last answer and is never
+    /// presented, so a sidebar refresh cannot interrupt the conversation.
+    func refreshSessionsAwaitingApproval() async {
+        guard let api, isConfigured, !isReconfiguring else { return }
+        let generation = connectionGeneration
+        var sessions: Set<UUID> = []
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        do {
+            repeat {
+                let page = try await api.listPendingApprovals(cursor: cursor)
+                guard generation == connectionGeneration else { return }
+                sessions.formUnion(page.items.filter { $0.status.isPending }.map(\.sessionID))
+                cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
+            } while cursor != nil
+        } catch {
+            return
+        }
+        if sessionsAwaitingApproval != sessions { sessionsAwaitingApproval = sessions }
     }
 
     var visibleNotificationSessionID: UUID? {
@@ -2662,6 +2701,7 @@ public final class ChatViewModel: ObservableObject {
         defer { isReconfiguring = false }
         connectionGeneration = UUID()
         unreadScheduledRunIDs = []
+        sessionsAwaitingApproval = []
         let installedGeneration = connectionGeneration
         let retainedSessionID = selectedSessionID
         selectionRequestID = nil
@@ -2703,6 +2743,7 @@ public final class ChatViewModel: ObservableObject {
 
     private func clearInstalledConnection() {
         unreadScheduledRunIDs = []
+        sessionsAwaitingApproval = []
         dismissCallResult()
         resetFolderState()
         activeTaskGrants = []

@@ -736,7 +736,7 @@ private struct MarkdownCodeBlockView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.secondary.opacity(0.2))
         )
-        .onChange(of: code) { _ in copied = false }
+        .onChange(of: code) { copied = false }
     }
 }
 

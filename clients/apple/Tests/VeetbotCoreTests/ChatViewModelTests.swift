@@ -1251,6 +1251,55 @@ import UserNotifications
         #expect(await store.list().map(\.sessionID) == [conversationID])
     }
 
+    /// The sidebar's Needs you group reads every pending approval the server
+    /// lists, across conversations, and keeps the last answer when a listing
+    /// fails: a background attention read never interrupts the conversation.
+    @Test
+    func testPendingApprovalsAcrossConversationsFeedTheSidebarAndSurviveAFailedListing() async throws {
+        let first = UUID()
+        let second = UUID()
+        let lock = NSLock()
+        var listingFails = false
+        func approval(_ sessionID: UUID) -> String {
+            """
+            {"id":"\(UUID().uuidString)","run_id":"\(UUID().uuidString)","session_id":"\(sessionID.uuidString)","status":"PENDING","tool_name":"workspace.write_text","action_summary":"Write the note","arguments":{},"risk":"HIGH","policy_reason":"Approval required","expires_at":null,"created_at":"2026-10-17T18:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+            """
+        }
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            }
+            #expect(request.url?.path == "/v1/approvals")
+            if lock.withLock({ listingFails }) {
+                return try response(for: request, statusCode: 503, body: "")
+            }
+            return try response(
+                for: request,
+                statusCode: 200,
+                body: "{\"items\":[\(approval(first)),\(approval(second))],\"next_cursor\":null}"
+            )
+        }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        await model.refreshSessionsAwaitingApproval()
+        #expect(model.sessionsAwaitingApproval == [first, second])
+        #expect(model.sessionsNeedingApproval == [first, second])
+
+        lock.withLock { listingFails = true }
+        await model.refreshSessionsAwaitingApproval()
+        #expect(model.sessionsAwaitingApproval == [first, second])
+        #expect(model.errorMessage == nil)
+    }
+
     @Test
     func testPendingApprovalPaginationHasNoArbitraryPageCap() async throws {
         let sessionID = UUID()

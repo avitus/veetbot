@@ -87,7 +87,7 @@ public struct MemoryDetailView: View {
                 }
                 if memory.flaggedForReview {
                     Label("Flagged for review", systemImage: "flag.fill")
-                        .foregroundColor(AppTheme.orange)
+                        .foregroundColor(AppTheme.amberText)
                     if model != nil {
                         Text("Formation committed this memory without an explicit statement from you. Use Review to confirm, correct, or remove it.")
                             .appFont(.caption)

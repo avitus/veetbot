@@ -27,7 +27,7 @@ import AppKit
             source.contains(
                 "}\n        .accessibilityIdentifier(\"memory.browser\")\n        .task { await model.reload() }"
             ),
-            "memory.browser must be attached to the NavigationView result, not nested inside its searchable/toolbar content chain"
+            "memory.browser must be attached to the navigation container, not nested inside its searchable/toolbar content chain"
         )
     }
 

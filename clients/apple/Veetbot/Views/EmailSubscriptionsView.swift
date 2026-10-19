@@ -15,9 +15,9 @@ struct EmailSubscriptionsScreen: View {
                 message: "Its conversations, what it offers, and what you can still do appear here."
             )
             .frame(maxWidth: 400).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(EmailSurface.canvas)
+            .background(AppTheme.paper)
         }
-        .tint(EmailSurface.accent)
+        .tint(AppTheme.teal)
         .accessibilityIdentifier("email.subscriptions")
         .sheet(isPresented: Binding(
             get: { model.confirmation?.source == .list },
@@ -31,7 +31,7 @@ struct EmailSubscriptionsScreen: View {
     private var census: some View {
         VStack(spacing: 0) {
             filters.fixedSize(horizontal: false, vertical: true)
-            Divider()
+            HairlineDivider()
             List {
                 if model.unavailable {
                     EmailEmptyState(
@@ -42,8 +42,9 @@ struct EmailSubscriptionsScreen: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Senders couldn’t be loaded", systemImage: "exclamationmark.circle")
                             .appFont(.headline)
-                        Text(error).appFont(.callout).foregroundColor(.secondary)
-                        Button("Try again") { Task { await model.reload() } }.buttonStyle(.bordered)
+                        Text(error).appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                        Button("Try again") { Task { await model.reload() } }
+                            .buttonStyle(SecondaryCapsuleButtonStyle())
                     }.padding(.vertical, 16)
                 } else if model.isLoading && model.items.isEmpty {
                     ProgressView("Finding bulk senders…").padding(.vertical, 32).frame(maxWidth: .infinity)
@@ -62,7 +63,7 @@ struct EmailSubscriptionsScreen: View {
                                 Image(systemName: model.isSelected(row.id) ? "checkmark.circle.fill" : "circle")
                                     .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain).foregroundColor(EmailSurface.accent)
+                            .buttonStyle(.plain).foregroundColor(AppTheme.teal)
                             .disabled(!model.canSelect(row))
                             .accessibilityLabel("Select \(row.displayName)")
                             .accessibilityValue(model.isSelected(row.id) ? "Selected" : "Not selected")
@@ -75,16 +76,19 @@ struct EmailSubscriptionsScreen: View {
                         }
                         .accessibilityIdentifier("email.subscription.row.\(row.id)")
                     }
-                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparatorTint(AppTheme.hairline)
                 }
                 if model.hasMore {
                     Button("More senders") { Task { await model.loadMore() } }
-                        .disabled(model.isLoading).padding(.vertical, 12)
+                        .buttonStyle(QuietCapsuleButtonStyle())
+                        .disabled(model.isLoading).padding(.vertical, 8)
                 }
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         }
-        .background(EmailSurface.canvas)
+        .background(AppTheme.paper)
         .navigationTitle("Subscriptions")
         .task(id: model.filterKey) { await model.reload() }
         .toolbar {
@@ -141,7 +145,7 @@ struct EmailSubscriptionsScreen: View {
             .accessibilityIdentifier("email.subscriptions.state")
             Spacer(minLength: 4)
             Text("\(model.items.count) \(model.items.count == 1 ? "sender" : "senders")")
-                .appFont(.caption).foregroundColor(.secondary).fixedSize()
+                .appFont(.caption).foregroundColor(AppTheme.inkSoft).fixedSize()
         }.padding(12)
     }
 }
@@ -152,34 +156,34 @@ private struct EmailSubscriptionRowLabel: View {
     let row: EmailSubscriptionView
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: EmailType.rowSpacing) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(row.displayName.isEmpty ? row.address : row.displayName)
-                    .appFont(.callout, weight: .semibold).lineLimit(1)
+                    .appFont(EmailType.sender, weight: .semibold).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(row.lastReceivedAt, format: .dateTime.month(.abbreviated).day())
-                    .appFont(.caption).foregroundColor(.secondary).fixedSize()
+                    .appFont(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
             }
-            Text(row.address).appFont(.caption).foregroundColor(.secondary).lineLimit(1)
+            Text(row.address).appFont(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(1)
             HStack(spacing: 6) {
                 Text(row.volumeDescription)
                 Text("·")
                 Text(row.mechanismSentence).lineLimit(1)
-            }.appFont(.caption).foregroundColor(.secondary)
+            }.appFont(EmailType.gist).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 6) {
-                Text(row.stateDescription).appFont(.caption).foregroundColor(EmailSurface.accent)
+                Text(row.stateDescription).appFont(EmailType.note, weight: .medium).foregroundColor(AppTheme.tealText)
                 if row.protected {
-                    Label("Protected", systemImage: "hand.raised").appFont(.caption)
-                        .foregroundColor(.secondary)
+                    Label("Protected", systemImage: "hand.raised").appFont(EmailType.note)
+                        .foregroundColor(AppTheme.inkSoft)
                 }
             }
             if let status = model.status(for: row) {
-                Text(status).appFont(.caption).foregroundColor(.secondary)
+                Text(status).appFont(.caption).foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("email.subscription.status.\(row.id)")
             }
         }
-        .padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        .padding(.vertical, 2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
 }
 
@@ -196,11 +200,11 @@ struct EmailSubscriptionDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(current.displayName.isEmpty ? current.address : current.displayName)
-                        .appFont(.title, weight: .bold).fixedSize(horizontal: false, vertical: true)
-                    Text(current.address).appFont(.callout).foregroundColor(.secondary)
+                        .appDisplayFont(.title2).fixedSize(horizontal: false, vertical: true)
+                    Text(current.address).appFont(.callout).foregroundColor(AppTheme.inkSoft)
                         .textSelection(.enabled)
                     if !current.listID.isEmpty {
-                        Text(current.listID).appFont(.caption).foregroundColor(.secondary)
+                        Text(current.listID).appFont(.caption).foregroundColor(AppTheme.inkFaint)
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -216,9 +220,12 @@ struct EmailSubscriptionDetailView: View {
                                 : "Protected: you write to this sender",
                             systemImage: "hand.raised")
                     }
-                }.appFont(.callout).padding(18).emailCard()
+                }
+                .appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.paperDeep))
                 if let status = model.status(for: current) {
-                    Text(status).appFont(.callout).foregroundColor(.secondary)
+                    Text(status).appFont(.callout).foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("email.subscription.detail.status")
                 }
@@ -226,15 +233,15 @@ struct EmailSubscriptionDetailView: View {
                     Button {
                         perform(action)
                     } label: {
-                        Label(action.title, systemImage: action.symbol).frame(minHeight: 44)
+                        Label(action.title, systemImage: action.symbol)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(SecondaryCapsuleButtonStyle())
                     .accessibilityIdentifier("email.subscription.action.\(action.rawValue)")
                 }
             }
             .padding(24).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity)
         }
-        .background(EmailSurface.canvas)
+        .background(AppTheme.paper)
         .navigationTitle(current.displayName.isEmpty ? current.address : current.displayName)
     }
 
@@ -256,8 +263,8 @@ struct EmailUnsubscribeConfirmationSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(title).appFont(.title2, weight: .bold)
-            Text(EmailUnsubscribeConfirmation.warning).appFont(.callout).foregroundColor(.secondary)
+            Text(title).appDisplayFont(.title2)
+            Text(EmailUnsubscribeConfirmation.warning).appFont(.callout).foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -266,9 +273,9 @@ struct EmailUnsubscribeConfirmationSheet: View {
                             Text(target.displayName.isEmpty ? target.address : target.displayName)
                                 .appFont(.callout, weight: .semibold)
                             if !target.address.isEmpty, target.address != target.displayName {
-                                Text(target.address).appFont(.caption).foregroundColor(.secondary)
+                                Text(target.address).appFont(.caption).foregroundColor(AppTheme.inkSoft)
                             }
-                            Text(target.sentence).appFont(.caption).foregroundColor(.secondary)
+                            Text(target.sentence).appFont(.caption).foregroundColor(AppTheme.inkSoft)
                                 .fixedSize(horizontal: false, vertical: true)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -280,6 +287,7 @@ struct EmailUnsubscribeConfirmationSheet: View {
                 .accessibilityIdentifier("email.unsubscribe.archive")
             HStack {
                 Button("Cancel") { model.cancelConfirmation() }
+                    .buttonStyle(QuietCapsuleButtonStyle())
                 Spacer()
                 Button("Unsubscribe") {
                     isSending = true
@@ -288,12 +296,13 @@ struct EmailUnsubscribeConfirmationSheet: View {
                         isSending = false
                     }
                 }
-                .buttonStyle(.borderedProminent).tint(AppTheme.turquoise).disabled(isSending)
+                .buttonStyle(PrimaryCapsuleButtonStyle()).disabled(isSending)
                 .accessibilityIdentifier("email.unsubscribe.confirm")
             }
         }
         .padding(24)
         .sheetFrame(minWidth: 300, macMinWidth: 480, idealWidth: 540, minHeight: 360, idealHeight: 520)
+        .background(AppTheme.paper)
     }
 
     private var title: String {

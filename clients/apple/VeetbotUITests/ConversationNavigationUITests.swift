@@ -1673,12 +1673,20 @@ final class ConversationNavigationUITests: XCTestCase {
 
     private func revealSynthesisAction(_ element: XCUIElement) {
         #if os(macOS)
-        let scroll = app.scrollViews["memory.synthesis.detail"]
+        // Scroll until the control lies inside the detail column's viewport: macOS 26
+        // reports a control just below it, but still inside the window, as hittable.
+        // The identifier sits on the column's content; its scroll view is the viewport.
+        let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let column = app.scrollViews.containing(.any, identifier: "memory.synthesis.detail").firstMatch
+        XCTAssertTrue(column.waitForExistence(timeout: 5), app.debugDescription)
+        let viewport = column.frame
         for _ in 0..<16 {
-            if element.exists && element.isHittable { break }
-            let down = element.exists && element.frame.minY < scroll.frame.minY
-            scroll.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
+            if element.exists && viewport.contains(element.frame) && element.isHittable { break }
+            let down = element.exists && element.frame.minY < viewport.minY
+            column.scroll(byDeltaX: 0, deltaY: down ? 150 : -150)
         }
+        XCTAssertTrue(viewport.contains(element.frame), element.debugDescription)
         #else
         let detail = app.descendants(matching: .any)["memory.synthesis.detail"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
@@ -2636,9 +2644,13 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5), app.debugDescription)
         checkHandledActionInDetail()
         let review = app.buttons["email.review-send"]
-        for _ in 0..<8 where !review.isHittable {
-            app.scrollViews["email.detail"].scroll(byDeltaX: 0, deltaY: -350)
+        // Scroll until the button lies inside the reading column: macOS 26 reports a
+        // control just below the viewport, but still inside the window, as hittable.
+        let reading = app.scrollViews["email.detail"]
+        for _ in 0..<8 where !reading.frame.contains(review.frame) {
+            reading.scroll(byDeltaX: 0, deltaY: -350)
         }
+        XCTAssertTrue(reading.frame.contains(review.frame), app.debugDescription)
         XCTAssertTrue(review.isHittable)
         review.click()
         let send = app.buttons["email.approve-send"]
@@ -2767,7 +2779,23 @@ final class ConversationNavigationUITests: XCTestCase {
         }
     }
 
+    /// Brings the chat list back over an open conversation. On a compact
+    /// window the list slides over the conversation and slides away as a
+    /// conversation opens, so a row that is still hittable may be mid-slide:
+    /// the list is reopened from the navigation bar's toggle once the row
+    /// has gone, and left alone if it stays. The pushed list of a window
+    /// without the toggle comes back through the navigation bar's back button.
     private func revealSidebarIfNeeded(for row: XCUIElement) {
+        let toggle = app.buttons["sidebar.toggle"]
+        if toggle.exists {
+            let gone = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "hittable == false"), object: row
+            )
+            guard XCTWaiter().wait(for: [gone], timeout: 1.5) == .completed else { return }
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            toggle.tap()
+            return
+        }
         guard !row.isHittable else { return }
         let backButton = app.navigationBars.buttons.element(boundBy: 0)
         XCTAssertTrue(backButton.waitForExistence(timeout: 5))

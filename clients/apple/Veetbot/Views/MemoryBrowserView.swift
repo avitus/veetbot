@@ -23,50 +23,7 @@ public struct MemoryBrowserView: View {
     }
 
     public var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                Picker("Memory collection", selection: $collection) {
-                    Text("Memories").tag("memories")
-                    Text("People").tag("people")
-                    Text("Synthesis").tag("synthesis")
-                }.pickerStyle(.segmented).padding()
-                if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
-                else if collection == "synthesis" { MemorySynthesisBrowserView() }
-                else { content }
-            }
-                .navigationTitle("Memory")
-                // No accessibility identifier is attached here: `.searchable`
-                // hoists its field into the navigation bar chrome, which is
-                // not a descendant of this content view, so an identifier
-                // placed on this chain would land on the content underneath
-                // it instead of the field itself. XCUITest reaches the field
-                // the way it reaches any search bar: `app.searchFields`.
-                .memoryCollectionSearch(
-                    text: Binding(
-                        get: { collection == "people" ? people.searchText : model.searchText },
-                        set: { if collection == "people" { people.setSearchText($0) } else { model.setSearchText($0) } }
-                    ),
-                    prompt: collection == "people" ? "Search people" : "Search memories",
-                    enabled: collection != "synthesis"
-                )
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        if collection == "memories" { reviewQueueToggle }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        if collection == "memories" { statusFilterMenu }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        if collection == "memories" { typeFilterMenu }
-                    }
-                }
-            #if os(macOS)
-            detailColumn
-            #endif
-        }
+        navigationContainer
         .confirmationDialog(
             "Delete this memory?",
             isPresented: Binding(
@@ -98,6 +55,67 @@ public struct MemoryBrowserView: View {
         .background(MemoryBrowserWindowResizeView())
         .memoryBrowserPresentationSizing()
         #endif
+    }
+
+    /// The Mac keeps the collection beside its detail column; elsewhere the
+    /// collection is the root of a stack. Either way the synthesis journal can
+    /// present its detail with `navigationDestination(isPresented:)`.
+    @ViewBuilder
+    private var navigationContainer: some View {
+        #if os(macOS)
+        NavigationSplitView {
+            collectionColumn
+        } detail: {
+            // A stack, so the synthesis detail can push the originals it cites.
+            NavigationStack { detailColumn }
+        }
+        #else
+        NavigationStack {
+            collectionColumn
+        }
+        #endif
+    }
+
+    private var collectionColumn: some View {
+        VStack(spacing: 0) {
+            Picker("Memory collection", selection: $collection) {
+                Text("Memories").tag("memories")
+                Text("People").tag("people")
+                Text("Synthesis").tag("synthesis")
+            }.pickerStyle(.segmented).padding()
+            if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
+            else if collection == "synthesis" { MemorySynthesisBrowserView() }
+            else { content }
+        }
+            .navigationTitle("Memory")
+            // No accessibility identifier is attached here: `.searchable`
+            // hoists its field into the navigation bar chrome, which is
+            // not a descendant of this content view, so an identifier
+            // placed on this chain would land on the content underneath
+            // it instead of the field itself. XCUITest reaches the field
+            // the way it reaches any search bar: `app.searchFields`.
+            .memoryCollectionSearch(
+                text: Binding(
+                    get: { collection == "people" ? people.searchText : model.searchText },
+                    set: { if collection == "people" { people.setSearchText($0) } else { model.setSearchText($0) } }
+                ),
+                prompt: collection == "people" ? "Search people" : "Search memories",
+                enabled: collection != "synthesis"
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if collection == "memories" { reviewQueueToggle }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if collection == "memories" { statusFilterMenu }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if collection == "memories" { typeFilterMenu }
+                }
+            }
     }
 
     /// On the Mac the directory selects the person its adjacent column shows;
@@ -217,7 +235,7 @@ public struct MemoryBrowserView: View {
                 if item.flaggedForReview {
                     Label("Flagged", systemImage: "flag.fill")
                         .appFont(.caption2, weight: .semibold)
-                        .foregroundColor(AppTheme.orange)
+                        .foregroundColor(AppTheme.amberText)
                 }
                 if !item.conflictsWith.isEmpty {
                     Label("Conflicts", systemImage: "exclamationmark.triangle.fill")
@@ -450,9 +468,9 @@ struct MemorySensitivityBadge: View {
 
     private var color: Color {
         switch kind {
-        case .public: return AppTheme.turquoise
+        case .public: return AppTheme.tealText
         case .internal: return .secondary
-        case .sensitive: return AppTheme.orange
+        case .sensitive: return AppTheme.amberText
         case .restricted: return .red
         case nil: return .secondary
         }
