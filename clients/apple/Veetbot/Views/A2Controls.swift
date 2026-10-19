@@ -132,11 +132,23 @@ struct A2FieldModifier: ViewModifier {
     var radius: CGFloat = 8
 
     func body(content: Content) -> some View {
+        // The well's shapes take no clicks: on a 1x Mac display (macOS 26)
+        // they swallowed the click meant for a plain text field under
+        // them, so nothing in Settings could be focused by clicking there;
+        // a 2x display never showed it.
         content
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(AppTheme.surface))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(AppTheme.hairlineStrong))
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(AppTheme.surface)
+                    .allowsHitTesting(false)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(AppTheme.hairlineStrong)
+                    .allowsHitTesting(false)
+            )
     }
 }
 

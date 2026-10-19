@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — Persona, Settings and Connect wear the A2 Dock design
+
+- The last three screens take the warm-paper design, so every screen on
+  iPhone, iPad and Mac now matches Chat. Settings opens with its title in the
+  serif face under a small brand mark; the Connection, Models, Website Access,
+  Appearance and Data & Privacy cards sit on surface with hairline rows, their
+  fields in the sunken well, Connect and Sign in on this device as filled
+  capsules and the other actions as hairline or quiet ones. First-run setup
+  reads "Connect this Mac to your Veetbot." (or iPhone, iPad). The Persona
+  editor keeps its entries as rows of fields in one card, and shows a server
+  conflict or a suggestion from memory as an amber-edged card with Affirm as
+  the filled capsule. Nothing about connecting, models, website logins, task
+  permissions, appearance or the persona changed.
+
 ## 2026-10-19 — Memory, People and Schedules wear the A2 Dock design
 
 - Memory, People and Schedules on iPhone, iPad and Mac take the same

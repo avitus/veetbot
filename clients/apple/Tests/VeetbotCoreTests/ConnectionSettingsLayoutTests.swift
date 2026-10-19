@@ -96,11 +96,18 @@ import Testing
         let remote = try #require(section.range(of: "Label(\"Use Veetbot's remote browser\""))
 
         #expect(device.lowerBound < remote.lowerBound)
+        // The A2 Dock design draws the primary action as a filled capsule and
+        // the alternative as an outlined one; the ranking the pin protects
+        // (device sign-in first, and the only prominent button) is unchanged.
         let deviceButton = section[device.lowerBound..<remote.lowerBound]
-        #expect(deviceButton.contains(".buttonStyle(.borderedProminent)"))
+        #expect(deviceButton.contains(".primaryCapsule()"))
         #expect(deviceButton.contains(".accessibilityIdentifier(\"website-access.sign-in-on-device\")"))
-        let remoteButton = section[remote.lowerBound...]
-        #expect(remoteButton.contains(".buttonStyle(.bordered)"))
+        let remoteIdentifier = try #require(
+            section.range(of: ".accessibilityIdentifier(\"website-access.remote-browser\")")
+        )
+        let remoteButton = section[remote.lowerBound..<remoteIdentifier.upperBound]
+        #expect(remoteButton.contains(".buttonStyle(SecondaryCapsuleButtonStyle())"))
+        #expect(!remoteButton.contains(".primaryCapsule()"))
         #expect(remoteButton.contains(".accessibilityIdentifier(\"website-access.remote-browser\")"))
         #expect(!section.contains("Create secure login"))
     }
