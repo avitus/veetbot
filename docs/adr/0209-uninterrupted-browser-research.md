@@ -52,6 +52,17 @@ After a successful decision, the client reconciles the run's current state;
 errors and late decisions remain visible. Old cancellation events with a deadline
 reason also display a deadline failure, without rewriting historical records.
 
+## Amendment: decisions resolved inside the time reserve (2026-10-18)
+
+An approval stays valid until the run deadline, so the owner may decide after
+the time reserve has begun. Resumption then refuses only the batch's other
+unfinished calls. The call the decision suspended is dispatched, and the
+pipeline performs, denies or expires it as resolved. Before this amendment the
+time recheck refused such a call as `tool.budget_exhausted`. The action never
+ran, and its invocation stayed `WAITING_FOR_APPROVAL` after the run completed.
+The hard deadline still bounds the dispatched call. The owner chose this
+over capping approval expiry at the reserve start.
+
 ## Verification
 
 The original backend regressions failed on approval suspension, four-hour

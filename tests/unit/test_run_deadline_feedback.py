@@ -20,6 +20,7 @@ from agent_core.domain.messages import (
     ScriptedTurn,
 )
 from agent_core.domain.runs import FailureReason, RunLimits, RunStatus
+from agent_core.domain.tools import ToolInvocationStatus
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
 from tests.contract.support import NOW
@@ -72,6 +73,35 @@ async def test_approval_resuming_after_deadline_fails_visibly() -> None:
         assert result.failure.reason is FailureReason.DEADLINE_EXCEEDED
         assert result.failure.message
         assert result.tool_call_count == 0
+
+
+@pytest.mark.parametrize(
+    ("resolution", "expected"),
+    [
+        (ApprovalResolutionType.APPROVE_ONCE, ToolInvocationStatus.SUCCEEDED),
+        (ApprovalResolutionType.DENY, ToolInvocationStatus.DENIED),
+    ],
+)
+async def test_approval_resolved_inside_the_answer_reserve_is_honored(
+    resolution: ApprovalResolutionType, expected: ToolInvocationStatus
+) -> None:
+    """A decision made before the deadline reaches its call even inside the time reserve."""
+    clock = FixedClock(NOW)
+    async with build(
+        settings=_settings(),
+        script=script(),
+        clock=clock,
+        limits=RunLimits(deadline_at=NOW + timedelta(minutes=5), synthesis_reserve_steps=1),
+    ) as app:
+        run_id = await app.runs.submit("Perform the action.")
+        [approval] = await app.approvals.list_pending(run_id=run_id)
+        clock.advance(timedelta(minutes=4, seconds=10))
+        await app.approvals.resolve(approval.id, resolution)
+        result = await app.runs.get(run_id)
+        async with app.uow_factory() as uow:
+            [invocation] = await uow.invocations.list_for_run(run_id, app.principal)
+        assert result.status is RunStatus.COMPLETED, result.failure
+        assert invocation.status is expected
 
 
 @pytest.mark.parametrize("delayed_boundary", ["authorization", "presentation"])

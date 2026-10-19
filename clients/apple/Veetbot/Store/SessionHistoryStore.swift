@@ -59,28 +59,42 @@ public enum SessionHistoryStoreFactory {
         category: "session-history"
     )
 
+    /// SwiftData keeps the cache. If its container cannot be opened, the
+    /// failure is logged and this launch keeps history in memory; the
+    /// authoritative session index refills it on connect (ADR-0211). Command
+    /// Line Tools builds cannot link SwiftData and use the in-memory store.
     public static func makeDefault() -> any SessionHistoryStore {
+        removeLegacyHistoryFile()
         #if XCODE_BUILD
-        if #available(iOS 17.0, macOS 14.0, *) {
-            do {
-                let store = try SwiftDataSessionHistoryStore()
-                return store
-            } catch {
-                logger.error(
-                    "SwiftData history initialization failed: \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
-        #endif
         do {
-            let store = try FileSessionHistoryStore()
-            return store
+            return try SwiftDataSessionHistoryStore()
         } catch {
             logger.error(
-                "File history initialization failed: \(error.localizedDescription, privacy: .public)"
+                "SwiftData history initialization failed: \(error.localizedDescription, privacy: .public)"
             )
         }
+        #endif
         return VolatileSessionHistoryStore()
+    }
+
+    /// The retired file store's cache (ADR-0211) could still list conversations
+    /// the owner deleted later, so it is removed rather than left orphaned.
+    static func removeLegacyHistoryFile(applicationSupport: URL? = nil) {
+        guard
+            let support = applicationSupport
+                ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                .first
+        else { return }
+        let legacy = support.appendingPathComponent("Veetbot", isDirectory: true)
+            .appendingPathComponent("session-history.json")
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: legacy)
+        } catch {
+            logger.error(
+                "Retired history file removal failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 }
 

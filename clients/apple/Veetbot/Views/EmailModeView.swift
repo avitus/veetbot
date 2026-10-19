@@ -28,44 +28,25 @@ public struct EmailModeView: View {
         #endif
     }
 
-    private var showingThread: Binding<Bool> {
-        Binding(get: { model.selectedThreadID != nil }, set: { if !$0 { model.clearSelection() } })
-    }
-
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
             #if os(macOS)
             macSplit
             #else
-            if #available(iOS 16, macOS 13, *) {
-                if directSelection {
-                    NavigationSplitView {
-                        inbox
-                            .frame(height: macColumnHeight)
-                            .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
-                    } detail: {
-                        detail.frame(height: macColumnHeight)
-                    }
-                } else {
-                    NavigationStack(path: $navigationPath) {
-                        inbox.navigationDestination(for: UUID.self) { id in
-                            detail.task { if model.selectedThreadID != id { await model.openThread(id) } }
-                        }
-                    }
+            if directSelection {
+                NavigationSplitView {
+                    inbox
+                        .frame(height: macColumnHeight)
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
+                } detail: {
+                    detail.frame(height: macColumnHeight)
                 }
             } else {
-                NavigationView {
-                    inbox.frame(height: macColumnHeight).background {
-                        if !directSelection {
-                            NavigationLink(isActive: showingThread) {
-                                detail
-                            } label: {
-                                EmptyView()
-                            }.hidden()
-                        }
+                NavigationStack(path: $navigationPath) {
+                    inbox.navigationDestination(for: UUID.self) { id in
+                        detail.task { if model.selectedThreadID != id { await model.openThread(id) } }
                     }
-                    detail.frame(height: macColumnHeight)
                 }
             }
             #endif
@@ -363,14 +344,8 @@ public struct EmailModeView: View {
             } label: {
                 threadLabel(thread)
             }
-        } else if #available(iOS 16, macOS 13, *) {
-            NavigationLink(value: thread.id) { threadLabel(thread) }
         } else {
-            NavigationLink {
-                detail.task { await model.openThread(thread.id) }
-            } label: {
-                threadLabel(thread)
-            }
+            NavigationLink(value: thread.id) { threadLabel(thread) }
         }
     }
 
@@ -756,37 +731,43 @@ private struct EmailThreadScreen: View {
                 Text("From: \(accountDescription(draft.accountID))").appFont(.caption).foregroundColor(.secondary)
                 draftNotices(draft)
                 VStack(alignment: .leading, spacing: 12) {
-                    envelopeField("To", path: \.to, field: .to)
-                    Button {
-                        showingEnvelope.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Cc, Bcc & subject")
-                            Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
+                    Group {
+                        envelopeField("To", path: \.to, field: .to)
+                        Button {
+                            showingEnvelope.toggle()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("Cc, Bcc & subject")
+                                Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
+                            }
+                        }.buttonStyle(.plain).appFont(.caption).foregroundColor(EmailSurface.accent)
+                            .accessibilityIdentifier("email.draft-envelope")
+                            .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
+                        if showingEnvelope {
+                            envelopeField("Cc", path: \.cc, field: .cc)
+                            envelopeField("Bcc", path: \.bcc, field: .bcc)
+                            envelopeField("Subject", path: \.subject, field: .subject)
                         }
-                    }.buttonStyle(.plain).appFont(.caption).foregroundColor(EmailSurface.accent)
-                        .accessibilityIdentifier("email.draft-envelope")
-                        .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
-                    if showingEnvelope {
-                        envelopeField("Cc", path: \.cc, field: .cc)
-                        envelopeField("Bcc", path: \.bcc, field: .bcc)
-                        envelopeField("Subject", path: \.subject, field: .subject)
-                    }
+                    }.disabled(!draft.canEdit || model.isPerformingAction)
                     Divider()
                     // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
                     // no longer change (sending, sent, uncertain) renders as text instead of an editor.
+                    // Only the editor is disabled: a disabled ancestor would also block selecting the text.
                     if draft.canEdit {
                         TextEditor(text: editBinding(\.body)).appFont(.body).lineSpacing(5).frame(
                             minHeight: 180, idealHeight: 220
                         )
                         .focused($focusedField, equals: .body)
+                        .disabled(model.isPerformingAction)
                         .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
                     } else {
+                        // No accessibilityLabel: on a selectable Text, AppKit resolves the label
+                        // through the text itself and recurses until the stack overflows.
                         Text(edit.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
+                            .accessibilityIdentifier("email.draft-body")
                     }
-                }.disabled(!draft.canEdit || model.isPerformingAction)
+                }
                 Divider()
                 HStack(spacing: 12) {
                     Menu {
@@ -993,9 +974,9 @@ enum EmailSurface {
 }
 
 extension View {
-    /// Hides separators for inbox notices only on platforms that support the list modifier.
-    @ViewBuilder func emailHideSeparator() -> some View {
-        if #available(iOS 15, macOS 13, *) { listRowSeparator(.hidden) } else { self }
+    /// Hides separators for inbox notices.
+    func emailHideSeparator() -> some View {
+        listRowSeparator(.hidden)
     }
 
     /// Gives reading sections an adaptive surface and optionally highlights the reply composer.

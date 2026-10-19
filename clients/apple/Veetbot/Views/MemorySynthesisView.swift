@@ -243,16 +243,7 @@ struct MemorySynthesisDetailView: View {
         .accessibilityIdentifier("memory.synthesis.source.\(source.id.uuidString)")
     }
     private var undoPreview: some View {
-        Group {
-            if #available(macOS 13, iOS 16, *) {
-                NavigationStack { undoContent }
-            } else {
-                NavigationView { undoContent }
-                #if os(iOS)
-                    .navigationViewStyle(.stack)
-                #endif
-            }
-        }
+        NavigationStack { undoContent }
         #if os(macOS)
         .frame(minWidth: 520, minHeight: 440)
         #endif

@@ -90,7 +90,7 @@ async def test_reliability_counts_terminal_outcomes_and_excludes_foreign_princip
                 await connection.execute(
                     text(
                         "update runs set status='QUEUED', created_at=:created, "
-                        "scheduled_for=null where id=:id"
+                        "updated_at=:created, scheduled_for=null where id=:id"
                     ),
                     {"id": rows[1].id, "created": now - timedelta(seconds=130)},
                 )
@@ -109,6 +109,37 @@ async def test_reliability_counts_terminal_outcomes_and_excludes_foreign_princip
             assert queue.running == 0 and queue.stale_leases == 0
             assert queue.oldest_ready_queue_seconds == pytest.approx(130)
             assert queue.completion_rate is None
+        finally:
+            await engine.dispose()
+
+
+async def test_requeued_run_reports_age_since_it_became_ready_not_since_creation() -> None:
+    """Verify that a run requeued after a long wait reports seconds of queue age, not hours."""
+    settings = database_settings()
+    async with build(
+        settings=settings,
+        storage="postgres",
+        script=FakeModelScript(turns=[ScriptedTurn(text="Answer")], on_exhausted="repeat_last"),
+    ) as app:
+        report = app.reliability_report
+        assert report is not None
+        await _complete(app, "Prompt")
+        engine = create_engine(settings.database_url)
+        try:
+            now = app.clock.now()
+            async with engine.begin() as connection:
+                # An approval, user answer or child join requeues through a
+                # status transition that keeps created_at and a null scheduled_for.
+                await connection.execute(
+                    text(
+                        "update runs set status='QUEUED', created_at=:created, "
+                        "updated_at=:requeued, scheduled_for=null"
+                    ),
+                    {"created": now - timedelta(hours=6), "requeued": now - timedelta(seconds=5)},
+                )
+            queue = await report(now - timedelta(hours=24), now)
+            assert queue.queued == 1
+            assert queue.oldest_ready_queue_seconds == pytest.approx(5)
         finally:
             await engine.dispose()
 

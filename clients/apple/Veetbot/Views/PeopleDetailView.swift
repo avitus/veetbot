@@ -160,13 +160,11 @@ private struct PeopleProfile: View {
             .disabled(locked || renaming)
         if typeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 8) { prepare; pin; rename }
-        } else if #available(macOS 13, iOS 16, *) {
+        } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { prepare; pin; rename }
                 VStack(alignment: .leading, spacing: 8) { prepare; HStack(spacing: 8) { pin; rename } }
             }
-        } else {
-            VStack(alignment: .leading, spacing: 8) { prepare; HStack(spacing: 8) { pin; rename } }
         }
     }
 
@@ -602,13 +600,7 @@ private struct PeopleFactEvidenceSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Group {
-            if #available(macOS 13, iOS 16, *) {
-                NavigationStack { record }
-            } else {
-                NavigationView { record }
-            }
-        }
+        NavigationStack { record }
         .environment(\.peopleSelection, nil)
         .peopleModalFrame(.reading, minHeight: 450, idealHeight: 620)
     }

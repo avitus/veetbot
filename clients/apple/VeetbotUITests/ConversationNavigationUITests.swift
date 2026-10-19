@@ -1,6 +1,8 @@
 import XCTest
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 final class ConversationNavigationUITests: XCTestCase {
@@ -1242,38 +1244,31 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["chat.people"].waitForExistence(timeout: 5))
         var unlocatedBaseline: [String: Int] = [:]
         #if os(macOS)
-        if #available(macOS 14, *) {
-            try app.performAccessibilityAudit { issue in
-                let attachment = XCTAttachment(string: "\(issue.compactDescription): \(issue.element?.debugDescription ?? "No element")")
-                attachment.name = "Background accessibility baseline"
-                attachment.lifetime = .keepAlways
-                self.add(attachment)
-                if issue.element == nil {
-                    unlocatedBaseline["\(issue.auditType.rawValue):\(issue.compactDescription)", default: 0] += 1
-                }
-                return true
+        try app.performAccessibilityAudit { issue in
+            let attachment = XCTAttachment(string: "\(issue.compactDescription): \(issue.element?.debugDescription ?? "No element")")
+            attachment.name = "Background accessibility baseline"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            if issue.element == nil {
+                unlocatedBaseline["\(issue.auditType.rawValue):\(issue.compactDescription)", default: 0] += 1
             }
+            return true
         }
         #endif
         activate(app.buttons["chat.people"])
         let person = app.descendants(matching: .any)["people.row.00000000-0000-0000-0000-000000000777"]
         let browser = app.descendants(matching: .any)["people.browser"]
         XCTAssertTrue(browser.waitForExistence(timeout: 5))
-        if #available(macOS 14, iOS 17, *) {
-            try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
-            #if !os(macOS)
-            for _ in 0..<10 where !person.exists || !person.isHittable { browser.swipeUp() }
-            #endif
-            XCTAssertTrue(person.waitForExistence(timeout: 5))
-            activate(person)
-            XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
-            try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
-        } else {
-            XCTFail("People accessibility verification requires the platform accessibility auditor")
-        }
+        try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
+        #if !os(macOS)
+        for _ in 0..<10 where !person.exists || !person.isHittable { browser.swipeUp() }
+        #endif
+        XCTAssertTrue(person.waitForExistence(timeout: 5))
+        activate(person)
+        XCTAssertTrue(app.descendants(matching: .any)["people.detail"].waitForExistence(timeout: 5))
+        try auditPeopleSurface(unlocatedBaseline: unlocatedBaseline)
     }
 
-    @available(macOS 14, iOS 17, *)
     private func auditPeopleSurface(unlocatedBaseline: [String: Int]) throws {
         #if os(macOS)
         let sheet = app.sheets.firstMatch
@@ -2651,6 +2646,22 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["To: alex@example.test"].exists)
         send.click()
         XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 10))
+        // A sent reply is read-only text the owner can still select and copy; a disabled
+        // container blocks that. The owner's clipboard is restored afterwards.
+        let sentBody = app.staticTexts["email.draft-body"]
+        XCTAssertTrue(sentBody.waitForExistence(timeout: 5), app.debugDescription)
+        let pasteboard = NSPasteboard.general
+        let savedClipboard = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let savedClipboard { pasteboard.setString(savedClipboard, forType: .string) }
+        }
+        pasteboard.clearContents()
+        sentBody.doubleClick()
+        app.typeKey("c", modifierFlags: .command)
+        let copied = pasteboard.string(forType: .string) ?? ""
+        XCTAssertFalse(copied.isEmpty, "The sent reply must stay selectable")
+        XCTAssertTrue((sentBody.value as? String ?? "").contains(copied), copied)
         app.buttons["mode.chat"].click()
         XCTAssertTrue(app.descendants(matching: .any)["sidebar.new-conversation"].waitForExistence(timeout: 5))
     }

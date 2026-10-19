@@ -276,13 +276,8 @@ private func scheduleWeekdayName(_ isoDay: Int) -> String {
 
 #if os(macOS)
 private extension View {
-    @ViewBuilder
     func scheduleBrowserPresentationSizing() -> some View {
-        if #available(macOS 15.0, *) {
-            presentationSizing(.fitted)
-        } else {
-            self
-        }
+        presentationSizing(.fitted)
     }
 }
 

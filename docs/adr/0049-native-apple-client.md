@@ -16,6 +16,9 @@ authoritative session index and deletion. The transport-only boundary and the
 local store's status as a nonauthoritative cache remain unchanged.
 ADR-0053 further requires selection to restore the durable session transcript
 before the client attaches to the latest run.
+ADR-0211 later raises the deployment floors of decision 1 to iOS 27 and
+macOS 26, toward macOS 27, and removes the file-backed history store that
+decision 7 added for iOS 15–16 and macOS 12–13.
 
 ## Context
 

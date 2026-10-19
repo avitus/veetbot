@@ -53,6 +53,9 @@ from tests.unit.test_browser_task_grant_authorizer import (
         "named_consequence",
         "incomplete_facts",
         "cross_origin_link",
+        "typed_text",
+        "typed_text_after_email",
+        "after_other_tool",
     ],
 )
 async def test_research_permission_boundaries(problem: str | None) -> None:
@@ -76,6 +79,8 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
         page = snapshot(url=ORIGIN + "/settings")
     if problem == "named_consequence":
         page = snapshot(name="Send message")
+    if problem in {"typed_text", "typed_text_after_email"}:
+        page = snapshot(role="textbox", facts=BrowserElementFacts(field_kind=BrowserFieldKind.TEXT))
     if problem == "dated_post_link":
         # Friday's interruption: a dated post link inside the profile's origin.
         page = snapshot(
@@ -127,6 +132,25 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
     if problem == "child":
         current = current.model_copy(update={"parent_run_id": UUID(int=8)})
     action = proposed()
+    if problem in {"typed_text", "typed_text_after_email"}:
+        action = proposed(
+            {
+                "kind": "type",
+                "expected_revision": "revision-7",
+                "ref": "revision-7:0",
+                "value": "private value",
+            }
+        )
+    turn = BROWSER_TURN
+    if problem == "untrusted_turn":
+        turn = AuthorizationTurn(newest_user_trust=TrustLevel.EXTERNAL_UNTRUSTED)
+    if problem in {"typed_text_after_email", "after_other_tool"}:
+        # ADR-0129 G5: a turn that read mail, memory or another tool's output
+        # could type that data into the page, so it keeps ordinary approval.
+        other = "email.read" if problem == "typed_text_after_email" else "web.search"
+        turn = AuthorizationTurn(
+            newest_user_trust=TrustLevel.USER, tool_names=frozenset({other, "browser.act"})
+        )
     if problem == "stale_page":
         action.arguments["expected_revision"] = "old"
     if problem == "policy_changed":
@@ -145,11 +169,9 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
         run=current,
         agent_version="changed" if problem == "agent_changed" else current.agent_version,
         action_deadline=WHEN if problem == "expired" else WHEN + timedelta(seconds=30),
-        turn=AuthorizationTurn(newest_user_trust=TrustLevel.EXTERNAL_UNTRUSTED)
-        if problem == "untrusted_turn"
-        else BROWSER_TURN,
+        turn=turn,
     )
-    assert result.allowed is (problem in {None, "scheduler", "dated_post_link"})
+    assert result.allowed is (problem in {None, "scheduler", "dated_post_link", "typed_text"})
     if result.allowed:
         assert result.dispatch_constraint is not None
         assert result.dispatch_constraint.grant_kind == "research"

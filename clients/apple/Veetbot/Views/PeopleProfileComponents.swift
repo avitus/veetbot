@@ -210,13 +210,11 @@ struct PeopleActionRow<Content: View>: View {
     var body: some View {
         if typeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 8) { content() }
-        } else if #available(macOS 13, iOS 16, *) {
+        } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { content() }
                 VStack(alignment: .leading, spacing: 8) { content() }
             }
-        } else {
-            HStack(spacing: 8) { content() }
         }
     }
 }
@@ -316,12 +314,8 @@ extension View {
 
 extension View {
     /// A menu drawn like `PeopleInlineButtonStyle`, without a disclosure arrow.
-    @ViewBuilder func peopleInlineMenu() -> some View {
-        if #available(macOS 13, iOS 16, *) {
-            menuStyle(.button).buttonStyle(PeopleInlineButtonStyle()).menuIndicator(.hidden).fixedSize()
-        } else {
-            menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().peopleTapTarget()
-        }
+    func peopleInlineMenu() -> some View {
+        menuStyle(.button).buttonStyle(PeopleInlineButtonStyle()).menuIndicator(.hidden).fixedSize()
     }
 }
 

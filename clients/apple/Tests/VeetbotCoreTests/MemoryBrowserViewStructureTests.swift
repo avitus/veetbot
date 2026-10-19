@@ -51,7 +51,8 @@ import AppKit
         let source = try memoryBrowserViewSource()
 
         #expect(source.contains(".memoryBrowserPresentationSizing()"))
-        #expect(source.contains("if #available(macOS 15.0, *)"))
+        // Fitted sizing is unconditional at the macOS floor (ADR-0211).
+        #expect(!source.contains("#available(macOS"))
         #expect(source.contains("presentationSizing(.fitted)"))
     }
 

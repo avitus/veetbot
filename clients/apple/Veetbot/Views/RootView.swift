@@ -314,27 +314,15 @@ public struct RootView: View {
         coordinator.email.setActive(model.isConfigured && !model.isReconfiguring && active && coordinator.mode == .email)
     }
 
-    @ViewBuilder
     private var chatContent: some View {
-        if #available(iOS 16.0, macOS 13.0, *) {
-            NavigationSplitView {
-                SessionSidebar(
-                    model: model,
-                    usesDirectActivation: usesDirectSidebarActivation,
-                    openSettings: presentSettings
-                )
-            } detail: {
-                ChatView(model: model)
-            }
-        } else {
-            NavigationView {
-                SessionSidebar(
-                    model: model,
-                    usesDirectActivation: usesDirectSidebarActivation,
-                    openSettings: presentSettings
-                )
-                ChatView(model: model)
-            }
+        NavigationSplitView {
+            SessionSidebar(
+                model: model,
+                usesDirectActivation: usesDirectSidebarActivation,
+                openSettings: presentSettings
+            )
+        } detail: {
+            ChatView(model: model)
         }
     }
 
@@ -456,13 +444,7 @@ private struct SessionSidebar: View {
 
     /// Presents session navigation and the iOS Chat overflow menu.
     var body: some View {
-        Group {
-            if #available(iOS 16.0, macOS 13.0, *) {
-                modernList
-            } else {
-                legacyList
-            }
-        }
+        sidebarList
         .listStyle(.sidebar)
         .navigationTitle("Veetbot")
         .confirmationDialog(
@@ -570,9 +552,8 @@ private struct SessionSidebar: View {
         }
     }
 
-    @available(iOS 16.0, macOS 13.0, *)
     @ViewBuilder
-    private var modernList: some View {
+    private var sidebarList: some View {
         #if os(macOS)
         directlyActivatingList
         #else
@@ -624,28 +605,11 @@ private struct SessionSidebar: View {
         }
     }
 
-    @available(iOS 16.0, macOS 13.0, *)
     private var pushingList: some View {
         navigationList
             .navigationDestination(isPresented: notificationNavigationBinding) {
                 ChatView(model: model)
             }
-    }
-
-    private var legacyList: some View {
-        navigationList
-        #if !os(macOS)
-        .background {
-            NavigationLink(
-                isActive: notificationNavigationBinding
-            ) {
-                ChatView(model: model)
-            } label: {
-                EmptyView()
-            }
-            .hidden()
-        }
-        #endif
     }
 
     private var navigationList: some View {

@@ -199,28 +199,17 @@ import Testing
         #expect(plain.scheduleID == nil)
     }
 
-    @Test
-    func testScheduleIDRoundTripsThroughTheFileStoreAndOlderFilesLoad() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let file = directory.appendingPathComponent("history.json")
-        let scheduled = entry(1, "Briefing", scheduleID: briefing)
-        try await FileSessionHistoryStore(fileURL: file).upsert(scheduled)
-        #expect(try await FileSessionHistoryStore(fileURL: file).list().first?.scheduleID == briefing)
+    @Test(arguments: HistoryBackend.allCases)
+    func testScheduleIDRoundTripsThroughEveryStore(backend: HistoryBackend) async throws {
+        let store = try backend.makeStore()
+        try await store.upsert(entry(1, "Briefing", scheduleID: briefing))
+        #expect(try await store.list().first?.scheduleID == briefing)
 
-        try Data(
-            #"[{"sessionID":"00000000-0000-0000-0000-000000000123","title":"Legacy","agentID":"general","createdAt":"2026-08-12T12:00:00Z","updatedAt":"2026-08-12T12:00:01Z","lastRunID":null,"folderID":null}]"#
-                .utf8
-        ).write(to: file)
-        let legacy = try await FileSessionHistoryStore(fileURL: file).list()
-        #expect(legacy.map(\.title) == ["Legacy"])
-        #expect(legacy.first?.scheduleID == nil)
+        try await store.upsert(entry(1, "Briefing"))
+        #expect(try await store.list().first?.scheduleID == nil)
     }
 
     #if XCODE_BUILD
-    @available(macOS 14.0, iOS 17.0, *)
     @Test
     func testSwiftDataRecordPersistsAScheduleID() {
         let plain = entry(1, "Briefing")

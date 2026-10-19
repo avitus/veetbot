@@ -27,11 +27,15 @@ select count(*) filter (where r.status='COMPLETED') as completed,
          filter (where r.status='COMPLETED') as p95
 from {_RUNS} and {_WINDOW}
 """
+# A QUEUED row's updated_at is when it became ready: creation, or the requeue
+# after an approval, answer, child join or reclaimed lease; created_at is not.
+# Any other write to a queued row (such as a cancel request) also moves
+# updated_at, so the reported age is a lower bound on the true wait.
 _QUEUE = f"""
 select count(*) filter (where r.status='QUEUED') as queued,
        count(*) filter (where r.status='RUNNING') as running,
        count(*) filter (where r.status in ('WAITING_FOR_APPROVAL','WAITING_FOR_USER')) as waiting,
-       max(extract(epoch from :until-greatest(r.created_at, r.scheduled_for)))
+       max(extract(epoch from :until-greatest(r.updated_at, r.scheduled_for)))
          filter (where r.status='QUEUED'
            and (r.scheduled_for is null or r.scheduled_for <= :until)) as oldest,
        count(*) filter (where r.status='RUNNING' and r.lease_expires_at <= :until) as stale

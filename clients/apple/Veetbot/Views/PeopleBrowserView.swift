@@ -20,15 +20,9 @@ struct PeopleLookupSheet: View {
         _model = StateObject(wrappedValue: PeopleViewModel(searchText: lookup.text, asOf: lookup.asOf))
     }
     var body: some View {
-        Group {
-            if #available(macOS 13, iOS 16, *) {
-                NavigationStack { navigationContent }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("People navigation")
-            } else {
-                NavigationView { navigationContent }
-            }
-        }
+        NavigationStack { navigationContent }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("People navigation")
         .environment(\.dismissPeople, { dismiss() })
         .accessibilityLabel("People")
         #if os(macOS)
@@ -457,8 +451,7 @@ enum PeopleModalWidth {
 }
 
 extension View {
-    /// Frames a People sheet with `sheetFrame`, so both its macOS 15 ideal
-    /// width and its earlier-release minimum are readable.
+    /// Frames a People sheet with `sheetFrame` at its ideal reading width.
     func peopleModalFrame(_ width: PeopleModalWidth, minHeight: CGFloat, idealHeight: CGFloat) -> some View {
         sheetFrame(minWidth: 320, macMinWidth: width.macMinimum, idealWidth: width.ideal, maxWidth: .infinity,
                    minHeight: minHeight, idealHeight: idealHeight, maxHeight: .infinity)

@@ -96,7 +96,6 @@ struct ForwardMessageRunner: Sendable {
 /// extension target, no app group — the keychain access this needs is the
 /// app's own, readable once the device has been unlocked after boot (see
 /// the client seam map §7).
-@available(iOS 16.0, *)
 struct ForwardMessageToVeetbotIntent: AppIntent {
     static let title: LocalizedStringResource = "Forward Message to Veetbot"
     static let openAppWhenRun = false

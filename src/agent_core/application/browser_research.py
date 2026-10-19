@@ -16,6 +16,7 @@ from agent_core.domain.browser_act_views import (
     describe_browser_action,
     element_labels,
     option_texts,
+    turn_is_browser_only,
 )
 from agent_core.domain.browser_classification import task_grant_coverage
 from agent_core.domain.errors import NotFoundError
@@ -88,6 +89,9 @@ class BrowserResearchAuthorizer:
             and "browser.profile.read" in principal.scopes
             and turn is not None
             and turn.newest_user_trust is TrustLevel.USER
+            # ADR-0129 G5: a turn that called any non-browser tool (mail, memory,
+            # search) could type what it read, so it keeps ordinary approval.
+            and turn_is_browser_only(turn)
             and self._now() < action_deadline
         ):
             return refused

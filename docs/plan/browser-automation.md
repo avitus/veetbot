@@ -1048,7 +1048,8 @@ that origin and nonsensitive paths. Unknown ordinary controls are permitted;
 named consequences still need approval. Each action records `browser_research`
 authority and a profile/generation/source reference, with a deadline-bound
 `research` dispatch constraint. No grant is created. Child runs and untrusted
-inputs cannot use this permission; profile, revision, effect and budget checks
+inputs cannot use this permission, nor can a turn that called a non-browser tool
+since the owner's message (ADR-0129 G5); profile, revision, effect and budget checks
 remain. Composition requires the default bounded-scroll rule with approval
 otherwise; custom unconditional approval or deny rules retain their behavior.
 

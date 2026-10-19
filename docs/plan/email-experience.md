@@ -44,7 +44,7 @@ explicit owner approval rather than an implementation-driven relaxation.
 Add a persistent Chat / Email selector. On iPhone, Email uses a list-to-thread
 navigation flow. Mac and regular-width iPad use a list and detail layout, with
 the draft visible alongside or below its source conversation. Preserve the
-existing iOS 15 and macOS 12 minimum versions and adaptive layouts.
+deployment floors ADR-0211 sets and the adaptive layouts.
 
 Switching modes preserves the active Chat run, unsent chat text, selected mail,
 scroll position, and unsent email edits. Memory, Persona, Schedules, and Settings

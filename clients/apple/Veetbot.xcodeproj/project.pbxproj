@@ -18,7 +18,6 @@
 		100000000000000000000009 /* SSEReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* SSEReader.swift */; };
 		10000000000000000000000A /* ArtifactCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* ArtifactCache.swift */; };
 		1000000000000000000000E1 /* AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000E1 /* AttachmentStaging.swift */; };
-		10000000000000000000000B /* FileSessionHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* FileSessionHistoryStore.swift */; };
 		10000000000000000000000C /* KeychainTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* KeychainTokenStore.swift */; };
 		10000000000000000000000D /* SessionHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* SessionHistoryStore.swift */; };
 		10000000000000000000000E /* SwiftDataSessionHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* SwiftDataSessionHistoryStore.swift */; };
@@ -115,7 +114,6 @@
 		200000000000000000000009 /* SSEReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEReader.swift; sourceTree = "<group>"; };
 		20000000000000000000000A /* ArtifactCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactCache.swift; sourceTree = "<group>"; };
 		2000000000000000000000E1 /* AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStaging.swift; sourceTree = "<group>"; };
-		20000000000000000000000B /* FileSessionHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSessionHistoryStore.swift; sourceTree = "<group>"; };
 		20000000000000000000000C /* KeychainTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTokenStore.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* SessionHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistoryStore.swift; sourceTree = "<group>"; };
 		20000000000000000000000E /* SwiftDataSessionHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftDataSessionHistoryStore.swift; sourceTree = "<group>"; };
@@ -293,7 +291,6 @@
 			children = (
 				20000000000000000000000A /* ArtifactCache.swift */,
 				2000000000000000000000E1 /* AttachmentStaging.swift */,
-				20000000000000000000000B /* FileSessionHistoryStore.swift */,
 				20000000000000000000000C /* KeychainTokenStore.swift */,
 				20000000000000000000000D /* SessionHistoryStore.swift */,
 				20000000000000000000000E /* SwiftDataSessionHistoryStore.swift */,
@@ -521,7 +518,6 @@
 				100000000000000000000009 /* SSEReader.swift in Sources */,
 				10000000000000000000000A /* ArtifactCache.swift in Sources */,
 				1000000000000000000000E1 /* AttachmentStaging.swift in Sources */,
-				10000000000000000000000B /* FileSessionHistoryStore.swift in Sources */,
 				10000000000000000000000C /* KeychainTokenStore.swift in Sources */,
 				10000000000000000000000D /* SessionHistoryStore.swift in Sources */,
 				10000000000000000000000E /* SwiftDataSessionHistoryStore.swift in Sources */,
@@ -706,12 +702,12 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -748,12 +744,12 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -774,13 +770,13 @@
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 9UW358LB5Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -800,13 +796,13 @@
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 9UW358LB5Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

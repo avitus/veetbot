@@ -347,13 +347,8 @@ public struct MemoryBrowserView: View {
 
 #if os(macOS)
 private extension View {
-    @ViewBuilder
     func memoryBrowserPresentationSizing() -> some View {
-        if #available(macOS 15.0, *) {
-            presentationSizing(.fitted)
-        } else {
-            self
-        }
+        presentationSizing(.fitted)
     }
 }
 
