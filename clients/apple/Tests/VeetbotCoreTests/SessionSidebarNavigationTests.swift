@@ -43,6 +43,22 @@ import SwiftUI
         #expect(SessionSidebarDestination.session(sessionID) == .session(sessionID))
     }
 
+    /// Removing the compact drawer also removes any sheet it was presenting.
+    @Test
+    func testCompactDrawerDismissalClearsNotificationCoverage() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/RootView.swift"),
+            encoding: .utf8
+        )
+        let start = try #require(source.range(of: "private var compactChat: some View"))
+        let end = try #require(source.range(of: "private func presentSettings()"))
+        let compact = String(source[start.lowerBound ..< end.lowerBound])
+        #expect(compact.contains(".onChange(of: chatListPresented)"))
+        #expect(compact.contains("if !presented { model.notificationOverlayPresented = false }"))
+    }
+
     /// Keep global navigation actions available through the accessible iOS overflow menu.
     @Test
     func testIOSSidebarUsesAnExplicitAccessibleOverflowMenu() throws {

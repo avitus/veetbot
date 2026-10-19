@@ -248,3 +248,12 @@ implementation without one.
 - [ADR-0210: OpenAI opaque credential boundary](0210-openai-opaque-credential-boundary.md)
 - [ADR-0211: Apple client deployment floors rise to iOS 27 and macOS 26, toward macOS 27 (Accepted)](0211-apple-client-deployment-floors.md)
 - [ADR-0213: Owner-requested calls without confirmation](0213-owner-requested-calls-without-confirmation.md)
+
+- [ADR-0212: Checkpointed memory confirmation](0212-checkpointed-memory-confirmation.md)
+- [ADR-0214: Formation deadline repair](0214-formation-deadline-repair.md)
+- [ADR-0215: Retained formation terminal outcomes and collector cleanup](0215-formation-terminal-outcomes.md)
+- [ADR-0216: Historical commit-scoped reliability signing](0216-commit-scoped-reliability-signing.md)
+- [ADR-0217: Bounded recovery of reconciled evaluation interruptions](0217-bounded-interruption-recovery.md)
+- [ADR-0218: Checkpoint recall production compatibility](0218-checkpoint-recall-production-compatibility.md)
+- [ADR-0219: Exact-revision signing for the isolated recall release](0219-recall-release-signing.md)
+- [ADR-0220: Owner-reviewed bounded recall rollout](0220-bounded-recall-rollout.md)

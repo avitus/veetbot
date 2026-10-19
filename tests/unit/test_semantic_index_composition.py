@@ -422,10 +422,15 @@ async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
     configurations = []
 
     def bind(
-        root: Path, manifest: Path, path: Path, release: str, dependencies: dict[str, str]
+        root: Path,
+        manifest: Path,
+        path: Path,
+        release: str,
+        dependencies: dict[str, str],
+        **context: Any,
     ) -> Callable[[], bool]:
         release_files(tmp_path, dependencies)
-        return real_bind(root, manifest, path, release, dependencies)
+        return real_bind(root, manifest, path, release, dependencies, **context)
 
     async def compose(**options: Any) -> SemanticServices | None:
         configurations.append(options["configuration"])

@@ -176,6 +176,15 @@ nav:
       - "ADR-0206: Session-default memory search": adr/0206-session-default-memory-search.md
       - "ADR-0207: Bounded confirmation concurrency": adr/0207-bounded-confirmation-concurrency.md
       - "ADR-0208: Grounded relationship discovery": adr/0208-grounded-relationship-discovery.md
+      - "ADR-0210: OpenAI opaque continuation credential boundary": adr/0210-openai-opaque-credential-boundary.md
+      - "ADR-0216: Commit-scoped reliability signing": adr/0216-commit-scoped-reliability-signing.md
+      - "ADR-0212: Checkpointed memory confirmation": adr/0212-checkpointed-memory-confirmation.md
+      - "ADR-0217: Bounded interruption recovery": adr/0217-bounded-interruption-recovery.md
+      - "ADR-0218: Checkpoint recall production compatibility": adr/0218-checkpoint-recall-production-compatibility.md
+      - "ADR-0219: Recall release signing": adr/0219-recall-release-signing.md
+      - "ADR-0220: Owner-reviewed bounded recall rollout": adr/0220-bounded-recall-rollout.md
+      - "ADR-0214: Formation deadline repair": adr/0214-formation-deadline-repair.md
+      - "ADR-0215: Formation terminal outcomes and collector cleanup": adr/0215-formation-terminal-outcomes.md
       - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md
       - ADR-0177 Bounded browser startup recovery: adr/0177-bounded-browser-startup-recovery.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md

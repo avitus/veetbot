@@ -990,6 +990,16 @@ CircleCI workflow are nevertheless release-signing security boundaries. Keep
 `dev` restricted to trusted maintainers and require the smoke job to pass on the
 exact revision proposed for `main`.
 
+ADR-0219 also selects the isolated `codex/recall-production-release` branch.
+Before its ordinary requested pipeline, the operator must retain the original
+context restrictions and admit only the final CodeRabbit-reviewed revision.
+Preserve project/group restrictions and the SSH/API-configuration denials; add
+and verify each replacement expression before removing its predecessor. Restore
+the original expression after the attempt, including failure or cancellation,
+and retain readbacks. The workflow branch selector alone grants no signing
+access. This route does not require a push to `dev` or permit publication from
+the release branch.
+
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
 | Variable | Value |
@@ -1035,7 +1045,8 @@ itself; such a branch is verified on the sidecar and, before it is proposed for
 verification jobs are required status checks, so a pull request cannot merge
 until a requested run reports them green on its head commit; the owner retains
 an admin override. A requested `dev` pipeline also
-runs the non-publishing Apple signing smoke described above. On `main`, a
+runs the non-publishing Apple signing smoke described above; the isolated recall
+release uses the exact-revision context admission in ADR-0219. On `main`, a
 verification job other than `public-site` whose source tree already passed it,
 normally in that requested run, reports success without rerunning; a merge
 commit whose tree nothing verified is verified in full (ADR-0114). After all
@@ -1575,6 +1586,45 @@ The next daily run may legitimately report no change until enough suitable new
 evidence exists. Keep supervised review enabled and unattended application off;
 new proposals still require individual approval. Never remove an activated
 boundary or replace unknown legacy attribution with empty metadata to unblock work.
+
+### Owner-reviewed bounded recall rollout (ADR-0220)
+
+The bounded exception uses `recall-bounded-evidence@1` and
+`recall-bounded-admission@1`; legacy passing-evidence admission is unchanged.
+Do not retag the completed failed comparison as a passing M33 release. The
+owner's approval of rollout scope is not a completed human failure review.
+
+Before enabling it, retain and byte-verify the complete original collection,
+failed attempts and every ledger. Obtain the actual human review of difficult
+answers and all interruption/uncertain-cost items, including residual-risk
+findings. Recompute the separate comparative criteria and retain every original
+quality exception. Record exact measured/target file and dependency differences,
+their individual dispositions, and verification receipts on the final target.
+The compatibility claim must cover the actual release tree and effective values,
+including the PostgreSQL schema, reader, formation and verified local encoder.
+Unknown material differences require new matching evidence, not a copied hash.
+
+Retain the previous effective configuration and a schema-compatible application,
+documentation and website rollback revision using the rollback procedure above.
+Rehearse evidence withdrawal and expiry against the release configuration before
+cutover. The manifest must name the final reviewed commit, evidence hash, complete
+target-input manifest, configured tenant/owner, rollback revision and a fixed
+activation/expiry window no longer than seven days. No wildcard or descendant
+inheritance is permitted. Supply the two files through the existing semantic
+index evidence/manifest settings, with the local encoder and query preparation
+enabled and unattended reconsolidation disabled. Existing request and USD 2 daily
+indexing ceilings remain unchanged.
+
+Complete CodeRabbit and exact-head CI before merge. Follow application/docs/
+website delivery and verify public revision identities, authenticated owner
+recall, and sparse fallback. Expiry or observed file/source mutation withdraws
+the current admission handle and its query cache; restoring a file does not
+revive that handle. For a confirmed access/lifecycle breach or unacceptable
+obsolete answer, immediately disable `AGENT_MEMORY_SEMANTIC_INDEX_ENABLED`,
+restore the retained configuration and restart. If an application rollback is
+needed, use the compatible retained release without downgrading the database.
+Verify readiness and public identities after either action, retain the incident,
+and record the rollout outcome before any separately authorized extension.
 
 ### Application reliability diagnostics and optional alerts (ADR-0205)
 

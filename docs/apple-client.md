@@ -124,7 +124,7 @@ chooses a colour by mode. The tokens are:
 | `field` | a sunken input or segment | ink at 5 % | ink at 8 % |
 | `ink`, `inkSoft`, `inkFaint` | text in three weights | `#102923`, `#2f4640`, `#566a64` | `#ece6d8`, `#bccbc5`, `#95a8a1` |
 | `teal`, `tealFill`, `tealText`, `tealWash` | marks, filled buttons, links, the owner's capsule | `#0e8b78`, `#0b7a69`, `#086657`, teal at 10 % | `#36d5bb`, `#36d5bb`, `#5ee3c9`, teal at 12 % |
-| `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)` | `#f2a93b` throughout |
+| `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border, a wash | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)`, `rgba(242,169,59,.12)` | `#f2a93b`, `#f2a93b`, `#f2a93b` at 50 %, `#f2a93b` at 10 % |
 | `red` | failure | `#b4452e` | `#e07a62` |
 | `hairline`, `hairlineStrong`, `selected` | dividers, borders, the chosen row | ink at 14 %, 28 %, 9 % | ink at 10 %, 22 %, 12 % |
 
@@ -383,7 +383,9 @@ Approvals, questions, and scheduled outcomes wait thirty seconds before push
 delivery, giving you time to handle them on another device. A loaded conversation
 visible in the active Chat window suppresses its foreground alerts. Active clients
 also clear delivered alerts once the server confirms they are obsolete, and
-viewing a terminal result acknowledges it across devices. Covered or background
+viewing a terminal result acknowledges it across devices. Dismissing the compact
+conversation drawer also clears coverage from its removed sidebar sheets;
+notification navigation can then acknowledge the visible report. Covered or background
 conversations do not count as viewed. Sleeping devices clear obsolete alerts
 when next active; a banner already shown cannot be recalled (ADR-0143).
 

@@ -14,6 +14,30 @@ from tests.contract.support import NOW, RUN_ID, SESSION_ID, principal
 from tests.contract.test_runtime_semantic_queries_contract import runtime_stack
 
 
+@pytest.mark.parametrize("change", ["delegated", "review", "parent"])
+async def test_bounded_rollout_authority_withholds_noninteractive_or_child_work(
+    change: str,
+) -> None:
+    from agent_core.domain.runs import RunKind
+
+    factory, _, live, session, checkpoint = await setup()
+    authority = LocalQueryAuthority(
+        factory,
+        principal(),
+        policy_version="policy@1",
+        retrieval_policy="retrieval@1",
+        reader_sha256="a" * 64,
+        interactive_only=True,
+    )
+    assert await authority(live, session, checkpoint) is not None
+    updates = (
+        {"parent_run_id": UUID(int=999)}
+        if change == "parent"
+        else {"kind": RunKind.DELEGATED if change == "delegated" else RunKind.SKILL_REVIEW}
+    )
+    assert await authority(live.model_copy(update=updates), session, checkpoint) is None
+
+
 async def setup(origin: dict[str, str] | None = None) -> tuple[Any, ...]:
     _, factory, _, _, _, _ = await runtime_stack()
     async with factory() as uow:

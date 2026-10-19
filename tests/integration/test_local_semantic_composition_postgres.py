@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from agent_core.domain.agents import Principal
+from agent_core.ports.determinism import Clock
 from tests.unit.test_local_semantic_composition import local_options
 from tests.unit.test_semantic_index_composition import release_files
 
@@ -67,12 +69,26 @@ async def test_bootstrap_prepares_local_vectors_for_actual_context_and_search(
     actual_compose = deployment.compose_indexing
     captured: list[Any] = []
     lifecycle: list[str] = []
+    owner = principal()
+    runtime_clock = HeldClock(NOW)
 
     def bind(
-        root: Path, manifest: Path, evidence: Path, release: str, dependencies: dict[str, str]
+        root: Path,
+        manifest: Path,
+        evidence: Path,
+        release: str,
+        dependencies: dict[str, str],
+        *,
+        principal: Principal,
+        clock: Clock,
     ) -> Any:
+        # The fixture substitutes evidence, never the composition's authority.
+        assert principal == owner
+        assert clock is runtime_clock
         release_files(tmp_path, dependencies)
-        return actual_bind(root, manifest, evidence, release, dependencies)
+        return actual_bind(
+            root, manifest, evidence, release, dependencies, principal=principal, clock=clock
+        )
 
     async def compose(**options: Any) -> Any:
         provider = Provider(options["factory"])
@@ -110,8 +126,8 @@ async def test_bootstrap_prepares_local_vectors_for_actual_context_and_search(
     async with bootstrap.build(
         settings=replace(kwargs["settings"], database_url=database_settings().database_url),
         storage="postgres",
-        principal=principal(),
-        clock=HeldClock(NOW),
+        principal=owner,
+        clock=runtime_clock,
         script=FakeModelScript(turns=turns),
     ) as app:
         provider, services = captured[0]

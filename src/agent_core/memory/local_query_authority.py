@@ -7,7 +7,7 @@ import re
 from agent_core.domain.agents import Principal
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.runs import Run, RunCheckpoint
+from agent_core.domain.runs import Run, RunCheckpoint, RunKind
 from agent_core.domain.sessions import Session
 from agent_core.memory.semantic_runtime import SemanticQueryAuthority
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -22,18 +22,24 @@ class LocalQueryAuthority:
         policy_version: str,
         retrieval_policy: str,
         reader_sha256: str,
+        interactive_only: bool = False,
     ) -> None:
         if re.fullmatch(r"[a-f0-9]{64}", reader_sha256) is None:
             raise ValueError("Local query authority needs an explicit reviewed reader")
         self._factory, self._principal = factory, principal.model_copy(deep=True)
         self._policy_version, self._retrieval_policy = policy_version, retrieval_policy
         self._reader_sha256 = reader_sha256
+        self._interactive_only = interactive_only
 
     async def __call__(
         self, run: Run, session: Session, checkpoint: RunCheckpoint
     ) -> SemanticQueryAuthority | None:
         if (
-            (session.tenant_id, session.principal_id)
+            (
+                self._interactive_only
+                and (run.kind is not RunKind.INTERACTIVE or run.parent_run_id is not None)
+            )
+            or (session.tenant_id, session.principal_id)
             != (self._principal.tenant_id, self._principal.principal_id)
             or run.tenant_id != self._principal.tenant_id
             or run.session_id != session.id
