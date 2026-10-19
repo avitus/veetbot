@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — The composer no longer covers the end of an answer
+
+- In Chat on iPhone, iPad and Mac, the last lines of an answer and its Copy and
+  Select Text row sat under the message field, even when scrolled all the way
+  down: the space kept free for the field never learned its height. The end of
+  the conversation now clears the field, and an answer that streams in keeps
+  its newest line in view while you read at the bottom. An answer taller than
+  the window stops with its beginning at the top, and scrolling away while one
+  streams leaves the view where you put it.
+
 ## 2026-10-19 — People sections, possible duplicates and profile actions
 
 - People lists Needs you, Recent, Everyone and Pinned, with Possible

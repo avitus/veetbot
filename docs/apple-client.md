@@ -269,7 +269,12 @@ connection retries. If the server reports `active_run_exists`, the UI attaches
 to the named run and does not queue a second message. A waiting user's answer is
 routed to run input with the displayed question identifier. Stop requests use
 the run-cancel route. The native composer uses padded multiline input; Return
-sends its contents, while Command-Return inserts a newline.
+sends its contents, while Command-Return inserts a newline. The composer floats
+over the end of the transcript, which keeps the composer's measured height free
+below its last row. While the owner reads at the end, a growing answer is
+followed so its newest line stays above the composer; an answer taller than the
+view stops with its beginning at the top, and scrolling away while it streams
+leaves the view alone until the owner returns to the end.
 
 Files can be attached to a message (ADR-0120): dropped on the conversation or
 the message field on Mac and iPad, or chosen with the paperclip from Files on

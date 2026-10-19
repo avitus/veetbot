@@ -151,6 +151,8 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleMailboxImportPreviewShowsExplicitCoverage \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPeopleForgetExplainsSourceRetentionAndPendingCleanup \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMixedToolSummaryKeepsAnswerVisibleAndExpandsDetails \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testStreamedAnswerEndsAboveTheComposer \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testLongStreamedAnswerKeepsItsBeginningInView \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailModeAndExactDraftApprovalOnMac \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailCanBeCheckedOffFromInboxWithoutOpeningThread \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailDetailArchiveDisplaysNextConversation \

@@ -204,6 +204,91 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
     }
 
+    /// The composer floats over the end of the transcript, so an answer that
+    /// grows while it streams has to keep its end clear of it.
+    func testStreamedAnswerEndsAboveTheComposer() {
+        app.launchArguments.append("--ui-testing-streamed-answer")
+        app.launch()
+        let composer = sendStreamedAnswerRequest()
+        let lastLine = streamedText("The answer's last line.")
+        XCTAssertTrue(lastLine.waitForExistence(timeout: 10))
+        let firstLine = streamedParagraph(1)
+        XCTAssertTrue(firstLine.waitForExistence(timeout: 5))
+        waitForStreamedAnswerToSettle()
+        attachEmailScreenshot("Streamed answer")
+        // The answer's own actions end the transcript, beneath its last line.
+        let answerActions = app.buttons
+            .matching(NSPredicate(format: "label == %@", "Copy message"))
+            .allElementsBoundByIndex
+            .map(\.frame)
+            .max { $0.maxY < $1.maxY } ?? .null
+        let geometry = "last line \(lastLine.frame) actions \(answerActions) first line \(firstLine.frame) composer \(composer.frame)"
+        XCTAssertGreaterThan(answerActions.minY, lastLine.frame.maxY, geometry)
+        XCTAssertLessThanOrEqual(answerActions.maxY, composer.frame.minY, geometry)
+        XCTAssertGreaterThan(firstLine.frame.minY, app.windows.firstMatch.frame.minY, geometry)
+    }
+
+    /// An answer taller than the window keeps its beginning in view while it
+    /// streams and after the run ends, so it can be read from the top.
+    func testLongStreamedAnswerKeepsItsBeginningInView() {
+        app.launchArguments += ["--ui-testing-streamed-answer", "--ui-testing-long-answer"]
+        app.launch()
+        let composer = sendStreamedAnswerRequest()
+        XCTAssertTrue(streamedParagraph(2).waitForExistence(timeout: 10))
+        waitForStreamedAnswerToSettle()
+        attachEmailScreenshot("Long streamed answer")
+        let firstLine = streamedParagraph(1)
+        XCTAssertTrue(firstLine.exists)
+        let geometry = "first line \(firstLine.frame) composer \(composer.frame) window \(app.windows.firstMatch.frame)"
+        XCTAssertGreaterThan(firstLine.frame.minY, app.windows.firstMatch.frame.minY, geometry)
+        XCTAssertLessThan(firstLine.frame.maxY, composer.frame.minY, geometry)
+    }
+
+    /// Opens the fixture conversation and sends the message the streamed answer replies to.
+    private func sendStreamedAnswerRequest() -> XCUIElement {
+        let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        #else
+        row.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        #if os(macOS)
+        composer.click()
+        #else
+        composer.tap()
+        #endif
+        composer.typeText("Stream an answer")
+        #if os(macOS)
+        app.buttons["Send"].click()
+        #else
+        app.buttons["Send"].tap()
+        #endif
+        return composer
+    }
+
+    private func streamedParagraph(_ number: Int) -> XCUIElement {
+        streamedText("Streamed paragraph \(number) of the answer.")
+    }
+
+    /// Mac static text carries its words in `value`, iOS in `label`.
+    private func streamedText(_ text: String) -> XCUIElement {
+        app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text))
+            .firstMatch
+    }
+
+    /// Waits for the run to end and any scroll to come to rest before frames are read.
+    private func waitForStreamedAnswerToSettle() {
+        let completed = NSPredicate(format: "exists == false")
+        expectation(for: completed, evaluatedWith: app.descendants(matching: .any)["chat.activity"])
+        waitForExpectations(timeout: 20)
+        Thread.sleep(forTimeInterval: 1)
+    }
+
     /// Keeps the answer on screen under the summary row.
     ///
     /// macOS 27 reports SwiftUI's message text as disabled in the accessibility

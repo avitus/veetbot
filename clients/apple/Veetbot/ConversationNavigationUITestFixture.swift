@@ -399,6 +399,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let statusCode: Int
         var holdOpen = false
         var stagedFrames: [String] = []
+        var stagedInterval = 0.01
         switch (request.httpMethod, url.path) {
         case (_, let path) where path.hasPrefix("/v1/memory-reconsolidations") || path.hasPrefix("/v1/memories/00000000-0000-0000-0000-00000000320"):
             let result = Self.synthesisResponse(request)
@@ -794,6 +795,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 statusCode = 202
                 body = "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
             }
+        case ("GET", "/v1/runs/\(Self.runID)/events")
+        where ProcessInfo.processInfo.arguments.contains("--ui-testing-streamed-answer"):
+            statusCode = 200
+            body = ""
+            // Slow enough that the answer grows across several renders, the
+            // way a model's stream does.
+            stagedFrames = Self.streamedAnswerEvents
+            stagedInterval = 0.15
+            holdOpen = true
         case ("GET", "/v1/runs/\(Self.runID)/events"):
             statusCode = 200
             body = ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools")
@@ -1122,7 +1132,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                         self.client?.urlProtocolDidFinishLoading(self)
                     }
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01 * Double(index + 1), execute: item)
+                DispatchQueue.main.asyncAfter(deadline: .now() + stagedInterval * Double(index + 1), execute: item)
                 return item
             }
             return
@@ -1369,6 +1379,21 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         frames.append("id: 23\nevent: assistant.message.completed\ndata: {\"message\":{\"kind\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Your answer is visible below the tool summary.\"}]}}\n\n")
         frames.append("id: 24\nevent: run.completed\ndata: {\"run_id\":\"\(runID)\"}\n\n")
         return frames.joined()
+    }
+
+    /// An answer that streams in paragraph by paragraph and ends with a line
+    /// the composer must not cover; a long one is taller than the window.
+    private static var streamedAnswerEvents: [String] {
+        let count = ProcessInfo.processInfo.arguments.contains("--ui-testing-long-answer") ? 40 : 12
+        let paragraphs = (1...count).map { "Streamed paragraph \($0) of the answer." } + ["The answer's last line."]
+        var frames = paragraphs.enumerated().map { index, paragraph in
+            let text = (index == 0 ? "" : "\n\n") + paragraph
+            return "id: \(100 + index)\nevent: message.delta\ndata: {\"run_id\":\"\(runID)\",\"text\":\"\(text.replacingOccurrences(of: "\n", with: "\\n"))\"}\n\n"
+        }
+        let full = paragraphs.joined(separator: "\\n\\n")
+        frames.append("id: \(100 + count + 1)\nevent: assistant.message.completed\ndata: {\"message\":{\"kind\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"\(full)\"}]}}\n\n")
+        frames.append("id: \(100 + count + 2)\nevent: run.completed\ndata: {\"run_id\":\"\(runID)\"}\n\n")
+        return frames
     }
 
     private static let reportRunID = "00000000-0000-0000-0000-0000000005A2"

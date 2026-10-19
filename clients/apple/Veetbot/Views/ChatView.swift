@@ -21,6 +21,64 @@ enum ConversationScrollTarget: Equatable {
     }
 }
 
+/// Where the transcript goes when its content grows, as an answer does while
+/// it streams. The composer floats over the end of the transcript, so while
+/// the owner reads at the end the view follows it and the newest line stays
+/// above the composer; once the growing answer is taller than the view, it
+/// stops with the answer's beginning at the top so the beginning stays readable.
+enum TranscriptFollow: Equatable {
+    case stay
+    case end
+    case latestTop
+
+    /// - Parameters:
+    ///   - latestMessageHeight: The height of the newest row when it is a message.
+    ///   - endClearance: The space kept free below the last row for the dock.
+    static func step(
+        following: Bool, contentGrew: Bool, latestMessageHeight: CGFloat?,
+        visibleHeight: CGFloat, endClearance: CGFloat
+    ) -> TranscriptFollow {
+        guard following, contentGrew else { return .stay }
+        guard let latestMessageHeight, latestMessageHeight + endClearance > visibleHeight else {
+            return .end
+        }
+        return .latestTop
+    }
+
+    /// Whether the view shows the end of its content, give or take a few points.
+    static func isAtEnd(
+        contentHeight: CGFloat, offset: CGFloat, containerHeight: CGFloat, bottomInset: CGFloat
+    ) -> Bool {
+        offset + containerHeight >= contentHeight + bottomInset - 4
+    }
+}
+
+/// The parts of the transcript's scroll geometry that following its end reads.
+private struct TranscriptScrollMetrics: Equatable {
+    var contentHeight: CGFloat
+    var offset: CGFloat
+    var containerHeight: CGFloat
+    var topInset: CGFloat
+    var bottomInset: CGFloat
+
+    init(_ geometry: ScrollGeometry) {
+        contentHeight = geometry.contentSize.height
+        offset = geometry.contentOffset.y
+        containerHeight = geometry.containerSize.height
+        topInset = geometry.contentInsets.top
+        bottomInset = geometry.contentInsets.bottom
+    }
+
+    var visibleHeight: CGFloat { containerHeight - topInset - bottomInset }
+
+    var isAtEnd: Bool {
+        TranscriptFollow.isAtEnd(
+            contentHeight: contentHeight, offset: offset,
+            containerHeight: containerHeight, bottomInset: bottomInset
+        )
+    }
+}
+
 private struct ChatListOverlayPresentedKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -54,6 +112,11 @@ public struct ChatView: View {
     @State private var composerContentHeight: CGFloat = 0
     /// The dock's laid-out height, kept free at the end of the transcript.
     @State private var dockHeight: CGFloat = 0
+    /// Whether growth keeps the end in view: true after the view scrolls to
+    /// the end, false once the owner scrolls away from it.
+    @State private var followsTranscriptEnd = true
+    /// The newest message's laid-out height, when the newest row is a message.
+    @State private var latestMessageHeight: CGFloat?
     #if os(iOS)
     @State private var showingPhotoPicker = false
     #endif
@@ -125,21 +188,30 @@ public struct ChatView: View {
                                 .onChange(of: geometry.size.height) { _, height in transcriptProbe.viewportHeight = height }
                         }
                     )
+                    .onScrollGeometryChange(for: TranscriptScrollMetrics.self) { geometry in
+                        TranscriptScrollMetrics(geometry)
+                    } action: { old, new in
+                        followGrowth(from: old, to: new, proxy)
+                    }
+                    .onScrollPhaseChange { _, phase in
+                        if phase == .interacting { followsTranscriptEnd = false }
+                    }
+                    // Read directly: a preference with a last-value reducer
+                    // arrived as zero and left the composer over the end.
                     bottomDock(maxCardHeight: pane.size.height * 0.55)
-                        .background(
-                            GeometryReader { geometry in
-                                Color.clear.preference(key: DockHeightKey.self, value: geometry.size.height)
-                            }
-                        )
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            dockHeight = height
+                        }
                 }
             }
-            .onPreferenceChange(DockHeightKey.self) { dockHeight = $0 }
             .onChange(of: scrollChangeToken) {
                 scroll(proxy)
             }
             // A dock that just grew would otherwise cover the end of the
             // transcript; the clearance below the anchor has to be laid out first.
-            .onChange(of: dockHeight) {
+            // One that shrank, as it does when a run ends, uncovers it already.
+            .onChange(of: dockHeight) { old, new in
+                guard new > old, followsTranscriptEnd else { return }
                 DispatchQueue.main.async { scroll(proxy) }
             }
             .onChange(of: model.notificationFocus) {
@@ -340,6 +412,11 @@ public struct ChatView: View {
             ForEach(Array(state.activityTimeline.enumerated()), id: \.element.id) { index, item in
                 row(for: item)
                     .padding(.top, index == 0 ? 0 : spacingBefore(item))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if case .message = item, item.id == state.activityTimeline.last?.id {
+                            latestMessageHeight = height
+                        }
+                    }
             }
             ForEach(detachedApprovals) { approval in
                 Group {
@@ -389,6 +466,7 @@ public struct ChatView: View {
                 },
                 selectText: { textSelection = $0 }
             )
+            .id(item.id)
         case .tool(let activity):
             VStack(alignment: .leading, spacing: 12) {
                 WorkStrip(
@@ -628,12 +706,44 @@ public struct ChatView: View {
     private func scroll(_ proxy: ScrollViewProxy) {
         withAnimation {
             let target = ConversationScrollTarget.resolve(model.notificationFocus)
+            followsTranscriptEnd = target == .bottom
             switch target {
             case .notification:
                 proxy.scrollTo(target.scrollID, anchor: .center)
             case .bottom:
                 proxy.scrollTo(target.scrollID, anchor: .bottom)
             }
+        }
+    }
+
+    /// Keeps a growing answer's newest line above the composer while the
+    /// owner reads at the end; an owner who scrolls back to the end resumes it.
+    private func followGrowth(
+        from old: TranscriptScrollMetrics, to new: TranscriptScrollMetrics, _ proxy: ScrollViewProxy
+    ) {
+        let contentGrew = new.contentHeight > old.contentHeight + 0.5
+        guard contentGrew else {
+            if new.isAtEnd { followsTranscriptEnd = true }
+            return
+        }
+        let latest = state.activityTimeline.last
+        let latestIsMessage: Bool
+        if case .message = latest { latestIsMessage = true } else { latestIsMessage = false }
+        switch TranscriptFollow.step(
+            following: followsTranscriptEnd,
+            contentGrew: contentGrew,
+            latestMessageHeight: latestIsMessage ? latestMessageHeight : nil,
+            visibleHeight: new.visibleHeight,
+            endClearance: max(dockHeight + 8, 1)
+        ) {
+        case .stay:
+            break
+        case .end:
+            // As for a grown dock, the new end has to be laid out first.
+            DispatchQueue.main.async { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+        case .latestTop:
+            followsTranscriptEnd = false
+            if let latest { DispatchQueue.main.async { proxy.scrollTo(latest.id, anchor: .top) } }
         }
     }
 
@@ -656,11 +766,6 @@ public struct ChatView: View {
             }
         }
     }
-}
-
-private struct DockHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 /// The card the run waits on, docked above the composer until the owner

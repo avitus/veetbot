@@ -11,9 +11,12 @@ import Testing
         let source = try source(at: "Veetbot/Views/ChatView.swift")
 
         // The dock floats over the transcript's end as a measured overlay; a
-        // bottom safe-area inset holding the card left the window undrawn.
+        // bottom safe-area inset holding the card left the window undrawn. The
+        // dock is measured directly: its height as a last-value preference
+        // arrived as zero and the composer covered the end of every answer.
         #expect(source.contains("ZStack(alignment: .bottom)"))
-        #expect(source.contains("onPreferenceChange(DockHeightKey.self)"))
+        #expect(source.contains("dockHeight = height"))
+        #expect(!source.contains("DockHeightKey"))
         #expect(!source.contains(".safeAreaInset(edge: .bottom"))
         #expect(source.contains("AttentionDock("))
         #expect(source.contains("WaitingLine(text: \"Waiting for your approval. See below.\")"))
