@@ -20,7 +20,8 @@ def _enabled_identifiers(node: object) -> set[str]:
         for key, value in node.items():
             if key == "enabledTests" and isinstance(value, list):
                 found.update(
-                    str(test["identifier"])
+                    # -only-testing names an XCTest case without a call suffix.
+                    str(test["identifier"]).removesuffix("()")
                     for test in value
                     if isinstance(test, dict) and "identifier" in test
                 )
@@ -51,10 +52,16 @@ def main(argv: list[str]) -> int:
         print("usage: python -m scripts.ios_ui_shard ENUMERATION.json INDEX/TOTAL", file=sys.stderr)
         return 2
     try:
-        options = shard_options(json.loads(Path(argv[0]).read_text(encoding="utf-8")), argv[1])
+        enumeration = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
+        options = shard_options(enumeration, argv[1])
     except (OSError, ValueError) as error:
         print(f"ios_ui_shard: {error}", file=sys.stderr)
         return 1
+    total = len(_enabled_identifiers(enumeration))
+    print(
+        f"ios_ui_shard: shard {argv[1]} runs {len(options)} of {total} enabled cases",
+        file=sys.stderr,
+    )
     print(" ".join(options))
     return 0
 

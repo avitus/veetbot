@@ -289,6 +289,8 @@ def test_a_shard_runs_every_other_enumerated_case(simulator_checkout: Path) -> N
     enumerations = [call for call in calls if "-enumerate-tests" in call]
     runs = [call for call in calls if "test-without-building" in call and "-enumerate" not in call]
     assert len(enumerations) == 1 and "id=IPAD-1" in enumerations[0]
+    # Pipeline 1306: the default hierarchical listing has no enabledTests list.
+    assert "-test-enumeration-style flat" in enumerations[0]
     assert len(runs) == 1
     assert "ConversationNavigationUITests/testB" in runs[0]
     assert "ConversationNavigationUITests/testD" in runs[0]

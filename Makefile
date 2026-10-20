@@ -315,7 +315,7 @@ test-apple-ui-ios:
 			-destination "platform=iOS Simulator,id=$${iphone_device_id:-$$ipad_device_id}" \
 			-testProductsPath "$$test_products_path" \
 			-collect-test-diagnostics never \
-			-enumerate-tests -test-enumeration-format json \
+			-enumerate-tests -test-enumeration-style flat -test-enumeration-format json \
 			-test-enumeration-output-path "$$apple_ui_tmp/tests.json" \
 			-only-testing:VeetbotUITests || exit $$?; \
 		only_testing=$$(python3 scripts/ios_ui_shard.py "$$apple_ui_tmp/tests.json" "$(IOS_UI_SHARD)") || exit $$?; \
