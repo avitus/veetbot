@@ -18,11 +18,14 @@ ADR-0228 left job parallelism as a separate decision.
 
 ## Decision
 
-1. `apple-ios` takes a `device` parameter, `iphone` or `ipad`, and the verify
-   workflow runs it as `apple-ios-iphone` and `apple-ios-ipad`. Packaging
-   requires both. `make test-apple-ui-ios` reads `IOS_UI_DEVICES`, which
-   defaults to `iphone ipad`, and builds for, boots, and tests only the named
-   devices, so local use is unchanged.
+1. The simulator job becomes `apple-ios-device` with a `device` parameter,
+   `iphone` or `ipad`, and the verify workflow runs it as `apple-ios-iphone`
+   and `apple-ios-ipad`. A step-only job keeps the name `apple-ios`, requires
+   both, and is what packaging requires, so the `apple-ios` status that
+   `main`'s branch protection requires still means both devices passed.
+   `make test-apple-ui-ios` reads `IOS_UI_DEVICES`, which defaults to
+   `iphone ipad`, and builds for, boots, and tests only the named devices, so
+   local use is unchanged.
 2. `static` and `integration` set `parallelism: 2`. Smarter Testing's free
    static splitting divides each partition's test files by recorded timing, so
    the two nodes together run the whole partition with no credit-charged

@@ -1040,9 +1040,10 @@ that counter.
 
 A pipeline for any branch other than `main` starts no hosted workflow by
 itself; such a branch is verified on the sidecar and, before it is proposed for
-`main`, by one pipeline requested with `run_verify: true` (ADR-0107,
-`docs/plan/development-toolchain.md`). `main` is protected: the seven
-verification jobs are required status checks, so a pull request cannot merge
+`main`, by a pipeline requested with `run_verify: true` on its final head (ADR-0107,
+`docs/plan/development-toolchain.md`). `main` is protected: nine verification
+statuses are required checks (`static`, `contract`, `integration`, `sandbox`,
+`apple`, `apple-ios`, `public-site`, and both browser-image instances), so a pull request cannot merge
 until a requested run reports them green on its head commit; the owner retains
 an admin override. A requested `dev` pipeline also
 runs the non-publishing Apple signing smoke described above; the isolated recall

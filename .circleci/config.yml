@@ -341,7 +341,7 @@ jobs:
 
   # One simulator per executor, so the two devices run at the same time
   # without sharing a machine, and a rerun repeats only the failed one (ADR-0230).
-  apple-ios:
+  apple-ios-device:
     parameters:
       device:
         type: enum
@@ -363,6 +363,17 @@ jobs:
           job: apple-ios-<< parameters.device >>
       - store_apple_test_results:
           platform: ios-<< parameters.device >>
+
+  # The required apple-ios status of main's branch protection: it passes once
+  # both simulator devices have passed (ADR-0230).
+  apple-ios:
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - run:
+          name: Both simulator devices passed
+          command: echo "apple-ios-iphone and apple-ios-ipad passed."
 
   apple-testflight:
     macos:
@@ -726,12 +737,16 @@ workflows:
       - integration
       - sandbox
       - apple
-      - apple-ios:
+      - apple-ios-device:
           name: apple-ios-iphone
           device: iphone
-      - apple-ios:
+      - apple-ios-device:
           name: apple-ios-ipad
           device: ipad
+      - apple-ios:
+          requires:
+            - apple-ios-iphone
+            - apple-ios-ipad
       - apple-signing-smoke:
           context: veetbot-apple-signing
           filters:
@@ -753,8 +768,7 @@ workflows:
             - integration
             - sandbox
             - apple
-            - apple-ios-iphone
-            - apple-ios-ipad
+            - apple-ios
             - public-site
             - browser-image-x86_64
             - browser-image-arm64

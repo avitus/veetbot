@@ -35,7 +35,7 @@ def _verify_entries() -> dict[str, dict[str, Any]]:
 
 
 def test_the_simulator_ui_job_runs_once_per_device_on_its_own_executor() -> None:
-    job = _config()["jobs"]["apple-ios"]
+    job = _config()["jobs"]["apple-ios-device"]
     assert job["parameters"] == {"device": {"type": "enum", "enum": ["iphone", "ipad"]}}
     commands = [step["run"]["command"] for step in job["steps"] if "run" in step]
     assert any(
@@ -47,19 +47,21 @@ def test_the_simulator_ui_job_runs_once_per_device_on_its_own_executor() -> None
     assert {"store_apple_test_results": {"platform": "ios-<< parameters.device >>"}} in job["steps"]
 
     entries = _verify_entries()
-    assert entries["apple-ios-iphone"] == {
-        "job": "apple-ios",
-        "name": "apple-ios-iphone",
-        "device": "iphone",
-    }
-    assert entries["apple-ios-ipad"] == {
-        "job": "apple-ios",
-        "name": "apple-ios-ipad",
-        "device": "ipad",
-    }
-    requires = entries["package-release"]["requires"]
-    assert {"apple-ios-iphone", "apple-ios-ipad"} <= set(requires)
-    assert "apple-ios" not in requires
+    for device in ("iphone", "ipad"):
+        assert entries[f"apple-ios-{device}"] == {
+            "job": "apple-ios-device",
+            "name": f"apple-ios-{device}",
+            "device": device,
+        }
+
+
+def test_the_required_apple_ios_status_passes_only_after_both_devices() -> None:
+    """main's branch protection requires the status named apple-ios."""
+    gate = _config()["jobs"]["apple-ios"]
+    assert [next(iter(step)) for step in gate["steps"]] == ["run"]
+    entries = _verify_entries()
+    assert entries["apple-ios"]["requires"] == ["apple-ios-iphone", "apple-ios-ipad"]
+    assert "apple-ios" in entries["package-release"]["requires"]
 
 
 @pytest.mark.parametrize("name", ["static", "integration"])

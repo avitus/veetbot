@@ -514,9 +514,10 @@ two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it, then runs the macOS UI cases with
 `make test-apple-ui-macos`. Job 6b runs `make test-apple-ui-ios` on available
-iPhone and iPad simulators, as two instances of one job (`apple-ios-iphone` and
-`apple-ios-ipad`) on separate executors; `IOS_UI_DEVICES` names the devices a
-run builds for, boots, and tests, and defaults to both (ADR-0230). The macOS cases synthesize real pointer and
+iPhone and iPad simulators, as two instances of `apple-ios-device`
+(`apple-ios-iphone` and `apple-ios-ipad`) on separate executors, and a
+step-only `apple-ios` job passes once both have; `IOS_UI_DEVICES` names the
+devices a run builds for, boots, and tests, and defaults to both (ADR-0230). The macOS cases synthesize real pointer and
 keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
 VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
 both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM
@@ -669,8 +670,11 @@ Three workflow-level facts complete the definition:
     other branch, pull-request branches included, a pipeline starts no workflow
     by itself and spends no credits; the workflow runs there only when the
     pipeline is triggered with `run_verify: true` (ADR-0107). Request that run
-    once, on the final head of a change proposed for `main`, naming the pull
-    request's own source branch:
+    with each push of a change proposed for `main`, alongside its review, so
+    the final head's run is already under way when the review ends; merge
+    `main` into the branch before the final push, so the merge commit's tree
+    matches the verified head and `main` skips re-verification (ADR-0114).
+    Name the pull request's own source branch:
 
     ```text
     circleci api api/v2/project/gh/avitus/veetbot/pipeline \

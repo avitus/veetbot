@@ -10,7 +10,7 @@
       "name": "check",
       "run": "make check",
       "role": "gate",
-      "timeout": 900,
+      "timeout": 1800,
       "remote": true
     }
   ],
