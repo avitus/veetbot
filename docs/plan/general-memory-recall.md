@@ -720,6 +720,19 @@ scenarios and every interruption/uncertain-cost item, with nonempty findings.
 Operator attribution and verification of the reviewer's real authorship remain
 mandatory; synthetic test reviews are never release evidence.
 
+[ADR-0222](../adr/0222-owner-approved-recall-review-scope.md) records the owner's
+2026-10-20 approval of a narrower human coverage requirement for this exact retained
+comparison. Version-two review, evidence and admission formats bind the immutable
+approved scope: 37 individual cases, one summary of all 40 cost-exception rows,
+and four summaries retaining all 18 history items. The 270 omitted difficult cases
+receive no individual attestation. Each selected case and summary requires an
+explicit assessment; concerns require notes, and unacceptable findings cannot
+accompany rollout acceptance. A separate overall finding and residual-risk
+decision remain required. The legacy full-review rule and all other safety,
+compatibility and release requirements remain unchanged. The offline packet
+generator preserves original evidence, starts with empty controls, saves drafts
+and exports only actual scoped findings; it never creates admission evidence.
+
 ## Hard gates
 
 1. **M33.** **Corpus independence** — at least 400 independent scenarios span eight families,

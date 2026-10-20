@@ -36,6 +36,12 @@ explicitly accept their bounded residual risks; an empty review or aggregate
 approval without the linked failed evidence cannot supply that decision.
 Every scenario with a row-level quality exception requires explicit review,
 including an otherwise correct answer that exceeds the per-answer cost ceiling.
+This remains the version-one rule. The owner's explicit 2026-10-20 approval in
+[ADR-0222](0222-owner-approved-recall-review-scope.md) permits a separately
+versioned review of exactly 37 named cases, one complete cost summary and four
+complete history summaries for the retained comparison. The 270 omitted cases
+remain individually unreviewed. Approval of that coverage and its residual risk
+does not supply the actual findings or authorize activation.
 
 An exact source found during search but omitted from a certified final context
 is candidate evidence only. Its original absent rank and unrendered status stay

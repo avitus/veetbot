@@ -155,7 +155,10 @@ def bind_index_manifest(
     }
     raw = _read_bounded(manifest)
     document = json.loads(raw, object_pairs_hook=_unique_object)
-    if isinstance(document, dict) and document.get("version") == "recall-bounded-admission@1":
+    if isinstance(document, dict) and document.get("version") in (
+        "recall-bounded-admission@1",
+        "recall-bounded-admission@2",
+    ):
         if principal is None or clock is None:
             raise ValueError("Bounded recall requires actual owner and clock")
         return bind_bounded_recall(
