@@ -52,6 +52,13 @@ DEFAULT_SYNTHESIS_RESERVE_COST = Decimal("1")
 # ADR-0213: a call schedule delegates exactly the calling scopes, so its
 # occurrence can place the call and read back how it went.
 CALL_SCOPES = frozenset({"mcp.bland_call.use", "mcp.bland_read.use"})
+# Those scopes are all the occurrence holds, so it can never schedule a later
+# attempt; Chat must not confirm a retry or follow-up it cannot arrange.
+CALL_SCHEDULE_LIMITS = (
+    "When it fires, its run can place calls but cannot create or change schedules or "
+    "wait for a later time, so no retry or follow-up that depends on how a call went is "
+    "arranged. If the owner asked for one, say it will not happen."
+)
 
 _FORBIDDEN_CADENCE_FIELD_SCHEMA: dict[str, Any] = {"not": {}}
 
@@ -391,6 +398,8 @@ class ScheduleCreateTool:
                 f"Schedule {record.schedule.id} already exists and is "
                 f"{record.schedule.state.value.lower()}; it will not fire again."
             )
+        if arguments.get("place_call"):
+            narration = f"{narration} {CALL_SCHEDULE_LIMITS}"
         return ToolResult(
             ok=True,
             content=[TextPart(text=narration)],

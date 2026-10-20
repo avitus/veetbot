@@ -347,4 +347,5 @@ nav:
       - ADR-0215 Native schedule lifecycle and plain-words creation (Proposed): adr/0215-native-schedule-lifecycle-and-plain-words-creation.md
       - ADR-0216 Persona voice, traits and boundaries (Proposed): adr/0216-persona-voice-traits-entry-switches-and-boundaries.md
       - ADR-0217 People directory attention and counts (Proposed): adr/0217-people-directory-attention-recent-and-counts.md
+      - ADR-0221 Unattended call plans (Proposed): adr/0221-unattended-call-plans.md
   - Changelog: changelog.md

@@ -1022,7 +1022,10 @@ the second consecutive failure (ADR-0109). No model argument can widen any of
 these values.
 
 The successful result contains `schedule_id`, `state`, `next_fire_at`, and
-whether the application request replayed. After the occurrence's run is
+whether the application request replayed. A call schedule's result text adds
+that its occurrence can call but cannot create or change schedules or wait, so
+no retry or follow-up that depends on a call's outcome is arranged, and asks
+Chat to say so when the owner asked for one. After the occurrence's run is
 accounted, the outbox emits `schedule_run_finished`, which can arrive after the
 nominal instant by the duration of the scheduled run. ADR-0091 subsequently
 authorizes the occurrence's pinned revision title and nominal firing time in

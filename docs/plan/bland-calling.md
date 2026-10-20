@@ -171,7 +171,11 @@ instruction is one the owner gave. Its definition requests exactly the two
 calling scopes, so the occurrence can call and read the outcome. Creation fails
 with `schedule.calling_unavailable` when calling is not composed, rather than
 at firing; the scheduler role mirrors `AGENT_CALL_ENABLED` to vouch for the
-scopes.
+scopes. Those scopes are all the occurrence holds, and it runs once, so it
+cannot arrange a retry or a follow-up; the creation result says so, so Chat
+does not confirm one. A call placed after the occurrence reads any call record,
+even an empty list, keeps the card. Proposed ADR-0221 covers running such a
+plan unattended.
 
 The server's stderr is not a private channel: the API or worker process that
 spawns the child passes on its own stderr, so anything the child logs lands in

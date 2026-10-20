@@ -252,3 +252,4 @@ implementation without one.
 - [ADR-0215: Native schedule lifecycle, plain-words creation, Run now and delivery preference (Proposed)](0215-native-schedule-lifecycle-and-plain-words-creation.md)
 - [ADR-0216: Persona voice, lean-towards traits, entry switches, sample reply and boundaries (Proposed)](0216-persona-voice-traits-entry-switches-and-boundaries.md)
 - [ADR-0217: People directory attention, last contact and section counts (Proposed)](0217-people-directory-attention-recent-and-counts.md)
+- [ADR-0221: Unattended call plans, with retries and a follow-up (Proposed)](0221-unattended-call-plans.md)
