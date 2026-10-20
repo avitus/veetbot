@@ -189,6 +189,39 @@ async def test_bland_final_states_stay_distinct(change: dict[str, Any], status: 
     assert result["status"] == status
 
 
+@pytest.mark.parametrize(
+    ("change", "status"),
+    [
+        ({"status": "busy"}, "busy"),
+        ({"status": "no-answer"}, "no_answer"),
+        ({"status": "failed"}, "failed"),
+        ({"status": "canceled"}, "failed"),
+        ({"answered_by": "no-answer"}, "no_answer"),
+        ({"status": None, "queue_status": "pre_queue_error", "completed": False}, "failed"),
+        ({"status": None, "queue_status": "queue_error", "completed": False}, "failed"),
+        ({"status": "unknown", "queue_status": "call_error"}, "failed"),
+        ({"status": "completed", "queue_status": "call_error"}, "completed"),
+        ({"status": "completed", "queue_status": "complete_error"}, "completed"),
+        ({"status": "unknown"}, "completed"),
+    ],
+)
+async def test_bland_documented_final_states_stay_distinct(
+    change: dict[str, Any], status: str
+) -> None:
+    """Bland's GET /v1/calls/{id} reference, not observed calls: none of the five
+    real outbound calls to 2026-10-20 was busy, unanswered or failed. `status` is
+    the provider's latest word; complete_error is a post-call fault, not a failure.
+    """
+
+    payload = {**provider_call(), "inbound": False, "to": RECIPIENT, "from": NUMBER}
+    payload.update({"status": "completed", **change})
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as http:
+        result = await BlandClient(KEY, NUMBER, http_client=http).get_call(CALL_ID)
+    assert result["status"] == status
+
+
 VOICEMAIL_DETECTED = "<Call ended due to voicemail detection>"
 
 

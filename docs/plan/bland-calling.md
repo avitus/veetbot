@@ -134,6 +134,13 @@ means that the call was accepted, not that the recipient answered or the task
 succeeded. Save the identifier, owner, approved invocation, agent revision, and
 outbound correlation identifier durably. Final states distinguish no answer,
 busy, voicemail, completed conversation, failure, and an uncertain dispatch.
+The provider's `status` is its latest word: `busy`, `no-answer`, `failed` and
+`canceled` map to busy, no answer and failure, and `answered_by: "no-answer"`
+on a finished call means no answer. Until `status` reads `completed`, the
+`queue_status` error stages before and during a call also mean failure, but
+`complete_error`, a fault after the call ended, does not. These values come
+from the provider's reference; no real busy, unanswered or failed call has
+been observed yet.
 Until reconciliation records an accepted call, reading its identifier returns
 a content-free pending view, not "call not found". The view gives the outbound
 direction, status `accepted` and `result_pending: true`.
