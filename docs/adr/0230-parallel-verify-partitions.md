@@ -55,6 +55,10 @@ ADR-0228 left job parallelism as a separate decision.
   (iPhone 1819 seconds, iPad 1832), as long as both together had on one
   machine. The cases themselves, not a shared machine, set the time, which is
   why decision 2 splits them.
+- Requested pipeline 1310 measured the case split: each of the four shards
+  ran 36 of the 72 enabled cases in 989 to 1057 seconds, the device jobs took
+  17.4 and 17.8 minutes, `integration` 14.0 and `static` 11.2, and the whole
+  verify workflow 17.9 minutes against a median of 30.4 before.
 - The simulator lane uses four macOS executors, each building the UI-test
   products once, so its macOS minutes rise by about three builds.
 - A flaky device reruns alone when the workflow is rerun from failed.
