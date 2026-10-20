@@ -297,7 +297,7 @@ struct DeviceSignInSheet: View {
                         : "\(blockedHost) is outside this website, so it was not opened.",
                     systemImage: "hand.raised.fill"
                 )
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.amberText)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -322,12 +322,12 @@ struct DeviceSignInSheet: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(session.currentURL?.host ?? request.startURL.host ?? "Website")
-                    .appFont(.headline)
+                    .veetType(.ui, weight: .semibold)
                     .lineLimit(1)
                 Text(
                     "Sign in to the website here. Veetbot does not see what you type. When you are signed in, tap I'm signed in: only this website's session goes to Veetbot's isolated browser, and this window is cleared."
                 )
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -348,7 +348,7 @@ struct DeviceSignInSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             if let failure {
                 Label(failure.message, systemImage: "exclamationmark.triangle.fill")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("device-sign-in.error")
@@ -366,7 +366,7 @@ struct DeviceSignInSheet: View {
                 if isConfirming {
                     ProgressView().controlSize(.small)
                     Text("Checking the sign-in…")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(.secondary)
                 }
                 Spacer()

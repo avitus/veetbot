@@ -122,14 +122,13 @@ open settings in a separate window that resizes horizontally and vertically and
 restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
 position are restored without interfering with the settings window. Appearance
-preferences include app-wide text sizing and system, rounded,
-serif, or monospaced typography. They are stored in device preferences and apply
-immediately. System sizing preserves the platform's accessibility setting, while
-the three explicit sizes use deterministic scales on both platforms. The
-body face still defaults to the rounded face, because the system face runs
-about two points wider per toolbar label and folds the iPhone Subscriptions
-toolbar into an overflow menu; the system, serif and monospaced choices apply
-everywhere.
+preferences choose a text size and a system, rounded, serif, or monospaced face.
+They are stored in device preferences, apply immediately, and reach transcript
+body text only (and the composer that writes it): sidebars, tables, toolbars,
+docks and controls keep the system face at their role sizes. System sizing
+preserves the platform's accessibility setting, while the three explicit sizes
+scale the body role deterministically on both platforms. The face defaults to
+System.
 
 ### Design tokens
 
@@ -152,10 +151,42 @@ chooses a colour by mode. The tokens are:
 | `hairline`, `hairlineStrong`, `selected` | dividers, borders, the chosen row | ink at 14 %, 28 %, 9 % | ink at 10 %, 22 %, 12 % |
 | `toastBackground`, `toastText`, `toastAction` | a toast: ink ground, paper text, its Undo | `#102923`, `#fcfaf6`, `#5ee3c9` | `#ece6d8`, `#0c211d`, `#086657` |
 
-Titles use the serif display face through `appDisplayFont`; body text follows
-the owner's font-style preference through `appFont`, and tool detail uses the
-monospaced face through `appCodeFont`. Capsule buttons come in three weights
-(filled teal, hairline, quiet) in `A2Controls.swift`.
+Type follows design-system type revision 2 (`VeetType.swift`). A view names
+one of seven roles with `.veetType(_:weight:)`, never a point size or a raw
+text style, and only the 400, 500 and 600 weights exist; `VeetTypeTests` fails
+on any view under `Views/` that sets a literal size, a raw text style or bold.
+
+| Role | Use | Mac | iPad | iPhone |
+| --- | --- | --- | --- | --- |
+| `display` | conversation and page titles, serif | 24 | 26 (scales as Title) | Title |
+| `title` | headings inside content and sheets, 600 | 17 | Title 3 | Title 3 |
+| `body` | transcript prose and the composer | 15 | Body | Body |
+| `ui` | sidebar rows, buttons, fields, segments | 13 | Subheadline | Body |
+| `dense` | tables, header at 600 | 13 | Subheadline | Subheadline |
+| `meta` | counts, times, tool lines, help text | 12 | Footnote | Footnote |
+| `label` | section labels, 600 | 11 | Caption | Footnote |
+
+The Mac sizes are fixed; the iPhone and iPad roles scale with Dynamic Type.
+`.veetMono()` sets the work ledger and code in SF Mono at the meta size, and
+`.veetIcon(_:)` sizes symbols to the row icon (15, 18 or 20 points).
+`.transcriptBody()` marks the transcript, where the body role follows the
+owner's face and size. Gaps come from one scale, `VeetSpace` (4, 8, 12, 16, 24,
+32, 48), and row, control and gutter sizes from `A2Metrics`.
+
+Every sidebar row uses `SidebarRow`: a fixed icon column, the title in the ui
+role, and a trailing slot in the meta role, so chats, folders, schedules,
+History and Needs you titles start at one x. Section labels align with the icon
+column; New folder is a + beside the Folders label, and New chat a teal compose
+button beside the sidebar's search, which filters rows by title. A
+conversation's move and delete actions replace the trailing slot on hover and
+sit in its context menu, where nothing hovers. Copy and Select Text show on
+hover on the Mac and iPad (a tap shows them on an iPad without a pointer); the
+iPhone keeps them visible, since a long-press menu would take the gesture text
+selection uses (ADR-0122). A conversation opens at its latest turn, and its
+title reaches the toolbar only once the display title has scrolled away.
+
+Capsule buttons come in three weights (filled teal, hairline, quiet) in
+`A2Controls.swift`.
 
 A change the server has confirmed is announced with a toast
 (`ToastCenter`, drawn by `A2Toast.swift`): one short sentence in an ink

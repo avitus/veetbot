@@ -527,9 +527,11 @@ private struct MarkdownBlocksView: View {
     let blocks: [MarkdownContentBlock]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+        VStack(alignment: .leading, spacing: VeetSpace.s3) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 MarkdownBlockView(block: block)
+                    // 24 before a heading: the 12 between blocks and 12 more.
+                    .padding(.top, index > 0 && block.isHeading ? VeetSpace.s3 : 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -543,12 +545,12 @@ private struct MarkdownBlockView: View {
         switch block {
         case .paragraph(let text):
             inlineMarkdownText(text)
-                .lineSpacing(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .heading(let level, let text):
+            // Headings in prose use the title role in sans; the smaller
+            // levels are body text at 600.
             inlineMarkdownText(text)
-                .appFont(headingTextStyle(level), weight: markdownHeadingWeight(level))
-                .padding(.top, level <= 2 ? 6 : 2)
+                .veetType(level <= 3 ? .title : .body, weight: markdownHeadingWeight(level))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
         case .blockquote(let blocks):
@@ -558,23 +560,19 @@ private struct MarkdownBlockView: View {
         case .codeBlock(let language, let code):
             MarkdownCodeBlockView(language: language, code: code)
         case .thematicBreak:
-            Divider().padding(.vertical, 5)
+            HairlineDivider().padding(.vertical, VeetSpace.s1)
         case .table(let table):
             MarkdownTableView(table: table)
         }
     }
 
-    private func headingTextStyle(_ level: Int) -> Font.TextStyle {
-        switch level {
-        case 1: return .largeTitle
-        case 2: return .title2
-        case 3: return .title3
-        case 4: return .headline
-        case 5: return .subheadline
-        default: return .caption
-        }
-    }
+}
 
+extension MarkdownContentBlock {
+    var isHeading: Bool {
+        if case .heading = self { return true }
+        return false
+    }
 }
 
 /// One block of a quote and how many levels deep it sits, so a nested reply
@@ -609,15 +607,15 @@ struct MarkdownQuoteRow: Equatable, Sendable {
 private struct MarkdownQuoteView: View {
     let rows: [MarkdownQuoteRow]
 
-    private static let barWidth: CGFloat = 3
-    private static let levelIndent: CGFloat = 14
+    private static let barWidth: CGFloat = 2
+    private static let levelIndent: CGFloat = VeetSpace.s4
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.accentColor.opacity(0.65))
+        HStack(alignment: .top, spacing: VeetSpace.s3) {
+            Rectangle()
+                .fill(AppTheme.hairlineStrong)
                 .frame(width: Self.barWidth)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: VeetSpace.s3) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     AnyView(MarkdownBlockView(block: row.block))
                         .padding(.leading, CGFloat(row.depth - 1) * Self.levelIndent)
@@ -625,47 +623,41 @@ private struct MarkdownQuoteView: View {
                 }
             }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
+        .padding(.vertical, VeetSpace.s1)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.045))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .foregroundColor(AppTheme.inkSoft)
     }
 
     /// One fainter bar per inner level, in the indent the row leaves for them.
     private func innerBars(count: Int) -> some View {
         HStack(spacing: Self.levelIndent - Self.barWidth) {
             ForEach(0..<count, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.accentColor.opacity(0.35))
+                Rectangle()
+                    .fill(AppTheme.hairline)
                     .frame(width: Self.barWidth)
             }
         }
     }
 }
 
-func markdownHeadingWeight(_ level: Int) -> Font.Weight? {
-    switch level {
-    case 1, 2: return .bold
-    case 3, 5: return .semibold
-    default: return nil
-    }
+/// Every heading is 600: bold is never used (type revision 2).
+func markdownHeadingWeight(_ level: Int) -> VeetType.Weight {
+    .semibold
 }
 
 private struct MarkdownListView: View {
     let items: [MarkdownListItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: VeetSpace.s1) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
                     marker(for: item)
-                        .frame(width: 24, alignment: .trailing)
+                        .frame(width: VeetSpace.s5, alignment: .trailing)
                     inlineMarkdownText(item.text)
-                        .lineSpacing(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.leading, CGFloat(item.depth) * 20)
+                .padding(.leading, CGFloat(item.depth) * VeetSpace.s5)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -674,7 +666,7 @@ private struct MarkdownListView: View {
     @ViewBuilder private func marker(for item: MarkdownListItem) -> some View {
         if let isComplete = item.taskIsComplete {
             Image(systemName: isComplete ? "checkmark.square.fill" : "square")
-                .foregroundColor(isComplete ? .accentColor : .secondary)
+                .foregroundColor(isComplete ? AppTheme.teal : AppTheme.inkFaint)
                 .accessibilityLabel(isComplete ? "Completed" : "Not completed")
         } else {
             switch item.marker {
@@ -682,7 +674,7 @@ private struct MarkdownListView: View {
                 Text("•")
             case .number(let number):
                 Text("\(number).")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppTheme.inkSoft)
             }
         }
     }
@@ -696,11 +688,11 @@ private struct MarkdownCodeBlockView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: VeetSpace.s2) {
                 Text(language ?? "Code")
-                    .appFont(.caption, weight: .semibold)
-                    .foregroundColor(.secondary)
-                Spacer(minLength: 8)
+                    .veetType(.meta, weight: .semibold)
+                    .foregroundColor(AppTheme.inkSoft)
+                Spacer(minLength: VeetSpace.s2)
                 Button {
                     SystemClipboard.copy(code)
                     copied = true
@@ -712,29 +704,29 @@ private struct MarkdownCodeBlockView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .appFont(.caption, weight: .semibold)
-                .foregroundColor(.secondary)
+                .veetType(.meta, weight: .semibold)
+                .foregroundColor(AppTheme.inkSoft)
                 .accessibilityLabel(
                     copied ? "Copied to clipboard" : "Copy code to clipboard"
                 )
                 .accessibilityIdentifier("markdown.code.copy")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            Divider()
+            .padding(.horizontal, VeetSpace.s3)
+            .padding(.vertical, VeetSpace.s2)
+            HairlineDivider()
             ScrollView(.horizontal, showsIndicators: true) {
                 Text(code.isEmpty ? " " : code)
-                    .appCodeFont(.body)
+                    .veetMono()
                     .fixedSize(horizontal: true, vertical: true)
-                    .padding(12)
+                    .padding(VeetSpace.s3)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(AppTheme.paperDeep)
+        .clipShape(RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.2))
+            RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous)
+                .stroke(AppTheme.hairline)
         )
         .onChange(of: code) { copied = false }
     }
@@ -752,6 +744,10 @@ enum SystemClipboard {
     }
 }
 
+/// A table in the dense role: a semibold soft-ink header on paper-deep,
+/// 8 × 12 cells, hairline row rules and a 10-radius hairline frame. On the Mac
+/// and iPad long cells wrap inside a capped column; on the iPhone cells never
+/// wrap and the table scrolls sideways, bleeding to the right edge.
 private struct MarkdownTableView: View {
     let table: MarkdownTable
 
@@ -759,45 +755,60 @@ private struct MarkdownTableView: View {
     @ScaledMetric(relativeTo: .body) private var maximumColumnWidth: CGFloat = 320
     @ScaledMetric(relativeTo: .body) private var approximateCharacterWidth: CGFloat = 7
 
+    @Environment(\.veetTranscript) private var inTranscript
+
+    private var scrollsInsteadOfWrapping: Bool { VeetType.Platform.current == .iPhone }
+    /// Only the transcript's tables run to the screen's right edge.
+    private var bleeds: Bool { scrollsInsteadOfWrapping && inTranscript }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 0) {
-                row(table.headers, isHeader: true, isAlternating: false)
-                if !table.rows.isEmpty { Divider() }
-                ForEach(Array(table.rows.enumerated()), id: \.offset) { index, cells in
-                    row(cells, isHeader: false, isAlternating: index.isMultiple(of: 2))
-                    if index < table.rows.count - 1 { Divider() }
+            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                row(table.headers, isHeader: true)
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { _, cells in
+                    HairlineDivider().gridCellUnsizedAxes(.horizontal)
+                    row(cells, isHeader: false)
                 }
             }
-            .background(Color.secondary.opacity(0.025))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.25))
+                RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous)
+                    .strokeBorder(AppTheme.hairline)
             )
+            .padding(.trailing, bleeds ? A2Metrics.transcriptSidePadding : 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, bleeds ? -A2Metrics.transcriptSidePadding : 0)
+        .environment(\.veetTranscript, false)
     }
 
-    private func row(_ cells: [String], isHeader: Bool, isAlternating: Bool) -> some View {
-        HStack(alignment: .top, spacing: 0) {
+    private func row(_ cells: [String], isHeader: Bool) -> some View {
+        GridRow {
             ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
-                inlineMarkdownText(cell)
-                    .appFont(isHeader ? .subheadline : .body, weight: isHeader ? .semibold : nil)
+                cellText(cell, isHeader: isHeader, column: index)
+                    .veetType(.dense, weight: isHeader ? .semibold : .regular)
+                    .monospacedDigit()
+                    .foregroundColor(isHeader ? AppTheme.inkSoft : AppTheme.ink)
                     .multilineTextAlignment(table.alignments[index].textAlignment)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(
-                        width: columnWidth(at: index),
-                        alignment: table.alignments[index].viewAlignment
-                    )
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                if index < cells.count - 1 { Divider() }
+                    .padding(.horizontal, VeetSpace.s3)
+                    .padding(.vertical, VeetSpace.s2)
+                    .frame(maxWidth: .infinity, alignment: table.alignments[index].viewAlignment)
+                    .background(isHeader ? AppTheme.paperDeep : Color.clear)
             }
         }
-        .background(
-            Color.secondary.opacity(isHeader ? 0.12 : (isAlternating ? 0.045 : 0))
-        )
+    }
+
+    @ViewBuilder
+    private func cellText(_ cell: String, isHeader: Bool, column: Int) -> some View {
+        if scrollsInsteadOfWrapping {
+            inlineMarkdownText(cell)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: true)
+        } else {
+            inlineMarkdownText(cell)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: columnWidth(at: column), alignment: table.alignments[column].viewAlignment)
+        }
     }
 
     private func columnWidth(at index: Int) -> CGFloat {
@@ -810,6 +821,8 @@ private struct MarkdownTableView: View {
     }
 }
 
+/// Inline Markdown as one `Text`. Strong text renders at 600, never bold:
+/// its runs drop the strong intent and take the semibold weight instead.
 private func inlineMarkdownText(_ source: String) -> Text {
     guard
         let attributed = try? AttributedString(
@@ -817,5 +830,17 @@ private func inlineMarkdownText(_ source: String) -> Text {
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )
     else { return Text(source) }
-    return Text(attributed)
+    let runs = attributed.runs
+    guard runs.contains(where: { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }) else {
+        return Text(attributed)
+    }
+    return runs.reduce(Text(verbatim: "")) { text, run in
+        var slice = AttributedString(attributed[run.range])
+        guard var intent = run.inlinePresentationIntent, intent.contains(.stronglyEmphasized) else {
+            return Text("\(text)\(Text(slice))")
+        }
+        intent.remove(.stronglyEmphasized)
+        slice.inlinePresentationIntent = intent.isEmpty ? nil : intent
+        return Text("\(text)\(Text(slice).fontWeight(.semibold))")
+    }
 }

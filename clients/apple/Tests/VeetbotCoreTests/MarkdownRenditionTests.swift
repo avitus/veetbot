@@ -183,7 +183,7 @@ import UIKit
         let body = try font(at: try range(of: "Body", in: rendition), in: rendition)
 
         #if os(macOS)
-        #expect(abs(body.pointSize - 13 * 1.3) < 0.01)
+        #expect(abs(body.pointSize - 15 * 1.3) < 0.01)
         #else
         #expect(abs(body.pointSize - 17 * 1.3) < 0.01)
         #endif

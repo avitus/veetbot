@@ -216,7 +216,13 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(firstLine.waitForExistence(timeout: 5))
         waitForStreamedAnswerToSettle()
         attachEmailScreenshot("Streamed answer")
-        // The answer's own actions end the transcript, beneath its last line.
+        // The answer's own actions end the transcript, beneath its last line;
+        // they show on hover on the Mac and after a tap on an iPad.
+        revealMessageActions(lastLine)
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label == %@", "Copy message")).firstMatch
+                .waitForExistence(timeout: 5)
+        )
         let answerActions = app.buttons
             .matching(NSPredicate(format: "label == %@", "Copy message"))
             .allElementsBoundByIndex
@@ -664,6 +670,37 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(waitForFolder(header, expanded: false))
     }
 
+    /// A conversation's move menu (design system revision 2): on the Mac it
+    /// replaces the row's trailing slot while the pointer is over the row; on
+    /// touch it is Move to Folder in the row's long-press menu.
+    private func openMoveMenu(for row: XCUIElement, sessionID: String) {
+        XCTAssertTrue(reveal(row))
+        let move = element("sidebar.session.move.\(sessionID)")
+        #if os(macOS)
+        row.hover()
+        XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
+        move.click()
+        #else
+        row.press(forDuration: 1.2)
+        let submenu = move.waitForExistence(timeout: 3) ? move : app.buttons["Move to Folder"]
+        XCTAssertTrue(submenu.waitForExistence(timeout: 5), app.debugDescription)
+        submenu.tap()
+        #endif
+    }
+
+    /// A menu item by its identifier. A SwiftUI context menu on iOS drops
+    /// its items' identifiers, so there the item is the unidentified button
+    /// with its label (a folder row of the same name carries an identifier).
+    private func menuItem(_ identifier: String, label: String) -> XCUIElement {
+        let byIdentifier = element(identifier)
+        #if os(iOS)
+        if !byIdentifier.waitForExistence(timeout: 2) {
+            return app.buttons.matching(NSPredicate(format: "label == %@ AND identifier == ''", label)).firstMatch
+        }
+        #endif
+        return byIdentifier
+    }
+
     private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval = 5) {
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
         wait(for: [gone], timeout: timeout)
@@ -739,7 +776,7 @@ final class ConversationNavigationUITests: XCTestCase {
                          "00000000-0000-0000-0000-0000000004A2",
                          "00000000-0000-0000-0000-0000000004A3"]
         for id in recentIDs {
-            XCTAssertTrue(element("sidebar.recent.session.\(id)").exists)
+            XCTAssertTrue(element("sidebar.recent.session.\(id)").waitForExistence(timeout: 5), app.debugDescription)
         }
         XCTAssertFalse(element("sidebar.recent.session.00000000-0000-0000-0000-0000000004A4").exists)
         attachFolderScreenshot("Five recent chats including filed conversations")
@@ -993,12 +1030,13 @@ final class ConversationNavigationUITests: XCTestCase {
         let travel = folderHeader(Self.folderID)
         XCTAssertTrue(waitForFolder(travel, label: "Travel", expanded: false, timeout: 10))
         let row = sessionRow(Self.firstSessionID)
-        let move = element("sidebar.session.move.\(Self.firstSessionID)")
-        XCTAssertTrue(reveal(move))
-        activate(move)
-        let intoTravel = element("sidebar.session.move.to.\(Self.folderID)")
+        openMoveMenu(for: row, sessionID: Self.firstSessionID)
+        let intoTravel = menuItem("sidebar.session.move.to.\(Self.folderID)", label: "Travel")
         XCTAssertTrue(intoTravel.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(element("sidebar.session.move.none").exists, "An unfiled conversation has no folder to leave")
+        XCTAssertFalse(
+            menuItem("sidebar.session.move.none", label: "Remove from folder").exists,
+            "An unfiled conversation has no folder to leave"
+        )
         activate(intoTravel)
         // Filed in the collapsed Travel folder, the row leaves the history.
         waitForDisappearance(of: row, timeout: 10)
@@ -1012,9 +1050,8 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(reveal(row))
         XCTAssertTrue(sessionRow(Self.secondSessionID).exists)
 
-        XCTAssertTrue(reveal(move))
-        activate(move)
-        let unfile = element("sidebar.session.move.none")
+        openMoveMenu(for: row, sessionID: Self.firstSessionID)
+        let unfile = menuItem("sidebar.session.move.none", label: "Remove from folder")
         XCTAssertTrue(unfile.waitForExistence(timeout: 5))
         activate(unfile)
         // Back in the history, the row stays in view when Travel closes again.
@@ -1565,10 +1602,14 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(historical)
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
 
+        // Copy and Select Text show on hover on the Mac, after a tap on an
+        // iPad without a pointer, and always on the iPhone.
+        revealMessageActions(app.staticTexts["Historical question"].firstMatch)
+        XCTAssertTrue(app.buttons["chat.message.copy.event-1"].waitForExistence(timeout: 5))
+        revealMessageActions(app.staticTexts["Historical answer loaded"].firstMatch)
         let copy = app.buttons["chat.message.copy.event-2"]
         XCTAssertTrue(copy.waitForExistence(timeout: 5))
         XCTAssertEqual(copy.label, "Copy message")
-        XCTAssertTrue(app.buttons["chat.message.copy.event-1"].exists)
         let select = app.buttons["chat.message.select.event-2"]
         XCTAssertTrue(select.exists)
 
@@ -1578,6 +1619,15 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(text.value as? String, "Historical answer loaded")
         activate(app.buttons["chat.message.selection.done"])
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    private func revealMessageActions(_ message: XCUIElement) {
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        #if os(macOS)
+        message.hover()
+        #else
+        if UIDevice.current.userInterfaceIdiom == .pad { message.tap() }
+        #endif
     }
 
     func testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings() {
@@ -2317,16 +2367,11 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(newConversationRow.waitForExistence(timeout: 5))
         newConversationRow.tap()
 
-        // The conversation's title is the window's on the Mac and the navigation bar's on iOS.
-        #if os(macOS)
-        let window = app.windows.firstMatch
-        XCTAssertTrue(window.waitForExistence(timeout: 5))
-        XCTAssertEqual(window.title, "New conversation")
-        #else
+        // The conversation's title heads the transcript; the toolbar shows it
+        // only once that heading has scrolled away (type revision 2).
         let heading = app.staticTexts["chat.heading"]
         XCTAssertTrue(heading.waitForExistence(timeout: 5))
         XCTAssertEqual(heading.label, "New conversation")
-        #endif
         XCTAssertTrue(app.descendants(matching: .any)["chat.composer"].exists)
     }
 
@@ -3096,8 +3141,11 @@ final class ConversationNavigationUITests: XCTestCase {
         for _ in 0..<8 {
             let bottom = app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY - 12 : app.frame.maxY - 50
             if element.exists && element.isHittable && element.frame.maxY < bottom { return }
-            scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.7))
-                .press(forDuration: 0.05, thenDragTo: scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.3)))
+            // Inside the content's right margin: a drag that starts in the
+            // 30-point scroll-indicator strip (dx 0.98) can scrub the
+            // indicator instead and leave the view where it was.
+            scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.7))
+                .press(forDuration: 0.05, thenDragTo: scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3)))
         }
     }
     #endif

@@ -51,7 +51,7 @@ public struct ScheduleBrowserView: View {
             column
         } detail: {
             Text("Select a schedule to read its instruction.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .background(AppTheme.paper)
@@ -67,9 +67,9 @@ public struct ScheduleBrowserView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Schedules").appDisplayFont(.title2)
+                Text("Schedules").veetType(.display)
                 Text("Work Veetbot does on its own, on a rhythm you set.")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -151,7 +151,7 @@ public struct ScheduleBrowserView: View {
     private func loadMoreFailureFooter(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(message, systemImage: "exclamationmark.triangle")
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
             Button("Retry") {
                 Task { await model.retry() }
@@ -204,17 +204,17 @@ struct ScheduleRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(item.title)
-                        .appFont(.body, weight: .semibold)
+                        .veetType(.ui, weight: .semibold)
                         .foregroundColor(AppTheme.ink)
                     Spacer()
                     ScheduleStateBadge(state: item.state, kind: item.stateKind)
                 }
                 Text(item.instructionPreview)
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
                     .lineLimit(3)
                 Text(scheduleTiming(item.cadence, nextFireAt: item.nextFireAt))
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
@@ -235,7 +235,7 @@ struct ScheduleStateBadge: View {
 
     var body: some View {
         Text(scheduleDisplayText(state))
-            .appFont(.caption2, weight: .semibold)
+            .veetType(.meta, weight: .semibold)
             .foregroundColor(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)

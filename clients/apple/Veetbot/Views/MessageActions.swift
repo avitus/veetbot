@@ -38,7 +38,7 @@ struct MessageActionBar: View {
     @State private var copied = false
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: VeetSpace.s4) {
             Button {
                 // Rendered on demand, never in `body`: a transcript redraw stays cheap.
                 SystemClipboard.copy(MarkdownRendition(markdown: markdown, textSize: textSize))
@@ -69,7 +69,7 @@ struct MessageActionBar: View {
             .help("Select any part of the message")
         }
         .buttonStyle(.plain)
-        .appFont(.caption, weight: .medium)
+        .veetType(.meta)
         .foregroundColor(AppTheme.inkFaint)
         .task(id: copied) {
             guard copied else { return }
@@ -103,15 +103,15 @@ struct MessageTextSheet: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Select Text")
-                    .appFont(.headline)
+                    .veetType(.title)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("chat.message.selection.done")
             }
-            .padding()
-            Divider()
+            .padding(VeetSpace.s4)
+            HairlineDivider()
             SelectableMessageText(attributedText: selection.rendition.attributedText)
         }
         .accessibilityElement(children: .contain)

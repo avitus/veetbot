@@ -93,7 +93,7 @@ public struct PersonaEditorView: View {
                     nominations
                     if let message = model.errorMessage {
                         Text(message)
-                            .appFont(.callout)
+                            .veetType(.ui)
                             .foregroundColor(AppTheme.red)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -110,10 +110,10 @@ public struct PersonaEditorView: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: 4) {
             #if os(macOS)
-            Text("Persona").appDisplayFont(.title)
+            Text("Persona").veetType(.display)
             #endif
             Text("How Veetbot sounds, and what it may assume about you.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
         }
     }
@@ -163,7 +163,7 @@ public struct PersonaEditorView: View {
                     + "every request. Entries marked with a seal were "
                     + "affirmed from the agent's memory."
             )
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -180,7 +180,7 @@ public struct PersonaEditorView: View {
                     id: \.offset
                 ) { _, entry in
                     Text(entry.text)
-                        .appFont(.body)
+                        .veetType(.ui)
                         .foregroundColor(AppTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -189,7 +189,7 @@ public struct PersonaEditorView: View {
                         + "drafts above. Save stays disabled until you "
                         + "choose how to resolve the merge."
                 )
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
@@ -215,7 +215,7 @@ public struct PersonaEditorView: View {
                     "Load the current server version before saving "
                         + "these local drafts."
                 )
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 Button("Load server version") {
@@ -251,17 +251,17 @@ private struct PersonaNominationCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Veetbot suggests", systemImage: "sparkles")
-                .appFont(.caption, weight: .semibold)
+                .veetType(.meta, weight: .semibold)
                 .foregroundColor(AppTheme.amberText)
             Text(nomination.statement)
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text(
                 "\(nomination.beliefType) · seen "
                     + "\(nomination.corroborationCount) times"
             )
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
                 Button("Affirm") {

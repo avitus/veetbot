@@ -5,12 +5,12 @@ import Testing
 
 @Suite struct AppearancePreferencesTests {
     @Test
-    func testDefaultsUseSystemSizingAndRoundedTypography() throws {
+    func testDefaultsUseSystemSizingAndTheSystemFace() throws {
         let defaults = try isolatedDefaults()
         let preferences = AppearancePreferences(defaults: defaults)
 
         #expect(preferences.textSize == .system)
-        #expect(preferences.fontStyle == .rounded)
+        #expect(preferences.fontStyle == .system)
     }
 
     @Test

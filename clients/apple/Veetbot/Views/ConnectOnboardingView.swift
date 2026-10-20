@@ -27,7 +27,7 @@ struct ConnectOnboardingView: View {
                     HStack(spacing: 10) {
                         VeetbotBrandMark(size: 22)
                         Text("VEETBOT")
-                            .appFont(.caption, weight: .semibold)
+                            .veetType(.meta, weight: .semibold)
                             .tracking(0.8)
                             .foregroundColor(AppTheme.inkSoft)
                     }
@@ -45,7 +45,7 @@ struct ConnectOnboardingView: View {
             }
             if let step {
                 Text("Step \(step.number) of 3")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkFaint)
                     .padding(.bottom, 20)
                     .accessibilityIdentifier("connect.step")
@@ -58,15 +58,15 @@ struct ConnectOnboardingView: View {
     private var notificationsStep: some View {
         VStack(alignment: .leading, spacing: 0) {
             Label("Connected to \(model.baseURL?.host ?? "your server")", systemImage: "checkmark")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.tealText)
                 .padding(.top, 24)
             Text("Hear about it when something needs you.")
-                .appDisplayFont(.title)
+                .veetType(.display)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 12)
             Text("Veetbot sends a notification when an approval is waiting, a question needs an answer, or a scheduled report is ready. Tapping it opens the conversation it is about.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
@@ -92,10 +92,10 @@ struct ConnectOnboardingView: View {
     private var readyStep: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Ready.")
-                .appDisplayFont(.title)
+                .veetType(.display)
                 .padding(.top, 24)
             Text("Chat opens with your history. Settings holds the connection, models, website access, notifications and appearance.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
@@ -138,7 +138,7 @@ struct ConnectOnboardingView: View {
             Text(key).foregroundColor(AppTheme.inkSoft).frame(width: 110, alignment: .leading)
             Text(value).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
         }
-        .appFont(.callout)
+        .veetType(.ui)
     }
 
     private var deviceName: String {

@@ -288,16 +288,15 @@ final class AppearancePreferences: ObservableObject {
         self.defaults = defaults
         textSize = AppTextSize(rawValue: defaults.string(forKey: Key.textSize) ?? "") ?? .system
         theme = AppThemePreference(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .system
-        // The rounded face stays the default: the system face runs about two
-        // points wider per toolbar label, which folds the iPhone Subscriptions
-        // toolbar into an overflow menu. The Email restyle may revisit this.
+        // System is the default face (design system revision 2); the choice
+        // reaches transcript body text only.
         fontStyle =
-            AppFontStyle(rawValue: defaults.string(forKey: Key.fontStyle) ?? "") ?? .rounded
+            AppFontStyle(rawValue: defaults.string(forKey: Key.fontStyle) ?? "") ?? .system
     }
 }
 
 private struct AppFontStyleKey: EnvironmentKey {
-    static let defaultValue = AppFontStyle.rounded
+    static let defaultValue = AppFontStyle.system
 }
 
 private struct AppTextSizeKey: EnvironmentKey {
@@ -316,138 +315,30 @@ extension EnvironmentValues {
     }
 }
 
+/// The transcript body's point size under a text-size choice, or nil for
+/// System, which follows the platform: the body role's size scaled.
 func appPointSize(for textStyle: Font.TextStyle, textSize: AppTextSize) -> CGFloat? {
     guard let scale = textSize.fontScale else { return nil }
-    return textStyle.appBasePointSize * scale
+    return VeetType.pointSize(.body, on: .current) * scale
 }
 
-private func resolvedAppFont(
-    _ textStyle: Font.TextStyle,
-    textSize: AppTextSize,
-    design: Font.Design,
-    weight: Font.Weight? = nil
-) -> Font {
-    var font: Font
-    if let pointSize = appPointSize(for: textStyle, textSize: textSize) {
-        font = .system(size: pointSize, design: design)
-    } else {
-        font = .system(textStyle, design: design)
-    }
-    if let weight {
-        font = font.weight(weight)
-    }
-    return font
-}
-
-extension Font.TextStyle {
-    fileprivate var appBasePointSize: CGFloat {
-        #if os(macOS)
-        switch self {
-        case .largeTitle: return 26
-        case .title: return 22
-        case .title2: return 17
-        case .title3: return 15
-        case .headline, .body: return 13
-        case .callout: return 12
-        case .subheadline: return 11
-        case .footnote, .caption, .caption2: return 10
-        @unknown default: return 13
-        }
-        #else
-        switch self {
-        case .largeTitle: return 34
-        case .title: return 28
-        case .title2: return 22
-        case .title3: return 20
-        case .headline, .body: return 17
-        case .callout: return 16
-        case .subheadline: return 15
-        case .footnote: return 13
-        case .caption: return 12
-        case .caption2: return 11
-        @unknown default: return 17
-        }
-        #endif
-    }
-}
-
+/// Hands the owner's face and size to the transcript (`.transcriptBody()`)
+/// and sets everything else in the system face at the ui role: chrome,
+/// sidebars, tables and controls never follow the preference.
 private struct AppTypographyModifier: ViewModifier {
     @ObservedObject var preferences: AppearancePreferences
 
     func body(content: Content) -> some View {
         content
+            .veetType(.ui)
             .environment(\.appFontStyle, preferences.fontStyle)
             .environment(\.appTextSize, preferences.textSize)
-            .font(
-                resolvedAppFont(
-                    .body,
-                    textSize: preferences.textSize,
-                    design: preferences.fontStyle.design
-                )
-            )
-    }
-}
-
-private struct AppFontModifier: ViewModifier {
-    @Environment(\.appFontStyle) private var fontStyle
-    @Environment(\.appTextSize) private var textSize
-    let textStyle: Font.TextStyle
-    let weight: Font.Weight?
-
-    func body(content: Content) -> some View {
-        content.font(
-            resolvedAppFont(
-                textStyle,
-                textSize: textSize,
-                design: fontStyle.design,
-                weight: weight
-            )
-        )
-    }
-}
-
-/// Titles: the serif display face at a medium weight, scaled with the text
-/// size preference but never with the body font style, so a title reads the
-/// same whichever body face the owner chose.
-private struct AppDisplayFontModifier: ViewModifier {
-    @Environment(\.appTextSize) private var textSize
-    let textStyle: Font.TextStyle
-    let weight: Font.Weight
-
-    func body(content: Content) -> some View {
-        content.font(
-            resolvedAppFont(textStyle, textSize: textSize, design: .serif, weight: weight)
-        )
-    }
-}
-
-private struct AppCodeFontModifier: ViewModifier {
-    @Environment(\.appTextSize) private var textSize
-    let textStyle: Font.TextStyle
-
-    func body(content: Content) -> some View {
-        content.font(
-            resolvedAppFont(textStyle, textSize: textSize, design: .monospaced)
-        )
     }
 }
 
 extension View {
     func appTypography(_ preferences: AppearancePreferences) -> some View {
         modifier(AppTypographyModifier(preferences: preferences))
-    }
-
-    func appFont(_ style: Font.TextStyle, weight: Font.Weight? = nil) -> some View {
-        modifier(AppFontModifier(textStyle: style, weight: weight))
-    }
-
-    func appCodeFont(_ style: Font.TextStyle = .caption) -> some View {
-        modifier(AppCodeFontModifier(textStyle: style))
-    }
-
-    /// A display title in the serif face.
-    func appDisplayFont(_ style: Font.TextStyle = .title2, weight: Font.Weight = .medium) -> some View {
-        modifier(AppDisplayFontModifier(textStyle: style, weight: weight))
     }
 
     /// Frames sheet content so a Mac sheet opens at `idealWidth`: macOS
@@ -495,7 +386,7 @@ struct VeetbotBrandMark: View {
             Image(systemName: "chevron.right")
                 .foregroundColor(AppTheme.amber)
         }
-        .font(.system(size: size, weight: .bold, design: .rounded))
+        .font(VeetType.brandMark(size: size))
         .accessibilityHidden(true)
     }
 }

@@ -26,6 +26,8 @@
 		100000000000000000000011 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* ActivityViews.swift */; };
 		1000000000000000000000F3 /* A2Controls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F3 /* A2Controls.swift */; };
 		1000000000000000000000F6 /* A2Toast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F6 /* A2Toast.swift */; };
+		1000000000000000000001A1 /* SidebarRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000001A1 /* SidebarRow.swift */; };
+		1000000000000000000001A0 /* VeetType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000001A0 /* VeetType.swift */; };
 		1000000000000000000000F9 /* ConnectOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F9 /* ConnectOnboardingView.swift */; };
 		1000000000000000000000F8 /* NotificationDevicesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F8 /* NotificationDevicesSection.swift */; };
 		100000000000000000000012 /* ArtifactViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* ArtifactViewerView.swift */; };
@@ -129,6 +131,8 @@
 		200000000000000000000011 /* ActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViews.swift; sourceTree = "<group>"; };
 		2000000000000000000000F3 /* A2Controls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2Controls.swift; sourceTree = "<group>"; };
 		2000000000000000000000F6 /* A2Toast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2Toast.swift; sourceTree = "<group>"; };
+		2000000000000000000001A1 /* SidebarRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarRow.swift; sourceTree = "<group>"; };
+		2000000000000000000001A0 /* VeetType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeetType.swift; sourceTree = "<group>"; };
 		2000000000000000000000F9 /* ConnectOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectOnboardingView.swift; sourceTree = "<group>"; };
 		2000000000000000000000F8 /* NotificationDevicesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDevicesSection.swift; sourceTree = "<group>"; };
 		200000000000000000000012 /* ArtifactViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactViewerView.swift; sourceTree = "<group>"; };
@@ -354,6 +358,8 @@
 				200000000000000000000011 /* ActivityViews.swift */,
 				2000000000000000000000F3 /* A2Controls.swift */,
 				2000000000000000000000F6 /* A2Toast.swift */,
+				2000000000000000000001A1 /* SidebarRow.swift */,
+				2000000000000000000001A0 /* VeetType.swift */,
 				2000000000000000000000F9 /* ConnectOnboardingView.swift */,
 				2000000000000000000000F8 /* NotificationDevicesSection.swift */,
 				200000000000000000000012 /* ArtifactViewerView.swift */,
@@ -557,6 +563,8 @@
 				100000000000000000000011 /* ActivityViews.swift in Sources */,
 				1000000000000000000000F3 /* A2Controls.swift in Sources */,
 				1000000000000000000000F6 /* A2Toast.swift in Sources */,
+				1000000000000000000001A1 /* SidebarRow.swift in Sources */,
+				1000000000000000000001A0 /* VeetType.swift in Sources */,
 				1000000000000000000000F9 /* ConnectOnboardingView.swift in Sources */,
 				1000000000000000000000F8 /* NotificationDevicesSection.swift in Sources */,
 				100000000000000000000012 /* ArtifactViewerView.swift in Sources */,

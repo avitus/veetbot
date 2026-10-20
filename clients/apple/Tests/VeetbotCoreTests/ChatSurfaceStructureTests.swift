@@ -34,7 +34,7 @@ import Testing
         #expect(source.contains("Material"))
         #expect(source.contains("AppTheme.tealWash"))
         #expect(source.contains("AssistantMark("))
-        #expect(source.contains("appDisplayFont("))
+        #expect(source.contains(".veetType(.display)"))
     }
 
     @Test
@@ -45,7 +45,7 @@ import Testing
         #expect(source.contains("struct ToolLedgerRow"))
         // A bundle's ledger names settled outcomes only; a pending approval is the dock's.
         #expect(source.contains("$0.id == activity.approvalID && !$0.status.isPending"))
-        #expect(source.contains(".appCodeFont("))
+        #expect(source.contains(".veetMono("))
         #expect(source.contains("\"tool.bundle.\\(bundle.id)\""))
         #expect(source.contains(".accessibilityIdentifier(summaryIdentifier)"))
         #expect(source.contains(".accessibilityIdentifier(\"tool.detail.\\(activity.id)\")"))
@@ -66,7 +66,7 @@ import Testing
         #expect(source.contains("AppTheme.paperDeep"))
         #expect(source.contains(".accessibilityIdentifier(\"sidebar.new-conversation\")"))
         let folderViews = try self.source(at: "Veetbot/Views/ConversationFolderViews.swift")
-        #expect(folderViews.contains(".accessibilityIdentifier(\"sidebar.recent-chats\")"))
+        #expect(folderViews.contains("toggleIdentifier: \"sidebar.recent-chats\""))
         #expect(folderViews.contains("AppTheme.inkSoft"))
     }
 

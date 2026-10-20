@@ -191,16 +191,16 @@ public struct ConnectionSettingsView: View {
     private var groupSidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Settings").appDisplayFont(.title3)
+                Text("Settings").veetType(.title)
                 Text("This \(deviceName) and your Veetbot server.")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 12)
             Text("Groups")
-                .appFont(.caption, weight: .semibold)
+                .veetType(.meta, weight: .semibold)
                 .foregroundColor(AppTheme.inkSoft)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
@@ -219,7 +219,7 @@ public struct ConnectionSettingsView: View {
                                 .accessibilityLabel("Needs sign-in")
                         }
                     }
-                    .appFont(.body)
+                    .veetType(.ui)
                     .padding(.horizontal, 8)
                     .frame(minHeight: A2Metrics.rowHeight)
                     .background(
@@ -263,11 +263,11 @@ public struct ConnectionSettingsView: View {
                                         .accessibilityLabel("Needs sign-in")
                                 }
                                 Image(systemName: "chevron.right")
-                                    .appFont(.caption, weight: .semibold)
+                                    .veetType(.meta, weight: .semibold)
                                     .foregroundColor(AppTheme.inkFaint)
                                     .accessibilityHidden(true)
                             }
-                            .appFont(.body)
+                            .veetType(.ui)
                             .padding(.horizontal, 14)
                             .frame(minHeight: A2Metrics.rowHeight)
                             .contentShape(Rectangle())
@@ -279,7 +279,7 @@ public struct ConnectionSettingsView: View {
                 .a2Card()
                 .padding(.horizontal, 16)
                 Text("Models and website access are saved on the server; everything else stays on this \(deviceName).")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .padding(.horizontal, 20)
                     .fixedSize(horizontal: false, vertical: true)
@@ -318,13 +318,13 @@ public struct ConnectionSettingsView: View {
         DisclosureGroup("Task approval websites") {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Saved on the server and shared across your devices. These websites can offer Allow All Actions for this Task: up to 30 minutes and 200 actions. Sensitive actions still need separate approval.")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                 if let policy = model.taskScopePolicy {
                     if policy.scopes.isEmpty { Text("No websites added.").foregroundColor(AppTheme.inkSoft) }
                     ForEach(policy.scopes) { scope in
                         HStack {
-                            Text(scope.id).appCodeFont(.callout).foregroundColor(AppTheme.ink).textSelection(.enabled)
+                            Text(scope.id).veetMono().foregroundColor(AppTheme.ink).textSelection(.enabled)
                             Spacer()
                             Button("Remove", role: .destructive) {
                                 Task { _ = await model.removeTaskScope(scope) }
@@ -335,7 +335,7 @@ public struct ConnectionSettingsView: View {
                         }
                     }
                     Text("Removing a website ends its active task permissions.")
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     TextField("https://www.duolingo.com/lesson", text: $taskScopeURL)
                         .textFieldStyle(.plain)
                         .a2Field(radius: 12)
@@ -359,7 +359,7 @@ public struct ConnectionSettingsView: View {
                         }
                 }
                 if let error = model.taskScopeError {
-                    Text(error).foregroundColor(AppTheme.red).appFont(.caption)
+                    Text(error).foregroundColor(AppTheme.red).veetType(.meta)
                         .accessibilityIdentifier("task-scopes.error")
                 }
                 Button("Refresh websites") { Task { await model.refreshTaskScopes() } }
@@ -393,26 +393,26 @@ public struct ConnectionSettingsView: View {
             HStack(spacing: 10) {
                 VeetbotBrandMark(size: 22)
                 Text("VEETBOT")
-                    .appFont(.caption, weight: .semibold)
+                    .veetType(.meta, weight: .semibold)
                     .tracking(0.8)
                     .foregroundColor(AppTheme.inkSoft)
                 Spacer(minLength: 12)
             }
             if embedded {
                 Text("Connect this \(deviceName) to your Veetbot.")
-                    .appDisplayFont(.title)
+                    .veetType(.display)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(
                     "Your assistant runs on a server you control. Enter its address and the access token it gave you. The token is kept in this \(deviceName)'s Keychain and sent only to that server, to sign you in."
                 )
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Settings")
-                    .appDisplayFont(.title2)
+                    .veetType(.display)
                 Text("This \(deviceName) and your Veetbot server.")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
@@ -441,7 +441,7 @@ public struct ConnectionSettingsView: View {
                     ) {
                         TextField("https://agent.example.com", text: $baseURL)
                             .textFieldStyle(.plain)
-                            .appCodeFont(.body)
+                            .veetMono()
                             .a2Field(radius: 12)
                             #if os(iOS)
                         .textContentType(.URL)
@@ -458,7 +458,7 @@ public struct ConnectionSettingsView: View {
                             Group {
                                 if showsToken {
                                     TextField("Static bearer token", text: $token)
-                                        .appCodeFont(.body)
+                                        .veetMono()
                                         .autocorrectionDisabled()
                                         #if os(iOS)
                                         .textInputAutocapitalization(.never)
@@ -484,7 +484,7 @@ public struct ConnectionSettingsView: View {
                             "The server rejected the saved credential. Enter a valid token.",
                             systemImage: "exclamationmark.triangle.fill"
                         )
-                        .appFont(.callout, weight: .medium)
+                        .veetType(.ui, weight: .medium)
                         .foregroundColor(AppTheme.red)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -530,7 +530,7 @@ public struct ConnectionSettingsView: View {
                         Text(
                             "Veetbot reuses your saved browser session. Sign in again when the website requires it; Veetbot does not save your password for automatic login."
                         )
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                         Button {
@@ -553,12 +553,12 @@ public struct ConnectionSettingsView: View {
                         if let authenticationLaunchURL = model.websiteAuthenticationLaunchURL {
                             VStack(alignment: .leading, spacing: 10) {
                                 Label("Secure login ready", systemImage: "lock.shield.fill")
-                                    .appFont(.headline)
+                                    .veetType(.ui, weight: .semibold)
                                     .foregroundColor(AppTheme.tealText)
                                 Text(
                                     "Continue in your web browser, then use the remote-browser image to sign in. Keep that page open—reloading or copying its one-time link requires starting over."
                                 )
-                                .appFont(.caption)
+                                .veetType(.meta)
                                 .foregroundColor(AppTheme.inkSoft)
                                 .fixedSize(horizontal: false, vertical: true)
                                 Button {
@@ -582,7 +582,7 @@ public struct ConnectionSettingsView: View {
                                     authentication.status.displayName,
                                     systemImage: authentication.status.systemImage
                                 )
-                                .appFont(.caption, weight: .semibold)
+                                .veetType(.meta, weight: .semibold)
                                 .foregroundColor(AppTheme.inkSoft)
                                 Spacer()
                                 if !authentication.status.isTerminal {
@@ -604,7 +604,7 @@ public struct ConnectionSettingsView: View {
                                 Text(
                                     "Finish signing in on the secure browser page, return here, and check the status. Start over if the page was closed, reloaded, or expired."
                                 )
-                                .appFont(.caption)
+                                .veetType(.meta)
                                 .foregroundColor(AppTheme.inkSoft)
                                 .fixedSize(horizontal: false, vertical: true)
                             }
@@ -613,7 +613,7 @@ public struct ConnectionSettingsView: View {
                         HairlineDivider()
                         if model.browserProfiles.isEmpty {
                             Text("No website logins have been added yet.")
-                                .appFont(.caption)
+                                .veetType(.meta)
                                 .foregroundColor(AppTheme.inkSoft)
                         } else {
                             ForEach(model.browserProfiles) { profile in
@@ -627,7 +627,7 @@ public struct ConnectionSettingsView: View {
                                 Image(systemName: "checkmark.shield.fill")
                                     .foregroundColor(AppTheme.tealText)
                                 Text("Task permissions")
-                                    .appFont(.body, weight: .semibold)
+                                    .veetType(.ui, weight: .semibold)
                                     .foregroundColor(AppTheme.ink)
                                 Spacer(minLength: 8)
                                 Menu {
@@ -652,7 +652,7 @@ public struct ConnectionSettingsView: View {
                     }
                 } else {
                     Text("Connect this app to Veetbot before adding a website login.")
-                        .appFont(.body)
+                        .veetType(.ui)
                         .foregroundColor(AppTheme.inkSoft)
                 }
             }
@@ -671,7 +671,7 @@ public struct ConnectionSettingsView: View {
                     NotificationDevicesSection(model: notificationSettings, chat: model)
                 } else {
                     Text("Connect this app to Veetbot before managing notifications.")
-                        .appFont(.body)
+                        .veetType(.ui)
                         .foregroundColor(AppTheme.inkSoft)
                 }
             }
@@ -727,13 +727,13 @@ public struct ConnectionSettingsView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Preview")
-                            .appFont(.caption, weight: .semibold)
+                            .veetType(.meta, weight: .semibold)
                             .foregroundColor(AppTheme.inkSoft)
                         Text("The quick brown fox meets a helpful bot.")
-                            .appFont(.body)
+                            .veetType(.ui)
                             .foregroundColor(AppTheme.ink)
                         Text("Clear, comfortable, and ready to work.")
-                            .appFont(.caption)
+                            .veetType(.meta)
                             .foregroundColor(AppTheme.inkSoft)
                     }
                     .padding(14)
@@ -835,7 +835,7 @@ public struct ConnectionSettingsView: View {
     private var connectionStatusRows: some View {
         VStack(alignment: .leading, spacing: 0) {
             statusRow("Server") {
-                Text(model.baseURL?.absoluteString ?? "").appCodeFont(.callout).textSelection(.enabled)
+                Text(model.baseURL?.absoluteString ?? "").veetMono().textSelection(.enabled)
             }
             HairlineDivider()
             statusRow("Token") {
@@ -862,7 +862,7 @@ public struct ConnectionSettingsView: View {
             Text(key).foregroundColor(AppTheme.inkSoft).frame(width: 72, alignment: .leading)
             value().frame(maxWidth: .infinity, alignment: .leading)
         }
-        .appFont(.callout)
+        .veetType(.ui)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
@@ -873,7 +873,7 @@ public struct ConnectionSettingsView: View {
         if confirmingClearCache {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Clear the local cache? Chats stay on the server and reload.")
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
@@ -905,12 +905,12 @@ public struct ConnectionSettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
-                .appFont(.subheadline, weight: .semibold)
+                .veetType(.meta, weight: .semibold)
                 .foregroundColor(AppTheme.inkSoft)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(help)
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -923,10 +923,10 @@ public struct ConnectionSettingsView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(profile.allowedOrigins.joined(separator: ", "))
-                    .appCodeFont(.callout)
+                    .veetMono()
                     .foregroundColor(AppTheme.ink)
                 Text(profile.status.displayName)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(profile.status == .needsUser ? AppTheme.amberText : AppTheme.inkSoft)
             }
             Spacer(minLength: 8)
@@ -941,7 +941,7 @@ public struct ConnectionSettingsView: View {
             if profile.status == .ready {
                 if model.selectedBrowserProfileID == profile.id {
                     Label("Used for new chats", systemImage: "checkmark.circle.fill")
-                        .appFont(.caption, weight: .semibold)
+                        .veetType(.meta, weight: .semibold)
                         .foregroundColor(AppTheme.tealText)
                 } else {
                     Button("Use for new chats") {
@@ -1168,7 +1168,7 @@ private struct ModelSettingsCard: View {
 
                     if let status = modelSettings.statusMessage {
                         Text(status)
-                            .appFont(.caption)
+                            .veetType(.meta)
                             .foregroundColor(AppTheme.inkSoft)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("settings.models.status")
@@ -1176,7 +1176,7 @@ private struct ModelSettingsCard: View {
                 }
             } else {
                 Text("Connect this app to Veetbot before choosing models.")
-                    .appFont(.body)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
@@ -1224,7 +1224,7 @@ private struct ModelSettingsCard: View {
             A2SectionHeading(title: title)
             content()
             Text(footnote)
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1236,7 +1236,7 @@ private struct ModelSettingsCard: View {
     ) -> some View {
         HStack(spacing: 12) {
             Text(label)
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
                 .frame(width: 96, alignment: .leading)
             content()
@@ -1274,10 +1274,10 @@ private struct SettingsCard<Content: View>: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .appDisplayFont(.title3)
+                        .veetType(.title)
                         .foregroundColor(AppTheme.ink)
                     Text(summary)
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1303,10 +1303,10 @@ private struct SettingsInfoRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .appFont(.headline)
+                    .veetType(.ui, weight: .semibold)
                     .foregroundColor(AppTheme.ink)
                 Text(detail)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }

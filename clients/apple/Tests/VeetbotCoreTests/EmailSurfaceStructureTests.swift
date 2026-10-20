@@ -29,7 +29,7 @@ import Testing
     func testTheThreadDetailOpensWithTheSerifSubjectAndVeetbotsGist() throws {
         let source = try source(at: "Veetbot/Views/EmailModeView.swift")
 
-        #expect(source.contains(".appDisplayFont(.title2)"))
+        #expect(source.contains(".veetType(.display)"))
         #expect(source.contains("struct EmailGistBlock"))
         #expect(source.contains("Text(\"Veetbot\")"))
         #expect(source.contains("Teach Veetbot"))

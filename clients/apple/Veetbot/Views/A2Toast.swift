@@ -53,12 +53,12 @@ private struct ToastView: View {
                 #endif
                 Button(undo.label) { Task { await toasts.performUndo() } }
                     .buttonStyle(.plain)
-                    .appFont(toastFont, weight: .semibold)
+                    .veetType(toastFont, weight: .semibold)
                     .foregroundColor(AppTheme.toastAction)
                     .accessibilityIdentifier("toast.undo")
             }
         }
-        .appFont(toastFont)
+        .veetType(toastFont)
         .foregroundColor(AppTheme.toastText)
         .padding(.horizontal, touchLayout ? 18 : 16)
         .padding(.vertical, touchLayout ? 12 : 8)
@@ -88,13 +88,8 @@ private struct ToastView: View {
         #endif
     }
 
-    private var toastFont: Font.TextStyle {
-        #if os(macOS)
-        .callout
-        #else
-        .subheadline
-        #endif
-    }
+    /// The toast reads in the ui role (design system revision 2).
+    private var toastFont: VeetType.Role { .ui }
 
     private func announce(_ toast: ToastCenter.Toast) {
         var announcement = AttributedString(toast.text)

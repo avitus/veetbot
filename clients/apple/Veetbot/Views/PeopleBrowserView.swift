@@ -102,9 +102,9 @@ public struct PeopleBrowserView: View {
                             ForEach(model.suggestions) { suggestion in
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("\(suggestion.source.displayName) and \(suggestion.target.displayName)")
-                                        .appFont(.body, weight: .semibold)
+                                        .veetType(.ui, weight: .semibold)
                                         .foregroundColor(AppTheme.ink)
-                                    Text(suggestion.explanation).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                                    Text(suggestion.explanation).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                                     HStack(spacing: 8) {
                                         Button("Merge") { Task { await model.resolveSuggestion(suggestion, decision: "merge") } }
                                             .primaryCapsule()
@@ -123,7 +123,7 @@ public struct PeopleBrowserView: View {
                             }
                         } header: {
                             Text("Two entries that may be one person. Merging keeps both addresses and all history under one name; Veetbot never merges people on a name alone.")
-                                .appFont(.caption)
+                                .veetType(.meta)
                                 .foregroundColor(AppTheme.inkSoft)
                                 .textCase(nil)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -233,7 +233,7 @@ public struct PeopleBrowserView: View {
 
     private func filterLabel(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).appFont(.caption).foregroundColor(AppTheme.inkSoft).fixedSize(horizontal: false, vertical: true)
+            Text(title).veetType(.meta).foregroundColor(AppTheme.inkSoft).fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .firstTextBaseline) {
                 Text(value).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
@@ -346,7 +346,7 @@ struct PeopleImportHistoryView: View {
                         Button { Task { await model.restore(saved.id) } } label: {
                             VStack(alignment: .leading) {
                                 Text(memoryDisplayText(saved.state))
-                                Text("\(saved.recordsProcessed) processed · $\(saved.spentUSD)").appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                                Text("\(saved.recordsProcessed) processed · $\(saved.spentUSD)").veetType(.meta).foregroundColor(AppTheme.inkSoft)
                             }
                         }.disabled(model.canRetry)
                     }
@@ -376,7 +376,7 @@ struct PeopleImportHistoryView: View {
                 Section("Limits") {
                     DatePicker("From", selection: $since, displayedComponents: .date)
                     DatePicker("Until", selection: $until, displayedComponents: .date)
-                    Text("The end date is excluded.").font(.caption).foregroundColor(.secondary)
+                    Text("The end date is excluded.").veetType(.meta).foregroundColor(.secondary)
                     Stepper("Up to \(maximum) records", value: $maximum, in: 100...10000, step: 100)
                     TextField("Maximum cost in USD", text: $budget)
                     Button("Preview import") { Task { await model.preview(sessionIDs: selected, accountIDs: selectedAccounts, fetchMailbox: fetchMailbox, since: since, until: until, maxRecords: maximum, maxCost: budget) } }.disabled(selected.isEmpty && selectedAccounts.isEmpty)
@@ -457,9 +457,9 @@ private struct PeopleDirectoryRow: View {
         HStack(spacing: 10) {
             PeopleMonogram(name: person.displayName, size: PeopleMetrics.rowAvatar)
             VStack(alignment: .leading, spacing: 2) {
-                Text(person.displayName).appFont(.body, weight: .semibold).foregroundColor(AppTheme.ink)
+                Text(person.displayName).veetType(.ui, weight: .semibold).foregroundColor(AppTheme.ink)
                 if person.state == "merged" {
-                    Text("Combined identity").appFont(.caption).foregroundColor(PeopleSurface.muted)
+                    Text("Combined identity").veetType(.meta).foregroundColor(PeopleSurface.muted)
                 }
             }
             Spacer(minLength: 0)
@@ -522,7 +522,7 @@ private struct PeopleFilter<Option: Identifiable & Equatable>: View {
             .accessibilityValue(label(selection))
             .popover(isPresented: $isPresented) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(title).appFont(.headline).accessibilityAddTraits(.isHeader)
+                    Text(title).veetType(.ui, weight: .semibold).accessibilityAddTraits(.isHeader)
                     ForEach(options) { option in
                         Button {
                             select(option)

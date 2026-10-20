@@ -97,7 +97,7 @@ struct PeopleIdentityRepairView: View {
                         ForEach(model.identityEvidence) { row in
                             VStack(alignment: .leading) {
                                 evidenceToggle(row.id, label: row.label)
-                                Text(memoryDisplayText(row.kind) + (row.unresolved ? " · Unresolved" : "")).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                                Text(memoryDisplayText(row.kind) + (row.unresolved ? " · Unresolved" : "")).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                                 ForEach(row.supportIDs, id: \.self) { reference in
                                     Button("View source") { Task { if let source = await model.evidence(reference) { sourceSelection = PeopleConversationSelection(source: source) } } }
                                 }
@@ -197,7 +197,7 @@ struct PeopleConversationView: View {
         NavigationView {
             VStack(spacing: 0) {
                 if let source = selection.source {
-                    Text("\(memoryDisplayText(source.sourceKind)) evidence · \(source.evidenceAt.formatted(date: .abbreviated, time: .shortened))").appFont(.caption).foregroundColor(AppTheme.inkSoft).padding()
+                    Text("\(memoryDisplayText(source.sourceKind)) evidence · \(source.evidenceAt.formatted(date: .abbreviated, time: .shortened))").veetType(.meta).foregroundColor(AppTheme.inkSoft).padding()
                 }
                 if let source = selection.source { PeopleSourceReader(source: source) }
                 else {
@@ -251,7 +251,7 @@ struct PeopleAliasEditor: View {
                 }
                 TextField("Name or contact", text: $value)
                 TextField("Context", text: $context)
-                Text("This confirms that the alias belongs to this person in the stated context. Phone numbers need an international prefix. End an assignment when an address or number changes hands.").appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                Text("This confirms that the alias belongs to this person in the stated context. Phone numbers need an international prefix. End an assignment when an address or number changes hands.").veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 if let error = model.errorMessage { Text(error).foregroundColor(AppTheme.red) }
                 if model.canRetrySave { Button("Retry save") { Task { await model.retrySave(); if model.errorMessage == nil { dismiss() } } } }
             }
@@ -279,7 +279,7 @@ private struct PeopleSourceReader: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if model.isLoading { ProgressView("Loading source…") }
-                if let heading = model.heading { Text(heading).appDisplayFont(.title3).foregroundColor(AppTheme.ink) }
+                if let heading = model.heading { Text(heading).veetType(.title).foregroundColor(AppTheme.ink) }
                 if model.partial { Text("Only part of the original message is retained.").foregroundColor(AppTheme.inkSoft) }
                 if let text = model.text {
                     A2Quote {

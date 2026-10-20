@@ -95,10 +95,10 @@ public struct MemoryBrowserView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             VStack(alignment: .leading, spacing: 4) {
-                Text(sidebarItem.title).appDisplayFont(.title2)
+                Text(sidebarItem.title).veetType(.display)
                 if sidebarItem == .memories(.review) {
                     Text("Formed without an explicit statement from you, and not yet confirmed.")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -172,9 +172,9 @@ public struct MemoryBrowserView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Memory").appDisplayFont(.title2)
+                    Text("Memory").veetType(.display)
                     Text("What Veetbot has learned and may rely on.")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -191,7 +191,7 @@ public struct MemoryBrowserView: View {
                 groupHeading("Maintenance")
                 groupRow(.synthesis, systemImage: "arrow.triangle.merge")
                 Text("Merges and summaries Veetbot made from overlapping memories, to review or undo.")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 8)
@@ -212,7 +212,7 @@ public struct MemoryBrowserView: View {
 
     private func groupHeading(_ title: String) -> some View {
         Text(title)
-            .appFont(.caption, weight: .semibold)
+            .veetType(.meta, weight: .semibold)
             .foregroundColor(AppTheme.inkSoft)
             .padding(.horizontal, 8)
             .padding(.top, 12)
@@ -245,7 +245,7 @@ public struct MemoryBrowserView: View {
                 Text(group.title).foregroundColor(AppTheme.ink)
                 Spacer(minLength: 4)
             }
-            .appFont(.body)
+            .veetType(.ui)
             .padding(.horizontal, 8)
             .frame(minHeight: A2Metrics.rowHeight)
             .background(
@@ -282,7 +282,7 @@ public struct MemoryBrowserView: View {
             PeoplePlaceholder()
         } else if collection == "memories" {
             Text("Select a memory to see where it came from.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .background(AppTheme.paper)
@@ -355,7 +355,7 @@ public struct MemoryBrowserView: View {
     private func loadMoreFailureFooter(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(message, systemImage: "exclamationmark.triangle")
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
             Button("Retry") {
                 Task { await model.retry() }
@@ -466,21 +466,21 @@ struct MemoryRow: View {
                 A2KindLabel(text: memoryDisplayText(memory.beliefType))
                 if memory.flaggedForReview {
                     Label("Needs review", systemImage: "flag.fill")
-                        .appFont(.caption2, weight: .semibold)
+                        .veetType(.meta, weight: .semibold)
                         .foregroundColor(AppTheme.amberText)
                 }
                 Spacer(minLength: 0)
                 Text(memory.updatedAt.formatted(date: .abbreviated, time: .omitted))
-                    .appFont(.caption2)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkFaint)
             }
             Text(memory.statement)
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .lineLimit(2)
             HStack(spacing: 8) {
                 Text("From \(memory.displaySubject)")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .lineLimit(1)
                 MemorySensitivityBadge(sensitivity: memory.sensitivity, kind: memory.sensitivityKind)
@@ -489,7 +489,7 @@ struct MemoryRow: View {
                 }
                 if !memory.conflictsWith.isEmpty {
                     Label("Conflicts", systemImage: "exclamationmark.triangle.fill")
-                        .appFont(.caption2, weight: .semibold)
+                        .veetType(.meta, weight: .semibold)
                         .foregroundColor(AppTheme.red)
                 }
             }
@@ -504,7 +504,7 @@ struct MemoryStatusTag: View {
 
     var body: some View {
         Text(memoryDisplayText(status))
-            .appFont(.caption2, weight: .semibold)
+            .veetType(.meta, weight: .semibold)
             .foregroundColor(AppTheme.inkSoft)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -609,7 +609,7 @@ struct MemorySensitivityBadge: View {
 
     var body: some View {
         Label(memoryDisplayText(sensitivity), systemImage: symbol)
-            .appFont(.caption2, weight: .semibold)
+            .veetType(.meta, weight: .semibold)
             .foregroundColor(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)

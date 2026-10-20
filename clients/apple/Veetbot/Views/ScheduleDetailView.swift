@@ -60,14 +60,14 @@ public struct ScheduleDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             #if os(macOS)
             Text(summary.title)
-                .appDisplayFont(.title)
+                .veetType(.display)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             #endif
             HStack(spacing: 10) {
                 ScheduleStateBadge(state: record.schedule.state, kind: record.schedule.stateKind)
                 Text(scheduleTiming(record.revision.cadence, nextFireAt: record.schedule.nextFireAt))
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
@@ -77,7 +77,7 @@ public struct ScheduleDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             A2SectionHeading(title: "Instruction")
             Text(record.revision.instruction)
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -144,7 +144,7 @@ public struct ScheduleDetailView: View {
             if let profiles = model.websiteAccessProfiles {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("Signed-in site")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                     Spacer(minLength: 0)
                     Picker(
@@ -173,7 +173,7 @@ public struct ScheduleDetailView: View {
                 }
             } else if let message = model.websiteAccessProfilesError {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(message).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     Spacer()
                     Button("Retry") {
                         Task { await model.loadWebsiteAccessProfiles() }
@@ -188,14 +188,14 @@ public struct ScheduleDetailView: View {
             }
             if let message = model.websiteAccessError(for: scheduleID) {
                 Text(message)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.red)
                     .accessibilityIdentifier("schedule.websiteAccess.error")
             }
             Text(
                 "Scheduled runs can read signed-in pages on the chosen site. Posting or scrolling still asks you first."
             )
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             .fixedSize(horizontal: false, vertical: true)
         }

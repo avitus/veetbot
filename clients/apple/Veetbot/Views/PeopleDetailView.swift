@@ -215,18 +215,18 @@ private struct PeopleProfile: View {
                 renameField(person)
             } else {
                 Text(person.displayName)
-                    .appDisplayFont(.title)
+                    .veetType(.display)
                     .foregroundColor(AppTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .accessibilityAddTraits(.isHeader)
             }
             if let summary = profile.relationshipSummary {
-                Text(summary).appFont(.callout).foregroundColor(PeopleSurface.muted)
+                Text(summary).veetType(.ui).foregroundColor(PeopleSurface.muted)
             }
             if let contact = profile.primaryContact {
                 Label(contact.value, systemImage: contact.symbolName)
-                    .appFont(PeopleMetrics.meta)
+                    .veetType(PeopleMetrics.meta)
                     .foregroundColor(PeopleSurface.muted)
                     // Selectable text detects the address as a link; keep it in the palette.
                     .tint(PeopleSurface.accent)
@@ -256,7 +256,7 @@ private struct PeopleProfile: View {
         return VStack(alignment: .leading, spacing: 8) {
             TextField("Name", text: $name)
                 .textFieldStyle(.plain)
-                .appFont(.title3)
+                .veetType(.title)
                 .a2Field()
                 .focused($nameFocused)
                 .onSubmit { if !unchanged && !locked { Task { await saveName(trimmed) } } }
@@ -330,7 +330,7 @@ private struct PeopleProfile: View {
             rowSymbol(alias.symbolName, tint: ended ? PeopleSurface.muted : PeopleSurface.accent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(alias.value)
-                    .appFont(.body)
+                    .veetType(.ui)
                     .foregroundColor(ended ? PeopleSurface.muted : AppTheme.ink)
                     .tint(PeopleSurface.accent)
                     .textSelection(.enabled)
@@ -360,7 +360,7 @@ private struct PeopleProfile: View {
                         rowSymbol(relationship.symbolName)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(relationship.phrase(in: profile))
-                                .appFont(.body)
+                                .veetType(.ui)
                                 .foregroundColor(relationship.validTo == nil ? AppTheme.ink : PeopleSurface.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                             if !relationship.qualifier.isEmpty { PeopleMeta(relationship.qualifier) }
@@ -386,7 +386,7 @@ private struct PeopleProfile: View {
             PeopleRow {
                 if model.history.isEmpty {
                     Text("No recorded interactions. Earlier history may not have been imported.")
-                        .appFont(.body)
+                        .veetType(.ui)
                         .foregroundColor(AppTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
@@ -394,7 +394,7 @@ private struct PeopleProfile: View {
                         ForEach(Array(model.history.enumerated()), id: \.element.id) { index, interaction in
                             PeopleTimelineRow(systemImage: interaction.symbolName, symbolLabel: interaction.channelDescription,
                                               isLast: index == model.history.count - 1) {
-                                Text(interaction.summary).appFont(.body).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                                Text(interaction.summary).veetType(.ui).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                                 PeopleMeta(interaction.dateLabel)
                                 // Observed mail and messages already say how they arrived.
                                 if interaction.direction == "reported" || interaction.attribution != "observed" {
@@ -431,7 +431,7 @@ private struct PeopleProfile: View {
                         rowSymbol(commitment.state == "uncertain" ? "questionmark.circle" : "circle",
                                   tint: commitment.state == "uncertain" ? PeopleSurface.attention : PeopleSurface.accent)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(commitment.description).appFont(.body).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                            Text(commitment.description).veetType(.ui).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                             PeopleMeta(commitment.parties(in: profile))
                             if let due = commitment.dueLabel { PeopleMeta(due) }
                             evidenceButton(commitment.supportIDs)
@@ -450,9 +450,9 @@ private struct PeopleProfile: View {
             if let receipt = factReceipt {
                 PeopleRow {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Fact removed").appFont(.headline).foregroundColor(AppTheme.ink)
+                        Text("Fact removed").veetType(.ui, weight: .semibold).foregroundColor(AppTheme.ink)
                         Text(receipt.state == "cleanup_pending" ? "The fact has been removed. Generated replies and files are still being cleaned up." : "The fact and its generated copies have been removed. Original messages remain at their source.")
-                            .appFont(.body)
+                            .veetType(.ui)
                             .fixedSize(horizontal: false, vertical: true)
                         if receipt.state == "cleanup_pending" {
                             Button("Check cleanup") { Task { await model.refreshReceipt() } }.buttonStyle(PeopleInlineButtonStyle())
@@ -465,7 +465,7 @@ private struct PeopleProfile: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(fact.statement)
-                                .appFont(.body)
+                                .veetType(.ui)
                                 .foregroundColor(AppTheme.ink)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
@@ -503,13 +503,13 @@ private struct PeopleProfile: View {
         if !missing.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("No \(peopleList(missing, conjunction: "or")) recorded yet.")
-                    .appFont(.body)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 // Empty states keep primary text: the Mac audit at Large text
                 // fails muted supporting text here, as it failed secondary text.
                 Text("They appear here as Veetbot learns more about \(profile.person.displayName).")
-                    .appFont(PeopleMetrics.meta)
+                    .veetType(PeopleMetrics.meta)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // The element covers the text, not the decorative edge.
@@ -530,7 +530,7 @@ private struct PeopleProfile: View {
                 Text(profile.coverage)
                 if profile.truncated { Text("This overview is partial. Open the history to see more recorded interactions.") }
             }
-            .appFont(PeopleMetrics.meta)
+            .veetType(PeopleMetrics.meta)
             .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
@@ -543,7 +543,7 @@ private struct PeopleProfile: View {
                 PeopleRow(divided: index > 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Merged with \(merge.merged.displayName)").appFont(.body).foregroundColor(AppTheme.ink)
+                            Text("Merged with \(merge.merged.displayName)").veetType(.ui).foregroundColor(AppTheme.ink)
                             PeopleMeta("Combined automatically \(merge.mergedAt.formatted(date: .abbreviated, time: .omitted))")
                         }
                         Spacer(minLength: 8)
@@ -557,7 +557,7 @@ private struct PeopleProfile: View {
                 PeopleRow(divided: !profile.automaticMerges.isEmpty) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Image(systemName: "checkmark.circle").foregroundColor(PeopleSurface.accent).accessibilityHidden(true)
-                        Text("Identity change saved.").appFont(.body).foregroundColor(AppTheme.ink)
+                        Text("Identity change saved.").veetType(.ui).foregroundColor(AppTheme.ink)
                         Spacer(minLength: 8)
                         Button("Preview undo") { Task { await model.undoIdentity(sessionID: sessionID) } }
                             .buttonStyle(PeopleInlineButtonStyle())
@@ -585,14 +585,14 @@ private struct PeopleProfile: View {
         let pending = model.receipt?.state == "cleanup_pending"
         return VStack(spacing: 14) {
             Image(systemName: "person.crop.circle.badge.xmark")
-                .font(.system(size: 28, weight: .light))
+                .veetIcon(.emptyState)
                 .foregroundColor(PeopleSurface.accent)
                 .frame(width: 60, height: 60)
                 .background(Circle().fill(AppTheme.tealWash))
                 .accessibilityHidden(true)
-            Text("Forgotten").appDisplayFont(.title3).foregroundColor(AppTheme.ink).accessibilityAddTraits(.isHeader)
+            Text("Forgotten").veetType(.title).foregroundColor(AppTheme.ink).accessibilityAddTraits(.isHeader)
             Text(pending ? "Derived memories have been removed. Generated replies and files are still being cleaned up." : "Derived memories and history have been removed. Original messages remain at their source.")
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

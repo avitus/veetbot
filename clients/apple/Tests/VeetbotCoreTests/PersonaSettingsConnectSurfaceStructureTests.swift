@@ -13,7 +13,7 @@ import Testing
     func testPersonaReadsAsAnA2Page() throws {
         let source = try source(at: "Veetbot/Views/PersonaEditorView.swift")
 
-        #expect(source.contains(".appDisplayFont("))
+        #expect(source.contains(".veetType(.display)"))
         #expect(source.contains("struct PersonaNominationCard"))
         #expect(source.contains("AppTheme.amberLine"))
         #expect(source.contains("A2EmptyState("))
@@ -30,7 +30,7 @@ import Testing
     func testSettingsAndConnectWearTheA2System() throws {
         let source = try source(at: "Veetbot/Views/ConnectionSettingsView.swift")
 
-        #expect(source.contains(".appDisplayFont("))
+        #expect(source.contains(".veetType(.display)"))
         #expect(source.contains("AppTheme.paper"))
         #expect(source.contains(".a2Card()"))
         #expect(source.contains(".a2Field("))

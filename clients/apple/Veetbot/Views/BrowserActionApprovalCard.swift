@@ -23,12 +23,12 @@ struct BrowserActionApprovalCard: View {
                     \(Text(presentation.verb).fontWeight(.semibold))\
                     \(Text(verbatim: presentation.detail.map { " " + $0 } ?? "").foregroundColor(AppTheme.inkSoft))
                     """)
-                    .appFont(.body)
+                    .veetType(.ui)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 if let badge = presentation.consequenceBadge {
                     Text(badge)
-                        .appFont(.caption, weight: .semibold)
+                        .veetType(.meta, weight: .semibold)
                         .foregroundColor(AppTheme.red)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -43,12 +43,12 @@ struct BrowserActionApprovalCard: View {
             if presentation.elementRole != nil || presentation.elementName != nil {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Text from the website")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         if let role = presentation.elementRole {
                             Text(verbatim: role)
-                                .appFont(.caption)
+                                .veetType(.meta)
                                 .foregroundColor(AppTheme.inkSoft)
                         }
                         if let name = presentation.elementName {
@@ -66,10 +66,10 @@ struct BrowserActionApprovalCard: View {
             if let location = presentation.pageLocation {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("Page")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                     Text(verbatim: location)
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .lineLimit(2)
                 }
             }
@@ -80,27 +80,27 @@ struct BrowserActionApprovalCard: View {
             case .visible(let text):
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Types")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                     Text(verbatim: text)
-                        .appCodeFont()
+                        .veetMono()
                         .textSelection(.enabled)
                 }
             case .hidden:
                 Text("Hidden: sensitive field")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             case nil:
                 EmptyView()
             }
             if let refused = presentation.refusedNotice {
                 Label(refused, systemImage: "nosign")
-                    .appFont(.caption, weight: .semibold)
+                    .veetType(.meta, weight: .semibold)
                     .foregroundColor(AppTheme.red)
             }
             if let notCovered = presentation.notCoveredText {
                 Text(notCovered)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("approval.browser.not-covered")
@@ -143,14 +143,14 @@ struct BrowserActionApprovalCard: View {
                 if presentation.offersTaskGrant, let offer = approval.taskGrantOffer {
                     // The offer's own words, beneath the decisions, as the reference places its limits.
                     Text(verbatim: offer.summary)
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("approval.task-scope")
                 }
             } else {
                 Text(resolutionText)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
@@ -181,7 +181,7 @@ struct BrowserActionApprovalCard: View {
     private func labelledQuote(_ label: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
             WebsiteQuote(text: text)
         }
@@ -200,7 +200,7 @@ struct WebsiteQuote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(verbatim: "“\(text)”")
-                .appFont(.body)
+                .veetType(.ui)
                 .lineLimit(expanded ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
                 .background(truncationProbe)
@@ -209,7 +209,7 @@ struct WebsiteQuote: View {
                     expanded.toggle()
                 }
                 .buttonStyle(.plain)
-                .appFont(.caption, weight: .medium)
+                .veetType(.meta, weight: .medium)
                 .foregroundColor(AppTheme.tealText)
             }
         }
@@ -231,7 +231,7 @@ struct WebsiteQuote: View {
 
     private func measured(lineLimit: Int?) -> some View {
         Text(verbatim: "“\(text)”")
-            .appFont(.body)
+            .veetType(.ui)
             .lineLimit(lineLimit)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -258,9 +258,9 @@ private struct TaskGrantConfirmation: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Allow all actions for this task?")
-                .appFont(.title3, weight: .semibold)
+                .veetType(.title)
             Text(verbatim: offer.summary)
-                .appFont(.body)
+                .veetType(.ui)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("task-grant.confirm.summary")
             HStack {

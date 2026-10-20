@@ -24,7 +24,7 @@ public struct MemoryDetailView: View {
                 heading
                 if memory.flaggedForReview { reviewCard }
                 if let message = model?.errorMessage {
-                    Text(message).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
                 A2RecordGroup(title: "Classification", rows: classification)
                 A2RecordGroup(title: "Provenance", rows: provenance)
@@ -69,12 +69,12 @@ public struct MemoryDetailView: View {
                 A2KindLabel(text: memoryDisplayText(memory.beliefType))
                 if memory.flaggedForReview {
                     Text("· Needs review")
-                        .appFont(.caption, weight: .medium)
+                        .veetType(.meta, weight: .medium)
                         .foregroundColor(AppTheme.amberText)
                 }
             }
             Text(memory.statement)
-                .appDisplayFont(.title2)
+                .veetType(.display)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -83,20 +83,20 @@ public struct MemoryDetailView: View {
                     PeopleDetailView(personID: person.id)
                 } label: {
                     Label(person.name, systemImage: "person")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.tealText)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("memory.detail.person")
             } else {
                 Text(memory.subject)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
             Text(
                 "Formed \(memory.createdAt.formatted(date: .abbreviated, time: .omitted)) · Last evidence \(memory.lastEvidenceAt.formatted(date: .abbreviated, time: .omitted))"
             )
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
                 MemorySensitivityBadge(sensitivity: memory.sensitivity, kind: memory.sensitivityKind)
@@ -113,10 +113,10 @@ public struct MemoryDetailView: View {
     private var reviewCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Is this right?", systemImage: "flag")
-                .appFont(.caption, weight: .semibold)
+                .veetType(.meta, weight: .semibold)
                 .foregroundColor(AppTheme.amberText)
             Text("Veetbot formed this without an explicit statement from you. Confirm it, or remove it.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             if let model {

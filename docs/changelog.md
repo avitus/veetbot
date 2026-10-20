@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — One type scale and one spacing scale in Chat
+
+- Chat on Mac, iPhone and iPad uses seven type roles and one spacing scale.
+  Every sidebar row shares one layout, so titles line up; New chat is a compose
+  button beside a new search field, and New folder a + beside Folders. Move
+  and delete appear on hover or in the row's menu. The font preference now
+  changes transcript text only and defaults to System. Tables use a compact
+  type and scroll sideways on iPhone; conversations open at the latest turn.
+
 ## 2026-10-19 — The composer no longer covers the end of an answer
 
 - In Chat on iPhone, iPad and Mac, the last lines of an answer and its Copy and

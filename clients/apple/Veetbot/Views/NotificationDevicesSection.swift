@@ -24,11 +24,11 @@ struct NotificationDevicesSection: View {
             HairlineDivider()
             if model.unavailable {
                 Text("This server does not list devices.")
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
             } else if model.devices.isEmpty {
                 Text(model.isLoading ? "Loading devices…" : "No device is registered for notifications yet.")
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
@@ -41,7 +41,7 @@ struct NotificationDevicesSection: View {
             }
             if let error = model.errorMessage {
                 Text(error)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("notifications.error")
@@ -57,10 +57,10 @@ struct NotificationDevicesSection: View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("This \(deviceName)")
-                    .appFont(.body, weight: .semibold)
+                    .veetType(.ui, weight: .semibold)
                     .foregroundColor(AppTheme.ink)
                 Text(permissionDescription)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -102,10 +102,10 @@ struct NotificationDevicesSection: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.isThisDevice(device) ? "\(device.name) · this \(deviceName)" : device.name)
-                    .appFont(.body)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.ink)
                 Text("Last seen \(device.lastSeenAt.formatted(.relative(presentation: .named)))")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
             Spacer(minLength: 8)
