@@ -96,23 +96,39 @@ struct EmailSubscriptionsScreen: View {
             #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
                 // A macOS sheet renders one primary item; keep every batch action inside it.
-                HStack(spacing: 8) { selectionActions }
+                HStack(spacing: 8) {
+                    if model.isSelecting {
+                        selectAllButton
+                        unsubscribeSelectedButton
+                    }
+                    selectButton
+                }
             }
             #else
-            ToolbarItemGroup(placement: .primaryAction) { selectionActions }
+            ToolbarItem(placement: .primaryAction) { selectButton }
+            // An iPhone navigation bar folds a third item into its overflow menu,
+            // hiding Unsubscribe N, so the batch actions take the bottom bar, as in Mail.
+            if model.isSelecting {
+                ToolbarItem(placement: .bottomBar) { selectAllButton }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) { unsubscribeSelectedButton }
+            }
             #endif
         }
     }
 
-    @ViewBuilder
-    private var selectionActions: some View {
-        if model.isSelecting {
-            Button("Select all") { model.selectAll() }
-                .accessibilityIdentifier("email.subscriptions.select-all")
-            Button("Unsubscribe \(model.selection.count)") { model.beginUnsubscribe() }
-                .disabled(model.selection.isEmpty)
-                .accessibilityIdentifier("email.subscriptions.unsubscribe-selected")
-        }
+    private var selectAllButton: some View {
+        Button("Select all") { model.selectAll() }
+            .accessibilityIdentifier("email.subscriptions.select-all")
+    }
+
+    private var unsubscribeSelectedButton: some View {
+        Button("Unsubscribe \(model.selection.count)") { model.beginUnsubscribe() }
+            .disabled(model.selection.isEmpty)
+            .accessibilityIdentifier("email.subscriptions.unsubscribe-selected")
+    }
+
+    private var selectButton: some View {
         Button(model.isSelecting ? "Done" : "Select") { model.setSelecting(!model.isSelecting) }
             .accessibilityIdentifier("email.subscriptions.select")
     }

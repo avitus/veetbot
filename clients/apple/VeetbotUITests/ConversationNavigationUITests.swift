@@ -1284,6 +1284,9 @@ final class ConversationNavigationUITests: XCTestCase {
         let selected = app.buttons["email.subscriptions.unsubscribe-selected"]
         XCTAssertTrue(selected.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(selected.label, "Unsubscribe 2")
+        // A crowded iPhone navigation bar folds trailing items into an overflow menu.
+        XCTAssertTrue(app.buttons["email.subscriptions.select"].isHittable, "Done stays in reach while selecting")
+        attachEmailScreenshot("Selecting subscriptions")
         func choice(_ id: String) -> XCUIElement { element("email.subscription.select.\(id)") }
         XCTAssertEqual(choice(Self.newsSubscriptionID).value as? String, "Selected")
         XCTAssertEqual(choice(Self.dealsSubscriptionID).value as? String, "Selected")
