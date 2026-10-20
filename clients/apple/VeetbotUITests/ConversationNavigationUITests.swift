@@ -3312,10 +3312,12 @@ final class ConversationNavigationUITests: XCTestCase {
         if toggle.exists {
             // A slow runner can drop the hidden list's rows from the tree; a
             // missing row never turns unhittable, so it counts as hidden too.
+            // Settling a missing row takes XCTest several existence retries,
+            // which outlast a 1.5 s wait on CircleCI's simulators.
             let gone = XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "exists == false OR hittable == false"), object: row
             )
-            guard XCTWaiter().wait(for: [gone], timeout: 1.5) == .completed else { return }
+            guard XCTWaiter().wait(for: [gone], timeout: 5) == .completed else { return }
             XCTAssertTrue(toggle.waitForExistence(timeout: 5))
             toggle.tap()
             return
