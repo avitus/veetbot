@@ -65,6 +65,12 @@ import Testing
         #expect(detail.contains("Button(\"Forget person…\", role: .destructive)"))
         #expect(detail.contains(".accessibilityIdentifier(\"people.detail\")"))
         #expect(!detail.contains(".buttonStyle(.bordered)"))
+        // A short relationship line in the regular 13-point face fails the
+        // contrast audit on CircleCI's 1x Mac display (job 6326, "Your
+        // sibling"); the medium weight passes there.
+        let compactDetail = detail.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        #expect(compactDetail.contains("Text(summary).veetType(.ui, weight: .medium)"))
+        #expect(compactDetail.contains("Text(relationship.phrase(in: profile)) .veetType(.ui, weight: .medium)"))
     }
 
     @Test

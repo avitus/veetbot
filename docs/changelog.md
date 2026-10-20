@@ -21,6 +21,8 @@ title: Changelog
   Nothing is sent and no reminder is scheduled; it is a list you open.
 - Recent shows when you were last in touch with each person.
 - The People sections show how many people each one holds.
+- A person's relationship to you ("Your sibling") reads in a slightly heavier
+  weight, so it stays legible on standard-resolution Mac displays.
 
 ## 2026-10-20 — Correct a memory's wording, see where it came from
 

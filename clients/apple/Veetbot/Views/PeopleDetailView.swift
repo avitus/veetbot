@@ -222,7 +222,7 @@ private struct PeopleProfile: View {
                     .accessibilityAddTraits(.isHeader)
             }
             if let summary = profile.relationshipSummary {
-                Text(summary).veetType(.ui).foregroundColor(PeopleSurface.muted)
+                Text(summary).veetType(.ui, weight: .medium).foregroundColor(PeopleSurface.muted)
             }
             if let contact = profile.primaryContact {
                 Label(contact.value, systemImage: contact.symbolName)
@@ -360,7 +360,7 @@ private struct PeopleProfile: View {
                         rowSymbol(relationship.symbolName)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(relationship.phrase(in: profile))
-                                .veetType(.ui)
+                                .veetType(.ui, weight: .medium)
                                 .foregroundColor(relationship.validTo == nil ? AppTheme.ink : PeopleSurface.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                             if !relationship.qualifier.isEmpty { PeopleMeta(relationship.qualifier) }
