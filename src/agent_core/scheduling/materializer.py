@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
-from agent_core.domain.agents import Principal
+from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.call_plans import (
     CALL_PLAN_SESSION_METADATA_KEY,
     CallPlanStep,
@@ -15,12 +15,14 @@ from agent_core.domain.call_plans import (
     call_plan_note,
     call_plan_step_key,
 )
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import ConflictError, NotFoundError, RateLimitedError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.recurrence import RecurrenceCalculator
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.schedules import (
+    AuthoritySnapshot,
     OccurrenceDisposition,
+    OccurrenceTrigger,
     OnceCadence,
     Schedule,
     ScheduleAdmissionOutcome,
@@ -48,6 +50,9 @@ from agent_core.ports.schedules import (
 )
 
 WriteProbe = Callable[[str], None]
+
+# ADR-0215 part C: at most this many Run-now occurrences per schedule a day.
+MANUAL_RUNS_PER_DAY = 5
 
 
 class _NotificationProducer(Protocol):
@@ -264,129 +269,27 @@ class ScheduleMaterializer:
                 note = call_plan_note(revision.call_plan, revision.cadence.at, step)
                 instruction = f"{instruction}\n\n{note}"
 
-            session_id = self._ids.new_id()
-            run_id = self._ids.new_id()
-            occurrence = ScheduleOccurrence(
-                id=self._ids.new_id(),
-                schedule_id=schedule.id,
-                schedule_revision=revision.revision,
-                nominal_fire_at=nominal,
-                disposition=OccurrenceDisposition.MATERIALIZED,
-                session_id=session_id,
-                run_id=run_id,
-                authority_version=authority.authority_version,
-                materialized_at=now,
-                created_at=now,
-            )
-            await uow.schedule_occurrences.insert(occurrence)
-            self._write_probe("occurrence")
-
-            session = Session(
-                id=session_id,
-                tenant_id=schedule.tenant_id,
-                principal_id=schedule.principal_id,
-                agent_id=agent.id,
-                agent_version=agent.version,
-                status=SessionStatus.ACTIVE,
-                title=revision.title,
-                metadata={
-                    **(
-                        {SESSION_BROWSER_PROFILE_METADATA_KEY: str(revision.browser_profile_id)}
-                        if revision.browser_profile_id is not None
-                        else {}
-                    ),
-                    SESSION_SCHEDULE_ID_METADATA_KEY: str(schedule.id),
-                    "schedule_revision": revision.revision,
-                    "schedule_occurrence_id": str(occurrence.id),
-                    "nominal_fire_at": nominal.isoformat(),
-                    **(
-                        {
-                            CALL_PLAN_SESSION_METADATA_KEY: {
-                                "kind": (
-                                    CallPlanStepKind.FIRST if step is None else step.kind
-                                ).value,
-                                "attempt": attempt,
-                            }
+            occurrence = await self._start_run(
+                uow,
+                schedule,
+                revision,
+                agent,
+                authority,
+                nominal,
+                now,
+                instruction=instruction,
+                scopes=run_scopes,
+                metadata=(
+                    {
+                        CALL_PLAN_SESSION_METADATA_KEY: {
+                            "kind": (CallPlanStepKind.FIRST if step is None else step.kind).value,
+                            "attempt": attempt,
                         }
-                        if revision.call_plan is not None
-                        else {}
-                    ),
-                },
-                created_at=now,
-                updated_at=now,
+                    }
+                    if revision.call_plan is not None
+                    else {}
+                ),
             )
-            await uow.sessions.create(session)
-            self._write_probe("session")
-            await uow.events.append(
-                NewEvent(
-                    session_id=session.id,
-                    run_id=None,
-                    event_type="session.created",
-                    payload_schema_version=2,
-                    actor_type="scheduler",
-                    actor_id=schedule.principal_id,
-                    payload={"agent_id": str(agent.id), "title": revision.title},
-                )
-            )
-            self._write_probe("session_event")
-
-            deadline = now + timedelta(seconds=revision.run_timeout_seconds)
-            run_limits = revision.limits.model_copy(update={"deadline_at": deadline}, deep=True)
-            run = Run(
-                id=run_id,
-                session_id=session.id,
-                tenant_id=schedule.tenant_id,
-                principal_scopes=set(run_scopes),
-                agent_id=agent.id,
-                agent_version=agent.version,
-                status=RunStatus.QUEUED,
-                limits=run_limits,
-                priority=10,
-                scheduled_for=now,
-                deadline_at=deadline,
-                created_at=now,
-                updated_at=now,
-            )
-            if uow.queue is None:
-                await uow.runs.create(run)
-            else:
-                await uow.queue.enqueue(run, priority=run.priority, scheduled_for=now)
-            self._write_probe("run")
-            user_event = await uow.events.append(
-                NewEvent(
-                    session_id=session.id,
-                    run_id=run.id,
-                    event_type="user.message.created",
-                    actor_type="scheduler",
-                    actor_id=schedule.principal_id,
-                    payload={"content": instruction},
-                )
-            )
-            await uow.runs.set_seed_event_sequence(run.id, user_event.sequence)
-            self._write_probe("instruction")
-            await uow.events.append(
-                NewEvent(
-                    session_id=session.id,
-                    run_id=run.id,
-                    event_type="run.queued",
-                    actor_type="scheduler",
-                    actor_id=schedule.principal_id,
-                    payload={
-                        "run_id": str(run.id),
-                        "priority": run.priority,
-                        "schedule_id": str(schedule.id),
-                        "schedule_revision": revision.revision,
-                        "schedule_occurrence_id": str(occurrence.id),
-                        "authority_version": authority.authority_version,
-                    },
-                )
-            )
-            self._write_probe("queued_event")
-            run_principal = authority.principal.model_copy(
-                update={"scopes": set(run_scopes)}, deep=True
-            )
-            await self._seed_checkpoint(uow, run, user_event.sequence, None, run_principal)
-            self._write_probe("checkpoint")
             advanced = self._advanced_schedule(
                 schedule,
                 revision,
@@ -400,6 +303,249 @@ class ScheduleMaterializer:
             await uow.schedules.advance(schedule, advanced)
             self._write_probe("schedule")
             return occurrence
+
+    async def materialize_manual(
+        self,
+        principal: Principal,
+        schedule_id: UUID,
+        *,
+        expected_revision: int,
+        request_key: str,
+    ) -> tuple[ScheduleOccurrence, bool]:
+        """Start one owner-requested run of a recurring schedule now (ADR-0215 C).
+
+        Returns the occurrence and whether it replayed an earlier request with
+        the same key. The schedule's next firing does not move, and the run
+        never counts toward the consecutive-failure pause. Every check the
+        cadence path records as a failed occurrence is refused here instead,
+        because the owner is waiting for the answer.
+        """
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            schedule = await uow.schedules.lock(schedule_id, principal)
+            existing = await uow.schedule_occurrences.get_manual(schedule.id, request_key)
+            if existing is not None:
+                return existing, True
+            if schedule.state not in {ScheduleState.ACTIVE, ScheduleState.PAUSED}:
+                raise ConflictError("the schedule has ended", reason="schedule.terminal")
+            if schedule.current_revision != expected_revision:
+                raise ConflictError(
+                    "the schedule changed; read it again", reason="schedule.revision_conflict"
+                )
+            owner = Principal(
+                tenant_id=schedule.tenant_id,
+                principal_id=schedule.principal_id,
+                roles=set(),
+                scopes=set(),
+            )
+            revision = await uow.schedules.get_revision(
+                schedule.id, schedule.current_revision, owner
+            )
+            if isinstance(revision.cadence, OnceCadence):
+                raise ConflictError(
+                    "a one-time schedule runs only at its time",
+                    reason="schedule.run_now_one_time",
+                )
+            latest = await uow.schedule_occurrences.latest_materialized(schedule.id)
+            if latest is not None and latest.run_id is not None:
+                linked = await uow.runs.get(latest.run_id, owner)
+                if linked.status not in TERMINAL_RUN_STATUSES:
+                    raise ConflictError(
+                        "a run of this schedule is still going", reason="schedule.run_active"
+                    )
+            taken = await uow.schedule_occurrences.count_manual_since(
+                schedule.id, now - timedelta(days=1)
+            )
+            if taken >= MANUAL_RUNS_PER_DAY:
+                raise RateLimitedError(
+                    "schedule.run_now_daily_limit",
+                    "this schedule already ran on request five times today",
+                )
+            authority = await self._principals.current(schedule.tenant_id, schedule.principal_id)
+            if authority is None or not authority.enabled:
+                raise ConflictError(
+                    "the schedule's owner cannot run it", reason="schedule.principal_disabled"
+                )
+            if not revision.requested_scopes <= authority.principal.scopes:
+                raise ConflictError(
+                    "the schedule asks for access it no longer has",
+                    reason="schedule.scope_revoked",
+                )
+            try:
+                agent = await uow.agents.get_version(revision.agent_id, revision.agent_version)
+            except NotFoundError as exc:
+                raise ConflictError(
+                    "the schedule's agent is gone", reason="schedule.agent_version_missing"
+                ) from exc
+            if agent.policy_profile != revision.policy_profile:
+                raise ConflictError(
+                    "the schedule's policy changed", reason="schedule.policy_profile_mismatch"
+                )
+            admission_controller = self._admission or uow.schedule_admission
+            admission = await admission_controller.check(schedule.tenant_id, revision, now)
+            if admission.outcome is ScheduleAdmissionOutcome.RETRY:
+                raise RateLimitedError(
+                    admission.reason_code or "schedule.admission_busy",
+                    "scheduled work is busy; try again in a minute",
+                )
+            if admission.outcome is ScheduleAdmissionOutcome.REJECT:
+                raise ConflictError(
+                    "the spending ceiling for scheduled work is reached",
+                    reason=admission.reason_code,
+                )
+            occurrence = await self._start_run(
+                uow,
+                schedule,
+                revision,
+                agent,
+                authority,
+                now,
+                now,
+                trigger=OccurrenceTrigger.MANUAL,
+                manual_request_key=request_key,
+            )
+            await self._append_occurrence_event(uow, occurrence, schedule, schedule.state, now)
+            self._write_probe("process_event")
+            return occurrence, False
+
+    async def _start_run(
+        self,
+        uow: ScheduleUnitOfWork,
+        schedule: Schedule,
+        revision: ScheduleRevision,
+        agent: AgentSpec,
+        authority: AuthoritySnapshot,
+        nominal: datetime,
+        now: datetime,
+        *,
+        trigger: OccurrenceTrigger = OccurrenceTrigger.SCHEDULED,
+        manual_request_key: str | None = None,
+        instruction: str | None = None,
+        scopes: frozenset[str] | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> ScheduleOccurrence:
+        """Record a materialized occurrence and start its run, session and seed.
+
+        A call plan's step (ADR-0221) supplies its own instruction note, scopes
+        and session metadata; every other run uses the revision's.
+        """
+        run_scopes = revision.requested_scopes if scopes is None else scopes
+        seed = revision.instruction if instruction is None else instruction
+        session_id = self._ids.new_id()
+        run_id = self._ids.new_id()
+        occurrence = ScheduleOccurrence(
+            id=self._ids.new_id(),
+            schedule_id=schedule.id,
+            schedule_revision=revision.revision,
+            nominal_fire_at=nominal,
+            disposition=OccurrenceDisposition.MATERIALIZED,
+            session_id=session_id,
+            run_id=run_id,
+            authority_version=authority.authority_version,
+            materialized_at=now,
+            created_at=now,
+            trigger=trigger,
+            manual_request_key=manual_request_key,
+        )
+        await uow.schedule_occurrences.insert(occurrence)
+        self._write_probe("occurrence")
+
+        session = Session(
+            id=session_id,
+            tenant_id=schedule.tenant_id,
+            principal_id=schedule.principal_id,
+            agent_id=agent.id,
+            agent_version=agent.version,
+            status=SessionStatus.ACTIVE,
+            title=revision.title,
+            metadata={
+                **(
+                    {SESSION_BROWSER_PROFILE_METADATA_KEY: str(revision.browser_profile_id)}
+                    if revision.browser_profile_id is not None
+                    else {}
+                ),
+                SESSION_SCHEDULE_ID_METADATA_KEY: str(schedule.id),
+                "schedule_revision": revision.revision,
+                "schedule_occurrence_id": str(occurrence.id),
+                "nominal_fire_at": nominal.isoformat(),
+                **(metadata or {}),
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        await uow.sessions.create(session)
+        self._write_probe("session")
+        await uow.events.append(
+            NewEvent(
+                session_id=session.id,
+                run_id=None,
+                event_type="session.created",
+                payload_schema_version=2,
+                actor_type="scheduler",
+                actor_id=schedule.principal_id,
+                payload={"agent_id": str(agent.id), "title": revision.title},
+            )
+        )
+        self._write_probe("session_event")
+
+        deadline = now + timedelta(seconds=revision.run_timeout_seconds)
+        run_limits = revision.limits.model_copy(update={"deadline_at": deadline}, deep=True)
+        run = Run(
+            id=run_id,
+            session_id=session.id,
+            tenant_id=schedule.tenant_id,
+            principal_scopes=set(run_scopes),
+            agent_id=agent.id,
+            agent_version=agent.version,
+            status=RunStatus.QUEUED,
+            limits=run_limits,
+            priority=10,
+            scheduled_for=now,
+            deadline_at=deadline,
+            created_at=now,
+            updated_at=now,
+        )
+        if uow.queue is None:
+            await uow.runs.create(run)
+        else:
+            await uow.queue.enqueue(run, priority=run.priority, scheduled_for=now)
+        self._write_probe("run")
+        user_event = await uow.events.append(
+            NewEvent(
+                session_id=session.id,
+                run_id=run.id,
+                event_type="user.message.created",
+                actor_type="scheduler",
+                actor_id=schedule.principal_id,
+                payload={"content": seed},
+            )
+        )
+        await uow.runs.set_seed_event_sequence(run.id, user_event.sequence)
+        self._write_probe("instruction")
+        await uow.events.append(
+            NewEvent(
+                session_id=session.id,
+                run_id=run.id,
+                event_type="run.queued",
+                actor_type="scheduler",
+                actor_id=schedule.principal_id,
+                payload={
+                    "run_id": str(run.id),
+                    "priority": run.priority,
+                    "schedule_id": str(schedule.id),
+                    "schedule_revision": revision.revision,
+                    "schedule_occurrence_id": str(occurrence.id),
+                    "authority_version": authority.authority_version,
+                },
+            )
+        )
+        self._write_probe("queued_event")
+        run_principal = authority.principal.model_copy(
+            update={"scopes": set(run_scopes)}, deep=True
+        )
+        await self._seed_checkpoint(uow, run, user_event.sequence, None, run_principal)
+        self._write_probe("checkpoint")
+        return occurrence
 
     async def _record_failure(
         self,
@@ -507,6 +653,7 @@ class ScheduleMaterializer:
                     "occurrence_id": str(occurrence.id),
                     "nominal_fire_at": occurrence.nominal_fire_at.isoformat(),
                     "disposition": occurrence.disposition.value,
+                    "trigger": occurrence.trigger.value,
                     "reason_code": occurrence.reason_code,
                     "session_id": (
                         None if occurrence.session_id is None else str(occurrence.session_id)

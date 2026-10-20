@@ -235,6 +235,13 @@ class ScheduleNotify(StrEnum):
     ATTENTION_ONLY = "attention_only"
 
 
+class OccurrenceTrigger(StrEnum):
+    """Why an occurrence exists: its cadence fired, or the owner asked (ADR-0215 C)."""
+
+    SCHEDULED = "SCHEDULED"
+    MANUAL = "MANUAL"
+
+
 class OccurrenceDisposition(StrEnum):
     MATERIALIZED = "MATERIALIZED"
     MISSED = "MISSED"
@@ -460,11 +467,25 @@ class ScheduleOccurrence(BaseModel):
     materialized_at: datetime | None = None
     links_erased_at: datetime | None = None
     created_at: datetime
+    # ADR-0215 part C: a manual occurrence's nominal instant is the request
+    # time, and its idempotency key is unique per schedule.
+    trigger: OccurrenceTrigger = OccurrenceTrigger.SCHEDULED
+    manual_request_key: str | None = Field(default=None, min_length=1, max_length=255)
 
     @field_validator("nominal_fire_at", "materialized_at", "links_erased_at", "created_at")
     @classmethod
     def occurrence_instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
         return _optional_aware_utc(value)
+
+    @model_validator(mode="after")
+    def manual_key_matches_trigger(self) -> ScheduleOccurrence:
+        if (self.trigger is OccurrenceTrigger.MANUAL) != (self.manual_request_key is not None):
+            raise ValueError("only a manual occurrence carries a request key, and it must")
+        if self.trigger is OccurrenceTrigger.MANUAL and (
+            self.disposition is not OccurrenceDisposition.MATERIALIZED
+        ):
+            raise ValueError("a manual occurrence is recorded only once it starts a run")
+        return self
 
     @model_validator(mode="after")
     def disposition_is_consistent(self) -> ScheduleOccurrence:

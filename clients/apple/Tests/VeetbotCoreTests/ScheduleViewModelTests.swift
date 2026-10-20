@@ -420,6 +420,47 @@ import FoundationNetworking
         #expect(model.draftState == .failed("You have read many schedules in the last hour. Try again later."))
     }
 
+    /// ADR-0215 part C: Run now sends the revision on screen with a key, says
+    /// so with a toast, and refreshes Recent runs; a busy schedule says why.
+    @Test
+    func testRunNowStartsARunAndExplainsARefusal() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000781"))
+        let recorder = ScheduleRequestRecorder()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let lock = NSLock()
+        var busy = false
+        let model = try makeModel(toasts: toasts) { request in
+            recorder.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("/run") {
+                if lock.withLock({ busy }) {
+                    return Self.response(request, statusCode: 409, body: #"{"error":{"code":"conflict","message":"x","details":{"reason":"schedule.run_active"},"request_id":"r"}}"#)
+                }
+                return Self.response(request, statusCode: 201, body: Self.occurrenceJSON(
+                    id: UUID(), schedule: scheduleID, at: "2026-10-20T15:00:00Z", disposition: "MATERIALIZED",
+                    session: UUID(), run: UUID()))
+            }
+            if path.hasSuffix("/occurrences") {
+                return Self.response(request, body: #"{"items":[],"next_cursor":null}"#)
+            }
+            return Self.response(request, body: Self.detailJSON(id: scheduleID))
+        }
+        await model.loadDetail(scheduleID)
+
+        await model.runNow(scheduleID)
+
+        let run = try #require(recorder.snapshot.first { $0.url!.path.hasSuffix("/run") })
+        #expect(run.httpMethod == "POST")
+        #expect(try Self.body(run)["expected_revision"] as? Int == 1)
+        #expect(!(run.value(forHTTPHeaderField: "Idempotency-Key") ?? "").isEmpty)
+        #expect(toasts.current?.text == "Running now. The report arrives in Chat.")
+        #expect(recorder.snapshot.contains { $0.url!.path.hasSuffix("/occurrences") })
+
+        lock.withLock { busy = true }
+        await model.runNow(scheduleID)
+        #expect(model.lifecycleError(for: scheduleID) == "A run of this schedule is still going.")
+    }
+
     /// A revision that moved on is read again and the change retried once.
     @Test
     func testAStaleRevisionIsReadAgainAndRetriedOnce() async throws {

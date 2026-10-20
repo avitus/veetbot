@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-20 — Schedules you can create, run, pause and stop from the app
+
+- New schedule: describe it in plain words ("every weekday at 7 am, tell me
+  what needs me today") and Veetbot shows how it understood the timing before
+  anything is saved.
+- A schedule's page has Run now, Pause and Resume, and Stop (the record stays
+  in Recent History for 30 days), plus Recent runs with Open report in Chat.
+- "Only notify when something needs you" keeps a finished report quiet;
+  failures, approvals and questions still notify.
+
 ## 2026-10-19 — A long report opens at its beginning
 
 - In Chat on iPhone, iPad and Mac, opening a scheduled report taller than the

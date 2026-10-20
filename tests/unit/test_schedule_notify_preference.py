@@ -98,7 +98,10 @@ def test_the_preference_survives_a_conversational_update() -> None:
 
 def test_the_default_leaves_an_existing_idempotency_hash_unchanged() -> None:
     definition = _definition_from_revision(revision())
-    legacy = definition.model_dump(mode="json", exclude={"browser_profile_id", "notify"})
+    # A request from before ADR-0150, ADR-0215 and ADR-0221 had none of these.
+    legacy = definition.model_dump(
+        mode="json", exclude={"browser_profile_id", "notify", "call_plan"}
+    )
     previous = hashlib.sha256(
         json.dumps(legacy, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()

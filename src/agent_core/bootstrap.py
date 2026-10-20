@@ -795,6 +795,8 @@ class ApplicationServices:
     browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
     # ADR-0215 part B: absent when drafts are off or titles use no routed model.
     schedule_drafts: ScheduleDrafter | None = None
+    # ADR-0215 part C: Run now materializes on the API's own unit of work.
+    schedule_runs: ScheduleMaterializer | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -4855,6 +4857,15 @@ async def _compose(
                 if settings.schedule_drafts_enabled
                 and title_profiles.generation.model_policy not in NON_ROUTED_MODEL_POLICIES
                 else None
+            ),
+            schedule_runs=ScheduleMaterializer(
+                uow_factory=uow_factory,
+                principals=ConfiguredSchedulePrincipalDirectory(principal),
+                clock=clock,
+                ids=ids,
+                seed_checkpoint=checkpoint_seeder,
+                metrics=schedule_metrics,
+                notification_producer=notification_producer,
             ),
             devices=device_service,
             device_ingest=device_ingest_service,

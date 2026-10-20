@@ -840,9 +840,11 @@ public struct ScheduleOccurrenceView: Codable, Equatable, Identifiable, Sendable
     public let reasonCode: String?
     public let materializedAt: Date?
     public let linksErasedAt: Date?
+    /// `SCHEDULED` or `MANUAL` (Run now, ADR-0215 part C); absent on older servers.
+    public let trigger: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, disposition
+        case id, disposition, trigger
         case scheduleID = "schedule_id"
         case nominalFireAt = "nominal_fire_at"
         case sessionID = "session_id"

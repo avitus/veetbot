@@ -32,6 +32,8 @@ PLATFORM_SCOPES = frozenset(
         "schedule.read",
         "schedule.write",
         "schedule.cancel",
+        # ADR-0215 part C: Run now spends money under the schedule's pinned authority.
+        "schedule.run",
         "device.read",
         "device.write",
         "notification.read",

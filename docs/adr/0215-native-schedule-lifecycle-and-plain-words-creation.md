@@ -20,31 +20,31 @@ spending limit; and Recent runs with status and "Open report in Chat".
 
 The native surface is read-only except for website access: it "has no other
 create, update, pause, resume, cancel, delete, occurrence, or run-history
-control" (scheduling.md:639-643; ADR-0075 decision 4, ADR-0089 decision 4).
-The server already has every lifecycle route (scheduling.md:536-563): create
+control" (scheduling.md:676-687; ADR-0075 decision 4, ADR-0089 decision 4).
+The server already has every lifecycle route (scheduling.md:543-570): create
 with a structured `ScheduleDefinition` under `schedule.write` and
 `Idempotency-Key`; full-definition `PATCH`, pause and resume under
 `schedule.write` with `expected_revision`; `DELETE` as terminal cancel under
 `schedule.cancel` (ADR-0080 rejected hard deletion; ADR-0089 keeps terminal
-records 30 days); and the occurrence ledger (scheduling.md:440-444).
+records 30 days); and the occurrence ledger (scheduling.md:446-450).
 
 Four gaps remain:
 
 1. **No parser.** Natural-language parsing is not part of the tool; the model
-   parses in chat (scheduling.md:986-991, ADR-0072 decision 4).
+   parses in chat (scheduling.md:1032-1037, ADR-0072 decision 4).
 2. **An asymmetry.** Chat creation is an approval-gated `EXTERNAL_WRITE`/HIGH
    tool call whose agent and policy pins, limits, grace, timeout and failure
    limit are derived server-side (`src/agent_core/tools/schedule_create.py`,
    `ScheduleDefinition` construction and `_run_limits`). HTTP creation needs
    only `schedule.write` and takes those values from the client, validated
-   against tenant ceilings (scheduling.md:570-575).
+   against tenant ceilings (scheduling.md:607-612).
 3. **No run-now.** Occurrences are unique on `(schedule_id, nominal_fire_at)`
    and follow the cadence; ADR-0109 set retry and run-now aside as needing
    their own idempotency and overlap design.
 4. **No per-schedule delivery preference.** Only per-device `muted_kinds`
    exist (notifications-and-devices.md:155, notifications-and-devices.md:176-178),
    with no device update route; `schedule_run_finished` fires after every
-   accounted run (scheduling.md:1026-1031). Email and webhook delivery are
+   accounted run (scheduling.md:1072-1077). Email and webhook delivery are
    undesigned.
 
 ## Decision
@@ -118,7 +118,7 @@ and exercises the schedule's pinned authority, which pause and resume do not).
   only purpose. Terminal states refuse with the existing `schedule.terminal`.
 - Overlap: refused with `409 schedule.run_active` while any linked run is
   non-terminal. A scheduled instant due while a manual run is active receives
-  `SKIPPED_OVERLAP` by the existing rule (scheduling.md:307-317).
+  `SKIPPED_OVERLAP` by the existing rule (scheduling.md:313-323).
 - The same admission checks as materialization: current authority, scopes,
   per-run budget reservation, and tenant daily and monthly ceilings. At most
   five manual runs per schedule per day.
@@ -157,6 +157,12 @@ above:
   content-free `schedule.draft_interpreted` process event that also counts
   the hourly allowance; the "Veetbot understood" line is rendered on the
   device from the typed cadence.
+- **C.** Uniqueness of scheduled instants is a partial index on
+  `trigger = 'SCHEDULED'` rather than a three-column key, so two manual runs
+  can never collide on an instant; a manual occurrence is unique per schedule
+  by its request key and is only recorded once its run starts. Refusals for
+  authority, policy and admission are returned to the owner rather than
+  recorded as failed occurrences. The daily cap is a rolling 24 hours.
 - **D.** The occurrence's pinned revision decides, so a change applies from
   the next run.
 
@@ -171,7 +177,7 @@ above:
 
 ## What changes if accepted
 
-- A: scheduling.md:639-643 rewritten; ADR-0075 decision 4 and ADR-0089
+- A: scheduling.md:676-687 rewritten; ADR-0075 decision 4 and ADR-0089
   decision 4 amended. Evidence: Swift transport, view-model and iOS UI
   journeys under ADR-0049.
 - B: new route behind `AGENT_SCHEDULE_DRAFTS_ENABLED` (default off; the cost
@@ -185,10 +191,10 @@ above:
   `schedule.run` in `src/agent_core/policy/scopes.py` (the count asserted in
   `tests/gates/test_policy_m4.py` moves from 43 to 44) and in deployment
   `AUTH_SCOPES`; scheduling.md overlap, failure-counting
-  (scheduling.md:472-476) and occurrence sections. Gate cases: idempotency,
+  (scheduling.md:478-483) and occurrence sections. Gate cases: idempotency,
   overlap refusal, no failure-count change, ceilings, one-time refusal.
 - D: definition field and upcast, accountant change, the trigger table
-  (notifications-and-devices.md:361-375) and scheduling.md:1026-1031.
+  (notifications-and-devices.md:361-378) and scheduling.md:1072-1077.
 
 ## Alternatives considered
 

@@ -80,6 +80,7 @@ from agent_core.domain.policies import (
 from agent_core.domain.runs import Run, RunFailure, RunKind, RunLimits, RunStatus, RunUsage
 from agent_core.domain.schedules import (
     OccurrenceDisposition,
+    OccurrenceTrigger,
     Schedule,
     ScheduleIdempotencyRecord,
     ScheduleOccurrence,
@@ -420,12 +421,15 @@ def schedule_occurrence_to_domain(row: ScheduleOccurrenceRow) -> ScheduleOccurre
         materialized_at=row.materialized_at,
         links_erased_at=row.links_erased_at,
         created_at=row.created_at,
+        trigger=OccurrenceTrigger(row.trigger),
+        manual_request_key=row.manual_request_key,
     )
 
 
 def schedule_occurrence_values(occurrence: ScheduleOccurrence) -> dict[str, Any]:
     values = occurrence.model_dump(mode="python")
     values["disposition"] = occurrence.disposition.value
+    values["trigger"] = occurrence.trigger.value
     return values
 
 

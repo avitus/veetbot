@@ -617,10 +617,23 @@ surface cards, the schedule's instruction on a deep-paper block, and a flagged
 memory's reason in an amber-edged card. On the Mac the Schedules sheet keeps
 its index beside the detail column, as the Memory sheet does. The synthesis journal keeps its list
 with teal text for its actions. A person's profile keeps its sections and
-actions: Prepare for a conversation is the filled capsule, Pin and Repair
-identity hairline capsules, Rename and Forget person quiet ones. The Review
-menu, swipe-to-delete, the Mac collection picker and every People journey keep
-their controls; only the drawing changed.
+actions: Ask Veetbot is the filled capsule, Email, Call and Pin hairline
+capsules, Rename quiet; Manage person holds Merge with another entry, Repair
+identity and Forget person. The Review
+menu, swipe-to-delete and every People journey keep their controls.
+
+Schedules (ADR-0215) can be created and run from the app. New schedule opens a
+sheet where the owner describes the work in plain words; once typing pauses,
+the server reads it (`POST /v1/schedules/drafts`) and the sheet shows "Veetbot
+understood: <cadence> · first run <time>" before anything is saved, and Create
+posts the server's own definition with an idempotency key. A schedule's page
+offers Run now (a one-off run that leaves the cadence alone, under
+`schedule.run`), Pause or Resume (Pause's toast offers Undo), and Stop behind an
+inline confirmation, which cancels future runs and keeps the record in Recent
+History for thirty days; it is never called Delete. A Delivery group holds
+"Only notify when something needs you" and the per-run spending limit, and
+Recent runs lists the latest occurrences with their outcome and Open report in
+Chat, which closes the sheet and opens that conversation.
 
 ## Milestone 26 client modes
 

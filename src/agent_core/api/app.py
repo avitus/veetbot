@@ -379,6 +379,17 @@ class CreateScheduleDraftRequest(BaseModel):
     timezone: str = Field(min_length=1, max_length=64)
 
 
+class ScheduleRunNowService(Protocol):
+    async def materialize_manual(
+        self,
+        principal: Principal,
+        schedule_id: UUID,
+        *,
+        expected_revision: int,
+        request_key: str,
+    ) -> tuple[ScheduleOccurrence, bool]: ...
+
+
 class ScheduleDraftService(Protocol):
     async def draft(self, principal: Principal, *, text: str, timezone: str) -> ScheduleDraft: ...
 
@@ -1368,6 +1379,40 @@ def create_app(
     ) -> ScheduleRecord:
         """Cancel future occurrences of an owned schedule at the expected revision."""
         return await services.schedules.cancel(authenticated, schedule_id, expected_revision)
+
+    @schedule_router.post(
+        "/v1/schedules/{schedule_id}/run",
+        openapi_extra={"required_scope": "schedule.run"},
+    )
+    async def run_schedule_now(
+        schedule_id: UUID,
+        body: ExpectedScheduleRevisionRequest,
+        authenticated: Annotated[Principal, secured("schedule.run")],
+        idempotency_key: Annotated[
+            str,
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+            ),
+        ],
+    ) -> Response:
+        """Start one owner-requested run of a recurring schedule now (ADR-0215 C)."""
+        runner: ScheduleRunNowService | None = getattr(services, "schedule_runs", None)
+        if runner is None:
+            raise ScheduleValidationError(
+                "schedule.run_now_unavailable", "this server cannot run schedules on request"
+            )
+        occurrence, replayed = await runner.materialize_manual(
+            authenticated,
+            schedule_id,
+            expected_revision=body.expected_revision,
+            request_key=idempotency_key,
+        )
+        return JSONResponse(
+            status_code=200 if replayed else 201,
+            content=occurrence.model_dump(mode="json"),
+        )
 
     @schedule_router.get(
         "/v1/schedules/{schedule_id}/occurrences",

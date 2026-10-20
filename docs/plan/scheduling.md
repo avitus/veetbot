@@ -217,6 +217,8 @@ class ScheduleOccurrence(BaseModel):
     materialized_at: datetime | None
     links_erased_at: datetime | None
     created_at: datetime
+    trigger: SCHEDULED | MANUAL = SCHEDULED      # ADR-0215 C
+    manual_request_key: str | None = None       # set exactly when MANUAL
 ```
 
 `MATERIALIZED` requires `session_id`, `run_id`, `materialized_at`, and the
@@ -228,10 +230,13 @@ disposition forbids the identifiers and `links_erased_at` and requires a stable
 reason code. Run progress and outcome are read by joining the linked run rather
 than copied onto the occurrence.
 
-The database enforces `UNIQUE(schedule_id, nominal_fire_at)`. This is the
+The database enforces `UNIQUE(schedule_id, nominal_fire_at)` for scheduled
+occurrences (a partial index on `trigger = 'SCHEDULED'`). This is the
 occurrence idempotency key. It prevents two schedule workers, a retry after an
 unknown commit, or a process restart from materializing the same nominal
-instant twice.
+instant twice. A manual Run-now occurrence (ADR-0215 part C) takes the request
+time as its nominal instant and is unique per schedule by its
+`manual_request_key`; it is only ever recorded `MATERIALIZED`.
 
 ## Cadence and civil time
 
@@ -471,7 +476,8 @@ endpoint with `run.cancel`; this separation prevents `schedule.cancel` from
 becoming indirect authority to cancel arbitrary execution.
 
 After a linked run reaches `COMPLETED`, a post-run hook resets
-`consecutive_failures` to zero. `FAILED`, authorization failure, configuration
+`consecutive_failures` to zero; a manual Run-now run (ADR-0215 part C) neither
+resets nor increments it and never auto-pauses the schedule. `FAILED`, authorization failure, configuration
 failure, and a missed occurrence increment it. User-cancelled runs and overlap
 skips do not. Reaching `max_consecutive_failures` pauses the schedule with
 `pause_reason = failure_limit` and emits `schedule.auto_paused`. The hook is
@@ -584,6 +590,19 @@ hour, counted from content-free `schedule.draft_interpreted` process events,
 then `429 rate_limited` with reason `schedule.drafts_rate_limited`. The route is
 mounted with the schedule API; `AGENT_SCHEDULE_DRAFTS_ENABLED=0`, or a
 non-routed title policy, answers `schedule.drafts_unavailable`.
+
+`POST /v1/schedules/{id}/run` (ADR-0215 part C, the exact scope
+`schedule.run`) takes `{expected_revision}` and an `Idempotency-Key` and starts
+one manual run of an ACTIVE or PAUSED recurring schedule now: `201` with the
+`MANUAL` occurrence, or `200` replaying the same key's occurrence. It refuses
+a one-time schedule (`409 schedule.run_now_one_time`), a terminal one
+(`schedule.terminal`), a stale revision (`schedule.revision_conflict`) and any
+schedule whose latest materialized run is not terminal (`schedule.run_active`);
+after five manual occurrences in a rolling day it answers `429
+schedule.run_now_daily_limit`. Authority, scopes, the pinned agent and policy,
+and tenant admission are checked as at materialization and refused instead of
+recorded. `next_fire_at` does not move; a cadence instant due while the manual
+run is active is `SKIPPED_OVERLAP` by the existing rule.
 
 Validation rejects unknown cadence fields, naive datetimes, invalid IANA zones,
 duplicate or out-of-range weekdays, duplicate or out-of-range monthly days,
@@ -859,7 +878,10 @@ schedule_occurrences
   materialized_at TIMESTAMPTZ NULL
   links_erased_at TIMESTAMPTZ NULL
   created_at TIMESTAMPTZ NOT NULL
-  UNIQUE (schedule_id, nominal_fire_at)
+  trigger TEXT NOT NULL DEFAULT 'SCHEDULED'      -- SCHEDULED | MANUAL
+  manual_request_key TEXT NULL                   -- NOT NULL exactly when MANUAL
+  UNIQUE (schedule_id, nominal_fire_at) WHERE trigger = 'SCHEDULED'
+  UNIQUE (schedule_id, manual_request_key) WHERE manual_request_key IS NOT NULL
 
 schedule_idempotency_keys
   tenant_id TEXT NOT NULL

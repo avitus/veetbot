@@ -2703,6 +2703,12 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
         scheduleRow.tap()
 
+        // ADR-0215 part C: Run now starts one run and says so.
+        let runNow = app.buttons["schedule.run-now"]
+        XCTAssertTrue(runNow.waitForExistence(timeout: 5), app.debugDescription)
+        runNow.tap()
+        XCTAssertTrue(app.staticTexts["Running now. The report arrives in Chat."].waitForExistence(timeout: 3))
+
         let pause = app.buttons["schedule.pause"]
         XCTAssertTrue(pause.waitForExistence(timeout: 5), app.debugDescription)
         pause.tap()

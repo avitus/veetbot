@@ -1002,6 +1002,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("POST", "/v1/schedules"):
             statusCode = 201
             body = Self.scheduleDetailJSON
+        case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/run"):
+            statusCode = 201
+            body = #"{"id":"00000000-0000-0000-0000-0000000006a3","schedule_id":"\#(ConversationNavigationUITestFixture.scheduleID)","schedule_revision":1,"nominal_fire_at":"2026-10-08T16:00:00Z","disposition":"MATERIALIZED","session_id":"\#(ConversationNavigationUITestFixture.reportSessionID)","run_id":"\#(Self.reportRunID)","reason_code":null,"authority_version":"v1","materialized_at":"2026-10-08T16:00:00Z","links_erased_at":null,"created_at":"2026-10-08T16:00:00Z","trigger":"MANUAL","manual_request_key":"ui"}"#
         case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/pause"):
             Self.scheduleWebsiteLock.withLock { Self.schedulePaused = true }
             statusCode = 200

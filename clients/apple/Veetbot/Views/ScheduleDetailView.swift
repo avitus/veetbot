@@ -105,6 +105,12 @@ public struct ScheduleDetailView: View {
                     }
                 } else {
                     HStack(spacing: 8) {
+                        // A one-time schedule runs only at its time (ADR-0215 C).
+                        if record.revision.cadence.kind != "ONCE" {
+                            Button { Task { await model.runNow(id) } } label: { Label("Run now", systemImage: "play.fill") }
+                                .primaryCapsule()
+                                .accessibilityIdentifier("schedule.run-now")
+                        }
                         if state == .active {
                             Button { Task { await model.pause(id) } } label: { Label("Pause", systemImage: "pause") }
                                 .buttonStyle(SecondaryCapsuleButtonStyle())

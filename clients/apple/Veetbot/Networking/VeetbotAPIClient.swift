@@ -899,6 +899,17 @@ public struct VeetbotAPIClient: Sendable {
         ))
     }
 
+    /// Starts one owner-requested run now (ADR-0215 part C, `schedule.run`).
+    public func runScheduleNow(_ id: UUID, expectedRevision: Int, idempotencyKey: String) async throws
+        -> ScheduleOccurrenceView
+    {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/\(id.uuidString)/run",
+            body: try JSONEncoder.server.encode(["expected_revision": expectedRevision]),
+            headers: ["Idempotency-Key": idempotencyKey]
+        ))
+    }
+
     public func listScheduleOccurrences(
         _ id: UUID, limit: Int = 20, cursor: String? = nil
     ) async throws -> Page<ScheduleOccurrenceView> {

@@ -9,6 +9,7 @@ from agent_core.domain.call_plans import CALL_PLAN_SESSION_METADATA_KEY, CallPla
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.schedules import (
+    OccurrenceTrigger,
     Schedule,
     ScheduleNotify,
     ScheduleOccurrence,
@@ -98,12 +99,19 @@ class ScheduleOutcomeAccountant:
                 schedule.id, occurrence.schedule_revision, owner
             )
             failures = schedule.consecutive_failures
-            if run.status is RunStatus.COMPLETED:
+            # ADR-0215 part C: a Run-now result neither resets nor adds to the
+            # cadence's failure count, so testing a fix cannot pause a schedule
+            # and one manual success cannot hide a failing cadence.
+            manual = occurrence.trigger is OccurrenceTrigger.MANUAL
+            if manual:
+                pass
+            elif run.status is RunStatus.COMPLETED:
                 failures = 0
             elif run.status is RunStatus.FAILED:
                 failures += 1
             auto_paused = (
-                run.status is RunStatus.FAILED
+                not manual
+                and run.status is RunStatus.FAILED
                 and failures >= revision.max_consecutive_failures
                 and schedule.state is ScheduleState.ACTIVE
             )

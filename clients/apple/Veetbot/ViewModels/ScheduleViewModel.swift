@@ -261,6 +261,47 @@ public final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    // MARK: Run now (ADR-0215 part C)
+
+    /// Starts one run now. The schedule's next firing does not move, and the
+    /// result never counts toward pausing it after failures.
+    public func runNow(_ scheduleID: UUID) async {
+        guard lifecycleChangingIDs.insert(scheduleID).inserted else { return }
+        defer { lifecycleChangingIDs.remove(scheduleID) }
+        lifecycleErrors[scheduleID] = nil
+        guard let api = await makeAPIClient() else {
+            lifecycleErrors[scheduleID] = "Connect to a Veetbot server to run this schedule."
+            return
+        }
+        do {
+            let revision: Int
+            if let current = detailRecords[scheduleID] {
+                revision = current.schedule.currentRevision
+            } else {
+                revision = try await api.getSchedule(scheduleID).schedule.currentRevision
+            }
+            _ = try await api.runScheduleNow(scheduleID, expectedRevision: revision, idempotencyKey: UUID().uuidString)
+            toasts.show("Running now. The report arrives in Chat.")
+            await loadRecentRuns(scheduleID)
+        } catch HTTPTransportError.api(let apiError) {
+            lifecycleErrors[scheduleID] = Self.runNowMessage(apiError)
+        } catch {
+            lifecycleErrors[scheduleID] = displayMessage(for: error)
+        }
+    }
+
+    private static func runNowMessage(_ error: APIError) -> String {
+        switch error.details.reason {
+        case "schedule.run_active": return "A run of this schedule is still going."
+        case "schedule.run_now_daily_limit": return "This schedule already ran on request five times today."
+        case "schedule.run_now_one_time": return "A one-time schedule runs only at its time."
+        case "schedule.revision_conflict": return "This schedule changed. Open it again to run it."
+        default:
+            if error.statusCode == 403 { return "This device isn't allowed to run schedules on request." }
+            return error.message
+        }
+    }
+
     // MARK: Delivery (ADR-0215 part D)
 
     /// "Only notify when something needs you": a completed report stays quiet;
@@ -537,13 +578,14 @@ public struct ScheduleRecentRun: Identifiable, Equatable, Sendable {
         switch occurrence.disposition {
         case "MATERIALIZED":
             if occurrence.linksErasedAt != nil { return "Ran; the conversation was deleted" }
+            let prefix = occurrence.trigger == "MANUAL" ? "Run now · " : ""
             switch runStatus {
-            case .completed: return "Completed"
-            case .failed: return "Failed"
-            case .cancelled: return "Stopped"
-            case .waitingForApproval, .waitingForUser: return "Waiting for you"
-            case .queued, .running: return "Running"
-            default: return "Ran"
+            case .completed: return prefix + "Completed"
+            case .failed: return prefix + "Failed"
+            case .cancelled: return prefix + "Stopped"
+            case .waitingForApproval, .waitingForUser: return prefix + "Waiting for you"
+            case .queued, .running: return prefix + "Running"
+            default: return prefix + "Ran"
             }
         case "SKIPPED_OVERLAP": return "Skipped: the last run was still going"
         case "MISSED": return "Missed: Veetbot was offline past the grace period"
