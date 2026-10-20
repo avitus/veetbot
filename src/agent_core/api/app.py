@@ -86,7 +86,7 @@ from agent_core.domain.devices import (
     device_capability_issue,
     device_routing_issue,
 )
-from agent_core.domain.errors import AgentCoreError, DeviceValidationError
+from agent_core.domain.errors import AgentCoreError, DeviceValidationError, ScheduleValidationError
 from agent_core.domain.failures import log_failure
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
@@ -102,6 +102,7 @@ from agent_core.domain.persona import (
 )
 from agent_core.domain.schedules import (
     ScheduleDefinition,
+    ScheduleDraft,
     ScheduleOccurrence,
     ScheduleRecord,
     ScheduleState,
@@ -367,6 +368,19 @@ class UpdateScheduleRequest(BaseModel):
 
     expected_revision: int = Field(ge=1)
     definition: ScheduleDefinition
+
+
+class CreateScheduleDraftRequest(BaseModel):
+    """The owner's plain-words description and their device's time zone."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=1000)
+    timezone: str = Field(min_length=1, max_length=64)
+
+
+class ScheduleDraftService(Protocol):
+    async def draft(self, principal: Principal, *, text: str, timezone: str) -> ScheduleDraft: ...
 
 
 class ExpectedScheduleRevisionRequest(BaseModel):
@@ -1247,6 +1261,24 @@ def create_app(
             status_code=200 if result.replayed else 201,
             content=result.model_dump(mode="json", exclude={"replayed"}),
         )
+
+    @schedule_router.post(
+        "/v1/schedules/drafts",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def draft_schedule(
+        body: CreateScheduleDraftRequest,
+        response: Response,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+    ) -> ScheduleDraft:
+        """Read a plain-words description into an unsaved schedule draft (ADR-0215 B)."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        drafter: ScheduleDraftService | None = getattr(services, "schedule_drafts", None)
+        if drafter is None:
+            raise ScheduleValidationError(
+                "schedule.drafts_unavailable", "this server cannot read schedules from plain words"
+            )
+        return await drafter.draft(authenticated, text=body.text, timezone=body.timezone)
 
     @schedule_router.get(
         "/v1/schedules",

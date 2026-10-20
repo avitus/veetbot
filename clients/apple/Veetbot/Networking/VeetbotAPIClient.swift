@@ -909,6 +909,23 @@ public struct VeetbotAPIClient: Sendable {
         ))
     }
 
+    /// Reads a plain-words description into an unsaved draft (ADR-0215 part B).
+    public func draftSchedule(text: String, timezone: String) async throws -> ScheduleDraftView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/drafts",
+            body: try JSONEncoder.server.encode(["text": text, "timezone": timezone])
+        ))
+    }
+
+    /// Creates a schedule from a definition the server derived, unchanged.
+    public func createSchedule(definition: JSONValue, idempotencyKey: String) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules",
+            body: try JSONEncoder.server.encode(definition),
+            headers: ["Idempotency-Key": idempotencyKey]
+        ))
+    }
+
     /// Sets when a schedule's finished runs notify (ADR-0215 part D) through
     /// the full-definition update, re-reading first so every other field goes
     /// back exactly as the server holds it; a stale revision is retried once.

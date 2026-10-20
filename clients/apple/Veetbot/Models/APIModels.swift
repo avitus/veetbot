@@ -803,6 +803,30 @@ public struct ScheduleRecordView: Codable, Equatable, Sendable {
     public let revision: ScheduleRevisionView
 }
 
+/// A schedule read from plain words (`POST /v1/schedules/drafts`, ADR-0215
+/// part B). The definition is kept as the server's JSON so creation posts it
+/// back unchanged; the title and cadence are read out of it for display.
+public struct ScheduleDraftView: Decodable, Equatable, Sendable {
+    public let status: String
+    public let reason: String?
+    public let definition: JSONValue?
+    public let nextFireAt: [Date]
+
+    enum CodingKeys: String, CodingKey {
+        case status, reason, definition
+        case nextFireAt = "next_fire_at"
+    }
+
+    public var title: String? { definition?.objectValue?["title"]?.stringValue }
+
+    public var cadence: ScheduleCadenceView? {
+        guard let cadence = definition?.objectValue?["cadence"],
+              let data = try? JSONEncoder.server.encode(cadence)
+        else { return nil }
+        return try? JSONDecoder.server.decode(ScheduleCadenceView.self, from: data)
+    }
+}
+
 /// One entry of a schedule's occurrence ledger (`/v1/schedules/{id}/occurrences`).
 /// Only a materialized occurrence links a session and run, and erasure clears
 /// both links.

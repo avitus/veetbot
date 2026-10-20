@@ -2724,6 +2724,33 @@ final class ConversationNavigationUITests: XCTestCase {
         )
     }
 
+    /// ADR-0215 part B: a sentence is read and shown before Create saves it.
+    func testANewScheduleIsDescribedInPlainWordsAndConfirmedBeforeSaving() {
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.schedules")
+        let new = app.buttons["schedule.new"]
+        XCTAssertTrue(new.waitForExistence(timeout: 5), app.debugDescription)
+        new.tap()
+        let create = app.buttons["schedule.new.create"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        XCTAssertFalse(create.isEnabled, "Nothing can be saved before the timing is read")
+        let field = app.textFields["schedule.new.text"].exists
+            ? app.textFields["schedule.new.text"] : app.textViews["schedule.new.text"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Every weekday at 7 am, tell me what needs me today.")
+        let understood = app.staticTexts["schedule.new.understood"]
+        XCTAssertTrue(understood.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(create.isEnabled)
+        create.tap()
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Scheduled. The first run is"))
+                .firstMatch.waitForExistence(timeout: 3),
+            app.debugDescription
+        )
+        XCTAssertTrue(create.waitForNonExistence(timeout: 5))
+    }
+
     func testScheduleDetailBindsAReadySignInThroughTheServer() {
         app.launchArguments.append("--ui-testing-schedule-website-access")
         app.launch()

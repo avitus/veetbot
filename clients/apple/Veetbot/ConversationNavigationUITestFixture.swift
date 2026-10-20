@@ -995,6 +995,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 body = Self.scheduleWebsiteLock.withLock { Self.scheduleWebsiteBound }
                     ? Self.boundScheduleDetailJSON : Self.scheduleDetailJSON
             }
+        case ("POST", "/v1/schedules/drafts"):
+            // ADR-0215 part B: any sentence reads as weekdays at 07:00.
+            statusCode = 200
+            body = #"{"status":"ready","reason":null,"definition":{"title":"Weekday briefing","instruction":"Every weekday at 7 am, tell me what needs me today.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"browser_profile_id":null,"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"5","deadline_at":null,"synthesis_reserve_steps":2,"synthesis_reserve_model_calls":2,"synthesis_reserve_cost":"1"},"run_timeout_seconds":300,"cadence":{"kind":"WEEKLY","local_time":"07:00:00","weekdays":[1,2,3,4,5],"timezone":"America/Los_Angeles"},"misfire_grace_seconds":3600,"max_consecutive_failures":2,"notify":"every_report"},"next_fire_at":["2026-10-20T14:00:00Z","2026-10-21T14:00:00Z","2026-10-22T14:00:00Z"]}"#
+        case ("POST", "/v1/schedules"):
+            statusCode = 201
+            body = Self.scheduleDetailJSON
         case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/pause"):
             Self.scheduleWebsiteLock.withLock { Self.schedulePaused = true }
             statusCode = 200

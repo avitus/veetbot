@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -27,7 +26,6 @@ from agent_core.domain.schedules import (
     Cadence,
     CallPlan,
     OnceCadence,
-    ScheduleDefinition,
     ScheduleDefinitionLimits,
 )
 from agent_core.domain.tools import (
@@ -38,18 +36,30 @@ from agent_core.domain.tools import (
     ToolSpec,
 )
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.scheduling.defaults import (
+    DEFAULT_MAX_CONSECUTIVE_FAILURES,
+    DEFAULT_MAX_COST,
+    DEFAULT_MISFIRE_GRACE_SECONDS,
+    DEFAULT_RUN_TIMEOUT_SECONDS,
+    DEFAULT_SYNTHESIS_RESERVE_COST,
+    DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS,
+    DEFAULT_SYNTHESIS_RESERVE_STEPS,
+    derived_definition,
+    schedule_run_limits,
+)
+
+__all__ = [
+    "DEFAULT_MAX_CONSECUTIVE_FAILURES",
+    "DEFAULT_MAX_COST",
+    "DEFAULT_MISFIRE_GRACE_SECONDS",
+    "DEFAULT_RUN_TIMEOUT_SECONDS",
+    "DEFAULT_SYNTHESIS_RESERVE_COST",
+    "DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS",
+    "DEFAULT_SYNTHESIS_RESERVE_STEPS",
+]
 
 SCHEDULE_CREATE_TOOL_NAME = "schedule.create"
 SCHEDULE_WRITE_SCOPE = "schedule.write"
-DEFAULT_RUN_TIMEOUT_SECONDS = 300
-DEFAULT_MISFIRE_GRACE_SECONDS = 3600
-DEFAULT_MAX_CONSECUTIVE_FAILURES = 2
-DEFAULT_MAX_COST = Decimal("5")
-# Final-synthesis headroom (ADR-0078): near its budget, a research run writes its
-# answer from the evidence it already has instead of failing without one.
-DEFAULT_SYNTHESIS_RESERVE_STEPS = 2
-DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS = 2
-DEFAULT_SYNTHESIS_RESERVE_COST = Decimal("1")
 # ADR-0213: a call schedule delegates exactly the calling scopes, so its
 # occurrence can place the call and read back how it went.
 CALL_PLACE_SCOPE = "mcp.bland_call.use"
@@ -399,25 +409,14 @@ class ScheduleCreateTool:
                     "Connect Website Access in this conversation before creating this schedule.",
                     retryable=False,
                 )
-        definition = ScheduleDefinition(
+        definition = derived_definition(
+            self._agent,
+            self._limits,
             title=str(arguments["title"]),
             instruction=str(arguments["instruction"]),
-            agent_id=self._agent.id,
-            agent_version=self._agent.version,
-            policy_profile=self._agent.policy_profile,
+            cadence=cadence,
             requested_scopes=_requested_scopes(arguments),
             browser_profile_id=UUID(selected_profile) if selected_profile else None,
-            limits=self._run_limits(),
-            run_timeout_seconds=min(
-                DEFAULT_RUN_TIMEOUT_SECONDS,
-                self._limits.max_run_timeout_seconds,
-            ),
-            cadence=cadence,
-            misfire_grace_seconds=min(
-                DEFAULT_MISFIRE_GRACE_SECONDS,
-                self._limits.max_misfire_grace_seconds,
-            ),
-            max_consecutive_failures=DEFAULT_MAX_CONSECUTIVE_FAILURES,
             call_plan=call_plan,
         )
         try:
@@ -474,26 +473,7 @@ class ScheduleCreateTool:
         )
 
     def _run_limits(self) -> RunLimits:
-        current = self._agent.limits
-        max_steps = min(current.max_steps, self._limits.max_steps_per_run)
-        max_model_calls = min(current.max_model_calls, self._limits.max_model_calls_per_run)
-        max_cost = min(current.max_cost or DEFAULT_MAX_COST, self._limits.max_cost_per_run)
-        return RunLimits(
-            max_steps=max_steps,
-            max_model_calls=max_model_calls,
-            max_tool_calls=min(
-                current.max_tool_calls,
-                self._limits.max_tool_calls_per_run,
-            ),
-            max_input_tokens=current.max_input_tokens,
-            max_output_tokens=current.max_output_tokens,
-            max_cost=max_cost,
-            synthesis_reserve_steps=_reserve_within(DEFAULT_SYNTHESIS_RESERVE_STEPS, max_steps),
-            synthesis_reserve_model_calls=_reserve_within(
-                DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS, max_model_calls
-            ),
-            synthesis_reserve_cost=_reserve_within(DEFAULT_SYNTHESIS_RESERVE_COST, max_cost),
-        )
+        return schedule_run_limits(self._agent, self._limits)
 
 
 def _requested_scopes(arguments: dict[str, Any]) -> frozenset[str]:
@@ -533,12 +513,6 @@ def _call_plan(arguments: dict[str, Any], cadence: Cadence) -> CallPlan | None:
     except (ValidationError, ValueError) as exc:
         raise CallPlanInputError("schedule.call_plan_invalid", str(exc)) from exc
     return plan
-
-
-def _reserve_within[T: (int, Decimal)](reserve: T, limit: T) -> T:
-    """Keep a reserve only when its limit leaves room to research before it."""
-
-    return reserve if reserve < limit else type(reserve)(0)
 
 
 def parse_cadence(arguments: dict[str, Any]) -> Cadence:

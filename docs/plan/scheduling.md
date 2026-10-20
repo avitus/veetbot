@@ -568,6 +568,23 @@ repository query before cursor comparison and limiting.
 Cross-tenant or cross-principal access returns the same not-found envelope as
 the existing API. Every route declares its required schedule scope in OpenAPI.
 
+`POST /v1/schedules/drafts` (ADR-0215 part B, `schedule.write`) reads
+`{text, timezone}` into a draft and persists nothing. One bounded, tool-less
+structured-output call (the title-generation model policy, at most USD 0.05,
+4,096 input and 1,024 output tokens, 20 seconds) returns only a short title and
+the timing as closed fields; the server builds the cadence in the given IANA
+zone, takes the owner's sentence verbatim as the instruction, derives every pin
+and limit through `scheduling.defaults` exactly as `schedule.create` does, and
+computes the next three firings with the recurrence engine. The answer is
+`{status: ready | needs_clarification | failed, reason, definition,
+next_fire_at}`; the client posts a ready `definition` unchanged to `POST
+/v1/schedules`. A secret-looking sentence or an unknown zone is refused before
+any model call (`schedule_validation_error`); thirty drafts per principal per
+hour, counted from content-free `schedule.draft_interpreted` process events,
+then `429 rate_limited` with reason `schedule.drafts_rate_limited`. The route is
+mounted with the schedule API; `AGENT_SCHEDULE_DRAFTS_ENABLED=0`, or a
+non-routed title policy, answers `schedule.drafts_unavailable`.
+
 Validation rejects unknown cadence fields, naive datetimes, invalid IANA zones,
 duplicate or out-of-range weekdays, duplicate or out-of-range monthly days,
 empty monthly selectors, duplicate or impossible yearly dates, empty yearly

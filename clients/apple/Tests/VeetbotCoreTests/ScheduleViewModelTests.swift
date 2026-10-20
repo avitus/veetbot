@@ -353,6 +353,73 @@ import FoundationNetworking
         #expect(toasts.current?.text == "Saved. Applies from the next run.")
     }
 
+    /// ADR-0215 part B: the sentence is read into a draft the owner sees
+    /// before anything is saved; creating posts the server's own definition.
+    @Test
+    func testANewScheduleIsReadFirstAndCreatedFromTheServersDefinition() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000771"))
+        let recorder = ScheduleRequestRecorder()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            recorder.append(request)
+            switch (request.httpMethod, request.url!.path) {
+            case ("POST", "/v1/schedules/drafts"):
+                return Self.response(request, body: Self.draftJSON)
+            case ("POST", "/v1/schedules"):
+                return Self.response(request, statusCode: 201, body: Self.detailJSON(id: scheduleID))
+            default:
+                return Self.response(request, body: #"{"items":[\#(Self.summaryJSON(id: scheduleID))],"next_cursor":null}"#)
+            }
+        }
+
+        await model.readDraft("Every weekday at 7 am, tell me what needs me today.", timezone: "America/Los_Angeles")
+
+        let read = try #require(recorder.snapshot.last)
+        #expect(read.url?.path == "/v1/schedules/drafts")
+        let body = try Self.body(read)
+        #expect(body["text"] as? String == "Every weekday at 7 am, tell me what needs me today.")
+        #expect(body["timezone"] as? String == "America/Los_Angeles")
+        guard case .ready(let draft) = model.draftState else {
+            Issue.record("expected a ready draft, got \(model.draftState)")
+            return
+        }
+        #expect(draft.title == "Weekday briefing")
+        #expect(draft.cadence?.kind == "WEEKLY")
+        #expect(draft.nextFireAt.count == 3)
+
+        #expect(await model.createFromDraft())
+        let create = try #require(recorder.snapshot.first { $0.url?.path == "/v1/schedules" && $0.httpMethod == "POST" })
+        #expect(!(create.value(forHTTPHeaderField: "Idempotency-Key") ?? "").isEmpty)
+        let posted = try Self.body(create)
+        #expect(posted["instruction"] as? String == "Every weekday at 7 am, tell me what needs me today.")
+        #expect(posted["agent_id"] as? String == "00000000-0000-0000-0000-000000000742")
+        #expect(model.draftState == .idle)
+        #expect(toasts.current?.text.hasPrefix("Scheduled. The first run is") == true)
+        #expect(model.items.map(\.id) == [scheduleID])
+    }
+
+    @Test
+    func testAnUnclearOrUnavailableDraftSaysWhyAndCreatesNothing() async throws {
+        var answer = (200, #"{"status":"needs_clarification","reason":"no_timing","definition":null,"next_fire_at":[]}"#)
+        let lock = NSLock()
+        let model = try makeModel { request in
+            let (status, body) = lock.withLock { answer }
+            return Self.response(request, statusCode: status, body: body)
+        }
+
+        await model.readDraft("Check the snow report", timezone: "America/Los_Angeles")
+        #expect(model.draftState == .unclear("Say when it should run, for example every morning at 7."))
+        #expect(await model.createFromDraft() == false)
+
+        lock.withLock { answer = (422, #"{"error":{"code":"schedule_validation_error","message":"x","details":{"reason":"schedule.drafts_unavailable"},"request_id":"r"}}"#) }
+        await model.readDraft("Every day at 7 check the snow", timezone: "America/Los_Angeles")
+        #expect(model.draftState == .unavailable)
+
+        lock.withLock { answer = (429, #"{"error":{"code":"rate_limited","message":"x","details":{"reason":"schedule.drafts_rate_limited"},"request_id":"r"}}"#) }
+        await model.readDraft("Every day at 8 check the snow", timezone: "America/Los_Angeles")
+        #expect(model.draftState == .failed("You have read many schedules in the last hour. Try again later."))
+    }
+
     /// A revision that moved on is read again and the change retried once.
     @Test
     func testAStaleRevisionIsReadAgainAndRetriedOnce() async throws {
@@ -611,6 +678,8 @@ import FoundationNetworking
     nonisolated private static func runJSON(id: UUID, session: UUID, status: String) -> String {
         #"{"id":"\#(id.uuidString)","session_id":"\#(session.uuidString)","parent_run_id":null,"status":"\#(status)","step_count":3,"model_call_count":2,"tool_call_count":1,"usage":{"input_tokens":10,"output_tokens":5,"cost_usd":"0.01"},"limits":{"max_steps":12,"deadline_at":null,"max_cost_usd":"1"},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-19T14:00:00Z","updated_at":"2026-10-19T14:01:00Z"}"#
     }
+
+    nonisolated private static let draftJSON = #"{"status":"ready","reason":null,"definition":{"title":"Weekday briefing","instruction":"Every weekday at 7 am, tell me what needs me today.","agent_id":"00000000-0000-0000-0000-000000000742","agent_version":"1","policy_profile":"default","requested_scopes":[],"browser_profile_id":null,"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"5","deadline_at":null,"synthesis_reserve_steps":2,"synthesis_reserve_model_calls":2,"synthesis_reserve_cost":"1"},"run_timeout_seconds":300,"cadence":{"kind":"WEEKLY","local_time":"07:00:00","weekdays":[1,2,3,4,5],"timezone":"America/Los_Angeles"},"misfire_grace_seconds":3600,"max_consecutive_failures":2,"notify":"every_report"},"next_fire_at":["2026-10-20T14:00:00Z","2026-10-21T14:00:00Z","2026-10-22T14:00:00Z"]}"#
 
     nonisolated private static func summaryJSON(id: UUID) -> String {
         #"{"id":"\#(id.uuidString)","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","title":"Daily review","instruction_preview":"Preview","cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"}"#

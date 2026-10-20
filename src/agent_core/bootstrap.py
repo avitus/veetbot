@@ -632,6 +632,7 @@ from agent_core.runtime.scheduled_browser import (
 )
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.scheduling.accounting import ScheduleOutcomeAccountant
+from agent_core.scheduling.drafts import ScheduleDrafter, ScheduleDraftInterpreter
 from agent_core.scheduling.materializer import ScheduleMaterializer
 from agent_core.scheduling.worker import ScheduleWorker
 from agent_core.skills.catalog import SkillCatalogService
@@ -792,6 +793,8 @@ class ApplicationServices:
     model_settings: PublicModelSettingsServiceContract | None = None
     # ADR-0129: present only when BROWSER_TASK_GRANTS_ENABLED is set.
     browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
+    # ADR-0215 part B: absent when drafts are off or titles use no routed model.
+    schedule_drafts: ScheduleDrafter | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -4834,6 +4837,25 @@ async def _compose(
             browser_profiles=browser_profile_service,
             browser_grants=browser_grant_service,
             schedules=schedule_service,
+            schedule_drafts=(
+                ScheduleDrafter(
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    agent=agent,
+                    limits=schedule_definition_limits,
+                    interpreter=ScheduleDraftInterpreter(
+                        router=model_router,
+                        providers=model_providers,
+                        clock=clock,
+                        ids=ids,
+                        model_policy=title_profiles.generation.model_policy,
+                    ),
+                )
+                if settings.schedule_drafts_enabled
+                and title_profiles.generation.model_policy not in NON_ROUTED_MODEL_POLICIES
+                else None
+            ),
             devices=device_service,
             device_ingest=device_ingest_service,
             notifications=notification_inbox,

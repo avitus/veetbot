@@ -591,3 +591,26 @@ def _aware_utc(value: datetime) -> datetime:
 
 def _optional_aware_utc(value: datetime | None) -> datetime | None:
     return None if value is None else _aware_utc(value)
+
+
+class ScheduleDraftStatus(StrEnum):
+    """What a plain-words draft came to (ADR-0215 part B)."""
+
+    READY = "ready"
+    NEEDS_CLARIFICATION = "needs_clarification"
+    FAILED = "failed"
+
+
+class ScheduleDraft(BaseModel):
+    """A schedule read from the owner's words, never persisted.
+
+    `definition` is complete when `status` is ready: the owner's sentence as
+    the instruction, the parsed cadence, and every pin the chat tool derives.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: ScheduleDraftStatus
+    reason: str | None = None
+    definition: ScheduleDefinition | None = None
+    next_fire_at: list[datetime] = Field(default_factory=list)

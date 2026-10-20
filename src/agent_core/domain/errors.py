@@ -59,6 +59,14 @@ class ScheduleValidationError(AgentCoreError):
         self.reason = reason
 
 
+class RateLimitedError(AgentCoreError):
+    """A bounded owner action ran out of its allowance for now."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class DeviceValidationError(AgentCoreError):
     """A device registration failed one stable boundary rule."""
 

@@ -141,6 +141,25 @@ something needs you" switch. A `none` value is not offered: an unseen approval
 would stall the run. The field travels through ADR-0154's full-definition
 update and is a revision change; `schedule.create` keeps the default.
 
+## As built (2026-10-20)
+
+Accepted parts were built with these choices, each no weaker than the text
+above:
+
+- **B.** The model returns only the timing and a short title; the instruction
+  is the owner's sentence verbatim, so the model writes nothing the schedule
+  will act on. The draft returns a complete server-derived definition, which
+  the client posts unchanged; `POST /v1/schedules` keeps validating every
+  supplied pin against the tenant ceilings and the agent's policy, so deriving
+  omitted fields on `POST` was not needed and was not added. The route is on
+  with the schedule API (`AGENT_SCHEDULE_DRAFTS_ENABLED=0` removes it), its
+  model is the title-generation policy, and usage is recorded as a
+  content-free `schedule.draft_interpreted` process event that also counts
+  the hourly allowance; the "Veetbot understood" line is rendered on the
+  device from the typed cadence.
+- **D.** The occurrence's pinned revision decides, so a change applies from
+  the next run.
+
 ## Consequences
 
 - The owner manages schedules from the app with the same audit trail as chat.

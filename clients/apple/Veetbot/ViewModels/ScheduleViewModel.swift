@@ -64,6 +64,7 @@ public final class ScheduleViewModel: ObservableObject {
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var unavailable = false
     @Published public private(set) var section = ScheduleBrowserSection.current
+    @Published public private(set) var draftState = ScheduleDraftState.idle
     @Published public private(set) var detailRecords: [UUID: ScheduleRecordView] = [:]
     /// Nil until the sign-ins load, so a failed load is not shown as "none".
     @Published public private(set) var websiteAccessProfiles: [BrowserProfileView]?
@@ -82,6 +83,9 @@ public final class ScheduleViewModel: ObservableObject {
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var reloadRequestID: UUID?
+    private var draftRequestID: UUID?
+    /// One key per confirmed draft, so a retried create replays rather than duplicates.
+    private var draftIdempotencyKey = UUID().uuidString
     private var detailRequestIDs: [UUID: UUID] = [:]
     private var websiteAccessRequestID: UUID?
     private var lastFailedListOperation: FailedListOperation?
@@ -180,6 +184,81 @@ public final class ScheduleViewModel: ObservableObject {
             title: row.title, instructionPreview: row.instructionPreview, cadence: row.cadence,
             createdAt: row.createdAt, updatedAt: record.schedule.updatedAt
         )
+    }
+
+    // MARK: New schedule (ADR-0215 part B)
+
+    /// Reads the sentence on the server; the newest reading wins.
+    public func readDraft(_ text: String, timezone: String = TimeZone.current.identifier) async {
+        let sentence = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard sentence.count >= 8 else {
+            draftState = .idle
+            return
+        }
+        let requestID = UUID()
+        draftRequestID = requestID
+        draftState = .reading
+        guard let api = await makeAPIClient() else {
+            draftState = .failed("Connect to a Veetbot server to add a schedule.")
+            return
+        }
+        do {
+            let draft = try await api.draftSchedule(text: sentence, timezone: timezone)
+            guard draftRequestID == requestID else { return }
+            switch draft.status {
+            case "ready" where draft.definition != nil: draftState = .ready(draft)
+            case "needs_clarification": draftState = .unclear(Self.clarification(draft.reason))
+            default: draftState = .failed("Veetbot could not read that. Try saying it another way.")
+            }
+        } catch HTTPTransportError.api(let apiError)
+            where apiError.statusCode == 404 || apiError.details.reason == "schedule.drafts_unavailable"
+        {
+            guard draftRequestID == requestID else { return }
+            draftState = .unavailable
+        } catch HTTPTransportError.api(let apiError) where apiError.statusCode == 429 {
+            guard draftRequestID == requestID else { return }
+            draftState = .failed("You have read many schedules in the last hour. Try again later.")
+        } catch {
+            guard draftRequestID == requestID else { return }
+            draftState = .failed(displayMessage(for: error))
+        }
+    }
+
+    /// Saves the draft the owner confirmed, exactly as the server derived it.
+    @discardableResult
+    public func createFromDraft() async -> Bool {
+        guard case .ready(let draft) = draftState, let definition = draft.definition,
+              let api = await makeAPIClient() else { return false }
+        do {
+            let record = try await api.createSchedule(definition: definition, idempotencyKey: draftIdempotencyKey)
+            draftIdempotencyKey = UUID().uuidString
+            draftState = .idle
+            detailRecords[record.schedule.id] = record
+            await reload(section)
+            let first = draft.nextFireAt.first.map {
+                $0.formatted(.dateTime.weekday(.wide).hour().minute())
+            } ?? "soon"
+            toasts.show("Scheduled. The first run is \(first).")
+            return true
+        } catch {
+            draftState = .failed(displayMessage(for: error))
+            return false
+        }
+    }
+
+    public func clearDraft() {
+        draftRequestID = nil
+        draftState = .idle
+        draftIdempotencyKey = UUID().uuidString
+    }
+
+    private static func clarification(_ reason: String?) -> String {
+        switch reason {
+        case "no_timing": return "Say when it should run, for example every morning at 7."
+        case "in_past": return "That time has already passed. Say when it should run next."
+        case "not_a_task": return "Say what Veetbot should do, and when."
+        default: return "The timing isn't clear yet. Try every weekday at 7, or tomorrow at 9."
+        }
     }
 
     // MARK: Delivery (ADR-0215 part D)
@@ -473,4 +552,15 @@ public struct ScheduleRecentRun: Identifiable, Equatable, Sendable {
         default: return "Did not run"
         }
     }
+}
+
+/// Where the New schedule sheet stands: nothing typed, reading, a draft the
+/// owner can confirm, a question, or a reason it cannot be read.
+public enum ScheduleDraftState: Equatable, Sendable {
+    case idle
+    case reading
+    case ready(ScheduleDraftView)
+    case unclear(String)
+    case unavailable
+    case failed(String)
 }
