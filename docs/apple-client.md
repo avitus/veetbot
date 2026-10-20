@@ -305,7 +305,10 @@ over the end of the transcript, which keeps the composer's measured height free
 below its last row. While the owner reads at the end, a growing answer is
 followed so its newest line stays above the composer; an answer taller than the
 view stops with its beginning at the top, and scrolling away while it streams
-leaves the view alone until the owner returns to the end.
+leaves the view alone until the owner returns to the end. The same holds when
+a conversation opens on such an answer or one arrives whole, as a scheduled
+report does: the view shows its beginning below the toolbar, and keeps it there
+while rows above it change height, until the owner scrolls.
 
 Files can be attached to a message (ADR-0120): dropped on the conversation or
 the message field on Mac and iPad, or chosen with the paperclip from Files on

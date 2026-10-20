@@ -39,7 +39,19 @@ enum TranscriptFollow: Equatable {
         visibleHeight: CGFloat, endClearance: CGFloat
     ) -> TranscriptFollow {
         guard following, contentGrew else { return .stay }
-        guard let latestMessageHeight, latestMessageHeight + endClearance > visibleHeight else {
+        return end(latestMessageHeight: latestMessageHeight, visibleHeight: visibleHeight, endClearance: endClearance)
+    }
+
+    /// Where the end of the transcript is: its last row, unless that row is
+    /// a message taller than the view, whose beginning is then the end to
+    /// show. Opening a conversation and new rows go there as growth does.
+    /// A view not yet laid out has no height to compare with.
+    static func end(
+        latestMessageHeight: CGFloat?, visibleHeight: CGFloat, endClearance: CGFloat
+    ) -> TranscriptFollow {
+        guard visibleHeight > 0, let latestMessageHeight,
+            latestMessageHeight + endClearance > visibleHeight
+        else {
             return .end
         }
         return .latestTop
@@ -51,6 +63,12 @@ enum TranscriptFollow: Equatable {
     ) -> Bool {
         offset + containerHeight >= contentHeight + bottomInset - 4
     }
+}
+
+/// A message row's laid-out height, with the row it was measured on.
+private struct MeasuredMessage: Equatable {
+    var id: String
+    var height: CGFloat
 }
 
 /// The parts of the transcript's scroll geometry that following its end reads.
@@ -115,8 +133,14 @@ public struct ChatView: View {
     /// Whether growth keeps the end in view: true after the view scrolls to
     /// the end, false once the owner scrolls away from it.
     @State private var followsTranscriptEnd = true
-    /// The newest message's laid-out height, when the newest row is a message.
-    @State private var latestMessageHeight: CGFloat?
+    /// The answer whose beginning the view stopped at: it stays at the top
+    /// while rows above it change height, until the owner scrolls.
+    @State private var heldAnswerTop: String?
+    /// The newest message's laid-out height, with the row it was measured
+    /// on: a row just added has none until it is laid out.
+    @State private var latestMessage: MeasuredMessage?
+    /// The transcript's height between its insets.
+    @State private var visibleHeight: CGFloat = 0
     /// The display title's height and whether it has scrolled out of view;
     /// only then does the toolbar carry the title.
     @State private var headingHeight: CGFloat = 0
@@ -197,10 +221,14 @@ public struct ChatView: View {
                     .onScrollGeometryChange(for: TranscriptScrollMetrics.self) { geometry in
                         TranscriptScrollMetrics(geometry)
                     } action: { old, new in
+                        visibleHeight = new.visibleHeight
                         followGrowth(from: old, to: new, proxy)
                     }
                     .onScrollPhaseChange { _, phase in
-                        if phase == .interacting { followsTranscriptEnd = false }
+                        if phase == .interacting {
+                            followsTranscriptEnd = false
+                            heldAnswerTop = nil
+                        }
                     }
                     // Read directly: a preference with a last-value reducer
                     // arrived as zero and left the composer over the end.
@@ -222,6 +250,13 @@ public struct ChatView: View {
             }
             .onChange(of: model.notificationFocus) {
                 scroll(proxy)
+            }
+            // A message that arrives whole is measured after the scroll that
+            // followed it in; once it proves taller than the view, its
+            // beginning is the end to show.
+            .onChange(of: latestMessage) {
+                guard followsTranscriptEnd, endOfTranscript == .latestTop, let id = latestMessage?.id else { return }
+                holdAnswerTop(id, proxy)
             }
             .onChange(of: model.selectedSessionID) {
                 headingScrolledAway = false
@@ -427,7 +462,7 @@ public struct ChatView: View {
                     .padding(.top, index == 0 ? 0 : spacingBefore(item))
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         if case .message = item, item.id == state.activityTimeline.last?.id {
-                            latestMessageHeight = height
+                            latestMessage = MeasuredMessage(id: item.id, height: height)
                         }
                     }
             }
@@ -725,16 +760,40 @@ public struct ChatView: View {
         let animated = lastScroll.session == model.selectedSessionID && lastScroll.rows > 0
         lastScroll = (model.selectedSessionID, rows)
         let target = ConversationScrollTarget.resolve(model.notificationFocus)
-        followsTranscriptEnd = target == .bottom
+        let answerTop = target == .bottom && endOfTranscript == .latestTop ? latestMessage?.id : nil
+        followsTranscriptEnd = target == .bottom && answerTop == nil
+        heldAnswerTop = answerTop
         let move = {
             switch target {
             case .notification:
                 proxy.scrollTo(target.scrollID, anchor: .center)
             case .bottom:
-                proxy.scrollTo(target.scrollID, anchor: .bottom)
+                if let answerTop {
+                    proxy.scrollTo(answerTop, anchor: .top)
+                } else {
+                    proxy.scrollTo(target.scrollID, anchor: .bottom)
+                }
             }
         }
-        if animated { withAnimation { move() } } else { move() }
+        // An answer's beginning is held in place, not animated to: rows above
+        // it can change height again before an animation would end.
+        if animated && answerTop == nil { withAnimation { move() } } else { move() }
+    }
+
+    /// The newest row's height when it is a message already laid out.
+    private var measuredLatestMessageHeight: CGFloat? {
+        guard case .message = state.activityTimeline.last,
+            let latestMessage, latestMessage.id == state.activityTimeline.last?.id
+        else { return nil }
+        return latestMessage.height
+    }
+
+    private var endOfTranscript: TranscriptFollow {
+        TranscriptFollow.end(
+            latestMessageHeight: measuredLatestMessageHeight,
+            visibleHeight: visibleHeight,
+            endClearance: max(dockHeight + VeetSpace.s2, 1)
+        )
     }
 
     /// Keeps a growing answer's newest line above the composer while the
@@ -742,18 +801,25 @@ public struct ChatView: View {
     private func followGrowth(
         from old: TranscriptScrollMetrics, to new: TranscriptScrollMetrics, _ proxy: ScrollViewProxy
     ) {
+        if let held = heldAnswerTop, abs(new.contentHeight - old.contentHeight) > 0.5 {
+            // Rows above the answer changed height, as the header's status
+            // line does when the run ends; keep the answer's beginning in place.
+            if held == state.activityTimeline.last?.id {
+                DispatchQueue.main.async { proxy.scrollTo(held, anchor: .top) }
+                return
+            }
+            heldAnswerTop = nil
+        }
         let contentGrew = new.contentHeight > old.contentHeight + 0.5
         guard contentGrew else {
             if new.isAtEnd { followsTranscriptEnd = true }
             return
         }
         let latest = state.activityTimeline.last
-        let latestIsMessage: Bool
-        if case .message = latest { latestIsMessage = true } else { latestIsMessage = false }
         switch TranscriptFollow.step(
             following: followsTranscriptEnd,
             contentGrew: contentGrew,
-            latestMessageHeight: latestIsMessage ? latestMessageHeight : nil,
+            latestMessageHeight: measuredLatestMessageHeight,
             visibleHeight: new.visibleHeight,
             endClearance: max(dockHeight + VeetSpace.s2, 1)
         ) {
@@ -763,9 +829,16 @@ public struct ChatView: View {
             // As for a grown dock, the new end has to be laid out first.
             DispatchQueue.main.async { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
         case .latestTop:
-            followsTranscriptEnd = false
-            if let latest { DispatchQueue.main.async { proxy.scrollTo(latest.id, anchor: .top) } }
+            if let latest { holdAnswerTop(latest.id, proxy) }
         }
+    }
+
+    /// Stops following the end at an answer taller than the view, with its
+    /// beginning at the top; the new row has to be laid out first.
+    private func holdAnswerTop(_ id: String, _ proxy: ScrollViewProxy) {
+        followsTranscriptEnd = false
+        heldAnswerTop = id
+        DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
     }
 
     private func submitDraft() {

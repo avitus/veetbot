@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-19 — A long report opens at its beginning
+
+- In Chat on iPhone, iPad and Mac, opening a scheduled report taller than the
+  window, such as the weekday briefing, showed its end or its middle, with the
+  title and introduction hidden under the toolbar or scrolled past. It now
+  opens with its beginning at the top and stays there while the report's
+  earlier steps finish loading above it.
+
 ## 2026-10-19 — One type scale and one spacing scale in Chat
 
 - Chat on Mac, iPhone and iPad uses seven type roles and one spacing scale.

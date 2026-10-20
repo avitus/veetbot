@@ -184,7 +184,14 @@ final class ConversationNavigationUITests: XCTestCase {
                 add(shot)
                 XCTAssertTrue(closing.exists, "\(day) visit \(visit)\n\(app.debugDescription)")
                 // A briefing taller than the window opens with its beginning
-                // at the top; a drawn transcript scrolls on to its last line.
+                // at the top, below the bars, not scrolled past it.
+                let heading = staticTextFrame("\(day) briefing")
+                let top = transcriptTop()
+                XCTAssertNotNil(heading, "\(day) visit \(visit)\n\(app.debugDescription)")
+                XCTAssertGreaterThanOrEqual(
+                    heading?.minY ?? -.infinity, top - 1, "\(day) visit \(visit): heading \(String(describing: heading)) top \(top)"
+                )
+                // A drawn transcript scrolls on to its last line.
                 // A Mac keeps static text in its value, iOS in its label.
                 let transcript = app.scrollViews.containing(
                     NSPredicate(format: "label == %@ OR value == %@", closingText, closingText)
@@ -259,8 +266,9 @@ final class ConversationNavigationUITests: XCTestCase {
         attachEmailScreenshot("Long streamed answer")
         let firstLine = streamedParagraph(1)
         XCTAssertTrue(firstLine.exists)
-        let geometry = "first line \(firstLine.frame) composer \(composer.frame) window \(app.windows.firstMatch.frame)"
-        XCTAssertGreaterThan(firstLine.frame.minY, app.windows.firstMatch.frame.minY, geometry)
+        let top = transcriptTop()
+        let geometry = "first line \(firstLine.frame) composer \(composer.frame) transcript top \(top)"
+        XCTAssertGreaterThanOrEqual(firstLine.frame.minY, top - 1, geometry)
         XCTAssertLessThan(firstLine.frame.maxY, composer.frame.minY, geometry)
     }
 
@@ -349,6 +357,39 @@ final class ConversationNavigationUITests: XCTestCase {
         app.staticTexts
             .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text))
             .firstMatch
+    }
+
+    /// The frame of the static text that reads exactly `text`, from one
+    /// snapshot of the app: a query by label does not find a Markdown
+    /// heading on the Mac, though the snapshot holds it.
+    private func staticTextFrame(_ text: String) -> CGRect? {
+        guard let root = try? app.snapshot() else { return nil }
+        var pending = [root]
+        while let node = pending.popLast() {
+            if node.elementType == .staticText, node.label == text || node.value as? String == text {
+                return node.frame
+            }
+            pending += node.children
+        }
+        return nil
+    }
+
+    /// The top of the transcript's readable area: below the navigation bar
+    /// it scrolls under on iOS, and the top of its own frame on the Mac.
+    private func transcriptTop() -> CGFloat {
+        let transcript = app.scrollViews.containing(
+            NSPredicate(format: "identifier == %@", "chat.heading")
+        ).firstMatch
+        var top = transcript.exists ? transcript.frame.minY : app.windows.firstMatch.frame.minY
+        #if os(iOS)
+        let bar = app.navigationBars.allElementsBoundByIndex
+            .map(\.frame)
+            .filter { $0.minX < transcript.frame.midX && $0.maxX > transcript.frame.midX }
+            .map(\.maxY)
+            .max()
+        if let bar { top = max(top, bar) }
+        #endif
+        return top
     }
 
     /// Waits for the run to end and any scroll to come to rest before frames are read.

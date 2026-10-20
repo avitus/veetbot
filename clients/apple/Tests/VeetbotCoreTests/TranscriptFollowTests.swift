@@ -51,6 +51,18 @@ import Testing
     }
 
     @Test
+    func theEndOfATranscriptEndingInATallAnswerIsItsBeginning() {
+        #expect(TranscriptFollow.end(latestMessageHeight: 650, visibleHeight: 700, endClearance: 90) == .latestTop)
+        #expect(TranscriptFollow.end(latestMessageHeight: 300, visibleHeight: 700, endClearance: 90) == .end)
+        #expect(TranscriptFollow.end(latestMessageHeight: nil, visibleHeight: 700, endClearance: 90) == .end)
+    }
+
+    @Test
+    func aViewNotYetLaidOutGoesToTheLastRow() {
+        #expect(TranscriptFollow.end(latestMessageHeight: 650, visibleHeight: 0, endClearance: 90) == .end)
+    }
+
+    @Test
     func theEndIsInViewWithinAFewPoints() {
         #expect(TranscriptFollow.isAtEnd(contentHeight: 1500, offset: 800, containerHeight: 700, bottomInset: 0))
         #expect(TranscriptFollow.isAtEnd(contentHeight: 1500, offset: 797, containerHeight: 700, bottomInset: 0))
