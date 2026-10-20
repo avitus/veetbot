@@ -30,9 +30,137 @@ enum EmailType {
     static let handledDiameter: CGFloat = 18
 }
 
+#if os(macOS)
+/// The inbox width the owner chose by dragging the Mac Email divider, kept on
+/// this Mac and never sent to the server. Before any drag, and for an
+/// unreadable value, the split view lays the inbox out as it always has.
+struct EmailInboxWidthStore {
+    static let key = "veetbot.email.inboxWidth"
+    static let bounds: ClosedRange<CGFloat> = 280...560
+    /// This launch's store: the owner's defaults, or a UI journey's own suite.
+    static let app: EmailInboxWidthStore = {
+        #if DEBUG && !SWIFT_PACKAGE
+        if let store = ConversationNavigationUITestFixture.makeEmailInboxWidthIfRequested() { return store }
+        #endif
+        return EmailInboxWidthStore()
+    }()
+    var defaults: UserDefaults = .standard
+    /// The event AppKit is handling, which tells the owner's drag from a layout pass.
+    var currentEvent: () -> NSEvent? = { NSApp?.currentEvent }
+
+    /// The remembered width, held within the column's bounds.
+    var width: CGFloat? {
+        guard let stored = defaults.object(forKey: Self.key) as? Double, stored.isFinite, stored > 0 else {
+            return nil
+        }
+        return Self.clamped(CGFloat(stored))
+    }
+
+    func remember(_ width: CGFloat) {
+        guard width.isFinite, width > 0 else { return }
+        defaults.set(Double(Self.clamped(width)), forKey: Self.key)
+    }
+
+    private static func clamped(_ width: CGFloat) -> CGFloat {
+        min(max(width, bounds.lowerBound), bounds.upperBound)
+    }
+}
+
+/// Sits inside the inbox column of the Mac Email split. `HSplitView` neither
+/// saves its divider nor honours an ideal width, so this view moves the divider
+/// to the remembered width once the split first lays out, and remembers the
+/// width the owner drags it to.
+private struct EmailInboxWidthAutosave: NSViewRepresentable {
+    let store: EmailInboxWidthStore
+
+    func makeNSView(context: Context) -> EmailInboxWidthAutosaveView {
+        let view = EmailInboxWidthAutosaveView()
+        view.store = store
+        return view
+    }
+
+    func updateNSView(_ view: EmailInboxWidthAutosaveView, context: Context) {
+        view.store = store
+    }
+}
+
+private final class EmailInboxWidthAutosaveView: NSView {
+    var store = EmailInboxWidthStore()
+    private weak var split: NSSplitView?
+    private var restoreScheduled = false
+    private var restored = false
+    private var restoring = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        let enclosing = sequence(first: self as NSView, next: \.superview)
+            .lazy.compactMap { $0 as? NSSplitView }.first
+        guard enclosing !== split else { return }
+        let center = NotificationCenter.default
+        if let split { center.removeObserver(self, name: NSSplitView.didResizeSubviewsNotification, object: split) }
+        split = enclosing
+        guard let enclosing else { return }
+        center.addObserver(self, selector: #selector(splitResizedSubviews),
+                           name: NSSplitView.didResizeSubviewsNotification, object: enclosing)
+        scheduleRestore()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        scheduleRestore()
+    }
+
+    /// AppKit reports every divider move, including the ones a layout pass
+    /// makes to keep the reading column at its minimum in a narrow window.
+    /// Only a pointer drag in this window, outside a live resize of the window
+    /// itself, is the owner choosing a width; a squeezed column leaves the
+    /// choice alone. The split view is in live resize during its own divider
+    /// drag, so only the window's state tells the two drags apart.
+    @objc private func splitResizedSubviews() {
+        guard restored, !restoring, let split, let column = inboxColumn,
+              let event = store.currentEvent(), event.type == .leftMouseDragged,
+              let window = split.window, event.windowNumber == window.windowNumber, !window.inLiveResize
+        else { return }
+        store.remember(column.frame.width)
+    }
+
+    /// The split subview that holds the inbox.
+    private var inboxColumn: NSView? {
+        split?.subviews.first { isDescendant(of: $0) }
+    }
+
+    /// Restores after the layout pass in progress, never from inside it.
+    private func scheduleRestore() {
+        guard !restored, !restoreScheduled, split != nil else { return }
+        restoreScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            restoreScheduled = false
+            restoreOnceLaidOut()
+        }
+    }
+
+    private func restoreOnceLaidOut() {
+        guard !restored, let split, split.bounds.width > 0, let column = inboxColumn,
+              let index = split.subviews.firstIndex(of: column), index < split.subviews.count - 1
+        else { return }
+        restored = true
+        guard let width = store.width else { return }
+        // Restoring is not a choice: a window too narrow for the remembered
+        // width holds the column below it, and the remembered width stays.
+        restoring = true
+        split.setPosition(column.frame.minX + width, ofDividerAt: index)
+        restoring = false
+    }
+}
+#endif
+
 public struct EmailModeView: View {
     @ObservedObject var model: EmailViewModel
     var viewportHeight: CGFloat? = nil
+    #if os(macOS)
+    var inboxWidth = EmailInboxWidthStore.app
+    #endif
     let discussInChat: () async -> Void
     @Environment(\.activeClientMode) private var activeMode
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -113,8 +241,10 @@ public struct EmailModeView: View {
     private var macSplit: some View {
         HSplitView {
             inbox
-                .frame(minWidth: 280, idealWidth: 340, maxWidth: 560)
+                .frame(minWidth: EmailInboxWidthStore.bounds.lowerBound, idealWidth: 340,
+                       maxWidth: EmailInboxWidthStore.bounds.upperBound)
                 .frame(height: macColumnHeight)
+                .background(EmailInboxWidthAutosave(store: inboxWidth))
             detail
                 .frame(minWidth: 360, maxWidth: .infinity)
                 .frame(height: macColumnHeight)

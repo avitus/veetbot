@@ -657,8 +657,11 @@ The inbox keeps search, Important / Other mail and account filtering in a compac
 header above the thread list, without a repeated title or introductory copy.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560
 points while retaining at least 360 points for reading. Its width and selected
-thread survive Chat / Email switching. Compact iPhone navigation and regular
-iPad navigation retain their platform layouts.
+thread survive Chat / Email switching. The width the owner drags the divider to
+is kept on this Mac (`veetbot.email.inboxWidth`) and restored at the next
+launch; a window too narrow for it squeezes the inbox without replacing the
+remembered width. Compact iPhone navigation and regular iPad navigation retain
+their platform layouts.
 Rows follow the A2 Email reference: a Handled circle leads each row (empty
 while the conversation is in the Inbox, a filled teal check once Gmail has
 archived it, the same reversible label change under the same Archive in Gmail
@@ -730,9 +733,9 @@ and initially open when copy recipients are present. Draft options collect save,
 history, writing-example endorsement and discard. Review & Send remains the
 primary composer action and opens a separate, scrollable exact-message review.
 Native interaction coverage checks the five-row inbox, divider dragging and
-width preservation across mode changes, the reply shortcut, optional feedback,
-recipient-field discovery and separation of Chat and Email toolbar actions in
-light and dark appearance. Email draws on the A2 tokens: paper behind the
+width preservation across mode changes and relaunch, the reply shortcut,
+optional feedback, recipient-field discovery and separation of Chat and Email
+toolbar actions in light and dark appearance. Email draws on the A2 tokens: paper behind the
 list and the reading column, teal for the gist rule and draft states, amber
 for attention, and filled capsules that keep contrasting text.
 

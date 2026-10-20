@@ -26,7 +26,13 @@ import SwiftUI
             return (200, "{\"items\":[\(rows)],\"next_cursor\":null}")
         }
         await model.reload()
-        let host = NSHostingView(rootView: EmailModeView(model: model, viewportHeight: 800, discussInChat: {}))
+        // A divider drag is remembered; keep this one out of the owner's defaults.
+        let suiteName = "veetbot.tests.email-inbox-layout.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = EmailInboxWidthStore(defaults: defaults)
+        let host = NSHostingView(rootView: EmailModeView(
+            model: model, viewportHeight: 800, inboxWidth: store, discussInChat: {}))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
@@ -69,7 +75,7 @@ import SwiftUI
         #expect(scroll.frame.width <= 560)
         try snapshot("email-sidebar-wide")
         window.setContentSize(NSSize(width: 780, height: 500))
-        host.rootView = EmailModeView(model: model, viewportHeight: 500, discussInChat: {})
+        host.rootView = EmailModeView(model: model, viewportHeight: 500, inboxWidth: store, discussInChat: {})
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 200_000_000)
         host.layoutSubtreeIfNeeded()
@@ -78,6 +84,79 @@ import SwiftUI
                 "Resizing the window must preserve room to read the selected email")
         #expect(host.bounds.contains(host.convert(scroll.bounds, from: scroll)))
         try snapshot("email-sidebar-small-window")
+    }
+
+    /// The inbox reopens at the width its divider was dragged to, as after quitting the app;
+    /// a window too narrow for that width squeezes the column without replacing the choice.
+    @Test func testEmailInboxReopensAtTheWidthItsDividerWasDraggedTo() async throws {
+        let suiteName = "veetbot.tests.email-inbox-width.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var handling: NSEvent?
+        let store = EmailInboxWidthStore(defaults: defaults, currentEvent: { handling })
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            return (200, "{\"items\":[\(self.threadJSON())],\"next_cursor\":null}")
+        }
+        await model.reload()
+        defer { model.resetConnection() }
+        /// Find the first matching AppKit descendant in the rendered email hierarchy.
+        func descendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+            if let match = view as? T { return match }
+            return view.subviews.lazy.compactMap { descendant(type, in: $0) }.first
+        }
+        /// Settle SwiftUI's asynchronous AppKit updates before measuring the columns.
+        func settle(_ window: NSWindow) async throws {
+            window.contentView?.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
+        /// Opens the inbox in a new window, as a launch does, and returns its divider.
+        func open() async throws -> (NSWindow, NSSplitView) {
+            let host = NSHostingView(rootView: EmailModeView(
+                model: model, viewportHeight: 800, inboxWidth: store, discussInChat: {}))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            host.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+            try await settle(window)
+            return (window, try #require(descendant(NSSplitView.self, in: host)))
+        }
+        func inboxWidth(_ split: NSSplitView) -> CGFloat { split.subviews.first?.frame.width ?? 0 }
+        /// After a divider move the split takes a few layout passes to settle; lay out
+        /// as display cycles would, for up to two seconds, until the inbox is `width` wide.
+        func inbox(of split: NSSplitView, in window: NSWindow, settlesAt width: CGFloat) async throws -> Bool {
+            for _ in 0..<10 where abs(inboxWidth(split) - width) > 2 { try await settle(window) }
+            return abs(inboxWidth(split) - width) <= 2
+        }
+        /// A pointer event in `window`, as AppKit hands it to the split view.
+        func pointer(_ type: NSEvent.EventType, at x: CGFloat, in window: NSWindow) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: NSPoint(x: x, y: 400), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        }
+
+        let (first, split) = try await open()
+        #expect(store.width == nil)
+        #expect(inboxWidth(split) < 400, "Before any drag the inbox opens at its own width, not \(inboxWidth(split))")
+        // AppKit moves the divider while it handles the owner's pointer drag.
+        handling = pointer(.leftMouseDragged, at: 480, in: first)
+        split.setPosition(480, ofDividerAt: 0)
+        handling = pointer(.leftMouseUp, at: 480, in: first)
+        #expect(try await inbox(of: split, in: first, settlesAt: 480),
+                "The divider moved the inbox to \(inboxWidth(split))")
+        #expect(store.width.map { abs($0 - 480) <= 2 } == true)
+        first.setContentSize(NSSize(width: 780, height: 800))
+        try await settle(first)
+        #expect(inboxWidth(split) <= 420, "A narrow window keeps room to read, not \(inboxWidth(split))")
+        first.contentView = nil
+
+        let (second, reopened) = try await open()
+        defer { second.contentView = nil }
+        #expect(try await inbox(of: reopened, in: second, settlesAt: 480),
+                "The inbox must reopen at the width the owner dragged it to, not \(inboxWidth(reopened))")
     }
 
     /// A sent reply is a record: its rendered body accepts no typing and holds no insertion point,

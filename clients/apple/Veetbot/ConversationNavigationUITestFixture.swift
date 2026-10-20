@@ -87,6 +87,21 @@ enum ConversationNavigationUITestFixture {
         return FolderSidebarPreferences(defaults: defaults)
     }
 
+    #if os(macOS)
+    /// The Email inbox width lives in a suite of its own, emptied at launch so
+    /// a journey never inherits another's, or the owner's, divider. A relaunch
+    /// journey keeps it to see the width the previous launch remembered.
+    static func makeEmailInboxWidthIfRequested() -> EmailInboxWidthStore? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.email-inbox-width"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] != "1" {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return EmailInboxWidthStore(defaults: defaults)
+    }
+    #endif
+
     /// Whether a launch asked for one conversation to open by itself.
     static var opensSessionAtLaunch: Bool {
         ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_OPEN_SESSION"] != nil

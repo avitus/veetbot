@@ -2959,6 +2959,32 @@ final class ConversationNavigationUITests: XCTestCase {
         attachEmailScreenshot("Resized priority inbox")
     }
 
+    /// Drags the actual divider, quits, and finds the inbox at the dragged width after relaunch.
+    func testEmailSidebarWidthPersistsAcrossApplicationRestart() {
+        launchFullEmailInbox()
+        let search = app.textFields["email.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        let originalWidth = search.frame.width
+        let divider = app.splitters.firstMatch
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
+        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
+                      "Dragging the divider must widen the email list\n\(app.debugDescription)")
+        let resizedWidth = search.frame.width
+
+        app.launchEnvironment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] = "1"
+        defer { app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH") }
+        // Launching again ends the running app first, as quitting it would.
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.email"].waitForExistence(timeout: 10))
+        app.buttons["mode.email"].click()
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { abs($0.width - resizedWidth) <= 3 },
+                      "The inbox must reopen at \(resizedWidth) points, not \(search.frame.width)")
+        attachEmailScreenshot("Inbox width after relaunch")
+    }
+
     /// Launch the five-priority email fixture in a deterministic Mac window.
     private func launchFullEmailInbox() {
         app.launchArguments.append("--ui-testing-email-full-inbox")
