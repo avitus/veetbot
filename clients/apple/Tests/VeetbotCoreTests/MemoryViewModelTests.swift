@@ -779,7 +779,8 @@ import Testing
         let body = try #require(lock.withLock { bodies.last })
         #expect(body["outcome"] as? String == "changed")
         #expect(body["replacement_statement"] as? String == "The user prefers light mode.")
-        #expect(body["expected_updated_at"] as? String == "2026-08-20T00:00:00Z")
+        // Milliseconds, the precision the server compares at (PR #179 review).
+        #expect(body["expected_updated_at"] as? String == "2026-08-20T00:00:00.000Z")
     }
 
     @Test

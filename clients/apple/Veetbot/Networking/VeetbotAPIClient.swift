@@ -669,7 +669,11 @@ public struct VeetbotAPIClient: Sendable {
         ceiling: MemorySensitivityKind,
         key: String = UUID().uuidString
     ) async throws -> MemoryView {
-        let stamp = ISO8601DateFormatter().string(from: expectedUpdatedAt)
+        // Milliseconds, the precision the server compares at; whole seconds
+        // would make every unchanged memory a conflict.
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: expectedUpdatedAt)
         do {
             return try await transport.send(
                 TransportRequest(

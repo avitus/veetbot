@@ -547,8 +547,8 @@ pair, `persona.read` and `persona.write`, mounted only when
 `AGENT_PERSONA_API_ENABLED` is set. The persona document and its nominations
 are a distinct resource: nothing persona-shaped is added under
 `/v1/memories`, whose table is exactly the one the memory design documents
-(two reads and, since ADR-0117, two writes) and which Milestone 17's route
-walk still proves.
+(four reads, two of them since ADR-0224, and since ADR-0117 two writes) and
+which Milestone 17's route walk still proves.
 
 ```text
 GET    /v1/persona                                   persona.read
@@ -557,6 +557,8 @@ GET    /v1/persona/history                           persona.read
 GET    /v1/persona/nominations                       persona.read
 POST   /v1/persona/nominations/{nomination_id}/affirm    persona.write
 POST   /v1/persona/nominations/{nomination_id}/decline   persona.write
+POST   /v1/persona/preview                           persona.write
+GET    /v1/persona/boundaries                        persona.read
 ```
 
 The persona design owns the request and view schemas, the `expected_version`

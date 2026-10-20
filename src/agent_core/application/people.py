@@ -107,6 +107,7 @@ def _safe(text: str) -> bool:
 OPEN_THREAD_WINDOW = timedelta(days=14)
 # Bounds on the scans that back the counts and the open-thread list.
 _SCAN_PAGES = 100
+_COUNT_ATTEMPTS = 3
 
 
 type PresentablePeople = (
@@ -883,15 +884,20 @@ class PublicPeopleService:
         The facts read history and open threads, so a caller without
         `people.read` (a write-only token) gets the person without them.
         """
-        persons = list(_shown_people(result))
-        if "people.read" in principal.scopes:
+        people = list(_shown_people(result))
+        # A page that enriched its own rows (the open-thread list) is not read again.
+        shown = {person.id: person for person in people if isinstance(person, DirectoryPerson)}
+        persons = [person for person in people if not isinstance(person, DirectoryPerson)]
+        if not persons:
+            enriched: builtins.list[DirectoryPerson] = []
+        elif "people.read" in principal.scopes:
             async with self._uow_factory() as uow:
                 enriched = await self._directory(
                     uow, principal, persons, self._ceiling(ceiling), as_of=as_of
                 )
         else:
             enriched = [DirectoryPerson.model_validate(person.model_dump()) for person in persons]
-        shown = {person.id: person for person in enriched}
+        shown.update({person.id: person for person in enriched})
         return cast(P, _with_people(result, shown))
 
     async def _merge_sections(
@@ -1233,6 +1239,8 @@ class PublicPeopleService:
             if after is not None:
                 ordered = [person for person in ordered if due_key(person) > after]
             shown = ordered[:limit]
+            # Enriched here with the scan this page already made.
+            items = await self._directory(uow, principal, shown, ceiling, threads=threads)
         next_cursor = None
         if len(ordered) > limit:
             last = shown[-1]
@@ -1244,7 +1252,7 @@ class PublicPeopleService:
                     sort_keys=True,
                 ).encode()
             ).decode()
-        return PeoplePage(items=shown, next_cursor=next_cursor)
+        return PeoplePage(items=list(items), next_cursor=next_cursor)
 
     async def _owed_people(
         self,
@@ -1271,28 +1279,37 @@ class PublicPeopleService:
         ceiling = self._ceiling(ceiling)
 
         async def directory(review: bool) -> set[UUID]:
-            found: set[UUID] = set()
-            cursor = None
-            for _ in range(_SCAN_PAGES):
-                page = await self._list_rows(
-                    principal,
-                    ceiling=ceiling,
-                    text=None,
-                    limit=100,
-                    cursor=cursor,
-                    as_of=None,
-                    state=None,
-                    pinned=None,
-                    sort="id",
-                    relationship=None,
-                    states=["active", "provisional"],
-                    review=review,
-                )
-                found.update(person.id for person in page.items)
-                cursor = page.next_cursor
-                if cursor is None:
-                    break
-            return found
+            # A change during the walk invalidates its cursor; start over a few
+            # times before reporting the conflict, as a client would.
+            for attempt in range(_COUNT_ATTEMPTS):
+                found: set[UUID] = set()
+                cursor = None
+                try:
+                    for _ in range(_SCAN_PAGES):
+                        page = await self._list_rows(
+                            principal,
+                            ceiling=ceiling,
+                            text=None,
+                            limit=100,
+                            cursor=cursor,
+                            as_of=None,
+                            state=None,
+                            pinned=None,
+                            sort="id",
+                            relationship=None,
+                            states=["active", "provisional"],
+                            review=review,
+                        )
+                        found.update(person.id for person in page.items)
+                        cursor = page.next_cursor
+                        if cursor is None:
+                            break
+                except ConflictError:
+                    if attempt + 1 == _COUNT_ATTEMPTS:
+                        raise
+                    continue
+                return found
+            raise AssertionError("unreachable")
 
         everyone = await directory(False)
         needs_review = await directory(True)

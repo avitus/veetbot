@@ -1722,7 +1722,10 @@ visibility, rejection and source-admissibility checks determine which originals
 remain. An attachment-bearing original or a hidden People dependency cannot
 prevent otherwise valid neighbors from forming their own group. Fewer than two
 surviving originals queues no work; the input digest and deduplication use exactly
-the surviving membership. Inventory-only coverage remains independent of provider
+the surviving membership. A group whose own anchor did not survive is not queued
+either: its other members may all lie outside the inspected page, which would make
+checkpoint refuse the batch and leave the owner's inventory stuck at that cursor;
+those members form their groups when they are anchors themselves. Inventory-only coverage remains independent of provider
 readiness. This is a selection preview: queued membership is never silently
 trimmed, and preparation, verification and application still revalidate every
 queued original together. No source type, privacy classification or daily budget

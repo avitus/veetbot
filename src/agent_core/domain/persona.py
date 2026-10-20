@@ -210,6 +210,20 @@ class PersonaNomination(BaseModel):
         return self
 
 
+def rendered_entry_count(document: PersonaDocument, *, ceiling: Sensitivity) -> int:
+    """How many entries the row renders: the thirty-item cap counts these.
+
+    The framing, voice and trait lines of ADR-0226 are fixed, bounded additions
+    that the persona token cap covers; they are not entries.
+    """
+    limit = SENSITIVITY_ORDER[ceiling]
+    return sum(
+        1
+        for entry in document.entries
+        if entry.enabled and SENSITIVITY_ORDER[entry.sensitivity] <= limit
+    )
+
+
 def render_persona(document: PersonaDocument, *, ceiling: Sensitivity) -> str:
     """Render the persona row's text: one entry per line, in document order.
 

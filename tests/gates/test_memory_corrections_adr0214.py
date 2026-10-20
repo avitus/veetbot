@@ -273,3 +273,29 @@ async def test_review_and_reinforcement_advance_updated_at() -> None:
                 )
                 assert response.status_code == 200, response.text
                 assert response.json()["updated_at"] != _stamp(belief.updated_at)
+
+
+async def test_a_revision_read_at_millisecond_precision_still_matches() -> None:
+    """Apple clients keep milliseconds; the store keeps microseconds.
+
+    The revision check compares at the precision a client can send back, so an
+    unchanged belief is never a false conflict.
+    """
+    from datetime import timedelta
+
+    async with build(
+        settings=_enabled_settings(), storage="memory", sequential_ids=True, principal=WRITER
+    ) as composition:
+        stamped = _belief(belief_id=1, position=1).model_copy(
+            update={
+                "updated_at": _belief(belief_id=1, position=1).updated_at
+                + timedelta(microseconds=123_456)
+            }
+        )
+        await _seed_with_session(composition, [stamped])
+        sent = stamped.updated_at.replace(microsecond=123_000)
+        async with _client(composition) as client:
+            changed = await _change(
+                client, stamped.id, REPLACEMENT, key="fix-ms", expected=sent.isoformat()
+            )
+            assert changed.status_code == 200, changed.text

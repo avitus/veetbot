@@ -18,6 +18,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import httpx
+import pytest
 
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition, build
@@ -309,3 +310,28 @@ async def test_counts_need_people_read_and_are_not_a_person_id() -> None:
         ]
         paths = [getattr(route, "path", "") for route in flattened]
         assert paths.index("/v1/people/counts") < paths.index("/v1/people/{person_id}")
+
+
+async def test_counts_restart_a_walk_that_people_changed_under(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent change makes a list cursor conflict; the count starts over."""
+    from agent_core.application.people import PublicPeopleService
+    from agent_core.domain.errors import ConflictError
+
+    original = PublicPeopleService._list_rows
+    raised: list[bool] = []
+
+    async def flaky(self: PublicPeopleService, *args: Any, **kwargs: Any) -> Any:
+        if not raised:
+            raised.append(True)
+            raise ConflictError("People changed; restart the list")
+        return await original(self, *args, **kwargs)
+
+    async with _api() as (client, _app):
+        await _person(client, "Maya")
+        monkeypatch.setattr(PublicPeopleService, "_list_rows", flaky)
+        counted = await client.get("/v1/people/counts?ceiling=sensitive")
+        assert counted.status_code == 200, counted.text
+        assert counted.json()["everyone"] == 1
+        assert raised == [True]

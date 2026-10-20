@@ -148,8 +148,9 @@ above:
   longer live (superseded, retired, expired or gone).
 - **C.** The response also returns the fixed `prompt` it answered, so the
   client can show the exchange. The model is the title-generation policy; a
-  deployment without a routed model returns `malformed_request` and the client
-  falls back to the labelled illustration. A reply over budget is discarded.
+  deployment without a routed model returns `not_found`, and the client falls
+  back to the labelled illustration only then, showing every other error. A
+  reply over budget is discarded.
 - **D.** The catalog lives in `agent_core.persona.boundaries`. A claim whose
   fact is missing is omitted at runtime and fails the gate in tests. Calls are
   named only when calling is enabled; website task grants are listed with

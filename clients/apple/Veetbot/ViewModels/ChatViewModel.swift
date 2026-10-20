@@ -1181,7 +1181,7 @@ public final class ChatViewModel: ObservableObject {
             return true
         } catch {
             history = (try? await historyStore.list()) ?? history
-            errorMessage = error.localizedDescription
+            present(error)
             return false
         }
     }

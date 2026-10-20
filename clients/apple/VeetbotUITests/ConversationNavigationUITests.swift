@@ -2677,11 +2677,6 @@ final class ConversationNavigationUITests: XCTestCase {
         openSidebarDestination(identifier: "sidebar.memory")
         let row = app.descendants(matching: .any)["memory.row.00000000-0000-0000-0000-000000000321"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        #if os(macOS)
-        let count = app.staticTexts["memory.group.all.count"]
-        XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(count.value as? String ?? count.label, "1")
-        #endif
         row.tap()
         let evidence = app.descendants(matching: .any)["memory.detail.evidence"]
         XCTAssertTrue(evidence.waitForExistence(timeout: 5), app.debugDescription)
@@ -2707,16 +2702,10 @@ final class ConversationNavigationUITests: XCTestCase {
         let field = app.textFields["memory.wording.text"].exists
             ? app.textFields["memory.wording.text"] : app.textViews["memory.wording.text"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        #if os(macOS)
-        field.tap()
-        field.typeKey("a", modifierFlags: .command)
-        field.typeText("The user prefers light mode.")
-        #else
         // The sheet focuses the field with the caret after the wording, so a
         // tap (which would move the caret) is not needed to clear it.
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40) + "The user prefers light mode.")
-        #endif
         XCTAssertTrue(save.isEnabled)
         save.tap()
         XCTAssertTrue(

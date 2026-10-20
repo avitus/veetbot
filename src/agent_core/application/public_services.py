@@ -2206,6 +2206,11 @@ class MemoryOwnerActions(Protocol):
 MEMORY_REPLACEMENT_MAX_CHARS = 500
 
 
+def _to_millisecond(value: datetime) -> datetime:
+    """The precision an Apple client can send back; the store keeps microseconds."""
+    return value.replace(microsecond=value.microsecond // 1000 * 1000)
+
+
 class PublicMemoryService:
     """Principal-first read surface over the belief store (Milestone 17).
 
@@ -2591,7 +2596,9 @@ class PublicMemoryService:
                     record = await self._visible(uow, principal, record.superseded_by, ceiling)
                 return MemoryView.from_record(record)
             record = await self._visible(uow, principal, memory_id, ceiling)
-            if expected_updated_at is not None and record.updated_at != expected_updated_at:
+            if expected_updated_at is not None and _to_millisecond(
+                record.updated_at
+            ) != _to_millisecond(expected_updated_at):
                 raise ConflictError(
                     "memory changed since it was read", reason="memory.revision_conflict"
                 )
@@ -2649,7 +2656,8 @@ class PublicPersonaService:
         """A sample reply in an unsaved voice (ADR-0226 part C); nothing is stored."""
         require_scope(principal, "persona.write")
         if self._previewer is None:
-            raise PersonaContentError("this server cannot generate a sample reply")
+            # Not found, not refused: the client then shows its labelled illustration.
+            raise NotFoundError("this server cannot generate a sample reply")
         return await self._previewer.preview(principal, voice=voice, traits=traits)
 
     async def boundaries(self, principal: Principal) -> PersonaBoundaryList:

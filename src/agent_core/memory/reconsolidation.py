@@ -61,7 +61,10 @@ class ReconsolidationInventoryPass:
                 return 0
             sources = await self._neighbors(source)
             digest = group_digest(sources)
-            if len(sources) > 1 and digest not in seen:
+            # A group keeps its inspected anchor. Without it every source may
+            # lie outside this page, checkpoint refuses the batch, and the
+            # owner's inventory never advances past this cursor.
+            if len(sources) > 1 and source in sources and digest not in seen:
                 seen.add(digest)
                 groups.append(sources)
             if len(groups) == 4:

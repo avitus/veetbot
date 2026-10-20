@@ -15,7 +15,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.errors import PersonaContentError, RateLimitedError
+from agent_core.domain.errors import NotFoundError, PersonaContentError, RateLimitedError
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import Sensitivity
@@ -104,7 +104,7 @@ class PersonaPreviewer:
         if cleaned is None and not chosen:
             raise PersonaContentError("describe a voice or choose a trait to hear it")
         if not self.available:
-            raise PersonaContentError("this server cannot generate a sample reply")
+            raise NotFoundError("this server cannot generate a sample reply")
         await self._admit(principal)
         row = render_persona(
             PersonaDocument(

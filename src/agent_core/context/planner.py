@@ -34,7 +34,7 @@ from agent_core.domain.messages import (
     ConversationItem,
     ResolvedModel,
 )
-from agent_core.domain.persona import render_persona
+from agent_core.domain.persona import render_persona, rendered_entry_count
 from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunKind
 from agent_core.domain.sessions import (
@@ -473,7 +473,7 @@ class EventContextPlanner:
             # A switched-off entry is not a standing instruction (ADR-0226), so
             # its belief takes its place in the snapshot again.
             document.rendered_belief_ids,
-            len(rendered.splitlines()) if rendered else 0,
+            rendered_entry_count(screened, ceiling=Sensitivity.RESTRICTED),
         )
 
     async def _create(

@@ -115,3 +115,17 @@ def test_the_preference_is_a_closed_set() -> None:
     values["notify"] = "never"
     with pytest.raises(ValueError):
         ScheduleDefinition.model_validate(values)
+
+
+def test_a_stored_revision_omits_the_default_so_an_older_release_reads_it() -> None:
+    """A revision is stored as before unless the owner chose a preference.
+
+    A release from before ADR-0225 part D forbids unknown keys, so writing the
+    default `notify` would make every new revision unreadable after a rollback.
+    """
+    from agent_core.adapters.persistence.mappers import schedule_revision_values
+
+    default = schedule_revision_values(revision())["definition"]
+    assert "notify" not in default
+    chosen = revision().model_copy(update={"notify": ScheduleNotify.ATTENTION_ONLY})
+    assert schedule_revision_values(chosen)["definition"]["notify"] == "attention_only"

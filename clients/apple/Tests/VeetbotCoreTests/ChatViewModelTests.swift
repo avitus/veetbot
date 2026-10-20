@@ -145,6 +145,28 @@ import UserNotifications
         #expect(toasts.current?.text == "Cleared. Chats reload from the server.")
     }
 
+    /// PR #179 review: a failed reload after clearing takes the ordinary
+    /// sign-in-again path rather than leaving only a message.
+    @Test
+    func testClearingTheCacheWithAnExpiredTokenAsksToSignInAgain() async throws {
+        let lock = NSLock()
+        var expired = false
+        let model = try configuredModel { request in
+            if lock.withLock({ expired }) {
+                return try response(
+                    for: request, statusCode: 401,
+                    body: #"{"error":{"code":"authentication_error","message":"expired","details":{},"request_id":"r"}}"#
+                )
+            }
+            return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        lock.withLock { expired = true }
+
+        #expect(await model.clearLocalCache() == false)
+        #expect(model.requiresReauthentication)
+    }
+
     @Test
     func testDeletingCallClearsDerivedChatPresentation() async throws {
         let callID = UUID()

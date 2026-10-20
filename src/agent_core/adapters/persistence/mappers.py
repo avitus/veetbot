@@ -83,6 +83,7 @@ from agent_core.domain.schedules import (
     OccurrenceTrigger,
     Schedule,
     ScheduleIdempotencyRecord,
+    ScheduleNotify,
     ScheduleOccurrence,
     SchedulePauseReason,
     ScheduleRevision,
@@ -398,6 +399,10 @@ def schedule_revision_values(revision: ScheduleRevision) -> dict[str, Any]:
     # predates call plans still reads every other revision.
     if revision.call_plan is None:
         definition.pop("call_plan")
+    # Likewise only a chosen notify preference is stored (ADR-0225 part D); an
+    # absent key reads back as the default.
+    if revision.notify is ScheduleNotify.EVERY_REPORT:
+        definition.pop("notify")
     return {
         "schedule_id": revision.schedule_id,
         "revision": revision.revision,

@@ -446,3 +446,64 @@ EXECUTION_SCENARIOS += [
     for variant in ("attachment", "hidden_attribution")
     for usable in (0, 1, 2)
 ]
+
+
+async def execution_never_groups_without_its_anchor(factory: Factory) -> None:
+    """A group whose anchor selection dropped is never queued (PR #179 review).
+
+    Its remaining sources may all lie outside the inspected page; checkpoint
+    then refuses the whole batch and the owner's inventory would never advance
+    past that cursor. The other anchors on the page still form their groups.
+    """
+    from agent_core.adapters.determinism import RandomIdFactory
+    from agent_core.domain.events import NewEvent
+    from agent_core.domain.reconsolidation import SourceVersion
+    from agent_core.memory.reconsolidation_worker import ReconsolidationPass
+    from tests.contract.memory_fixtures import memory
+    from tests.contract.support import SESSION_ID
+
+    owner = principal()
+    async with factory() as uow:
+        await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=owner.principal_id,
+                payload={"content": "I prefer concise answers."},
+            )
+        )
+        for i in range(4):
+            await uow.memories.upsert_belief(
+                memory(belief_id=601 + i).model_copy(update={"store_position": i + 1})
+            )
+        lease = await uow.reconsolidation.claim_due(owner, NOW, "anchor-check")
+        assert lease is not None
+    tracked = TrackedFactory(factory)
+    worker = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        FixedClock(NOW),
+        owner,
+        worker_id="anchor-check",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=ExecutionProvider(tracked),
+        egress_policy=policy,
+    )
+    selected = worker._neighbors
+
+    async def without_anchor(source: SourceVersion) -> tuple[SourceVersion, ...]:
+        if source.belief_id != UUID(int=601):
+            return await selected(source)
+        # Selection dropped the anchor; what survived is off this page.
+        return tuple(
+            source.model_copy(update={"belief_id": UUID(int=9_901 + index)}) for index in range(2)
+        )
+
+    worker._neighbors = without_anchor  # type: ignore[method-assign]
+    assert await worker._inventory(lease) >= 1
+
+
+EXECUTION_SCENARIOS.append(execution_never_groups_without_its_anchor)

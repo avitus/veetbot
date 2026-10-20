@@ -377,6 +377,22 @@ import Testing
         #expect(model.errorMessage == nil)
     }
 
+    /// Only a server that cannot generate (404) gets the illustration; any
+    /// other failure is shown, so a rate limit never looks like a sample.
+    @Test
+    func testASampleThatFailsForAnotherReasonIsReportedNotIllustrated() async throws {
+        let model = try makeModel { request in
+            try self.response(
+                for: request, statusCode: 429,
+                body: #"{"error":{"code":"rate_limited","message":"twenty sample replies an hour; try later","details":{"reason":"persona.previews_rate_limited"},"request_id":"r"}}"#
+            )
+        }
+        model.voice = "Plain."
+        await model.loadSample()
+        #expect(model.sample == nil)
+        #expect(model.errorMessage == "twenty sample replies an hour; try later")
+    }
+
     @Test
     func testBoundariesComeFromTheServer() async throws {
         let model = try makeModel { request in

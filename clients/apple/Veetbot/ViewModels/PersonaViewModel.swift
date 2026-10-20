@@ -246,11 +246,19 @@ public final class PersonaViewModel: ObservableObject {
         guard !isLoadingSample else { return }
         isLoadingSample = true
         defer { isLoadingSample = false }
-        if let client = await makeAPIClient(),
-           let preview = try? await client.previewPersona(voice: trimmedVoice, traits: traits)
-        {
-            sample = Sample(prompt: preview.prompt, reply: preview.reply, label: "Example — generated, not saved")
-            return
+        errorMessage = nil
+        if let client = await makeAPIClient() {
+            do {
+                let preview = try await client.previewPersona(voice: trimmedVoice, traits: traits)
+                sample = Sample(prompt: preview.prompt, reply: preview.reply, label: "Example — generated, not saved")
+                return
+            } catch let HTTPTransportError.api(error) where error.code == .notFound {
+                // The server cannot generate one: fall through to the illustration.
+            } catch {
+                sample = nil
+                errorMessage = Self.describe(error)
+                return
+            }
         }
         sample = Sample(prompt: Self.samplePrompt, reply: Self.illustration(for: traits), label: "Illustration")
     }

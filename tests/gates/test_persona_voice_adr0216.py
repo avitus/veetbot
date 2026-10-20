@@ -345,15 +345,24 @@ async def test_previews_are_limited_per_hour() -> None:
     assert len(provider.requests) == PREVIEWS_PER_HOUR
 
 
-async def test_the_preview_route_needs_persona_write_and_a_generator() -> None:
+async def test_the_preview_route_needs_persona_write_and_a_generator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = replace(memory_settings(), persona_api_enabled=True)
     async with (
         build(settings=settings, storage="memory", principal=OWNER) as composition,
         _client(composition) as client,
     ):
+        # A model call that produced nothing usable is a refusal the owner sees.
+        failed = await client.post("/v1/persona/preview", json={"voice": "Plain."})
+        assert failed.status_code == 400
+        assert failed.json()["error"]["code"] == "malformed_request"
+        # No generator at all is not_found, which the client answers with its
+        # labelled illustration.
+        monkeypatch.setattr(composition.services.persona, "_previewer", None)
         unavailable = await client.post("/v1/persona/preview", json={"voice": "Plain."})
-        assert unavailable.status_code == 400
-        assert unavailable.json()["error"]["code"] == "malformed_request"
+        assert unavailable.status_code == 404
+        assert unavailable.json()["error"]["code"] == "not_found"
         reader = _principal("persona.read")
         app = create_app(
             composition.services,
