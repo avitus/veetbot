@@ -2554,6 +2554,23 @@ milestones:
         unsigned probe was logged as calling.callback_rejected
         reason=signature_missing, which confirms that each delivery's outcome
         reaches the journal.
+    - check: thirty-day expiry and result intake under the production call role
+      outcome: pass
+      detail: >-
+        On 2026-10-20 a scheduled outbound call reached Bland, but its run
+        reported "call not found" and no result was recorded. Every
+        reconciliation pass expires 30-day-old calls before it reads receipts.
+        Call erasure locks the owner's sessions FOR UPDATE and deletes memory
+        revisions, which the documented veetbot_call grants did not allow.
+        From 2026-10-11 19:49Z, when the first call aged out, every pass had
+        failed with "permission denied for table sessions". With the owner's
+        approval, UPDATE on sessions and SELECT, DELETE on memory_revisions
+        were granted at 16:46:55Z. The next passes erased the eight expired
+        calls and, at 16:50:10Z, recorded the morning's call and enqueued its
+        call_finished notification. The journal has shown no failure since.
+        The setup guide's grants are now tested against the real worker
+        composition. A failed expiry no longer blocks intake, and a call read
+        before reconciliation reports a pending result instead of not found.
     - check: hosted CI and review of the implementation to date
       outcome: passed_to_date
       detail: >-

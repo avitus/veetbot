@@ -66,6 +66,7 @@ from tests.contract.support import run as contract_run
 from tests.contract.support import session as contract_session
 from tests.contract.test_delegation_repository_contract import delegation
 from tests.integration.m2_support import database_settings
+from tests.integration.role_probe import release_probe_role
 
 # Before the host's real clock, so the run worker's system-clock claims see
 # every row the fixed clock stamps as due.
@@ -101,42 +102,8 @@ async def release_surface_role(
 ) -> AsyncIterator[str]:
     """Yield a login URL holding exactly ``privileges``, as docs/deployment.md grants."""
 
-    admin_url = make_url(database_settings().database_url)
-    role = f"veetbot_surface_probe_{uuid4().hex[:12]}"
-    password = uuid4().hex
-    engine = create_engine(admin_url.render_as_string(hide_password=False))
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text(
-                    f"CREATE ROLE {role} LOGIN PASSWORD '{password}' "
-                    "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS"
-                )
-            )
-            await connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
-            for table, table_privileges in privileges.items():
-                if table_privileges:
-                    await connection.execute(
-                        text(f"GRANT {', '.join(sorted(table_privileges))} ON {table} TO {role}")
-                    )
-        try:
-            yield admin_url.set(username=role, password=password).render_as_string(
-                hide_password=False
-            )
-        finally:
-            async with engine.begin() as connection:
-                # The role's poller may still hold a pooled session in a failed case.
-                await connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                        "WHERE usename = :role"
-                    ),
-                    {"role": role},
-                )
-                await connection.execute(text(f"DROP OWNED BY {role}"))
-                await connection.execute(text(f"DROP ROLE {role}"))
-    finally:
-        await engine.dispose()
+    async with release_probe_role("veetbot_surface_probe", privileges) as url:
+        yield url
 
 
 @dataclass

@@ -518,3 +518,99 @@ async def test_cancelled_run_terminates_a_recovered_uncertain_call_without_redia
     async with factory() as uow:
         dispatch = await uow.calls.get(principal(), "dispatch", str(tool_context().invocation_id))
     assert dispatch is not None and dispatch.payload.get("termination") == "confirmed"
+
+
+async def test_dispatched_call_reads_as_pending_until_its_result_arrives() -> None:
+    """A lookup straight after dispatch reports the accepted call, not "call not found".
+
+    On 2026-10-20 a scheduled wake-up call read its outcome five seconds after
+    the provider accepted it, before reconciliation had recorded anything, and
+    the run told the owner the call could not be found.
+    """
+    clock, factory = await memory_uow_factory()
+
+    async def provider(server: str, name: str, args: dict[str, Any]) -> MCPCallResult:
+        if name == "provider_list_calls":
+            return MCPCallResult(structured={"provider_call_ids": [], "next_offset": None})
+        return MCPCallResult(
+            structured={
+                **normalized_call(),
+                "direction": "outbound",
+                "request_id": str(tool_context().invocation_id),
+            }
+        )
+
+    async def accepted(args: dict[str, Any]) -> MCPCallResult:
+        return MCPCallResult(structured={"provider_call_id": CALL_ID, "status": "accepted"})
+
+    async def unused(args: dict[str, Any]) -> MCPCallResult:
+        raise AssertionError("owner call reads never reach the provider")
+
+    service = CallService(factory, clock, principal(), call_configuration(), provider)
+    await service.invoke(tool_context(), "bland_call", "start_call", arguments(), accepted)
+    pending = {
+        "call_id": CALL_ID,
+        "direction": "outbound",
+        "status": "accepted",
+        "result_pending": True,
+    }
+    read = await service.invoke(
+        tool_context(), "bland_read", "get_call", {"call_id": CALL_ID}, unused
+    )
+    assert not read.is_error and read.structured == pending
+    assert await service.get_call(principal(), CALL_ID) == pending
+    with pytest.raises(NotFoundError):
+        await service.get_call(principal().model_copy(update={"principal_id": "other"}), CALL_ID)
+    with pytest.raises(NotFoundError):
+        await service.get_call(principal(), str(UUID(int=99)))
+    assert await service.reconcile() == 1
+    recorded = await service.get_call(principal(), CALL_ID)
+    assert recorded["status"] == "completed" and "result_pending" not in recorded
+
+
+async def test_retention_failure_does_not_block_new_call_results(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Every pass expires old calls first; a failed expiry must not stop new results.
+
+    From 2026-10-11 production erasure failed on every pass, so no call result
+    was recorded for nine days.
+    """
+    from agent_core.adapters.persistence.session_deletions import (
+        InMemorySessionDeletionRepository,
+    )
+
+    clock, factory = await memory_uow_factory()
+    fresh = str(UUID(int=28))
+
+    async def provider(server: str, name: str, args: dict[str, Any]) -> MCPCallResult:
+        if name == "provider_list_calls":
+            return MCPCallResult(structured={"provider_call_ids": [], "next_offset": None})
+        return MCPCallResult(
+            structured={
+                **normalized_call(),
+                "provider_call_id": args["provider_call_id"],
+                "created_at": clock.now().isoformat(),
+            }
+        )
+
+    async def denied(*args: Any, **kwargs: Any) -> dict[str, int]:
+        raise RuntimeError("permission denied for table sessions")
+
+    service = CallService(factory, clock, principal(), call_configuration(), provider)
+    await service.receive(*signed_body(), SIGNING_FIXTURE)
+    assert await service.reconcile() == 1
+    clock.advance(timedelta(days=31))
+    monkeypatch.setattr(InMemorySessionDeletionRepository, "erase_call_source", denied)
+    caplog.set_level(logging.WARNING, logger="agent_core.application.calling")
+    await service.receive(*signed_body(fresh), SIGNING_FIXTURE)
+    assert await service.reconcile() == 1
+    assert (await service.get_call(principal(), fresh))["status"] == "completed"
+    # Expired content stays hidden while its erasure waits for the next pass.
+    assert await service.get_call(principal(), CALL_ID) == {
+        "call_id": CALL_ID,
+        "erased": True,
+        "provider_deleted": False,
+    }
+    assert "calling.retention_failed" in [record.getMessage() for record in caplog.records]
+    assert CALL_ID not in caplog.text and "permission denied" not in caplog.text

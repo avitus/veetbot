@@ -131,6 +131,9 @@ means that the call was accepted, not that the recipient answered or the task
 succeeded. Save the identifier, owner, approved invocation, agent revision, and
 outbound correlation identifier durably. Final states distinguish no answer,
 busy, voicemail, completed conversation, failure, and an uncertain dispatch.
+Until reconciliation records an accepted call, reading its identifier returns
+a content-free pending view, not "call not found". The view gives the outbound
+direction, status `accepted` and `result_pending: true`.
 
 Use the executor's existing effect watermark and uncertain-outcome handling.
 
@@ -266,6 +269,9 @@ redacts subsequent generated content and tool arguments in affected sessions,
 since later turns may paraphrase the source without retaining its identifier;
 original owner messages remain intact. Active runs defer erasure. Expired
 content is hidden immediately and physical artifact cleanup uses maintenance.
+Each pass expires calls before it reads receipts. A failed expiry logs the
+fixed `calling.retention_failed` and moves on, so erasure faults never hold
+back new results, and the next pass retries the erasure.
 
 `agent call-ingress` uses a separate Linux user, receipt-only database role,
 loopback port 8003 and a 256-KiB raw-body limit. The main owner API exposes
