@@ -261,6 +261,143 @@ import Testing
         #expect(model.errorMessage == nil)
     }
 
+    // MARK: ADR-0216
+
+    @Test
+    func testVoiceTraitsAndSwitchesLoadAndSaveWithTheDocument() async throws {
+        let beliefID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000511"))
+        let lock = NSLock()
+        var bodies: [Data] = []
+        let document = """
+            {"version":5,"voice":"Plain and calm.","traits":["brief","warm"],"entries":[{"text":"User drinks oat milk.","source":"affirmation","source_belief_id":"\(beliefID.uuidString)","sensitivity":"internal","enabled":false,"stale":true}],"source":"user_edit","created_at":"2026-10-20T12:00:00Z"}
+            """
+        let model = try makeModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/persona"), ("PUT", "/v1/persona"):
+                if request.httpMethod == "PUT" { lock.withLock { bodies.append(request.bodyData ?? Data()) } }
+                return try self.response(for: request, statusCode: 200, body: document)
+            case ("GET", "/v1/persona/nominations"):
+                return try self.response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            default:
+                return try self.response(for: request, statusCode: 404, body: "{}")
+            }
+        }
+
+        await model.load()
+        #expect(model.voice == "Plain and calm.")
+        #expect(model.traits == ["brief", "warm"])
+        #expect(model.toneSupported)
+        #expect(model.drafts[0].enabled == false)
+        #expect(model.drafts[0].stale)
+
+        model.voice = "Short and kind."
+        model.toggleTrait("warm")
+        model.drafts[0].enabled = true
+        await model.save()
+
+        let body = try #require(lock.withLock { bodies.first })
+        let decoded = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(decoded["voice"] as? String == "Short and kind.")
+        #expect(decoded["traits"] as? [String] == ["brief"])
+        let entry = try #require((decoded["entries"] as? [[String: Any]])?.first)
+        #expect(entry["enabled"] == nil, "an enabled entry is sent as before")
+    }
+
+    @Test
+    func testAnOlderServerIsSentNoFieldsItWouldRefuse() async throws {
+        let lock = NSLock()
+        var bodies: [Data] = []
+        let model = try makeModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/persona"):
+                return try self.response(for: request, statusCode: 200, body: self.personaJSON(version: 3))
+            case ("PUT", "/v1/persona"):
+                lock.withLock { bodies.append(request.bodyData ?? Data()) }
+                return try self.response(for: request, statusCode: 200, body: self.personaJSON(version: 4))
+            case ("GET", "/v1/persona/nominations"):
+                return try self.response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            default:
+                return try self.response(for: request, statusCode: 404, body: "{}")
+            }
+        }
+        await model.load()
+        #expect(model.toneSupported == false)
+        #expect(model.boundaries.isEmpty)
+        await model.save()
+        let body = try #require(lock.withLock { bodies.first })
+        let decoded = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(Set(decoded.keys) == ["expected_version", "entries"])
+    }
+
+    @Test
+    func testTraitsAreAtMostThreeAndFormalAndPlayfulExcludeEachOther() throws {
+        let model = try makeModel { request in try self.response(for: request, statusCode: 404, body: "{}") }
+        for trait in ["brief", "warm", "direct", "formal"] { model.toggleTrait(trait) }
+        #expect(model.traits == ["brief", "warm", "direct"])
+        model.toggleTrait("direct")
+        model.toggleTrait("formal")
+        model.toggleTrait("playful")
+        #expect(model.traits == ["brief", "warm", "playful"])
+        model.toggleTrait("brief")
+        #expect(model.traits == ["warm", "playful"])
+    }
+
+    @Test
+    func testTheSampleReplyIsGeneratedOrIllustratedAndSaysWhich() async throws {
+        let lock = NSLock()
+        var available = true
+        var previews: [[String: Any]] = []
+        let model = try makeModel { request in
+            if request.url?.path == "/v1/persona/preview" {
+                let body = try JSONSerialization.jsonObject(with: request.bodyData ?? Data()) as? [String: Any]
+                lock.withLock { previews.append(body ?? [:]) }
+                guard lock.withLock({ available }) else {
+                    return try self.response(for: request, statusCode: 404, body: #"{"error":{"code":"not_found","message":"The requested resource was not found.","details":{},"request_id":"r"}}"#)
+                }
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: #"{"prompt":"Can you move my 3 pm to tomorrow?","reply":"Done soon. Tomorrow at 3?","generated_at":"2026-10-20T12:00:00Z"}"#
+                )
+            }
+            return try self.response(for: request, statusCode: 404, body: "{}")
+        }
+        model.voice = "Plain."
+        model.toggleTrait("brief")
+        await model.loadSample()
+        #expect(model.sample?.reply == "Done soon. Tomorrow at 3?")
+        #expect(model.sample?.label == "Example — generated, not saved")
+        let sent = try #require(lock.withLock { previews.first })
+        #expect(sent["voice"] as? String == "Plain.")
+        #expect(sent["traits"] as? [String] == ["brief"])
+
+        lock.withLock { available = false }
+        await model.loadSample()
+        #expect(model.sample?.label == "Illustration")
+        #expect(model.sample?.reply.isEmpty == false)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testBoundariesComeFromTheServer() async throws {
+        let model = try makeModel { request in
+            switch request.url?.path {
+            case "/v1/persona":
+                return try self.response(for: request, statusCode: 200, body: self.personaJSON(version: 1))
+            case "/v1/persona/nominations":
+                return try self.response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            case "/v1/persona/boundaries":
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: #"{"items":[{"id":"payments_ask","text":"Payments ask you first.","enforced_by":{"kind":"policy_rule","ref":"rules.financial=require_approval"},"active":true},{"id":"website_task_grants","text":"Website tasks…","enforced_by":{"kind":"configuration","ref":"browser_task_grants_enabled"},"active":false}]}"#
+                )
+            default:
+                return try self.response(for: request, statusCode: 404, body: "{}")
+            }
+        }
+        await model.load()
+        #expect(model.boundaries.map(\.id) == ["payments_ask"], "an inactive rule is not shown as a promise")
+    }
+
     private func makeModel(
         toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)

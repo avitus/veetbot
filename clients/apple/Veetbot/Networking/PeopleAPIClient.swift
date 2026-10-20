@@ -4,10 +4,12 @@ import Foundation
 extension VeetbotAPIClient {
     /// Repeated `state` values list several states; `review` asks for the
     /// server's Needs review filter (ADR-0121).
-    public func listPeople(text: String? = nil, cursor: String? = nil, asOf: Date? = nil, states: [String] = [], review: Bool = false, pinned: Bool? = nil, sort: String = "id", relationship: String? = nil) async throws -> Page<PersonView> {
+    public func listPeople(text: String? = nil, cursor: String? = nil, asOf: Date? = nil, states: [String] = [], review: Bool = false, pinned: Bool? = nil, sort: String = "id", relationship: String? = nil, openThreads: Bool = false) async throws -> Page<PersonView> {
         var query = peopleQuery
         query.append(URLQueryItem(name: "limit", value: "50"))
         query.append(URLQueryItem(name: "sort", value: sort))
+        // ADR-0217: owed replies due soon; the server takes it alone.
+        if openThreads { query.append(URLQueryItem(name: "open_threads", value: "true")) }
         query.append(contentsOf: states.map { URLQueryItem(name: "state", value: $0) })
         if review { query.append(URLQueryItem(name: "review", value: "true")) }
         if let relationship { query.append(URLQueryItem(name: "relationship", value: relationship)) }
@@ -21,6 +23,11 @@ extension VeetbotAPIClient {
         }
         return try await transport.send(TransportRequest(method: .get, path: "/v1/people", queryItems: query))
     }
+    /// The sidebar's numbers under each list's own predicates (ADR-0217).
+    public func peopleCounts() async throws -> PeopleCountsView {
+        try await transport.send(TransportRequest(method: .get, path: "/v1/people/counts", queryItems: peopleQuery))
+    }
+
     public func person(_ id: UUID) async throws -> PersonProfileView {
         try await transport.send(TransportRequest(method: .get, path: "/v1/people/\(id.uuidString)", queryItems: peopleQuery))
     }

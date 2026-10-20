@@ -167,7 +167,8 @@ public struct MemoryBrowserView: View {
     #if os(macOS)
     /// The Mac's first column (MagicPath coolly-breeze-5701): the review
     /// queue, the memories by type and the People directory, then the
-    /// synthesis journal. Counts wait on a server summary (ADR-0214).
+    /// synthesis journal. The numbers come from the counts route (ADR-0214);
+    /// an older server leaves the rows without them.
     private var groupSidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
@@ -200,6 +201,7 @@ public struct MemoryBrowserView: View {
             .padding(10)
         }
         .background(AppTheme.paperDeep)
+        .task { await model.loadCounts() }
     }
 
     private var sidebarItem: MemorySidebarItem {
@@ -218,6 +220,11 @@ public struct MemoryBrowserView: View {
             .padding(.top, 12)
             .padding(.bottom, 2)
             .accessibilityAddTraits(.isHeader)
+    }
+
+    private func sidebarCount(_ item: MemorySidebarItem) -> Int? {
+        if case .memories(let group) = item { return model.count(for: group) }
+        return nil
     }
 
     private func groupRow(_ group: MemorySidebarItem, systemImage: String?) -> some View {
@@ -244,6 +251,15 @@ public struct MemoryBrowserView: View {
                 .accessibilityHidden(true)
                 Text(group.title).foregroundColor(AppTheme.ink)
                 Spacer(minLength: 4)
+                if let count = sidebarCount(group) {
+                    Text(count, format: .number)
+                        .veetType(.meta, weight: group == .memories(.review) && count > 0 ? .semibold : .regular)
+                        .monospacedDigit()
+                        .foregroundColor(
+                            group == .memories(.review) && count > 0 ? AppTheme.amberText : AppTheme.inkSoft
+                        )
+                        .accessibilityIdentifier("memory.group.\(group.id).count")
+                }
             }
             .veetType(.ui)
             .padding(.horizontal, 8)

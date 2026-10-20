@@ -212,7 +212,14 @@ list slides over the conversation from the leading edge. Email follows (see
 People" below), and Persona, Settings and Connect complete the set: the
 persona's entries as a card of hairline rows of fields, a server conflict and
 each nomination from memory in an amber-edged card with Affirm as the filled
-capsule and Decline as a quiet one. `HairlineDivider`,
+capsule and Decline as a quiet one. With a server that has them (ADR-0216),
+Persona leads with Voice, the Lean towards chips (Brief, Warm, Direct, Formal,
+Playful; up to three, Formal and Playful replacing each other) and How that
+sounds, an example reply the server generates from the unsaved voice and labels
+"Example — generated, not saved" (or a labelled illustration of the chips when
+it cannot); each entry under What Veetbot assumes has an on/off switch and says
+when the memory it came from has changed; and Boundaries lists the active
+rules the server reports, each enforced by a named policy rule or setting. `HairlineDivider`,
 `FilterPillButtonStyle`, the `a2Field`, `a2List` and `a2Card` modifiers, and
 the reading-page pieces `A2SectionHeading`, `A2KindLabel`, `A2RecordGroup`,
 `A2Quote`, `A2EmptyState` and `A2SheetHeader` join the shared controls for the
@@ -577,23 +584,33 @@ email-derived memory arrives flagged. On the Mac the sheet has three columns:
 a group sidebar on deep paper (Review: Needs review; Browse: All memories, each
 belief type and the People directory; Maintenance: Synthesis), the list, and
 the detail; it replaces the collection picker and the review and type
-filters, and counts wait on a server summary (ADR-0214, proposed). A flagged
-memory asks "Is this right?" in an amber-edged card with Looks right (the
-`dismiss` outcome) as the filled capsule and Not true and Not relevant here as
-quiet ones; the Review menu offers the same with Delete memory, and a row can
-be swiped to delete after a confirmation (ADR-0117, under `memory.write`).
-Fixing a memory's wording, editing it and showing evidence quotes are held for
-the owner in ADR-0214. A
-deleted statement does not form again; its original messages stay at their
-source.
+filters, and each memory group shows its number from the counts route
+(ADR-0214); an older server leaves the numbers off. A flagged memory asks "Is
+this right?" in an amber-edged card with Looks right (the `dismiss` outcome) as
+the filled capsule and Fix the wording, Not true and Not relevant here as quiet
+ones; the Review menu offers the same with Edit wording for any live memory and
+Delete memory, and a row can be swiped to delete after a confirmation (ADR-0117,
+under `memory.write`). Fix the wording and Edit wording open one sheet: saving
+supersedes the memory with the owner's words through the `changed` review
+outcome, the detail then shows the new memory, and the earlier wording stays on
+the server as history and does not form again (ADR-0214). Under "Where this came
+from" the detail lists up to five cited sources: the owner's own words as a
+quote, and an email, text, call, schedule or tool source by where it came from,
+never its text. A deleted statement does not form again; its original messages
+stay at their source.
 
 **People** (Milestone 28, under `people.read` and `people.write`) lists the
 people the owner knows or writes to (ADR-0121) in the A2 sections: Needs you
 (the server's review filter: people known only by a name or role), Recent (the
 server's newest-interaction order), Everyone and Pinned, then Possible
 duplicates (each pair answered with Merge or Keep separate, ADR-0125) and All
-identities. Counts and a last-contact time on each row wait on a server change
-(ADR-0217, proposed). A person's profile leads with Ask Veetbot about the
+identities. The collection picker shows each number from `GET /v1/people/counts`
+(ADR-0217); an older server leaves them off. Needs you also lists the replies
+the owner owes someone that are overdue or due within fourteen days, earliest
+first: such a row reads "Needs you · Reply about the lease · due Friday" with
+Done and Not needed beneath it, which send the existing commitment correction;
+a person waiting to be identified reads "Needs you · Who is this?". Recent rows
+say when the last contact was. A person's profile leads with Ask Veetbot about the
 person, then Email and Call when a current address or number is known: each
 opens Chat with a request naming the person, so sending keeps its confirmation
 and a call its card (a number from People never counts as the owner's own,

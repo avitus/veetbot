@@ -25,6 +25,9 @@ public final class MemoryViewModel: ObservableObject {
     /// The identifier of the row a write is acting on, so the views can
     /// disable a second action on it until the first settles.
     @Published public private(set) var pendingActionID: UUID?
+    /// The sidebar's numbers (ADR-0214); nil while unknown or when the server
+    /// predates the counts route, so a row then shows no number rather than 0.
+    @Published public private(set) var counts: MemoryCountsView?
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
     private let toasts: ToastCenter
@@ -145,6 +148,7 @@ public final class MemoryViewModel: ObservableObject {
             try await api.deleteMemory(memory.id, ceiling: memoryBrowsingCeiling)
             items.removeAll { $0.id == memory.id }
             toasts.show(Self.deletedConfirmation)
+            await refreshCounts(api)
             return true
         } catch VeetbotAPIClientError.memoryChangesUnavailable {
             changesUnavailable = true
@@ -169,6 +173,85 @@ public final class MemoryViewModel: ObservableObject {
         case .untrue: "Marked not true. Veetbot will not form it again from the same evidence."
         case .notHere: "Marked not relevant here."
         }
+    }
+
+    static let correctedConfirmation = "Updated. The earlier wording is kept as history."
+    static let refusedWordingMessage =
+        "That wording can't be saved. It may match the current one, something you removed, or look like a password."
+
+    /// Supersedes a belief with the owner's wording (ADR-0214). The server
+    /// answers with the replacement, which takes the original's row; the
+    /// original stays on the server as history. Returns the replacement, or
+    /// nil when nothing changed.
+    @discardableResult
+    public func correct(_ memory: MemoryView, wording: String) async -> MemoryView? {
+        let text = wording.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard pendingActionID == nil, !text.isEmpty else { return nil }
+        pendingActionID = memory.id
+        defer { pendingActionID = nil }
+        errorMessage = nil
+        guard let api = await makeAPIClient() else {
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return nil
+        }
+        do {
+            let replacement = try await api.correctMemory(
+                memory.id,
+                wording: text,
+                expectedUpdatedAt: memory.updatedAt,
+                ceiling: memoryBrowsingCeiling
+            )
+            if let index = items.firstIndex(where: { $0.id == memory.id }) {
+                items[index] = replacement
+            }
+            toasts.show(Self.correctedConfirmation)
+            await refreshCounts(api)
+            return replacement
+        } catch VeetbotAPIClientError.memoryChangesUnavailable {
+            changesUnavailable = true
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return nil
+        } catch HTTPTransportError.api(let apiError) where apiError.statusCode == 400 {
+            errorMessage = Self.refusedWordingMessage
+            return nil
+        } catch HTTPTransportError.api(let apiError) where apiError.statusCode == 409 {
+            errorMessage = "This memory changed on the server. The list has been refreshed."
+            await reload()
+            return nil
+        } catch {
+            errorMessage = displayMessage(for: error)
+            return nil
+        }
+    }
+
+    /// The sources the belief cites, or nil when the server cannot say.
+    public func evidence(for memory: MemoryView) async -> [MemoryEvidenceItem]? {
+        guard let api = await makeAPIClient() else { return nil }
+        return try? await api.memoryEvidence(memory.id, ceiling: memoryBrowsingCeiling)
+    }
+
+    /// The number a sidebar group shows, when the server reported one.
+    public func count(for group: MemoryBrowseGroup) -> Int? {
+        guard let counts else { return nil }
+        switch group {
+        case .review: return counts.flagged
+        case .all: return counts.live
+        case .type(let type): return counts.byType[type.rawValue] ?? 0
+        }
+    }
+
+    /// Fetches the sidebar's numbers. Counts are a label, never a blocker:
+    /// any failure, including a server without the route, leaves them unknown.
+    public func loadCounts() async {
+        guard let api = await makeAPIClient() else { return }
+        counts = try? await api.memoryCounts(ceiling: memoryBrowsingCeiling)
+    }
+
+    /// After a write, numbers already on screen are fetched again; a surface
+    /// that never showed them costs no request.
+    private func refreshCounts(_ api: VeetbotAPIClient) async {
+        guard counts != nil else { return }
+        counts = try? await api.memoryCounts(ceiling: memoryBrowsingCeiling)
     }
 
     /// Applies one review outcome. The row is replaced by the server's view of
@@ -197,6 +280,7 @@ public final class MemoryViewModel: ObservableObject {
                 if stillListed { items[index] = reviewed } else { items.remove(at: index) }
             }
             toasts.show(Self.confirmation(for: outcome))
+            await refreshCounts(api)
             return reviewed
         } catch VeetbotAPIClientError.memoryChangesUnavailable {
             changesUnavailable = true

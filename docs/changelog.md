@@ -4,6 +4,33 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-20 — Persona: voice, tone, a sample reply and boundaries
+
+- Describe how Veetbot should talk to you, and pick up to three tones (Brief,
+  Warm, Direct, Formal or Playful).
+- "Hear it" shows an example reply in that voice before you save it.
+- Each standing fact has an on/off switch: off keeps it but stops Veetbot
+  treating it as an instruction. A fact whose memory changed says so.
+- Boundaries lists the rules your persona cannot change, as the server
+  enforces them.
+
+## 2026-10-20 — People: replies you owe, last contact and counts
+
+- Needs you now also lists replies you promised someone that are overdue or
+  due in the next two weeks, earliest first, with Done and Not needed on each.
+  Nothing is sent and no reminder is scheduled; it is a list you open.
+- Recent shows when you were last in touch with each person.
+- The People sections show how many people each one holds.
+
+## 2026-10-20 — Correct a memory's wording, see where it came from
+
+- Fix the wording (on a memory that asks "Is this right?") and Edit wording
+  (on any memory) save your words as the memory. The earlier wording is kept
+  as history and won't form again.
+- A memory shows where it came from: your own words as a quote, and an email,
+  text or call by where it came from, without its text.
+- On the Mac, the Memory sidebar shows how many memories each group holds.
+
 ## 2026-10-20 — Schedules you can create, run, pause and stop from the app
 
 - New schedule: describe it in plain words ("every weekday at 7 am, tell me

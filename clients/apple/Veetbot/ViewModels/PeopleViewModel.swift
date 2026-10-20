@@ -51,6 +51,10 @@ public final class PeopleViewModel: ObservableObject {
     @Published public private(set) var relationship: PeopleRelationshipFilter = .all
     /// The open possible duplicates, on their own page (ADR-0125).
     @Published public private(set) var suggestions: [PeopleMergeSuggestionView] = []
+    /// The sidebar's numbers (ADR-0217); nil while unknown or on an older server.
+    @Published public private(set) var counts: PeopleCountsView?
+    /// The person whose owed thread is being corrected from its row.
+    @Published public private(set) var resolvingThreadOf: UUID?
     private var isConnectionValid = true
     private var connectionObserver: AnyCancellable?
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
@@ -75,7 +79,7 @@ public final class PeopleViewModel: ObservableObject {
     }
     private func invalidateConnection() {
         isConnectionValid = false; listRequest = UUID(); searchTask?.cancel(); searchTask = nil
-        items = []; suggestions = []; suggestionSessionID = nil; searchText = ""; nextCursor = nil; seenCursors = []
+        items = []; suggestions = []; suggestionSessionID = nil; searchText = ""; nextCursor = nil; seenCursors = []; counts = nil
         isLoading = false; isLoadingMore = false; errorMessage = nil
     }
     deinit { searchTask?.cancel() }
@@ -165,12 +169,20 @@ public final class PeopleViewModel: ObservableObject {
                 availability = .available
                 return
             }
-            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: collection.sort, relationship: relationship.queryValue)
+            let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            // ADR-0217: Needs you leads with the replies the owner owes soon. The
+            // filter stands alone, so it applies only to the unfiltered list; a
+            // row without a thread (an older server ignoring the filter) is dropped.
+            var owed: [PersonView] = []
+            if collection == .review, text.isEmpty, relationship == .all {
+                owed = ((try? await api.listPeople(asOf: nil, openThreads: true))?.items ?? []).filter { $0.nextThread != nil }
+            }
+            let page = try await api.listPeople(text: text, asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: collection.sort, relationship: relationship.queryValue)
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
             suggestions = []
             var seen: Set<UUID> = []
-            items = page.items.filter { seen.insert($0.id).inserted }
+            items = (owed + page.items).filter { seen.insert($0.id).inserted }
             seenCursors = []
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             errorMessage = nil
@@ -211,6 +223,100 @@ public final class PeopleViewModel: ObservableObject {
     public func retry() async {
         guard isConnectionValid else { return }
         if !failedPage || items.isEmpty || availability == .changed { await reload() } else { await loadMore() }
+    }
+
+    // MARK: ADR-0217
+
+    /// Fetches the sidebar's numbers. They label the lists and never block
+    /// them: any failure, an older server included, leaves them unknown.
+    public func loadCounts() async {
+        guard isConnectionValid, let api = await makeAPIClient() else { return }
+        let loaded = try? await api.peopleCounts()
+        guard isConnectionValid else { return }
+        counts = loaded
+    }
+
+    /// A collection's name with its number, when the server reported one.
+    public func collectionLabel(_ collection: PeopleCollection) -> String {
+        count(for: collection).map { "\(collection.rawValue) · \($0)" } ?? collection.rawValue
+    }
+
+    /// The number a sidebar row shows, when the server reported one.
+    public func count(for collection: PeopleCollection) -> Int? {
+        guard let counts else { return nil }
+        switch collection {
+        case .review: return counts.needsYou
+        case .people: return counts.everyone
+        case .duplicates: return counts.possibleDuplicates
+        case .recent, .pinned, .all: return nil
+        }
+    }
+
+    /// Why a person is under Needs you: a reply owed soon, or a name with no
+    /// confirmed address that waits for the owner to say who it is.
+    public func attentionLine(for person: PersonView, now: Date = Date()) -> String? {
+        guard collection == .review else { return nil }
+        if let thread = person.nextThread, let due = thread.dueAt {
+            return "Needs you · \(thread.description) · \(Self.dueText(due, now: now))"
+        }
+        return "Needs you · Who is this?"
+    }
+
+    /// When an owed thread is due, in words.
+    static func dueText(_ due: Date, now: Date, calendar: Calendar = .current) -> String {
+        let today = calendar.startOfDay(for: now)
+        let days = calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: due)).day ?? 0
+        switch days {
+        case ..<0: return "overdue"
+        case 0: return "due today"
+        case 1: return "due tomorrow"
+        case 2...6: return "due " + due.formatted(.dateTime.weekday(.wide))
+        default: return "due " + due.formatted(.dateTime.month(.abbreviated).day())
+        }
+    }
+
+    /// When the owner last had contact with someone, in words (Recent rows).
+    static func lastContactText(_ at: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let days = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: at), to: calendar.startOfDay(for: now)
+        ).day ?? 0
+        switch days {
+        case ...0: return "Last contact today"
+        case 1: return "Last contact yesterday"
+        case 2...30: return "Last contact \(days) days ago"
+        default: return "Last contact " + at.formatted(.dateTime.month(.abbreviated).day())
+        }
+    }
+
+    /// Marks the owed thread on a Needs you row completed or cancelled through
+    /// the person's existing commitment correction (ADR-0217 part C).
+    public func resolveThread(of person: PersonView, state: String) async {
+        guard isConnectionValid, resolvingThreadOf == nil, let thread = person.nextThread,
+              let beliefID = thread.beliefID else { return }
+        resolvingThreadOf = person.id
+        defer { resolvingThreadOf = nil }
+        let detail = PeopleDetailViewModel(personID: person.id, makeAPIClient: makeAPIClient)
+        await detail.reload()
+        guard isConnectionValid else { return }
+        guard let fact = detail.profile?.facts.first(where: { $0.id == beliefID }) else {
+            errorMessage = "Refresh People before changing this thread."
+            return
+        }
+        await detail.correct(fact, operation: "changed", statement: thread.description, sessionID: nil, commitmentState: state)
+        guard isConnectionValid else { return }
+        if let failure = detail.errorMessage {
+            errorMessage = failure
+            return
+        }
+        errorMessage = nil
+        toasts.show(state == "completed" ? "Marked done." : "Marked not needed.")
+        await reload()
+        await refreshCounts()
+    }
+
+    private func refreshCounts() async {
+        guard counts != nil else { return }
+        await loadCounts()
     }
 
     private func report(_ error: Error) {

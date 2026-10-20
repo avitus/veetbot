@@ -14,22 +14,51 @@ public final class PersonaViewModel: ObservableObject {
         /// Set exactly for a kept affirmation entry; an owner edit may keep,
         /// reword, or drop promoted provenance, never mint it.
         public let sourceBeliefID: UUID?
+        /// ADR-0216: off keeps the entry but stops Veetbot treating it as a
+        /// standing instruction.
+        public var enabled: Bool
+        /// The memory it was affirmed from has since changed.
+        public let stale: Bool
 
         public init(
             id: UUID = UUID(),
             text: String,
             sensitivity: String = "internal",
-            sourceBeliefID: UUID? = nil
+            sourceBeliefID: UUID? = nil,
+            enabled: Bool = true,
+            stale: Bool = false
         ) {
             self.id = id
             self.text = text
             self.sensitivity = sensitivity
             self.sourceBeliefID = sourceBeliefID
+            self.enabled = enabled
+            self.stale = stale
         }
+    }
+
+    /// The A2 "Lean towards" chips, in the order they are shown.
+    public static let traitChoices = ["brief", "warm", "direct", "formal", "playful"]
+
+    /// A sample reply and what it is: a generated example, or, when the server
+    /// cannot generate one, an illustration of the chips alone (ADR-0216).
+    public struct Sample: Equatable, Sendable {
+        public let prompt: String
+        public let reply: String
+        public let label: String
     }
 
     @Published public private(set) var version = 0
     @Published public var drafts: [DraftEntry] = []
+    /// ADR-0216: how Veetbot should talk, and up to three tones.
+    @Published public var voice = ""
+    @Published public private(set) var traits: [String] = []
+    /// The server reported voice and traits; an older one is never sent them.
+    @Published public private(set) var toneSupported = false
+    @Published public private(set) var sample: Sample?
+    @Published public private(set) var isLoadingSample = false
+    /// The active rules from the server; empty on a server without the route.
+    @Published public private(set) var boundaries: [PersonaBoundaryView] = []
     @Published public private(set) var nominations: [PersonaNominationView] = []
     @Published public private(set) var isLoading = false
     @Published public private(set) var isSaving = false
@@ -75,6 +104,8 @@ public final class PersonaViewModel: ObservableObject {
             mergeRequired = false
             conflictDetected = false
             nominations = try await client.listPersonaNominations(state: "nominated").items
+            // Rules are listed only as the server states them; none otherwise.
+            boundaries = ((try? await client.personaBoundaries()) ?? []).filter(\.active)
             unavailable = false
         } catch let HTTPTransportError.api(error) where error.code == .notFound {
             // An older server, or the surface's default-off flag: the sheet
@@ -104,9 +135,11 @@ public final class PersonaViewModel: ObservableObject {
                     UpdatePersonaEntryBody(
                         text: $0.text,
                         sensitivity: $0.sensitivity,
-                        sourceBeliefID: $0.sourceBeliefID
+                        sourceBeliefID: $0.sourceBeliefID,
+                        enabled: $0.enabled
                     )
-                }
+                },
+                tone: toneSupported ? UpdatePersonaBody.Tone(voice: trimmedVoice, traits: traits) : nil
             )
             apply(document)
             conflictHead = nil
@@ -190,6 +223,55 @@ public final class PersonaViewModel: ObservableObject {
         }
     }
 
+    /// Chooses or clears a tone: at most three, and formal and playful
+    /// replace each other because they pull opposite ways.
+    public func toggleTrait(_ trait: String) {
+        if let index = traits.firstIndex(of: trait) {
+            traits.remove(at: index)
+            return
+        }
+        let opposite = ["formal": "playful", "playful": "formal"][trait]
+        if let opposite, let index = traits.firstIndex(of: opposite) {
+            traits[index] = trait
+            return
+        }
+        guard traits.count < 3 else { return }
+        traits.append(trait)
+    }
+
+    /// Asks the server how the unsaved voice sounds. A server that cannot
+    /// generate one gets a labelled illustration of the chips instead, which
+    /// never pretends to reflect the voice text.
+    public func loadSample() async {
+        guard !isLoadingSample else { return }
+        isLoadingSample = true
+        defer { isLoadingSample = false }
+        if let client = await makeAPIClient(),
+           let preview = try? await client.previewPersona(voice: trimmedVoice, traits: traits)
+        {
+            sample = Sample(prompt: preview.prompt, reply: preview.reply, label: "Example — generated, not saved")
+            return
+        }
+        sample = Sample(prompt: Self.samplePrompt, reply: Self.illustration(for: traits), label: "Illustration")
+    }
+
+    static let samplePrompt = "Can you move my 3 pm to tomorrow?"
+
+    /// A fixed reply per tone; it reflects the chips only.
+    static func illustration(for traits: [String]) -> String {
+        if traits.contains("formal") { return "Certainly. I can move your 3 pm meeting to tomorrow at the same time. Shall I proceed?" }
+        if traits.contains("playful") { return "Sure thing — 3 pm, meet tomorrow! Want me to make it official?" }
+        if traits.contains("brief") { return "Yes. Tomorrow at 3?" }
+        if traits.contains("direct") { return "Yes — moving it to tomorrow at 3. Confirm and I'll send the update." }
+        if traits.contains("warm") { return "Of course! Tomorrow at 3 works. I'll let everyone know, if you'd like." }
+        return "I can move it to tomorrow at 3 pm. Would you like me to?"
+    }
+
+    private var trimmedVoice: String? {
+        let text = voice.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     public func addDraft() {
         drafts.append(DraftEntry(text: ""))
     }
@@ -204,9 +286,14 @@ public final class PersonaViewModel: ObservableObject {
             DraftEntry(
                 text: $0.text,
                 sensitivity: $0.sensitivity,
-                sourceBeliefID: $0.sourceBeliefID
+                sourceBeliefID: $0.sourceBeliefID,
+                enabled: $0.enabled,
+                stale: $0.stale
             )
         }
+        toneSupported = document.traits != nil
+        voice = document.voice ?? ""
+        traits = document.traits ?? []
     }
 
     private static func describe(_ error: Error) -> String {

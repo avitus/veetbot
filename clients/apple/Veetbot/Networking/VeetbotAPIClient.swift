@@ -659,23 +659,100 @@ public struct VeetbotAPIClient: Sendable {
         }
     }
 
+    /// Supersedes a belief with the owner's wording (ADR-0214 part A). The
+    /// server answers with the replacement belief; the old one stays readable
+    /// as history. `expectedUpdatedAt` makes a stale screen a conflict.
+    public func correctMemory(
+        _ id: UUID,
+        wording: String,
+        expectedUpdatedAt: Date,
+        ceiling: MemorySensitivityKind,
+        key: String = UUID().uuidString
+    ) async throws -> MemoryView {
+        let stamp = ISO8601DateFormatter().string(from: expectedUpdatedAt)
+        do {
+            return try await transport.send(
+                TransportRequest(
+                    method: .post,
+                    path: "/v1/memories/\(id.uuidString)/review",
+                    queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)],
+                    body: try JSONEncoder.server.encode([
+                        "outcome": "changed",
+                        "replacement_statement": wording,
+                        "expected_updated_at": stamp,
+                    ]),
+                    headers: ["Idempotency-Key": key],
+                    retryAttempts: 2
+                )
+            )
+        } catch {
+            throw memoryChangesCompatibilityError(from: error, missingRouteIsUnsupported: true)
+                ?? error
+        }
+    }
+
+    /// The sources a belief cites, newest first (ADR-0214 part B).
+    public func memoryEvidence(
+        _ id: UUID, ceiling: MemorySensitivityKind
+    ) async throws -> [MemoryEvidenceItem] {
+        let page: MemoryEvidencePage = try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/memories/\(id.uuidString)/evidence",
+                queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)]
+            )
+        )
+        return page.items
+    }
+
+    /// The sidebar's numbers under the list's own predicates (ADR-0214 part C).
+    public func memoryCounts(ceiling: MemorySensitivityKind) async throws -> MemoryCountsView {
+        try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/memories/counts",
+                queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)]
+            )
+        )
+    }
+
     public func getPersona() async throws -> PersonaView {
         try await transport.send(TransportRequest(method: .get, path: "/v1/persona"))
     }
 
     public func updatePersona(
         expectedVersion: Int,
-        entries: [UpdatePersonaEntryBody]
+        entries: [UpdatePersonaEntryBody],
+        tone: UpdatePersonaBody.Tone? = nil
     ) async throws -> PersonaView {
         try await transport.send(
             TransportRequest(
                 method: .put,
                 path: "/v1/persona",
                 body: try JSONEncoder.server.encode(
-                    UpdatePersonaBody(expectedVersion: expectedVersion, entries: entries)
+                    UpdatePersonaBody(expectedVersion: expectedVersion, entries: entries, tone: tone)
                 )
             )
         )
+    }
+
+    /// One example reply in an unsaved voice (ADR-0216 part C).
+    public func previewPersona(voice: String?, traits: [String]) async throws -> PersonaPreviewView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/persona/preview",
+                body: try JSONEncoder.server.encode(UpdatePersonaBody.Tone(voice: voice, traits: traits))
+            )
+        )
+    }
+
+    /// The fixed rules the persona cannot change (ADR-0216 part D).
+    public func personaBoundaries() async throws -> [PersonaBoundaryView] {
+        let page: PersonaBoundaryPage = try await transport.send(
+            TransportRequest(method: .get, path: "/v1/persona/boundaries")
+        )
+        return page.items
     }
 
     public func personaHistory(limit: Int = 20) async throws -> Page<PersonaView> {

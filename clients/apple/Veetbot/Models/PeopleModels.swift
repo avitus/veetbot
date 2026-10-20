@@ -24,10 +24,32 @@ public struct PersonView: Codable, Equatable, Identifiable, Sendable {
     public let pinned: Bool
     public let sensitivity: String
     public let supportIDs: [UUID]
+    /// The newest visible dated interaction; nil on a server before ADR-0217.
+    public let lastInteractionAt: Date?
+    /// The earliest open reply the owner owes this person that is due soon (ADR-0217).
+    public let nextThread: PersonCommitmentView?
     enum CodingKeys: String, CodingKey {
         case id, revision, state, pinned, sensitivity
         case displayName = "display_name"
         case supportIDs = "support_ids"
+        case lastInteractionAt = "last_interaction_at"
+        case nextThread = "next_thread"
+    }
+}
+
+/// The People sidebar's numbers (ADR-0217); `needsYou` counts each person once.
+public struct PeopleCountsView: Codable, Equatable, Sendable {
+    public let everyone: Int
+    public let needsReview: Int
+    public let possibleDuplicates: Int
+    public let openThreads: Int?
+    public let needsYou: Int
+    enum CodingKeys: String, CodingKey {
+        case everyone
+        case needsReview = "needs_review"
+        case possibleDuplicates = "possible_duplicates"
+        case openThreads = "open_threads"
+        case needsYou = "needs_you"
     }
 }
 

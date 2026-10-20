@@ -76,7 +76,7 @@ public struct PeopleBrowserView: View {
                 PeopleList(label: "People and filters") {
                     #if os(macOS)
                     VStack(alignment: .leading, spacing: 10) {
-                        PeopleFilter(title: "Show", selection: model.collection, options: PeopleCollection.allCases, label: { $0.rawValue }) { value in Task { await model.selectCollection(value) } }
+                        PeopleFilter(title: "Show", selection: model.collection, options: PeopleCollection.allCases, label: { model.collectionLabel($0) }) { value in Task { await model.selectCollection(value) } }
                         if model.collection != .duplicates {
                             PeopleFilter(title: "Relationship with you", selection: model.relationship, options: PeopleRelationshipFilter.allCases, label: { $0.label }) { value in Task { await model.selectRelationship(value) } }
                         }
@@ -85,9 +85,9 @@ public struct PeopleBrowserView: View {
                     #else
                     Menu {
                         Picker("Show", selection: Binding(get: { model.collection }, set: { value in Task { await model.selectCollection(value) } })) {
-                            ForEach(PeopleCollection.allCases) { Text($0.rawValue).tag($0) }
+                            ForEach(PeopleCollection.allCases) { Text(model.collectionLabel($0)).tag($0) }
                         }
-                    } label: { filterLabel("Show", value: model.collection.rawValue) }
+                    } label: { filterLabel("Show", value: model.collectionLabel(model.collection)) }
                     if model.collection != .duplicates {
                         Menu {
                             Picker("Relationship with you", selection: Binding(get: { model.relationship }, set: { value in Task { await model.selectRelationship(value) } })) {
@@ -164,6 +164,9 @@ public struct PeopleBrowserView: View {
                             .a2ListRow()
                             .accessibilityIdentifier("people.row.\(person.id.uuidString)")
                             .onAppear { if person.id == model.items.last?.id { Task { await model.loadMore() } } }
+                        if model.collection == .review, person.nextThread != nil {
+                            threadActions(person).a2ListRow()
+                        }
                     }
                     if model.isLoadingMore { ProgressView("Loading more people…").a2ListRow() }
                     if let error = model.errorMessage {
@@ -188,6 +191,7 @@ public struct PeopleBrowserView: View {
         .accessibilityIdentifier("people.browser")
         .accessibilityLabel("People directory")
         .task { await model.reload() }
+        .task { await model.loadCounts() }
         .sheet(isPresented: $showingImport) { PeopleImportHistoryView(initialSessionID: sessionID) }
         .sheet(isPresented: $showingAdd) { AddPersonView(sessionID: sessionID) { _ in Task { await model.reload() } } }
     }
@@ -199,11 +203,34 @@ public struct PeopleBrowserView: View {
             .buttonStyle(SecondaryCapsuleButtonStyle())
     }
 
+    /// The owed thread's in-place correction (ADR-0217): the owner's word is
+    /// the attributed report a completed or cancelled commitment needs.
+    private func threadActions(_ person: PersonView) -> some View {
+        HStack(spacing: 8) {
+            Button("Done") { Task { await model.resolveThread(of: person, state: "completed") } }
+                .accessibilityIdentifier("people.thread.done.\(person.id.uuidString)")
+            Button("Not needed") { Task { await model.resolveThread(of: person, state: "cancelled") } }
+                .accessibilityIdentifier("people.thread.cancel.\(person.id.uuidString)")
+        }
+        .buttonStyle(QuietCapsuleButtonStyle())
+        .disabled(model.resolvingThreadOf != nil)
+        .padding(.leading, PeopleMetrics.rowAvatar + 10)
+    }
+
+    /// Why a row is in this collection, or when the owner last had contact.
+    private func note(for person: PersonView) -> String? {
+        if let attention = model.attentionLine(for: person) { return attention }
+        if model.collection == .recent, let at = person.lastInteractionAt {
+            return PeopleViewModel.lastContactText(at)
+        }
+        return nil
+    }
+
     @ViewBuilder private func personRow(_ person: PersonView) -> some View {
         if let selection {
             let selected = selection.wrappedValue == person.id
             Button { selection.wrappedValue = person.id } label: {
-                PeopleDirectoryRow(person: person)
+                PeopleDirectoryRow(person: person, note: note(for: person))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(
@@ -218,7 +245,7 @@ public struct PeopleBrowserView: View {
             NavigationLink {
                 PeopleDetailView(personID: person.id, sessionID: sessionID)
             } label: {
-                PeopleDirectoryRow(person: person)
+                PeopleDirectoryRow(person: person, note: note(for: person))
                     #if os(macOS)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -452,6 +479,8 @@ struct PeopleList<Content: View>: View {
 /// One person in the directory: initials, name, and any identity note.
 private struct PeopleDirectoryRow: View {
     let person: PersonView
+    /// Why the person needs the owner, or their last contact (ADR-0217).
+    var note: String? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -460,6 +489,12 @@ private struct PeopleDirectoryRow: View {
                 Text(person.displayName).veetType(.ui, weight: .semibold).foregroundColor(AppTheme.ink)
                 if person.state == "merged" {
                     Text("Combined identity").veetType(.meta).foregroundColor(PeopleSurface.muted)
+                }
+                if let note {
+                    Text(note)
+                        .veetType(.meta)
+                        .foregroundColor(note.hasPrefix("Needs you") ? AppTheme.amberText : PeopleSurface.muted)
+                        .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)

@@ -378,11 +378,14 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let memoryLock = NSLock()
     /// Set by a governed delete, after which the browser's reads omit the belief.
     private static var memoryDeleted = false
+    /// Set by a `changed` review (ADR-0214): reads then return the replacement.
+    private static var memoryCorrection: String?
     private static var synthesisReviewed = false
     private static var synthesisDeleted = false
     private static var synthesisUndone = false
     static func resetMemory() { memoryLock.withLock {
-        memoryDeleted = false; synthesisReviewed = false; synthesisDeleted = false; synthesisUndone = false
+        memoryDeleted = false; memoryCorrection = nil
+        synthesisReviewed = false; synthesisDeleted = false; synthesisUndone = false
     } }
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
@@ -425,6 +428,19 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/memories/\(ConversationNavigationUITestFixture.memoryID)"):
             statusCode = 200
             body = Self.memoryJSON
+        case ("GET", "/v1/memories/counts"):
+            let corrected = Self.memoryLock.withLock { Self.memoryCorrection != nil }
+            statusCode = 200
+            body = #"{"live":1,"flagged":0,"by_status":{"active":1,"provisional":0,"superseded":\#(corrected ? 1 : 0),"retired":0,"expired":0,"candidate":0},"by_type":{"preference":1,"fact":0,"relationship":0,"user_model_attr":0,"procedure_pointer":0},"synthesis":null,"counted_at":"2026-10-20T15:00:00Z"}"#
+        case ("GET", let path) where path.hasPrefix("/v1/memories/") && path.hasSuffix("/evidence"):
+            statusCode = 200
+            body = """
+                {"items":[{"source_kind":"owner","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","event_sequence":11,"evidence_at":"2026-08-15T00:00:00Z","excerpt":"I prefer dark mode everywhere.","withheld":null},{"source_kind":"email","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","event_sequence":10,"evidence_at":"2026-08-14T00:00:00Z","excerpt":null,"withheld":"not_owner_text"}]}
+                """
+        case ("GET", "/v1/memories/\(Self.correctedMemoryID)"):
+            let wording = Self.memoryLock.withLock { Self.memoryCorrection }
+            statusCode = wording == nil ? 404 : 200
+            body = wording.map(Self.correctedMemoryJSON) ?? #"{"error":{"code":"not_found","message":"memory not found","details":{},"request_id":"fixture"}}"#
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"):
             statusCode = 200
             body = """
@@ -959,8 +975,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 204
             body = ""
         case ("POST", let path) where path.hasPrefix("/v1/memories/") && path.hasSuffix("/review"):
-            statusCode = 200
-            body = Self.memoryJSON
+            let review = requestJSON()
+            if review["outcome"] as? String == "changed",
+                let wording = review["replacement_statement"] as? String
+            {
+                Self.memoryLock.withLock { Self.memoryCorrection = wording }
+                statusCode = 200
+                body = Self.correctedMemoryJSON(wording)
+            } else {
+                statusCode = 200
+                body = Self.memoryJSON
+            }
         case ("GET", "/v1/memories"):
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             guard query.contains(URLQueryItem(name: "ceiling", value: "restricted")) else {
@@ -968,9 +993,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 return
             }
             statusCode = 200
-            let deleted = Self.memoryLock.withLock { Self.memoryDeleted }
+            let (deleted, correction) = Self.memoryLock.withLock { (Self.memoryDeleted, Self.memoryCorrection) }
+            let row = correction.map(Self.correctedMemoryJSON) ?? Self.memoryJSON
             body = """
-                {"items":[\(deleted ? "" : Self.memoryJSON)],"next_cursor":null}
+                {"items":[\(deleted ? "" : row)],"next_cursor":null}
                 """
         case ("GET", "/v1/schedules"):
             let states = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -1719,6 +1745,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
     private static let synthesisOperationJSON = #"{"id":"00000000-0000-0000-0000-000000003201","kind":"summary","state":"committed","revision":1,"reason":"summarized","policy":"reconsolidation@1","model_identity":"extractive@1","created_at":"2026-10-06T01:00:00Z","committed_at":"2026-10-06T01:00:00Z","content":{"memory_id":"00000000-0000-0000-0000-000000003202","subject":"the user","statement":"The user prefers dark mode.","clauses":[{"text":"The user prefers dark mode.","source_ids":["00000000-0000-0000-0000-000000000321"]}]},"sources":[{"belief_id":"00000000-0000-0000-0000-000000000321","content_revision":1,"subject":"the user","statement":"The user prefers dark mode.","session_id":"00000000-0000-0000-0000-000000000123","event_ids":[10,11],"omitted":false},{"belief_id":"00000000-0000-0000-0000-000000003203","content_revision":1,"subject":"the user","statement":"The user prefers quiet mornings.","session_id":"00000000-0000-0000-0000-000000000124","event_ids":[10,11],"omitted":true}]}"#
     private static let synthesisSummaryJSON = #"{"id":"00000000-0000-0000-0000-000000003202","record_kind":"summary","operation_id":"00000000-0000-0000-0000-000000003201","revision":1,"status":"active","flagged_for_review":true,"created_at":"2026-10-06T01:00:00Z","updated_at":"2026-10-06T01:00:00Z","content":{"subject":"the user","statement":"The user prefers dark mode.","clauses":[{"text":"The user prefers dark mode.","source_ids":["00000000-0000-0000-0000-000000000321"]}],"belief_types":["preference"],"scope":"user","portability":"portable","sensitivity":"restricted","authority":"user","confidence":0.8,"last_evidence_at":"2026-09-01T00:00:00Z","valid_from":"2026-09-01T00:00:00Z","expires_at":null},"sources":[{"belief_id":"00000000-0000-0000-0000-000000000321","content_revision":1,"subject":"the user","statement":"The user prefers dark mode.","session_id":"00000000-0000-0000-0000-000000000123","event_ids":[10,11],"omitted":false},{"belief_id":"00000000-0000-0000-0000-000000003203","content_revision":1,"subject":"the user","statement":"The user prefers quiet mornings.","session_id":"00000000-0000-0000-0000-000000000124","event_ids":[10,11],"omitted":true}]}"#
+
+    private static let correctedMemoryID = "00000000-0000-0000-0000-000000000329"
+
+    /// The belief a `changed` review formed: a new identifier and the owner's words.
+    private static func correctedMemoryJSON(_ wording: String) -> String {
+        let escaped = (try? JSONEncoder().encode(wording)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        return memoryJSON
+            .replacingOccurrences(of: ConversationNavigationUITestFixture.memoryID, with: correctedMemoryID)
+            .replacingOccurrences(of: "\"The user prefers dark mode.\"", with: escaped)
+            .replacingOccurrences(of: "\"updated_at\":\"2026-08-20T00:00:00Z\"", with: "\"updated_at\":\"2026-10-20T15:00:00Z\"")
+    }
 
     private static let memoryJSON = """
         {"id":"\(ConversationNavigationUITestFixture.memoryID)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
