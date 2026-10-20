@@ -258,3 +258,4 @@ implementation without one.
 - [ADR-0219: Exact-revision signing for the isolated recall release](0219-recall-release-signing.md)
 - [ADR-0220: Owner-reviewed bounded recall rollout](0220-bounded-recall-rollout.md)
 - [ADR-0222: Owner-approved scope for the retained recall review](0222-owner-approved-recall-review-scope.md)
+- [ADR-0223: Owner trial with production recall review](0223-owner-production-recall-trial.md)

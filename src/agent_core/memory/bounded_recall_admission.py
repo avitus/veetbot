@@ -26,6 +26,7 @@ from agent_core.memory.general_recall_evidence import (
     _stage,
     _unique_object,
 )
+from agent_core.memory.production_recall_trial import ProductionRecallTrial, validate_trial_window
 from agent_core.memory.recall_release_binding import (
     InputFile,
     RecallInputManifest,
@@ -103,11 +104,16 @@ class CompatibilityAssessment(ReleaseValue):
 
 
 class BoundedRecallEvidence(ReleaseValue):
-    version: Literal["recall-bounded-evidence@1", "recall-bounded-evidence@2"]
+    version: Literal[
+        "recall-bounded-evidence@1", "recall-bounded-evidence@2", "recall-bounded-evidence@3"
+    ]
     bundle: CheckpointReleaseBundle
     operational_gate_report: str | None = Field(default=None, max_length=2 * 1024 * 1024)
     review_items: tuple[dict[str, Any], ...] = Field(max_length=20000)
-    human_review: Annotated[BoundedHumanReview | ScopedHumanReview, Field(discriminator="version")]
+    human_review: Annotated[
+        BoundedHumanReview | ScopedHumanReview | None, Field(discriminator="version")
+    ] = None
+    production_trial: ProductionRecallTrial | None = None
     scope_proposal: str | None = Field(default=None, max_length=2 * 1024 * 1024)
     owner_authorization_sha256: Digest
     provenance_verification_sha256: Digest
@@ -117,7 +123,9 @@ class BoundedRecallEvidence(ReleaseValue):
 
 
 class BoundedRecallManifest(ReleaseValue):
-    version: Literal["recall-bounded-admission@1", "recall-bounded-admission@2"]
+    version: Literal[
+        "recall-bounded-admission@1", "recall-bounded-admission@2", "recall-bounded-admission@3"
+    ]
     deployment_build_ref: str = Field(pattern=r"^[a-f0-9]{40}$")
     evidence_sha256: Digest
     target_inputs: RecallInputManifest
@@ -197,7 +205,7 @@ def validate_bounded_evidence(
 ) -> dict[str, Any]:
     """Recompute benefit and require explicit findings and complete dispositions."""
     evidence = BoundedRecallEvidence.model_validate(evidence.model_dump())
-    bundle, review, compatibility = evidence.bundle, evidence.human_review, evidence.compatibility
+    bundle, compatibility = evidence.bundle, evidence.compatibility
     report = assess_bounded_comparison(
         bundle, operational_gate_report=evidence.operational_gate_report
     )
@@ -207,6 +215,38 @@ def validate_bounded_evidence(
         "original measured inputs changed",
     )
     observed = b"".join(r.model_dump_json().encode() + b"\n" for r in bundle.observations)
+    if evidence.version == "recall-bounded-evidence@3":
+        trial = evidence.production_trial
+        _require(
+            trial is not None and evidence.human_review is None and evidence.scope_proposal is None,
+            "production trial cannot substitute or invent a synthetic human review",
+        )
+        assert trial is not None
+        _require(
+            trial.authorization_sha256 == evidence.owner_authorization_sha256
+            and len(trial.instruction.strip()) >= 20
+            and trial.observations_sha256 == _digest(observed) == APPROVED_OBSERVATIONS_SHA256
+            and trial.review_items_sha256
+            == _digest(_encoded(evidence.review_items) + b"\n")
+            == APPROVED_ITEMS_SHA256
+            and max(r.observed_at for r in bundle.observations)
+            <= trial.authorized_at
+            <= clock.now(),
+            "production trial omits original failed evidence or actual owner authorization",
+        )
+    else:
+        _require(evidence.production_trial is None, "legacy admission cannot accept a trial")
+        _validate_human_findings(evidence, observed, report, clock)
+    _validate_compatibility(evidence, target, compatibility)
+    return report
+
+
+def _validate_human_findings(
+    evidence: BoundedRecallEvidence, observed: bytes, report: dict[str, Any], clock: Clock
+) -> None:
+    bundle, review = evidence.bundle, evidence.human_review
+    _require(review is not None, "human findings are required for legacy admission")
+    assert review is not None
     scenarios = {s.id: s for s in bundle.scenarios}
     difficult = {
         r.scenario_id
@@ -245,6 +285,13 @@ def validate_bounded_evidence(
             and difficult <= set(review.reviewed_scenarios) <= set(scenarios),
             "human findings omit failed evidence, interruptions or uncertain charges",
         )
+
+
+def _validate_compatibility(
+    evidence: BoundedRecallEvidence,
+    target: RecallInputManifest,
+    compatibility: CompatibilityAssessment,
+) -> None:
     checks = {c.id: c for c in compatibility.checks}
     _require(
         len(checks) == len(compatibility.checks)
@@ -281,7 +328,6 @@ def validate_bounded_evidence(
             and set(dependency.checks) <= checks.keys(),
             "dependency disposition or verification mismatch",
         )
-    return report
 
 
 def bind_bounded_recall(
@@ -332,7 +378,15 @@ def bind_bounded_recall(
         "bounded target input mismatch",
     )
     validate_bounded_evidence(facts, binding.target_inputs, clock)
-    _require(facts.human_review.reviewed_at <= binding.activated_at, "activation predates review")
+    if facts.production_trial is not None:
+        validate_trial_window(
+            facts.production_trial, binding.activated_at, binding.expires_at, principal, clock
+        )
+    else:
+        assert facts.human_review is not None
+        _require(
+            facts.human_review.reviewed_at <= binding.activated_at, "activation predates review"
+        )
     revoked = False
 
     def admitted() -> bool:

@@ -158,6 +158,7 @@ def bind_index_manifest(
     if isinstance(document, dict) and document.get("version") in (
         "recall-bounded-admission@1",
         "recall-bounded-admission@2",
+        "recall-bounded-admission@3",
     ):
         if principal is None or clock is None:
             raise ValueError("Bounded recall requires actual owner and clock")

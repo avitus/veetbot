@@ -53,6 +53,11 @@ review for the owner.
 
 ## Unchanged release requirements
 
+The owner subsequently requested review of real production use instead of this
+synthetic packet. [ADR-0223](0223-owner-production-recall-trial.md) defines that
+separate trial route. This scoped packet remains retained and unreviewed; the
+new direction does not fill its findings or change its version-two contract.
+
 All access, correction, erasure, lifecycle, runtime budget, owner-local interactive
 scope, seven-day maximum expiry, withdrawal and rollback requirements remain.
 Scheduled or delegated use and unattended reconsolidation remain off. The new

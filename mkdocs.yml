@@ -67,6 +67,7 @@ nav:
   - Bland Calling Proposal: bland-calling-proposal.md
   - Bland Calling Setup: bland-setup.md
   - People Memory Operations: people-operations.md
+  - Recall Production Trial: recall-production-trial.md
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
       - Bland Calling: plan/bland-calling.md
@@ -184,6 +185,7 @@ nav:
       - "ADR-0219: Recall release signing": adr/0219-recall-release-signing.md
       - "ADR-0220: Owner-reviewed bounded recall rollout": adr/0220-bounded-recall-rollout.md
       - "ADR-0222: Owner-approved recall review scope": adr/0222-owner-approved-recall-review-scope.md
+      - "ADR-0223: Owner production recall trial": adr/0223-owner-production-recall-trial.md
       - "ADR-0214: Formation deadline repair": adr/0214-formation-deadline-repair.md
       - "ADR-0215: Formation terminal outcomes and collector cleanup": adr/0215-formation-terminal-outcomes.md
       - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md

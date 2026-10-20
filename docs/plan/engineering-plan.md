@@ -4331,6 +4331,12 @@ production compatibility assessment (ADR-0218), owner-only local recall, fixed
 expiry and verified rollback. It does not complete M33 or enable unattended
 dreaming. Legacy exact-input passing-evidence admission remains unchanged.
 
+The owner's 2026-10-20 direction in ADR-0223 separately admits a supervised
+production trial using actual daily owner check-ins in place of pre-activation
+synthetic case findings. Its versioned admission expires after 24 hours without
+timely renewal and never extends beyond the original seven-day maximum. All
+other bounded-release requirements and the original failed quality goals remain.
+
 ADR-0214 authorizes the specific formation deadline repair after repeated local
 preparation cancellation. The 413 completed observations retain their original
 identities and bytes. The remaining observations explicitly name the repaired

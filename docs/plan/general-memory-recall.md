@@ -733,6 +733,19 @@ compatibility and release requirements remain unchanged. The offline packet
 generator preserves original evidence, starts with empty controls, saves drafts
 and exports only actual scoped findings; it never creates admission evidence.
 
+[ADR-0223](../adr/0223-owner-production-recall-trial.md) records the owner's later
+request to learn from real production use. Version-three evidence carries a
+separate genuine owner trial authorization, not synthetic-case findings. Its
+admission expires after 24 hours unless renewed by a timely actual owner check-in
+covering up to five recent eligible production runs. Each check-in binds its
+selection/provenance receipt, period, owner and trial; negative decisions, missing
+coverage, a serious incident or a missed deadline refuse continuation. Renewed
+evidence requires re-composition and cannot move the original seven-day end.
+The original comparison, compatibility and other admission requirements remain.
+The [trial guide](../recall-production-trial.md) describes the conversational
+review and privacy-preserving operator workflow. Neither approval of the trial
+nor these mechanics establishes actual production quality.
+
 ## Hard gates
 
 1. **M33.** **Corpus independence** — at least 400 independent scenarios span eight families,

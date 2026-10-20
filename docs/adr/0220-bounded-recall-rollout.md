@@ -43,6 +43,13 @@ complete history summaries for the retained comparison. The 270 omitted cases
 remain individually unreviewed. Approval of that coverage and its residual risk
 does not supply the actual findings or authorize activation.
 
+The owner's later production-trial direction is recorded in
+[ADR-0223](0223-owner-production-recall-trial.md). Its version-three route replaces
+pre-activation synthetic findings with genuine trial authorization and daily
+production check-ins, expiring after 24 hours without timely renewal and always
+within the original seven-day maximum. It preserves the version-one/two routes
+and every other requirement below.
+
 An exact source found during search but omitted from a certified final context
 is candidate evidence only. Its original absent rank and unrendered status stay
 unchanged and receive no ranked, rendered or answer credit. This bounded route
