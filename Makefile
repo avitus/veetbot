@@ -1,6 +1,10 @@
 PYTHON ?= python
 CHECK_JOBS ?= 2
 STATIC_TEST_WORKERS ?= 2
+# Extra pytest arguments for the static, contract and integration partitions:
+# CircleCI Smarter Testing passes the test files it selects and its report
+# path here (.circleci/test-suites.yml). Empty runs the whole partition.
+PYTEST_ARGS ?=
 BROWSER_IMAGE ?= veetbot-browser-profile-service:check
 
 # Keep one Make graph so repeated goals share prerequisites. Independent lanes
@@ -63,10 +67,11 @@ test:
 	uv run pytest -m "not live and not browser_image"
 
 test-static:
-	uv run pytest -n $(STATIC_TEST_WORKERS) --dist loadscope -m static
+	uv run pytest -n $(STATIC_TEST_WORKERS) --dist loadscope -m static $(PYTEST_ARGS)
 
 test-contract:
-	@uv run pytest -m "not static and not integration and not live and not browser"; \
+	@uv run pytest -m "not static and not integration and not live and not browser" \
+		$(PYTEST_ARGS); \
 	status=$$?; test $$status -eq 0 -o $$status -eq 5
 
 test-fast: test-static test-contract
@@ -76,7 +81,7 @@ test-browser: browser-install
 		-p tests.browser_report --browser-report test-results/browser/baseline.json
 
 test-integration:
-	@uv run pytest -m "integration and not sandbox and not browser_image"; \
+	@uv run pytest -m "integration and not sandbox and not browser_image" $(PYTEST_ARGS); \
 	status=$$?; test $$status -eq 0 -o $$status -eq 5
 
 sandbox-image:

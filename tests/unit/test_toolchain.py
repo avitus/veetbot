@@ -968,6 +968,21 @@ def test_only_the_ci_integration_job_marks_its_database_disposable() -> None:
         assert "VEETBOT_TEST_DATABASE_DISPOSABLE" not in (ROOT / shared).read_text(encoding="utf-8")
 
 
+def _test_suites() -> dict[str, dict[str, Any]]:
+    """The CircleCI Smarter Testing suites, by name (ADR-0222)."""
+    path = ROOT / ".circleci" / "test-suites.yml"
+    if not path.is_file():
+        return {}
+    return {suite["name"]: suite for suite in yaml.safe_load_all(path.read_text(encoding="utf-8"))}
+
+
+def _run_command(step: dict[str, Any]) -> str:
+    """A run step's command, with a Smarter Testing step resolved to its suite's run."""
+    command: str = step["run"]["command"]
+    suite = re.fullmatch(r'circleci testsuite run "([a-z-]+)"\s*', command)
+    return _test_suites()[suite.group(1)]["run"] if suite else command
+
+
 def test_ci_has_the_required_partitions() -> None:
     """Require the hosted jobs and dependency structure owned by CircleCI."""
     workflow_directory = ROOT / ".github" / "workflows"
@@ -1026,9 +1041,7 @@ def test_ci_has_the_required_partitions() -> None:
     commands = {}
     for name, job in jobs.items():
         commands[name] = [
-            step["run"]["command"]
-            for step in job["steps"]
-            if isinstance(step, dict) and "run" in step
+            _run_command(step) for step in job["steps"] if isinstance(step, dict) and "run" in step
         ]
     for target in ("lint", "typecheck", "test-static", "test-deploy", "docs-check"):
         assert any(f"make {target}" in command for command in commands["static"])
@@ -1293,7 +1306,7 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
         assert names.index("checkout") < skip_index
         run_indexes = [index for index, step in enumerate(names) if step == "run"]
         test_indexes = [
-            index for index in run_indexes if "make test-" in job["steps"][index]["run"]["command"]
+            index for index in run_indexes if "make test-" in _run_command(job["steps"][index])
         ]
         assert test_indexes and skip_index < min(test_indexes)
         assert record_index > max(run_indexes)
@@ -1358,25 +1371,34 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
         "sandbox": "test-sandbox",
         "browser": "test-browser",
     }
+    suites = _test_suites()
     for job_name, target in expected_python_lanes.items():
         commands = [
-            step["run"]["command"]
+            _run_command(step)
             for step in jobs[job_name]["steps"]
             if isinstance(step, dict) and "run" in step
         ]
         test_command = next(command for command in commands if f"make {target}" in command)
-        assert f"--junitxml=test-results/{job_name}/results.xml" in test_command
+        if job_name in suites:
+            # Smarter Testing names the report; the suite places it in the job's directory.
+            assert "--junitxml=<< outputs.junit >>" in test_command
+            assert suites[job_name]["outputs"]["junit"] == f"test-results/{job_name}/results.xml"
+        else:
+            assert f"--junitxml=test-results/{job_name}/results.xml" in test_command
         assert {"store_test_results": {"path": f"test-results/{job_name}"}} in jobs[job_name][
             "steps"
         ]
 
+    # CI's static lane keeps the local target's two load-scope workers.
     static_command = next(
-        step["run"]["command"]
+        _run_command(step)
         for step in jobs["static"]["steps"]
-        if isinstance(step, dict) and "run" in step and "make test-static" in step["run"]["command"]
+        if isinstance(step, dict) and "run" in step and "make test-static" in _run_command(step)
     )
-    assert "-n 2" in static_command
-    assert "--dist loadscope" in static_command
+    assert "STATIC_TEST_WORKERS" not in static_command
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^STATIC_TEST_WORKERS \?= 2$", makefile, re.M) is not None
+    assert "-n $(STATIC_TEST_WORKERS) --dist loadscope" in _make_target(makefile, "test-static")
 
     # The Mac and simulator UI suites run on separate executors at the same time,
     # and each uploads its result bundles as one archive instead of thousands of
@@ -1413,6 +1435,43 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
             "destination": "apple-test-results-<< parameters.platform >>.tar",
         }
     }
+
+
+def test_smarter_testing_runs_three_partitions_through_their_make_targets() -> None:
+    """ADR-0222: CircleCI Smarter Testing schedules static, contract and integration.
+
+    Discovery and execution both go through the partition's own Make target, so
+    the marker selection stays in the Makefile. Each test atom is a file, and the
+    report records every case's file so results map back to atoms. Only the free
+    features are configured: no run selects fewer tests than its partition.
+    """
+
+    suites = _test_suites()
+    assert set(suites) == {"static", "contract", "integration"}
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^PYTEST_ARGS \?=$", makefile, re.M) is not None
+    for name, suite in suites.items():
+        assert set(suite) == {"name", "discover", "run", "outputs"}
+        discover = suite["discover"]
+        assert discover.startswith(f'make -s test-{name} PYTEST_ARGS="--collect-only -q"')
+        assert discover.endswith(r"| sed -nE 's#^(tests/[^:[:space:]]+\.py)::.*#\1#p' | sort -u")
+        run = suite["run"]
+        assert run.startswith(f"make test-{name} PYTEST_ARGS=")
+        assert "-o junit_family=xunit1" in run
+        assert run.endswith('--junitxml=<< outputs.junit >> << test.atoms >>"')
+        assert suite["outputs"] == {"junit": f"test-results/{name}/results.xml"}
+        recipe = re.search(rf"^test-{name}:\n((?:\t.*\n)+)", makefile, re.M)
+        assert recipe is not None and "$(PYTEST_ARGS)" in recipe.group(1)
+
+        steps = config["jobs"][name]["steps"]
+        assert {
+            "run": {
+                "name": f"{name.capitalize()} tests",
+                "command": f'circleci testsuite run "{name}"',
+            }
+        } in steps
+        assert {"store_test_results": {"path": f"test-results/{name}"}} in steps
 
 
 def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:

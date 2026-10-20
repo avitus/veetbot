@@ -348,4 +348,5 @@ nav:
       - ADR-0216 Persona voice, traits and boundaries: adr/0216-persona-voice-traits-entry-switches-and-boundaries.md
       - ADR-0217 People directory attention and counts: adr/0217-people-directory-attention-recent-and-counts.md
       - ADR-0221 Unattended call plans: adr/0221-unattended-call-plans.md
+      - ADR-0222 Smarter Testing partitions: adr/0222-smarter-testing-partitions.md
   - Changelog: changelog.md

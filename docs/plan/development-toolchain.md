@@ -261,7 +261,10 @@ disposable opt-in described below, and has run the third job as well.
 Locally, `make check` schedules two independent Make jobs by default, starting
 the Python and browser lanes first. Static tests use two load-scope workers;
 contract tests follow static tests and stay serial. `CHECK_JOBS=1` and
-`STATIC_TEST_WORKERS=0` provide a serial diagnostic run. All targets remain in
+`STATIC_TEST_WORKERS=0` provide a serial diagnostic run. `PYTEST_ARGS`, empty
+by default, appends pytest arguments to `test-static`, `test-contract`, and
+`test-integration`; CI's Smarter Testing suites pass the selected test files
+and the report path through it (ADR-0222). All targets remain in
 one Make dependency graph, so explicitly naming `docs-check` or `test-static`
 beside `check` does not execute them twice. Run the aggregate once on final
 inputs; repeat a passed check only after its inputs change. No test-result
@@ -485,6 +488,14 @@ targets are separate CircleCI steps so timing data identifies the remaining
 bottleneck. Jobs 1 through 3, job 5, and job 11 publish their pytest JUnit XML through
 CircleCI's test-results collector so failed and slow tests are visible without
 searching raw logs.
+Jobs 1 through 3 run their test target through CircleCI Smarter Testing
+(ADR-0222): `.circleci/test-suites.yml` defines one suite per job, whose
+discovery and run both invoke that job's Make target, with test files as the
+atoms and reports that name each case's file. Only the free features are
+configured, so every run executes the whole partition; rerunning a workflow from
+failed runs only the files that failed in the earlier attempt on the same
+commit. No credit-charged feature is enabled: test impact analysis would reduce
+the selection of a required check.
 Job 6 is an additional native-client gate outside `make check`, split across
 two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle
