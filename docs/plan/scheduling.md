@@ -700,6 +700,7 @@ schedule.occurrence.authorization_failed
 schedule.occurrence.configuration_failed
 schedule.misfires_coalesced
 schedule.next_fire_repaired
+schedule.call_plan.step
 ```
 
 Every event carries `schedule_id`, revision, tenant, principal, actor, event
@@ -1010,7 +1011,8 @@ sets `requested_scopes = frozenset()` unless `use_website=true` supplies the
 validated website dependency described above (ADR-0172), or `place_call=true`
 (version 1.3.0, ADR-0213) requests exactly `mcp.bland_call.use` and
 `mcp.bland_read.use`; that flag fails as `schedule.calling_unavailable` when
-calling is not composed. Its step, model-call, and tool-call
+calling is not composed. A `call_plan` (version 1.4.0, ADR-0221) narrows a call
+schedule to `mcp.bland_call.use` alone. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
 ceilings. Cost is the minimum of the active agent's finite cost or `5` and the
 schedule cost ceiling; run timeout is the lesser of 300 seconds and its
@@ -1025,13 +1027,44 @@ The successful result contains `schedule_id`, `state`, `next_fire_at`, and
 whether the application request replayed. A call schedule's result text adds
 that its occurrence can call but cannot create or change schedules or wait, so
 no retry or follow-up that depends on a call's outcome is arranged, and asks
-Chat to say so when the owner asked for one. After the occurrence's run is
+Chat to say so when the owner asked for one. With a call plan the text says
+instead that the platform places the plan's calls and reports the outcome.
+After the occurrence's run is
 accounted, the outbox emits `schedule_run_finished`, which can arrive after the
 nominal instant by the duration of the scheduled run. ADR-0091 subsequently
 authorizes the occurrence's pinned revision title and nominal firing time in
 the alert; instructions and run results remain excluded. The accountant and
 materializer pass the already loaded revision to notification production so
 both terminal and skipped outcomes preserve the schedule identity at firing.
+
+### Call plans (ADR-0221)
+
+`call_plan` requires `place_call=true` and a one-time `at`; otherwise creation
+fails with `schedule.call_plan_needs_call` or
+`schedule.call_plan_needs_one_time`. It holds `retry_every_minutes` (1–30) with
+`retry_until`, and/or `follow_up_after_answer_minutes` (1–60). At most ten calls
+fit within an hour of `at`; anything else is `schedule.call_plan_invalid`. The
+revision stores the plan in its definition only when present. A plan cannot
+change after its first call (`schedule.call_plan_started`).
+
+The first call materializes at `at` like any one-time occurrence. A plan's
+schedule then stays `ACTIVE` with no `next_fire_at` while it awaits that call's
+result. The maintenance sweep, which can read the call ledger, finds such
+schedules every pass. It reads only each call's closed dispatch status and
+decides the next step from it. It appends that step as the process event
+`schedule.call_plan.step`, keyed by schedule and call number, and sets
+`next_fire_at`. The scheduler cannot read the ledger and gains no grant for
+it. For a plan schedule it materializes at `next_fire_at` instead of the
+cadence instant, and reads the step event to build the run.
+
+Each run's seed is the instruction followed by a platform note: the call's
+number in the plan and earlier results, the follow-up's opening, or the plan's
+outcome. The note gives times as hours and minutes and holds no phone-like
+digit run. The final step runs with no scopes and completes the schedule. A
+missing step event records `CONFIGURATION_FAILED` with
+`schedule.call_plan_step_missing`. The accountant skips
+`schedule_run_finished` for a plan's completed calls, so the final step is the
+plan's only alert; failed or cancelled calls still alert.
 
 ## Model-callable lifecycle
 

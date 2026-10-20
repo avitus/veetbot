@@ -1,8 +1,8 @@
 # ADR-0221: Unattended call plans, with retries and a follow-up
 
-- Status: Proposed — awaiting the owner's decision
+- Status: Accepted — the owner accepted it and asked for its implementation on 2026-10-20
 - Date: 2026-10-20
-- Amends, if accepted: ADR-0213
+- Amends: ADR-0213
 - Detailed design: `docs/plan/bland-calling.md`, `docs/plan/scheduling.md`
 - Scope: calling and scheduling; no milestone or gate moves
 
@@ -33,74 +33,86 @@ Three causes, each confirmed against the code:
    ADR-0213 keeps from choosing a call. But every retry or follow-up decision
    needs to know how the last call went, so under ADR-0213 any
    outcome-dependent second call needs a card.
-2. **Nothing can arrange a later attempt.** An occurrence holds exactly its
+2. **Nothing could arrange a later attempt.** An occurrence holds exactly its
    schedule's requested scopes, and `schedule.write` is never among them. The
-   run lasts at most 300 seconds and has no way to wait. A two-minute retry or
-   a five-minute follow-up therefore has no mechanism at all.
-3. **Chat confirmed a plan that could not run.** This is fixed with this
-   proposal, without changing authorization: the `schedule.create` result for
-   a call schedule now says that no retry or follow-up is arranged, and tells
-   Chat to say so when the owner asked for one.
+   run lasts at most 300 seconds and has no way to wait.
+3. **Chat confirmed a plan that could not run.** The `schedule.create` result
+   for a call schedule now says when no retry or follow-up is arranged.
 
-Causes 1 and 2 are decisions about authorization, so they are put to the owner
-here.
-
-## Decision proposed
+## Decision
 
 **The platform runs the call plan. The model only places each call.**
 
-- `schedule.create` with `place_call=true` takes an optional closed
-  `call_plan`: `retry_every_minutes`, `retry_until`,
-  `follow_up_after_answer_minutes` with a `follow_up_instruction`, and
-  `alert_if_unreached`. Proposed bounds: at most ten attempts in sixty minutes,
-  at least one minute apart, plus one follow-up. Every attempt dials only the
-  numbers in the owner-approved instruction. The owner authorizes the whole
-  plan once, on the card or through ADR-0213's owner request.
-- After each attempt, the scheduler reads only the closed status that call
-  reconciliation already records: `no_answer`, `busy`, `voicemail`, `failed`,
-  `completed`, or an uncertain dispatch. It never reads summaries or
-  transcripts.
-  - Not reached, with time left: it fires the next attempt as an occurrence of
-    the same revision.
-  - `completed`: retries stop. If the plan has a follow-up, it fires that many
-    minutes after the answered call.
-  - Uncertain, or no result by the next interval: it does not dial again and
-    alerts the owner, because a duplicate call is worse than a missed retry.
-  - Out of attempts: the existing scheduled-run alert tells the owner that the
-    person was not reached.
-- Each attempt's seed is the owner-approved instruction plus a platform line
-  built only from those statuses and times, for example "Attempt 3 of 6.
-  Earlier: no answer at 9:30, voicemail at 9:32." It carries `PLATFORM` trust.
-  Attempt runs request only `mcp.bland_call.use`, so they read no call record,
-  and ADR-0213 allows their call without a card, just as it allows the first.
+- `schedule.create` 1.4.0 takes `call_plan` with `place_call=true` and a
+  one-time `at`: `retry_every_minutes` (1–30) with `retry_until`, and/or
+  `follow_up_after_answer_minutes` (1–60). A plan places at most ten calls
+  within an hour of `at`, then at most one follow-up. Version 1.3.0 stays
+  registered, unchanged, for runs pinned to it. The owner authorizes the whole
+  plan once, on the card or through ADR-0213's owner request. A plan cannot
+  change after its first call.
+- A plan's revision requests only `mcp.bland_call.use`. No call run can read
+  a call record, so no run taints itself, and ADR-0213 allows each call
+  without a card, exactly as it allows the first.
+- The scheduler cannot read the call ledger, and this decision gives it no new
+  grant. Instead the maintenance sweep, which runs in the application role,
+  reads each call's closed dispatch status every pass: `no_answer`, `busy`,
+  `voicemail`, `failed` (not reached), `completed` (answered), `not_dispatched`
+  (no call), or one still in flight. It never reads a summary or transcript.
+  - Not reached, with time and calls left: the next call fires at the
+    previous call's time plus the interval, or at once if the result came
+    late.
+  - Answered: retries stop. A follow-up fires that many minutes after the
+    answered call ended, even past `retry_until`.
+  - Still in flight: the plan waits. After 20 minutes without a result, it
+    ends with an unknown outcome and never redials, because a duplicate call is
+    worse than a missed retry. A run that placed no call also ends the plan.
+  - Ended, for any reason: one more occurrence runs with no scopes at all. It
+    can tell the owner how the plan went, but it cannot call. Its
+    scheduled-run alert is the plan's only alert; each completed call stays
+    quiet.
+- The sweep records each decided step as a `schedule.call_plan.step` process
+  event and sets the schedule's next firing. The scheduler materializes that
+  firing and reads the step to choose the run's scopes and its note.
+- Each run's seed is the owner-approved instruction plus a platform note,
+  built only from those statuses and times, for example "this is call 3 of up
+  to 7 in a call plan. Earlier calls: 16:30 UTC no answer; 16:32 UTC
+  voicemail." The note states hours and minutes and never contains a digit run
+  that the number check could read as a phone number.
 
 ADR-0213's checks all stay: number provenance, the conversation-wide content
 check, dispatch's pinned-configuration checks, one-active-call admission, the
 kill switch, and the card for any content-derived call.
 
-## Open questions for the owner
+## Answers to the open questions
 
-1. Approve the platform-run plan, or choose an alternative below?
-2. Are the bounds right: ten attempts, sixty minutes, one minute apart, one
-   follow-up?
-3. Should retries ever leave voicemail? Proposed: never; only the plan's own
-   instruction can ask for it.
-4. If the person says "stop calling" on an answered call, the platform cannot
-   tell from the status alone. Should the follow-up still be placed, opening by
-   asking whether to continue? Or should follow-ups wait until the in-call
-   agent records a structured do-not-call result?
-5. When an outcome is uncertain, stop and alert (proposed), or retry?
+1. The platform-run plan is accepted.
+2. The bounds are accepted: ten calls, sixty minutes, at least one minute
+   apart, and one follow-up.
+3. Retries leave no voicemail unless the instruction asks for one. The note
+   tells each run so.
+4. The owner did not choose. The implemented default is that the follow-up is
+   placed, and the note asks its brief to open by asking whether the person is
+   happy to talk and to end politely if they ask not to be called again. A
+   structured do-not-call result from the in-call agent remains possible
+   later.
+5. An uncertain outcome stops the plan and reports it.
 
 ## Consequences
 
-- This depends on telling a person from a voicemail reliably. A voicemail
-  recorded as `completed` would stop the retries early. Work to classify
-  voicemail-detection hang-ups as voicemail is a prerequisite.
-- When accepted, a new gate covers the plan end to end: request, retries,
-  follow-up, and the unreached alert. Hard gate 3's wording is unchanged.
-- Until then, Chat says which parts of such a request will not happen. A
-  scheduled single call still needs no card, as long as the occurrence reads no
-  call record first.
+- Each plan's correctness depends on telling a person from a voicemail. A
+  call ended by the provider's own voicemail detection is recorded as
+  `voicemail` (the calling design's provider notes). A voicemail the provider
+  reports as a completed conversation would still stop the retries early.
+- Gate tests in `tests/gates/test_owner_requested_calls.py` run a plan end to
+  end: the retry, the follow-up, the report run that cannot call, and an
+  unanswered plan alerting once. No hard gate is added or renumbered, and hard
+  gate 3's wording is unchanged.
+- Only one-time call schedules carry a plan. A plan paused after its first
+  call cannot be resumed: its one-time `at` has passed, so resuming fails with
+  `schedule.no_future_occurrence`.
+- A revision without a plan is stored exactly as before, so a release that
+  predates call plans still reads it. A release that predates call plans
+  cannot read a plan's revision.
 
 ## Alternatives considered
 
@@ -110,6 +122,9 @@ kill switch, and the card for any content-derived call.
   loop: on 2026-10-20 the model read the full list anyway, and that would
   still taint the run. It also widens what `schedule.write` delegates, and
   loop bounds would have to hold across schedules.
+- **Let the scheduler read call results.** The scheduler role is an exact
+  allowlist that excludes the call ledger, which holds transcripts. The
+  maintenance role can already read it.
 - **A durable wait inside one occurrence.** This needs the same untainted
   outcome read, holds a run for the whole plan beyond the 300-second limit, and
   still leaves the model orchestrating.
@@ -119,5 +134,6 @@ kill switch, and the card for any content-derived call.
 - **Count the owner's in-run "yes" as authorization.** It still asks the owner,
   which is the complaint, and it lets content-shaped questions collect
   approvals.
-- **Do nothing more.** Chat now tells the owner the truth, but each later call
-  needs the owner present.
+- **A new notification kind for an unreached person.** It would need a
+  database constraint change and client support. The report run's ordinary
+  scheduled-run alert says the same thing in the session.

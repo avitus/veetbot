@@ -184,8 +184,28 @@ at firing; the scheduler role mirrors `AGENT_CALL_ENABLED` to vouch for the
 scopes. Those scopes are all the occurrence holds, and it runs once, so it
 cannot arrange a retry or a follow-up; the creation result says so, so Chat
 does not confirm one. A call placed after the occurrence reads any call record,
-even an empty list, keeps the card. Proposed ADR-0221 covers running such a
-plan unattended.
+even an empty list, keeps the card.
+
+### Call plans (ADR-0221)
+
+"Call at 9:30; if she doesn't answer, call every 2 minutes until 9:40; if she
+answers, call again 5 minutes later" is one `schedule.create` 1.4.0 with
+`place_call=true`, a one-time `at` and a `call_plan`: `retry_every_minutes`
+(1–30) with `retry_until`, and/or `follow_up_after_answer_minutes` (1–60). A
+plan places at most ten calls within an hour of `at`, then at most one
+follow-up. The owner authorizes the whole plan once, and it cannot change after
+its first call.
+
+A plan's revision requests only `mcp.bland_call.use`, so no call run can read a
+call record and each call keeps the owner-request authority above. The
+maintenance sweep reads each call's closed dispatch status, never its content,
+and chooses the next step: a retry at the next interval while calls and time
+remain, one follow-up after an answered call ends, or the end of the plan. A
+call still in flight holds the plan; after 20 minutes without a result, or
+when a run placed no call, the plan ends without redialing. An ended plan runs
+one occurrence with no scopes, which tells the owner the outcome and cannot
+call. Its scheduled-run alert is the plan's only alert. The scheduling design
+gives the materialization contract.
 
 The server's stderr is not a private channel: the API or worker process that
 spawns the child passes on its own stderr, so anything the child logs lands in

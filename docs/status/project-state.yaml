@@ -17,6 +17,9 @@ project:
   # ADR-0205: independently authorized existing-app reliability repair; no M33
   # source, evaluation, migration or activation changes are included.
   active_milestone: 15
+  # ADR-0221 records the owner's 2026-10-20 acceptance of unattended call plans:
+  # the platform places a one-time call schedule's retries and follow-up from
+  # each call's closed result. No milestone or gate moves; delivery is pending.
   # ADR-0209 records the owner-authorized browser approval, native feedback and
   # deadline repair on 2026-10-16. No milestone or gate moves; delivery is pending.
   # ADR-0178 authorizes parallel Milestone 33 on 2026-10-11: general recall,

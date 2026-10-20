@@ -8,6 +8,13 @@ from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.call_plans import (
+    CALL_PLAN_SESSION_METADATA_KEY,
+    CallPlanStep,
+    CallPlanStepKind,
+    call_plan_note,
+    call_plan_step_key,
+)
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.recurrence import RecurrenceCalculator
@@ -96,7 +103,12 @@ class ScheduleMaterializer:
             revision = await uow.schedules.get_revision(
                 schedule.id, schedule.current_revision, owner
             )
-            nominal = RecurrenceCalculator.latest_at_or_before(revision.cadence, now)
+            if revision.call_plan is None:
+                nominal = RecurrenceCalculator.latest_at_or_before(revision.cadence, now)
+            else:
+                # ADR-0221: after its first call, a plan's next call is the one
+                # the maintenance sweep chose and wrote as the next firing.
+                nominal = schedule.next_fire_at
             if nominal is None or schedule.next_fire_at is None or nominal < schedule.next_fire_at:
                 return None
             existing = await uow.schedule_occurrences.get_by_nominal(schedule.id, nominal)
@@ -222,6 +234,36 @@ class ScheduleMaterializer:
                     authority.authority_version,
                 )
 
+            step: CallPlanStep | None = None
+            attempt = 1
+            if revision.call_plan is not None:
+                attempt = 1 + await _materialized_count(uow, schedule.id, owner)
+                if attempt > 1:
+                    decided = await uow.process_events.get_by_derivation(
+                        call_plan_step_key(schedule.id, attempt)
+                    )
+                    if decided is None:
+                        return await self._record_failure(
+                            uow,
+                            schedule,
+                            revision,
+                            nominal,
+                            next_fire_at,
+                            now,
+                            OccurrenceDisposition.CONFIGURATION_FAILED,
+                            "schedule.call_plan_step_missing",
+                            authority.authority_version,
+                        )
+                    step = CallPlanStep.model_validate(decided.payload["step"])
+            reporting = step is not None and step.kind is CallPlanStepKind.REPORT
+            # The report run only tells the owner how the plan ended; it cannot call.
+            run_scopes = frozenset() if reporting else revision.requested_scopes
+            instruction = revision.instruction
+            if revision.call_plan is not None:
+                assert isinstance(revision.cadence, OnceCadence)
+                note = call_plan_note(revision.call_plan, revision.cadence.at, step)
+                instruction = f"{instruction}\n\n{note}"
+
             session_id = self._ids.new_id()
             run_id = self._ids.new_id()
             occurrence = ScheduleOccurrence(
@@ -257,6 +299,18 @@ class ScheduleMaterializer:
                     "schedule_revision": revision.revision,
                     "schedule_occurrence_id": str(occurrence.id),
                     "nominal_fire_at": nominal.isoformat(),
+                    **(
+                        {
+                            CALL_PLAN_SESSION_METADATA_KEY: {
+                                "kind": (
+                                    CallPlanStepKind.FIRST if step is None else step.kind
+                                ).value,
+                                "attempt": attempt,
+                            }
+                        }
+                        if revision.call_plan is not None
+                        else {}
+                    ),
                 },
                 created_at=now,
                 updated_at=now,
@@ -282,7 +336,7 @@ class ScheduleMaterializer:
                 id=run_id,
                 session_id=session.id,
                 tenant_id=schedule.tenant_id,
-                principal_scopes=set(revision.requested_scopes),
+                principal_scopes=set(run_scopes),
                 agent_id=agent.id,
                 agent_version=agent.version,
                 status=RunStatus.QUEUED,
@@ -305,7 +359,7 @@ class ScheduleMaterializer:
                     event_type="user.message.created",
                     actor_type="scheduler",
                     actor_id=schedule.principal_id,
-                    payload={"content": revision.instruction},
+                    payload={"content": instruction},
                 )
             )
             await uow.runs.set_seed_event_sequence(run.id, user_event.sequence)
@@ -329,11 +383,18 @@ class ScheduleMaterializer:
             )
             self._write_probe("queued_event")
             run_principal = authority.principal.model_copy(
-                update={"scopes": set(revision.requested_scopes)}, deep=True
+                update={"scopes": set(run_scopes)}, deep=True
             )
             await self._seed_checkpoint(uow, run, user_event.sequence, None, run_principal)
             self._write_probe("checkpoint")
-            advanced = self._advanced_schedule(schedule, revision, next_fire_at, now, failed=False)
+            advanced = self._advanced_schedule(
+                schedule,
+                revision,
+                next_fire_at,
+                now,
+                failed=False,
+                awaiting_call_result=revision.call_plan is not None and not reporting,
+            )
             await self._append_occurrence_event(uow, occurrence, schedule, advanced.state, now)
             self._write_probe("process_event")
             await uow.schedules.advance(schedule, advanced)
@@ -513,8 +574,21 @@ class ScheduleMaterializer:
         now: datetime,
         *,
         failed: bool,
+        awaiting_call_result: bool = False,
     ) -> Schedule:
         failures = schedule.consecutive_failures + (1 if failed else 0)
+        if awaiting_call_result:
+            # Active with no firing: the maintenance sweep sets the next one
+            # from this call's result (ADR-0221).
+            return schedule.model_copy(
+                update={
+                    "state": ScheduleState.ACTIVE,
+                    "pause_reason": None,
+                    "next_fire_at": None,
+                    "consecutive_failures": failures,
+                    "updated_at": now,
+                }
+            )
         if isinstance(revision.cadence, OnceCadence) or next_fire_at is None:
             return schedule.model_copy(
                 update={
@@ -544,3 +618,8 @@ class ScheduleMaterializer:
                 "updated_at": now,
             }
         )
+
+
+async def _materialized_count(uow: ScheduleUnitOfWork, schedule_id: UUID, owner: Principal) -> int:
+    occurrences = await uow.schedule_occurrences.list(schedule_id, owner, limit=100)
+    return sum(item.disposition is OccurrenceDisposition.MATERIALIZED for item in occurrences)

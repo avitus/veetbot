@@ -284,6 +284,7 @@ from agent_core.application.browser_task_grants import (
     sweep_expired_task_grants,
 )
 from agent_core.application.call_authorization import OwnerCallAuthorizer
+from agent_core.application.call_plans import CallPlanSweep
 from agent_core.application.call_worker import CallWorker
 from agent_core.application.calling import CallService
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
@@ -690,6 +691,7 @@ from agent_core.tools.schedule_create import (
     LegacyScheduleCreateTool,
     PreviousScheduleCreateTool,
     ScheduleCreateTool,
+    SingleCallScheduleCreateTool,
 )
 from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_CANCEL_TOOL_NAME,
@@ -833,6 +835,7 @@ class Composition:
     judgment_provider: JudgmentProvider | None = None
     attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
+    call_plans: CallPlanSweep | None = None
     # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
     latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
     reliability_report: Callable[[datetime, datetime], Awaitable[ReliabilityReport]] | None = None
@@ -2821,6 +2824,15 @@ async def _compose(
             )
         )
         registry.register(
+            SingleCallScheduleCreateTool(
+                schedule_service,
+                agent,
+                schedule_definition_limits,
+                uow_factory=uow_factory,
+                calling_enabled=settings.call_enabled,
+            )
+        )
+        registry.register(
             ScheduleCreateTool(
                 schedule_service,
                 agent,
@@ -4560,6 +4572,20 @@ async def _compose(
                     limit=schedule_terminal_purge_batch,
                 )
 
+        call_plan_sweep = (
+            CallPlanSweep(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                wake_scheduler=schedule_notify,
+            )
+            if settings.call_enabled
+            and settings.schedule_api_enabled
+            and settings.schedule_worker_enabled
+            else None
+        )
+
         async def sweep_device_invocations() -> int:
             async with uow_factory() as uow:
                 return await uow.device_invocations.expire_overdue(
@@ -4989,6 +5015,9 @@ async def _compose(
                     sweep_people_erasures=lambda: people_erasure.resume_pending(principal),
                     sweep_people_duplicates=_duplicate_sweep(people_duplicates, principal),
                     sweep_terminal_schedules=sweep_terminal_schedules,
+                    sweep_call_plans=(
+                        call_plan_sweep.run_once if call_plan_sweep is not None else None
+                    ),
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
                     ),
@@ -5040,6 +5069,7 @@ async def _compose(
                 local_import_tasks=local_import_tasks,
                 judgment_provider=judgment_provider,
                 people_repair=people_repair,
+                call_plans=call_plan_sweep,
             ),
             list(effective_providers.values()),
         )

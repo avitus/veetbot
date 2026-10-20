@@ -393,6 +393,10 @@ def schedule_revision_values(revision: ScheduleRevision) -> dict[str, Any]:
         exclude={"schedule_id", "revision", "created_by_principal_id", "created_at"},
     )
     definition["requested_scopes"] = sorted(revision.requested_scopes)
+    # Only call-plan revisions carry the key (ADR-0221), so a release that
+    # predates call plans still reads every other revision.
+    if revision.call_plan is None:
+        definition.pop("call_plan")
     return {
         "schedule_id": revision.schedule_id,
         "revision": revision.revision,

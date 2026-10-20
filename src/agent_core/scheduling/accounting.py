@@ -5,6 +5,7 @@ from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.call_plans import CALL_PLAN_SESSION_METADATA_KEY, CallPlanStepKind
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.schedules import (
@@ -141,7 +142,9 @@ class ScheduleOutcomeAccountant:
                 )
             )
             self._write_probe("process_event")
-            if self._notification_producer is not None:
+            if self._notification_producer is not None and not await _quiet_plan_call(
+                uow, revision, run, owner
+            ):
                 produced = await self._notification_producer.for_schedule_run_accounted(
                     uow,
                     schedule=updated,
@@ -191,3 +194,15 @@ class ScheduleOutcomeAccountant:
                 lease_reclaims=max(0, run.attempts - 1),
             )
             return True
+
+
+async def _quiet_plan_call(
+    uow: ScheduleUnitOfWork, revision: ScheduleRevision, run: Run, owner: Principal
+) -> bool:
+    """A call plan alerts once, with its report; each completed call stays quiet (ADR-0221)."""
+
+    if revision.call_plan is None or run.status is not RunStatus.COMPLETED:
+        return False
+    session = await uow.sessions.get(run.session_id, owner)
+    step = session.metadata.get(CALL_PLAN_SESSION_METADATA_KEY)
+    return isinstance(step, dict) and step.get("kind") != CallPlanStepKind.REPORT.value

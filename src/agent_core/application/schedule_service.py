@@ -29,6 +29,7 @@ from agent_core.domain.schedules import (
     ScheduleRecord,
     ScheduleRevision,
     ScheduleState,
+    check_call_plan,
 )
 from agent_core.domain.security import contains_credential
 from agent_core.domain.views import Page
@@ -189,6 +190,10 @@ class ScheduleService:
                 raise ConflictError(
                     "terminal schedule cannot be updated", reason="schedule.terminal"
                 )
+            await _reject_started_call_plan(
+                uow,
+                await uow.schedules.get_revision(schedule_id, current.current_revision, principal),
+            )
             await _validate_definition(uow, principal, definition, self._limits)
             now = self._clock.now()
             next_fire_at = (
@@ -280,6 +285,7 @@ class ScheduleService:
             current_revision = await uow.schedules.get_revision(
                 schedule_id, current.current_revision, principal
             )
+            await _reject_started_call_plan(uow, current_revision)
             current_definition = _definition_from_revision(current_revision)
             definition = current_definition.model_copy(
                 update={
@@ -531,7 +537,21 @@ def _revision(
         max_consecutive_failures=definition.max_consecutive_failures,
         created_by_principal_id=principal.principal_id,
         created_at=now,
+        call_plan=definition.call_plan,
     )
+
+
+async def _reject_started_call_plan(uow: RepositoryUnitOfWork, revision: ScheduleRevision) -> None:
+    """ADR-0221: the owner approved a whole plan, so it cannot change once it starts."""
+
+    if (
+        revision.call_plan is not None
+        and await uow.schedule_occurrences.latest_materialized(revision.schedule_id) is not None
+    ):
+        raise ConflictError(
+            "a call plan cannot change after its first call",
+            reason="schedule.call_plan_started",
+        )
 
 
 def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
@@ -548,6 +568,7 @@ def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
         cadence=revision.cadence,
         misfire_grace_seconds=revision.misfire_grace_seconds,
         max_consecutive_failures=revision.max_consecutive_failures,
+        call_plan=revision.call_plan,
     )
 
 
@@ -574,6 +595,10 @@ async def _validate_definition(
             raise ScheduleValidationError(
                 "schedule.browser_profile_unavailable", "browser profile is not ready"
             )
+    try:
+        check_call_plan(definition.call_plan, definition.cadence)
+    except ValueError as exc:
+        raise ScheduleValidationError("schedule.call_plan_invalid", str(exc)) from exc
     if not definition.requested_scopes <= principal.scopes:
         raise ScheduleValidationError(
             "schedule.scope_not_granted",
@@ -654,6 +679,8 @@ def _definition_hash(definition: ScheduleDefinition) -> str:
     payload = definition.model_dump(mode="json")
     if definition.browser_profile_id is None:
         payload.pop("browser_profile_id")
+    if definition.call_plan is None:
+        payload.pop("call_plan")
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
