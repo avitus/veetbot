@@ -48,6 +48,7 @@ from agent_core.domain.people_views import (
     MergeSuggestionPage,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
+    PeopleCounts,
     PeopleDedupeReport,
     PeopleErasureView,
     PeopleEvidenceView,
@@ -60,7 +61,14 @@ from agent_core.domain.people_views import (
     ResolveMergeSuggestion,
     UpdatePerson,
 )
-from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
+from agent_core.domain.persona import (
+    KeepPersonaField,
+    PersonaBoundaryList,
+    PersonaEntryDraft,
+    PersonaNominationState,
+    PersonaPreview,
+    PersonaTrait,
+)
 from agent_core.domain.reconsolidation_views import OperationKind, OperationState, OperationView
 from agent_core.domain.schedules import (
     ScheduleDefinition,
@@ -84,6 +92,8 @@ from agent_core.domain.views import (
     DeviceView,
     FolderProposalView,
     FolderView,
+    MemoryCountsView,
+    MemoryEvidenceView,
     MemoryView,
     NotificationInboxItem,
     Page,
@@ -516,7 +526,17 @@ class MemoryReadService(Protocol):
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
     ) -> MemoryView | DerivedMemoryView: ...
 
-    # The two write routes of ADR-0117; every other memory change stays on the CLI.
+    # ADR-0214 parts B and C.
+    async def evidence(
+        self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
+    ) -> MemoryEvidenceView: ...
+
+    async def counts(
+        self, principal: Principal, *, ceiling: Sensitivity, include_derived: bool = False
+    ) -> MemoryCountsView: ...
+
+    # The two write routes of ADR-0117 (review gains `changed` in ADR-0214);
+    # every other memory change stays on the CLI.
     async def delete(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity, key: str
     ) -> None: ...
@@ -529,6 +549,8 @@ class MemoryReadService(Protocol):
         *,
         ceiling: Sensitivity,
         key: str,
+        replacement_statement: str | None = None,
+        expected_updated_at: datetime | None = None,
     ) -> MemoryView | DerivedMemoryView: ...
 
 
@@ -680,7 +702,19 @@ class PeopleService(Protocol):
         relationship: PeopleRelationshipFilter | None = None,
         states: Sequence[str] | None = None,
         review: bool = False,
+        open_threads: bool = False,
     ) -> PeoplePage: ...
+    async def counts(self, principal: Principal, *, ceiling: Sensitivity) -> PeopleCounts: ...
+    async def present[
+        P: (Person, PeoplePage, PersonProfile, MergeSuggestionDetail, MergeSuggestionPage)
+    ](
+        self,
+        principal: Principal,
+        result: P,
+        *,
+        ceiling: Sensitivity,
+        as_of: datetime | None = None,
+    ) -> P: ...
 
 
 class ModelSettingsService(Protocol):
@@ -707,7 +741,16 @@ class PersonaService(Protocol):
         *,
         expected_version: int,
         entries: builtins.list[PersonaEntryDraft],
+        voice: str | KeepPersonaField | None = ...,
+        traits: Sequence[PersonaTrait] | KeepPersonaField = ...,
     ) -> PersonaView: ...
+
+    # ADR-0216 parts C and D.
+    async def preview(
+        self, principal: Principal, *, voice: str | None, traits: Sequence[PersonaTrait]
+    ) -> PersonaPreview: ...
+
+    async def boundaries(self, principal: Principal) -> PersonaBoundaryList: ...
 
     async def nominations(
         self,

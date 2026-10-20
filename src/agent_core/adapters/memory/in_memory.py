@@ -532,6 +532,22 @@ class InMemoryMemoryStore:
             result.sort(key=lambda record: (-record.store_position, str(record.id)))
             return result[: query.limit + 1]
 
+    async def browse_counts(
+        self, tenant_id: str, principal_id: str, ceiling: Sensitivity
+    ) -> dict[tuple[MemoryStatus, BeliefType, bool], int]:
+        counts: dict[tuple[MemoryStatus, BeliefType, bool], int] = {}
+        async with self._transaction.owner((tenant_id, principal_id)):
+            for record in self._records.values():
+                if record.id in self._erasure_pending:
+                    continue
+                if record.tenant_id != tenant_id or record.principal_id != principal_id:
+                    continue
+                if SENSITIVITY_ORDER[record.sensitivity] > SENSITIVITY_ORDER[ceiling]:
+                    continue
+                key = (record.status, record.belief_type, record.flagged_for_review)
+                counts[key] = counts.get(key, 0) + 1
+        return counts
+
     async def list_idle(
         self,
         principal: Principal,

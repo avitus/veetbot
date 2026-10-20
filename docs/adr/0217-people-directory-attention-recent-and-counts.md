@@ -101,6 +101,28 @@ ordered by due date. It adds no notification kind, no push, no app-icon badge
 and no Chat message. If the owner reads the rule as forbidding any due-date
 prominence, C is declined and Needs you stays the review set.
 
+## As built (2026-10-20)
+
+Accepted parts were built with these choices, each no weaker than the text
+above:
+
+- **A.** The service keeps returning plain domain records, which callers may
+  write back; the HTTP routes and the CLI add the two fields when they build a
+  response, and `PersonView` declares both without a default, so a response
+  that skipped that step fails instead of reporting "never". A token without
+  `people.read` (write-only) gets both as null, because they read history.
+- **B.** `everyone` counts `state=active&state=provisional`, the A2 Everyone
+  list; a list with no state also returns merged identities. Counts page
+  through the lists themselves, so suppression and the display-name hazard
+  check apply exactly as on the list. A sixth number, `needs_you`, counts the
+  union of the review and open-thread sets once per person, because the native
+  Needs you shows both and their sum would count a person in both twice.
+- **C.** `open_threads=true` stands alone: combined with search, review,
+  relationship, pin, state, sort or `as_of` it is a validation error. Its
+  cursor is keyed on due date and person. A thread is shown exactly as the
+  person's Open threads section shows it: resolved, safe, and backed by a live
+  belief at the ceiling.
+
 ## Consequences
 
 - Recent rows can show "Last contact 3 days ago"; the sidebar shows numbers.

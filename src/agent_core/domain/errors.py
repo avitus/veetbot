@@ -41,6 +41,12 @@ class ModelSettingsChoiceError(AgentCoreError):
     """A model-settings save named a model or effort that is not offered."""
 
 
+class MemoryCorrectionError(AgentCoreError):
+    """A memory's replacement wording was refused before any write (ADR-0214):
+    empty, over-length, unchanged, secret- or injection-shaped, or the text of
+    a statement the owner already deleted or rejected."""
+
+
 class FolderNameError(AgentCoreError):
     """A folder name was refused before persistence: empty, over-length,
     control characters, or content failing the secret or injection scans."""

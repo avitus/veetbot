@@ -18,7 +18,7 @@ admit the typed-judgment port and the judgment matcher.
 
 A chat conversation is a `sessions` row shared by every surface, and every
 client lists those rows as one flat, activity-ordered history
-(http-api-and-streaming.md:805-809). Nothing groups them. The owner wants
+(http-api-and-streaming.md:809-813). Nothing groups them. The owner wants
 conversations organized into folders, wants the assistant to notice when a
 handful of unfiled conversations belong together and to say so, and wants the
 folders to carry the names the owner gives them. Milestone 29 builds it: flat,
@@ -68,7 +68,7 @@ not find it here should find the reason here.
 3. **Automatic filing.** No threshold, similarity score, or model confidence
    files a conversation without the owner's acceptance. The pass proposes;
    the owner disposes. This is the persona surface's rule
-   (persona-surface.md:60-63) applied to a lighter object.
+   (persona-surface.md:65-68) applied to a lighter object.
 4. **Embeddings and a vector extension.** Roadmap item B6 keeps the semantic
    arm and `pgvector` deferred behind benchmark evidence, and ADR-0045
    recorded the no-embedding decision. Grouping here is a bounded structured
@@ -89,7 +89,7 @@ not find it here should find the reason here.
 conversation history server state and every local history store a cache
 (multi-device-and-surfaces.md:49-53). A folder is a fact about a session the
 same way its title is: `SessionView.title` is server-owned and never a
-client-only value (http-api-and-streaming.md:667-677). Membership therefore
+client-only value (http-api-and-streaming.md:671-681). Membership therefore
 lives beside the session on the server and every client reads it from the
 index, which is what lets a folder created on the Mac appear on the iPhone.
 
@@ -101,16 +101,16 @@ uniqueness rule, a cascade, and a count — so it is a table, not a metadata
 key. Metadata stays opaque, bounded, and untrusted.
 
 **Session metadata never enters a model prompt.** The rule is a security rule
-(http-api-and-streaming.md:712-720): metadata is client input and the shape
+(http-api-and-streaming.md:716-724): metadata is client input and the shape
 an injection takes. The grouping call reads titles, bounded message text, and
 folder names — content the platform already treats as user-authored data
 under a trust label — and reads no metadata key at all.
 
 **The persona nomination lifecycle.** Milestone 22 defined the shape of an
 assistant proposal the owner resolves: closed eligibility
-(persona-surface.md:173-180), a bounded open set (persona-surface.md:182-184),
+(persona-surface.md:186-193), a bounded open set (persona-surface.md:195-197),
 a decline that is durable and content-keyed, and withdrawal when the source
-dies before review (persona-surface.md:200-210). Proposals here take that
+dies before review (persona-surface.md:213-223). Proposals here take that
 lifecycle unchanged and add a second withdrawal cause, so a reason field
 exists where the persona design deliberately omitted one.
 
@@ -118,7 +118,7 @@ exists where the persona design deliberately omitted one.
 computes the deterministic result first, calls the provider under a strict
 response schema and a fixed budget, grounds every returned item against its
 source, and records an audited deterministic fallback on any failure
-(memory-formation-and-consolidation.md:752). The grouper is that design with
+(memory-formation-and-consolidation.md:763). The grouper is that design with
 a different schema.
 
 **The maintenance role.** Background work runs as sweeps in the maintenance
@@ -164,7 +164,7 @@ session_folder_memberships (
 
 The primary key is the single-parent rule: a session is in at most one
 folder, and a move is an upsert. The first cascade is how ADR-0050's session
-deletion (http-api-and-streaming.md:811-817) leaves no membership behind
+deletion (http-api-and-streaming.md:815-821) leaves no membership behind
 without a new step in the deletion transaction; the second is how deleting a
 folder returns its conversations to the unfiled state in the same statement.
 The denormalized tenant and principal let ownership be a predicate on this

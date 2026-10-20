@@ -8,10 +8,10 @@ import binascii
 import hashlib
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 from uuid import UUID
 
 from agent_core.application.attachments import (
@@ -33,6 +33,7 @@ from agent_core.application.errors import (
     SessionMetadataValidationError,
 )
 from agent_core.application.folder_service import unfile_deleted_session
+from agent_core.application.memory_evidence import memory_evidence
 from agent_core.application.session_service import bootstrap_session
 from agent_core.application.surfaces import PreparedSurfaceSubmission
 from agent_core.domain.agents import (
@@ -81,6 +82,7 @@ from agent_core.domain.errors import (
     AuthorizationError,
     ConflictError,
     InvalidStateTransition,
+    MemoryCorrectionError,
     NotFoundError,
     PersonaContentError,
     ToolValidationError,
@@ -115,11 +117,17 @@ from agent_core.domain.messages import (
 from agent_core.domain.model_settings import ModelSettingsCatalog
 from agent_core.domain.persistence import IdempotencyRecord, WorkerLease
 from agent_core.domain.persona import (
+    KEEP_PERSONA_FIELD,
+    KeepPersonaField,
+    PersonaBoundary,
+    PersonaBoundaryList,
     PersonaDocument,
     PersonaEntry,
     PersonaEntryDraft,
     PersonaEntrySource,
     PersonaNominationState,
+    PersonaPreview,
+    PersonaTrait,
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.reconsolidation_summary import SummaryMemory
@@ -144,6 +152,8 @@ from agent_core.domain.views import (
     ContentBlock,
     FileContentBlock,
     ImageContentBlock,
+    MemoryCountsView,
+    MemoryEvidenceView,
     MemoryView,
     Page,
     PersistedStreamFrame,
@@ -2187,8 +2197,13 @@ class MemoryOwnerActions(Protocol):
         belief_id: UUID,
         outcome: MemoryReviewOutcome,
         *,
+        replacement_statement: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
     ) -> MemoryRecord: ...
+
+
+# ADR-0214: a corrected wording is a belief statement, bounded like one.
+MEMORY_REPLACEMENT_MAX_CHARS = 500
 
 
 class PublicMemoryService:
@@ -2311,6 +2326,72 @@ class PublicMemoryService:
                     return await derived_view(uow, principal, memory_id, ceiling, self._now())
             return MemoryView.from_record(record)
 
+    async def evidence(
+        self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
+    ) -> MemoryEvidenceView:
+        """The sources a belief cites, shown no further than each may be (ADR-0214)."""
+        require_scope(principal, "memory.read")
+        async with self._uow_factory() as uow:
+            record = await self._visible(uow, principal, memory_id, ceiling)
+            return await memory_evidence(uow, principal, record, ceiling)
+
+    async def counts(
+        self, principal: Principal, *, ceiling: Sensitivity, include_derived: bool = False
+    ) -> MemoryCountsView:
+        """The browser's sidebar numbers under the list's own predicates (ADR-0214)."""
+        require_scope(principal, "memory.read")
+        if include_derived and not self._derived_enabled:
+            raise MemoryCursorError("derived memory browsing is unavailable")
+        async with self._uow_factory() as uow:
+            grouped = await uow.memories.browse_counts(
+                principal.tenant_id, principal.principal_id, ceiling
+            )
+            synthesis = (
+                await self._summary_count(uow, principal, ceiling) if include_derived else None
+            )
+        by_status = dict.fromkeys(MemoryStatus, 0)
+        by_type = dict.fromkeys(BeliefType, 0)
+        flagged = 0
+        for (status, belief_type, is_flagged), count in grouped.items():
+            by_status[status] += count
+            if status in LIVE_MEMORY_STATUSES:
+                by_type[belief_type] += count
+                flagged += count if is_flagged else 0
+        return MemoryCountsView(
+            live=sum(by_status[status] for status in LIVE_MEMORY_STATUSES),
+            flagged=flagged,
+            by_status=by_status,
+            by_type=by_type,
+            synthesis=synthesis,
+            counted_at=self._now(),
+        )
+
+    async def _summary_count(
+        self, uow: RepositoryUnitOfWork, principal: Principal, ceiling: Sensitivity
+    ) -> int:
+        """Walk the derived browse to its end; summaries are few and revalidated per read."""
+        now = self._now()
+        total = 0
+        cursor: tuple[int, UUID] | None = None
+        try:
+            async with uow.people.lock(principal):
+                while True:
+                    query = MemoryBrowseQuery(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        ceiling=ceiling,
+                        limit=200,
+                        cursor=cursor,
+                    )
+                    rows = await uow.reconsolidation.browse_summaries(principal, query, now)
+                    page = rows[: query.limit]
+                    total += len(page)
+                    if len(rows) <= query.limit:
+                        return total
+                    cursor = (page[-1].store_position, page[-1].id)
+        except NotFoundError:
+            return 0
+
     # -- writes (ADR-0117) -------------------------------------------------------
     #
     # Each write runs in one unit of work under the owner's email and People
@@ -2333,6 +2414,29 @@ class PublicMemoryService:
         if SENSITIVITY_ORDER[record.sensitivity] > SENSITIVITY_ORDER[ceiling]:
             raise NotFoundError("memory not found")
         return record
+
+    @staticmethod
+    async def _check_replacement(
+        uow: RepositoryUnitOfWork, principal: Principal, record: MemoryRecord, replacement: str
+    ) -> None:
+        """Refuse a corrected wording before anything is written (ADR-0214).
+
+        Messages never quote the submitted text: a refusal is a log surface.
+        """
+        if record.status not in LIVE_MEMORY_STATUSES:
+            raise ConflictError("only a live memory can be reworded", reason="memory.not_live")
+        if not replacement or len(replacement) > MEMORY_REPLACEMENT_MAX_CHARS:
+            raise MemoryCorrectionError("replacement text must be 1 to 500 characters")
+        if replacement.casefold() == " ".join(record.statement.split()).casefold():
+            raise MemoryCorrectionError("replacement text does not change the memory")
+        if contains_secret_material(replacement) or contains_injection_pattern(replacement):
+            raise MemoryCorrectionError("replacement text failed the safety checks")
+        statement_hash = hashlib.sha256(replacement.casefold().encode()).hexdigest()
+        rejections = await uow.memories.outstanding_rejections(
+            principal.tenant_id, principal.principal_id
+        )
+        if any(rejection.statement_sha256 == statement_hash for rejection in rejections):
+            raise MemoryCorrectionError("the owner already removed that statement")
 
     @staticmethod
     def _write_key(principal: Principal, key: str, request: object) -> tuple[str, str]:
@@ -2431,12 +2535,33 @@ class PublicMemoryService:
         *,
         ceiling: Sensitivity,
         key: str,
+        replacement_statement: str | None = None,
+        expected_updated_at: datetime | None = None,
     ) -> MemoryView | DerivedMemoryView:
-        """Apply one review outcome to a belief; a repeated key replays its live view."""
+        """Apply one review outcome to a belief; a repeated key replays its live view.
+
+        ``changed`` (ADR-0214) returns the replacement belief's view, and so
+        does its replay; the superseded belief stays readable.
+        """
         require_scope(principal, "memory.write")
-        derivation, digest = self._write_key(
-            principal, key, {"op": "review", "memory_id": str(memory_id), "outcome": outcome.value}
+        changed = outcome is MemoryReviewOutcome.CHANGED
+        if changed != (replacement_statement is not None):
+            raise MemoryCorrectionError("replacement text belongs to the changed outcome only")
+        replacement = (
+            None if replacement_statement is None else " ".join(replacement_statement.split())
         )
+        request: dict[str, object] = {
+            "op": "review",
+            "memory_id": str(memory_id),
+            "outcome": outcome.value,
+        }
+        # Older receipts hashed only the three fields above; the new ones join
+        # the hash only when present, so a replayed old key still matches.
+        if replacement is not None:
+            request["replacement_statement"] = replacement
+        if expected_updated_at is not None:
+            request["expected_updated_at"] = expected_updated_at.isoformat()
+        derivation, digest = self._write_key(principal, key, request)
         async with (
             self._uow_factory() as uow,
             uow.email.lock(principal),
@@ -2447,9 +2572,12 @@ class PublicMemoryService:
                 self._derived_enabled
                 and await uow.reconsolidation.summary_operation(principal, memory_id) is not None
             ):
+                if changed:
+                    # A summary's corrections belong to memory-reconsolidation.md.
+                    raise MemoryCorrectionError("a derived summary cannot be reworded")
                 now = self._now()
                 if not replayed:
-                    action: SummaryAction = outcome.value
+                    action = cast(SummaryAction, outcome.value)
                     await change_derived(uow, principal, memory_id, action, ceiling, now)
                     await uow.reconsolidation.record_summary_write(
                         principal,
@@ -2458,11 +2586,20 @@ class PublicMemoryService:
                     )
                 return await derived_view(uow, principal, memory_id, ceiling, now)
             if replayed:
-                return MemoryView.from_record(
-                    await self._visible(uow, principal, memory_id, ceiling)
-                )
+                record = await self._visible(uow, principal, memory_id, ceiling)
+                if changed and record.superseded_by is not None:
+                    record = await self._visible(uow, principal, record.superseded_by, ceiling)
+                return MemoryView.from_record(record)
             record = await self._visible(uow, principal, memory_id, ceiling)
-            reviewed = await self._governed(principal).review(memory_id, outcome, existing_uow=uow)
+            if expected_updated_at is not None and record.updated_at != expected_updated_at:
+                raise ConflictError(
+                    "memory changed since it was read", reason="memory.revision_conflict"
+                )
+            if replacement is not None:
+                await self._check_replacement(uow, principal, record, replacement)
+            reviewed = await self._governed(principal).review(
+                memory_id, outcome, replacement_statement=replacement, existing_uow=uow
+            )
             await self._receipt(
                 uow,
                 principal,
@@ -2475,6 +2612,12 @@ class PublicMemoryService:
             return MemoryView.from_record(reviewed)
 
 
+class PersonaPreviewSource(Protocol):
+    async def preview(
+        self, principal: Principal, *, voice: str | None, traits: Sequence[PersonaTrait]
+    ) -> PersonaPreview: ...
+
+
 class PublicPersonaService:
     """The persona document's write and review surface (Milestone 22).
 
@@ -2485,26 +2628,75 @@ class PublicPersonaService:
     nomination row, never through the memory API.
     """
 
-    def __init__(self, *, uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory) -> None:
+    def __init__(
+        self,
+        *,
+        uow_factory: UnitOfWorkFactory,
+        clock: Clock,
+        ids: IdFactory,
+        previewer: PersonaPreviewSource | None = None,
+        boundaries: Sequence[PersonaBoundary] = (),
+    ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
+        self._previewer = previewer
+        self._boundaries = tuple(boundaries)
+
+    async def preview(
+        self, principal: Principal, *, voice: str | None, traits: Sequence[PersonaTrait]
+    ) -> PersonaPreview:
+        """A sample reply in an unsaved voice (ADR-0216 part C); nothing is stored."""
+        require_scope(principal, "persona.write")
+        if self._previewer is None:
+            raise PersonaContentError("this server cannot generate a sample reply")
+        return await self._previewer.preview(principal, voice=voice, traits=traits)
+
+    async def boundaries(self, principal: Principal) -> PersonaBoundaryList:
+        """The fixed rules the persona cannot change, each with what enforces it."""
+        require_scope(principal, "persona.read")
+        return PersonaBoundaryList(items=list(self._boundaries))
 
     async def get(self, principal: Principal) -> PersonaView:
         require_scope(principal, "persona.read")
         async with self._uow_factory() as uow:
             document = await uow.personas.active(principal)
-        return PersonaView.from_document(document or self._empty(principal))
+            return await self._view(uow, principal, document or self._empty(principal))
 
     async def history(self, principal: Principal, *, limit: int) -> Page[PersonaView]:
         require_scope(principal, "persona.read")
         effective_limit = min(max(limit, 1), 200)
         async with self._uow_factory() as uow:
             rows = await uow.personas.history(principal, limit=effective_limit)
-        return Page[PersonaView](
-            items=[PersonaView.from_document(row) for row in rows],
-            next_cursor=None,
-        )
+            known: dict[UUID, bool] = {}
+            items = [await self._view(uow, principal, row, known=known) for row in rows]
+        return Page[PersonaView](items=items, next_cursor=None)
+
+    async def _view(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        document: PersonaDocument,
+        *,
+        known: dict[UUID, bool] | None = None,
+    ) -> PersonaView:
+        """The document with each promoted entry's staleness (persona-surface.md).
+
+        An affirmed entry is stale once its source belief is superseded,
+        retired, expired or gone; the owner decides what to do about it.
+        """
+        live = known if known is not None else {}
+        for belief_id in document.affirmed_belief_ids:
+            if belief_id in live:
+                continue
+            try:
+                belief = await uow.memories.get(belief_id, principal)
+            except NotFoundError:
+                live[belief_id] = False
+                continue
+            live[belief_id] = belief.status in LIVE_MEMORY_STATUSES
+        stale = frozenset(belief_id for belief_id, alive in live.items() if not alive)
+        return PersonaView.from_document(document, stale=stale)
 
     async def update(
         self,
@@ -2512,8 +2704,19 @@ class PublicPersonaService:
         *,
         expected_version: int,
         entries: list[PersonaEntryDraft],
+        voice: str | KeepPersonaField | None = KEEP_PERSONA_FIELD,
+        traits: Sequence[PersonaTrait] | KeepPersonaField = KEEP_PERSONA_FIELD,
     ) -> PersonaView:
+        """Replace the document; an omitted voice or trait list keeps the head's.
+
+        Omission rather than null keeps a client that predates ADR-0216 from
+        clearing a voice it never showed.
+        """
         require_scope(principal, "persona.write")
+        if isinstance(voice, str):
+            voice = voice.strip() or None
+            if voice is not None:
+                self._refuse_hazards(voice)
         async with self._uow_factory() as uow:
             head = await uow.personas.active(principal)
             affirmed_now = set(head.affirmed_belief_ids) if head is not None else set()
@@ -2531,6 +2734,7 @@ class PublicPersonaService:
                             text=draft.text,
                             source=PersonaEntrySource.USER_EDIT,
                             sensitivity=draft.sensitivity,
+                            enabled=draft.enabled,
                         )
                     )
                     continue
@@ -2541,7 +2745,11 @@ class PublicPersonaService:
                     )
                 built.append(
                     kept_sources[draft.source_belief_id].model_copy(
-                        update={"text": draft.text, "sensitivity": draft.sensitivity}
+                        update={
+                            "text": draft.text,
+                            "sensitivity": draft.sensitivity,
+                            "enabled": draft.enabled,
+                        }
                     )
                 )
             document = self._next_version(
@@ -2550,6 +2758,8 @@ class PublicPersonaService:
                 entries=tuple(built),
                 source=PersonaEntrySource.USER_EDIT,
                 source_nomination_id=None,
+                voice=voice,
+                traits=traits,
             )
             stored = await uow.personas.append_version(document, expected_version=expected_version)
             dropped = affirmed_now - set(stored.affirmed_belief_ids)
@@ -2561,9 +2771,12 @@ class PublicPersonaService:
                     "version": stored.version,
                     "entries": len(stored.entries),
                     "cleared_markers": len(dropped),
+                    "disabled": sum(not entry.enabled for entry in stored.entries),
+                    "voice": stored.voice is not None,
+                    "traits": len(stored.traits),
                 },
             )
-        return PersonaView.from_document(stored)
+            return await self._view(uow, principal, stored)
 
     async def nominations(
         self,
@@ -2586,7 +2799,7 @@ class PublicPersonaService:
             if nomination.state is PersonaNominationState.AFFIRMED:
                 # Idempotent replay: the entry already stands.
                 head = await uow.personas.active(principal)
-                return PersonaView.from_document(head or self._empty(principal))
+                return await self._view(uow, principal, head or self._empty(principal))
             if nomination.state is not PersonaNominationState.NOMINATED:
                 raise ConflictError(
                     f"persona nomination {nomination_id} is already {nomination.state}"
@@ -2626,7 +2839,7 @@ class PublicPersonaService:
                 principal,
                 {"version": stored.version, "nomination_id": str(nomination.id)},
             )
-        return PersonaView.from_document(stored)
+            return await self._view(uow, principal, stored)
 
     async def decline(self, principal: Principal, nomination_id: UUID) -> PersonaNominationView:
         require_scope(principal, "persona.write")
@@ -2656,7 +2869,12 @@ class PublicPersonaService:
         entries: tuple[PersonaEntry, ...],
         source: PersonaEntrySource,
         source_nomination_id: UUID | None,
+        voice: str | KeepPersonaField | None = KEEP_PERSONA_FIELD,
+        traits: Sequence[PersonaTrait] | KeepPersonaField = KEEP_PERSONA_FIELD,
     ) -> PersonaDocument:
+        """The next version; voice and traits carry over unless the caller set them."""
+        kept_voice = head.voice if head is not None else None
+        kept_traits = head.traits if head is not None else ()
         try:
             return PersonaDocument(
                 tenant_id=principal.tenant_id,
@@ -2666,6 +2884,8 @@ class PublicPersonaService:
                 source=source,
                 source_nomination_id=source_nomination_id,
                 created_at=self._clock.now(),
+                voice=kept_voice if isinstance(voice, KeepPersonaField) else voice,
+                traits=kept_traits if isinstance(traits, KeepPersonaField) else tuple(traits),
             )
         except ValueError as exc:
             raise PersonaContentError(f"persona document rejected: {exc}") from exc

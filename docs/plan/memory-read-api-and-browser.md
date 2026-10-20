@@ -20,7 +20,7 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:506-516). That surface is right for an
+(memory-formation-and-consolidation.md:517-527). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
@@ -52,13 +52,14 @@ Milestone 17 delivers a read surface and the client that consumes it.
 Four things are out of scope, and each is named because a reader who does not
 find it here should find the reason here.
 
-1. **Any write beyond review and deletion.** No edit, no replacement text,
-   no re-derivation. ADR-0070 decision 3 kept the router read-only in round
+1. **Any write beyond review and deletion.** No in-place edit and no
+   re-derivation. ADR-0070 decision 3 kept the router read-only in round
    one; ADR-0117 superseded that decision with exactly two writes, a delete
    and a review outcome, both routed through the governed formation service
-   rather than around it (see *Writes* below). Every other correction stays
-   on the `agent memory` CLI, and hard gate 6 enforces the exact route table
-   structurally rather than by convention.
+   rather than around it (see *Writes* below). ADR-0214 let the review
+   outcome carry replacement text, as a supersession and never an overwrite.
+   Every other correction stays on the `agent memory` CLI, and hard gate 6
+   enforces the exact route table structurally rather than by convention.
 2. **Recall-trace viewing.** There is a precondition and it is a defect:
    `PostgresTraceStore.for_turn` in
    `src/agent_core/adapters/persistence/memory_repositories.py` selects traces
@@ -85,14 +86,16 @@ entity graph, and belief merge remain excluded exactly as ADR-0069 left them.
 The persona surface left that residue at Milestone 22 (ADR-0079,
 [persona-surface.md](persona-surface.md)); its routes are a distinct resource.
 Of the write half of this milestone's exclusion, ADR-0117 later admitted
-exactly deletion and the review outcomes; belief edit and replacement over
-HTTP stay excluded, with hard gate 6 still walking the memory router to prove
-the table is exactly the documented one.
+exactly deletion and the review outcomes, and ADR-0214 the `changed` outcome
+that supersedes a belief with the owner's wording; an in-place belief edit
+over HTTP stays excluded, with hard gate 6 still walking the memory router to
+prove the table is exactly the documented one.
 
 ## The routes
 
-Two read routes, both GET under the exact scope `memory.read`, and since
-ADR-0117 two governed writes under the exact scope `memory.write`, all mounted
+Four read routes, all GET under the exact scope `memory.read` (Milestone 17's
+two, and ADR-0214's evidence and counts), and since ADR-0117 two governed
+writes under the exact scope `memory.write`, all mounted
 only when `AGENT_MEMORY_API_ENABLED` is set. They use the same
 authentication middleware, principal-first application signatures, request-id
 header, error envelope, and cross-principal not-found rule as every route in
@@ -106,7 +109,9 @@ route that returns user content. A write additionally requires a bounded
 
 ```text
 GET    /v1/memories                       memory.read    Page[MemoryView]
+GET    /v1/memories/counts                memory.read    MemoryCountsView
 GET    /v1/memories/{memory_id}           memory.read    MemoryView
+GET    /v1/memories/{memory_id}/evidence  memory.read    MemoryEvidenceView
 DELETE /v1/memories/{memory_id}           memory.write   204
 POST   /v1/memories/{memory_id}/review    memory.write   MemoryView
 ```
@@ -176,7 +181,9 @@ searchable derived output. An opt-in request while the surface is disabled retur
 `400 malformed_request`. The exact derived projection, review/delete semantics,
 historical restrictions, erasure and receipt contract are specified in
 [memory-reconsolidation.md](memory-reconsolidation.md). Derived detail and writes
-use the same four routes and scopes; no additional memory text-write route exists.
+use the same routes and scopes; no additional memory text-write route exists,
+and a summary refuses the `changed` review outcome with `malformed_request`
+because its corrections belong to reconsolidation (ADR-0214).
 
 ### `GET /v1/memories/{memory_id}`
 
@@ -189,6 +196,51 @@ distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
 (memory-retrieval-and-ranking.md:756-762).
+
+### `GET /v1/memories/{memory_id}/evidence`
+
+ADR-0214 part B. The same `ceiling` and `not_found` rule as the detail read
+decide whether the belief is visible at all. The response is
+`{"items": [...]}`, at most five items, newest cited event first, one per
+cited source event of the belief's source session:
+
+```text
+source_kind     owner | email | sms | call | scheduler | tool | unknown
+session_id      the source session
+event_sequence  the cited event
+evidence_at     the event's time; null when the source is gone
+excerpt         at most 280 characters from the start of the text, cut at a
+                word boundary; null unless the rule below allows it
+withheld        null, or erased | ceiling | not_owner_text | scope | hazard
+```
+
+An `excerpt` is returned only for the owner's own authenticated words — a
+`user.message.created`, `people.owner_assertion` or `memory.owner_correction`
+event whose actor is the caller — when the caller also holds `session.read`,
+the request's ceiling is `restricted`, and the text passes the secret and
+injection scans; otherwise `withheld` says which condition failed. Email,
+SMS (including a message the owner's iPhone relayed), call, scheduler and tool
+sources return identifiers only, like the People evidence view, and the route
+reads only the event log: it never touches a mailbox or resets an email body's
+retention timer. An erased session, a source a People erasure suppressed, and
+an event past retention return `withheld: erased` with nothing beyond the
+reference. Excerpts are never written to a trace, index, cache or model
+context; this route follows the People evidence pattern, not ADR-0189's model
+recall of source text.
+
+### `GET /v1/memories/counts`
+
+ADR-0214 part C, mounted before the identifier route so `counts` never parses
+as one. `ceiling` is required; `include_derived` defaults to false and, while
+the reconsolidation surface is disabled, is `malformed_request` exactly as on
+the list. The response is `{live, flagged, by_status, by_type, synthesis,
+counted_at}`: `live` and `by_type` count `active` and `provisional`, matching
+the default browse; `flagged` counts live beliefs with `flagged_for_review`,
+matching `flagged=true`; `by_status` counts every status; `synthesis` is null
+unless `include_derived=true`, and then counts what the derived browse would
+list. Every count applies the list's own tenant, principal, erasure and ceiling
+predicates in both store adapters, so a number never disagrees with the list
+it labels.
 
 ### Writes
 
@@ -205,27 +257,42 @@ tombstoned so it cannot re-form, People copies are erased, and a
 `memory.deleted` event is appended to the belief's source session.
 
 `POST /v1/memories/{memory_id}/review` takes `{"outcome": ...}` with one of
-three values. `dismiss` clears `flagged_for_review` and nothing else: the
+four values, and an optional `expected_updated_at`: when it differs from the
+belief's current `updated_at` the request is `conflict` and nothing changes. `dismiss` clears `flagged_for_review` and nothing else: the
 belief takes a fresh store position, so the next recall delta shows it as
 reviewed, and a `memory.reviewed` event is appended. `untrue` and `not_here`
 are the rejection kinds of the same name in
 [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md):
 the first retires the belief as never true, the second lowers its portability
 to `local`; both leave it flagged and down-weighted, as the correction table
-says. A belief that was true but has changed needs replacement text and stays
-on the People correction path and the CLI. The response is the belief's new
-`MemoryView`.
+says. The response is the belief's new `MemoryView`.
+
+`changed` (ADR-0214 part A) carries `replacement_statement`, which is required
+for it and refused with every other outcome. The text is trimmed, must be 1 to
+500 characters, must differ from the current statement after case folding,
+must pass the secret and injection scans, and must not hash to a statement the
+owner already deleted or rejected; a refusal is `malformed_request` and never
+quotes the text. Only a live belief can be reworded; any other is `conflict`.
+One unit of work then appends a `memory.owner_correction` event carrying the
+replacement to the belief's source session, applies the CHANGED rejection
+(status `superseded`, `valid_to` set, flag kept, rejection record), forms the
+replacement at user authority citing that event and inheriting subject, scope,
+type, portability and sensitivity, links `superseded_by` and the rejection's
+`replacement_id`, and records the receipt. The response, and its replay, is the
+replacement's `MemoryView`; the superseded belief stays readable.
 
 ### Errors
 
 The closed error-code vocabulary is unchanged
 (http-api-and-streaming.md:111). The read routes raise exactly four of its
-members; the two write routes add `conflict` for a reused idempotency key.
+members; the two write routes add `conflict` for a reused idempotency key, a
+stale `expected_updated_at`, and a reworded belief that is no longer live.
 
 ```text
 400  malformed_request     missing or unknown ceiling, unknown status or
                            belief type, malformed or undecodable cursor,
-                           limit that is not a positive integer
+                           limit that is not a positive integer, refused
+                           replacement text (ADR-0214)
 401  authentication_error  no credential, or a credential that does not
                            resolve
 403  authorization_error   a principal without memory.read on a read, or
@@ -233,7 +300,8 @@ members; the two write routes add `conflict` for a reused idempotency key.
 404  not_found             a belief above the ceiling, in another
                            principal's store, or absent
 409  conflict              writes only: an idempotency key reused for a
-                           different request
+                           different request, a stale expected_updated_at,
+                           or rewording a belief that is not live
 ```
 
 A `limit` above 200 is clamped rather than rejected, which is the pagination
@@ -245,7 +313,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1694-1711) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1698-1715) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text
@@ -515,10 +583,11 @@ enumeration ship together or the corpus disagrees with the code.
    text filter's results equal those of the shared lexical helpers applied
    directly. Registered as `gate.memory.read_api_filters`, case. **M17.**
 6. **The router exposes exactly the documented routes.** Every route mounted
-   under `/v1/memories` is one of the two GET reads declaring exactly the
-   scope `memory.read` or the two writes of ADR-0117 declaring exactly the
-   scope `memory.write` with a required `Idempotency-Key` header and ceiling;
-   any other route, method, or scope fails the build. Registered as
+   under `/v1/memories` is one of the four GET reads declaring exactly the
+   scope `memory.read` (the counts read mounted before the identifier route)
+   or the two writes of ADR-0117 declaring exactly the scope `memory.write`
+   with a required `Idempotency-Key` header and ceiling; any other route,
+   method, or scope fails the build. Registered as
    `gate.memory.read_api_read_only`, structural. **M17.**
 7. **The flag is a real switch.** With `AGENT_MEMORY_API_ENABLED` unset, no
    `/v1/memories` route is registered and none appears in the OpenAPI document,

@@ -139,6 +139,29 @@ page pay a count; and a total read beside a keyset cursor drifts as beliefs
 change between pages. It is mounted before `/v1/memories/{memory_id}`, as
 `/v1/people/merge-suggestions` already is before the person route.
 
+## As built (2026-10-20)
+
+Accepted parts were built with these choices, each no weaker than the text
+above:
+
+- **A.** The content checks run on the whitespace-collapsed text, the form the
+  replacement is stored in. A `changed` request for a belief that is no longer
+  live is `conflict` rather than `malformed_request`, since the request is
+  well formed and the state moved. The idempotency hash includes the
+  replacement and `expected_updated_at` only when present, so receipts written
+  before this change still replay. A replay returns the belief the original's
+  `superseded_by` names. The CLI's `agent memory review` gained
+  `--replacement`, required with `--outcome changed` and refused otherwise.
+- **B.** `memory.owner_correction`, the event part A introduces, counts as the
+  owner's own words alongside the two event types named above; the owner wrote
+  it through an authenticated request. A chat message the owner's iPhone
+  relayed (trust `external_untrusted`) is `sms`, and a schedule's seed message
+  is `scheduler`. A missing source session withholds every item as `erased`.
+- **C.** `synthesis` walks the derived browse to its end rather than adding a
+  store method, so it counts exactly what that browse would list. `by_status`
+  carries every status, including `candidate`, and `by_type` every belief type,
+  zero where none exist.
+
 ## Consequences
 
 - Owners can correct any memory from the clients without a conversation, and

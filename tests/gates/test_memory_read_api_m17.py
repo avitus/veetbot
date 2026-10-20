@@ -693,10 +693,16 @@ async def test_the_router_exposes_exactly_the_documented_routes() -> None:
     }
     assert table == {
         ("/v1/memories", "GET"): "memory.read",
+        # ADR-0214: two reads join under the same scope; no new scope exists.
+        ("/v1/memories/counts", "GET"): "memory.read",
         ("/v1/memories/{memory_id}", "GET"): "memory.read",
+        ("/v1/memories/{memory_id}/evidence", "GET"): "memory.read",
         ("/v1/memories/{memory_id}", "DELETE"): "memory.write",
         ("/v1/memories/{memory_id}/review", "POST"): "memory.write",
     }
+    # "counts" is a literal segment; the identifier route must not shadow it.
+    paths = [route.path for route in routes]
+    assert paths.index("/v1/memories/counts") < paths.index("/v1/memories/{memory_id}")
 
     # The same statement over the published document: every operation on the
     # surface requires exactly its documented scope, and each write declares

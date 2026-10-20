@@ -597,6 +597,19 @@ duplicates** lists each pair with Merge and Keep separate, and a person's
 detail asks about its own and lists merges made without asking, with an undo
 (ADR-0125).
 
+Every response that shows a person carries `last_interaction_at`, the newest
+visible dated interaction and so exactly the key recent sorting uses, and
+`next_thread`, the earliest open commitment the owner owes that person whose
+supported due date (precision `instant` or `day`) is overdue or within fourteen
+days; `proposed` and `uncertain` commitments never qualify. Null means none,
+never "not computed" (ADR-0217). `open_threads=true` lists those people,
+earliest due first, and the native **Needs you** shows them beside the review
+set, each thread with its in-place correction. This is a passive list the owner
+opens: "no automatic sends or reminders" forbids the system acting or prompting
+on its own, and the list adds no notification, badge, push or Chat message.
+`GET /v1/people/counts` returns the sidebar's numbers, each under its own
+list's predicates.
+
 Person detail has five sections:
 
 1. **Overview:** name, supported relationship to the owner, brief grounded
@@ -627,7 +640,8 @@ on their implemented checks and the master switch.
 
 | Method and route | Scope | Contract |
 | --- | --- | --- |
-| `GET /v1/people` | `people.read` | Search/list; relationship filter, repeatable `state` filter, and `review=true` for Needs review (ADR-0121); keyset pagination. |
+| `GET /v1/people` | `people.read` | Search/list; relationship filter, repeatable `state` filter, and `review=true` for Needs review (ADR-0121); `open_threads=true` alone for owed replies due soon (ADR-0217); keyset pagination. |
+| `GET /v1/people/counts` | `people.read` | `{everyone, needs_review, possible_duplicates, open_threads, needs_you, counted_at}`; `everyone` matches `state=active&state=provisional`, `needs_you` counts the review and open-thread sets with each person once, and the rest match their own lists (ADR-0217). |
 | `GET /v1/people/{id}` | `people.read` | Revisioned profile, coverage, permitted aliases, and bounded section summaries. |
 | `GET /v1/people/{id}/relationships` | `people.read` | Paginated directed links with `as_of` and `known_at`. |
 | `GET /v1/people/{id}/history` | `people.read` | Paginated timeline; time/channel/kind filters, unknown-date bucket, and coverage. |

@@ -556,6 +556,34 @@ async def test_recent_people_directory_uses_visible_interactions_before_paging()
     await people_recent_directory_contract(InMemoryPeopleStore(FixedClock(NOW)))
 
 
+async def people_last_interaction_contract(store: PeopleStore) -> None:
+    """ADR-0217 part A: the reported last contact is exactly the recent sort key."""
+    await people_recent_directory_contract(store)
+    owner = principal()
+    people = [UUID(int=9100 + i) for i in range(4)]
+    at = await store.last_interactions(
+        owner, people, ceiling=Sensitivity.SENSITIVE, as_of=NOW + timedelta(days=5)
+    )
+    # The restricted day-4 meeting is above the ceiling and day 10 is after as_of.
+    assert at == {people[0]: NOW + timedelta(days=1), people[1]: NOW + timedelta(days=3)}
+    wider = await store.last_interactions(
+        owner, people, ceiling=Sensitivity.RESTRICTED, as_of=NOW + timedelta(days=30)
+    )
+    assert wider == {
+        people[0]: NOW + timedelta(days=4),
+        people[1]: NOW + timedelta(days=3),
+        people[2]: NOW + timedelta(days=10),
+    }
+    assert await store.last_interactions(owner, [people[3]], ceiling=Sensitivity.SENSITIVE) == {}
+    assert await store.last_interactions(owner, [], ceiling=Sensitivity.SENSITIVE) == {}
+    stranger = owner.model_copy(update={"principal_id": "someone-else"})
+    assert await store.last_interactions(stranger, people, ceiling=Sensitivity.RESTRICTED) == {}
+
+
+async def test_last_interaction_equals_the_recent_sort_key() -> None:
+    await people_last_interaction_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
 async def people_duplicate_source_erasure_contract(store: PeopleStore) -> None:
     from uuid import UUID
 

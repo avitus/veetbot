@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import hashlib
 import json
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.authorization import require_scope
@@ -22,7 +23,12 @@ from agent_core.domain.email import EmailThread
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
-from agent_core.domain.memory import LIVE_MEMORY_STATUSES, SENSITIVITY_ORDER, Sensitivity
+from agent_core.domain.memory import (
+    LIVE_MEMORY_STATUSES,
+    SENSITIVITY_ORDER,
+    MemoryRecord,
+    Sensitivity,
+)
 from agent_core.domain.people import (
     OrganizationReference,
     PeopleCommitment,
@@ -53,6 +59,7 @@ from agent_core.domain.people_views import (
     AddPersonAlias,
     AutomaticMergeDetail,
     CreatePerson,
+    DirectoryPerson,
     EndPersonAlias,
     IdentityEvidenceView,
     LegacyPeopleLinkResult,
@@ -60,6 +67,7 @@ from agent_core.domain.people_views import (
     MergeSuggestionPage,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
+    PeopleCounts,
     PeopleDedupeReport,
     PeopleErasureView,
     PeopleEvidenceView,
@@ -92,6 +100,80 @@ def _key(principal: Principal, key: str) -> str:
 
 def _safe(text: str) -> bool:
     return not contains_injection_pattern(text) and not contains_secret_material(text)
+
+
+# ADR-0217 part C: an owed reply joins Needs you when it is overdue or due
+# within this window. A passive list, never a reminder or a notification.
+OPEN_THREAD_WINDOW = timedelta(days=14)
+# Bounds on the scans that back the counts and the open-thread list.
+_SCAN_PAGES = 100
+
+
+type PresentablePeople = (
+    Person | PeoplePage | PersonProfile | MergeSuggestionDetail | MergeSuggestionPage
+)
+
+
+def _shown_people(result: PresentablePeople) -> Iterator[Person]:
+    """Every person a public People response shows."""
+    if isinstance(result, Person):
+        yield result
+    elif isinstance(result, PeoplePage):
+        yield from result.items
+    elif isinstance(result, MergeSuggestionDetail):
+        yield from (result.source, result.target)
+    elif isinstance(result, MergeSuggestionPage):
+        for item in result.items:
+            yield from (item.source, item.target)
+    else:
+        yield result.person
+        for suggestion in result.merge_suggestions:
+            yield from (suggestion.source, suggestion.target)
+        for merge in result.automatic_merges:
+            yield merge.merged
+
+
+def _with_people(
+    result: PresentablePeople, shown: dict[UUID, DirectoryPerson]
+) -> PresentablePeople:
+    """The response with each person replaced by its directory form (never persisted)."""
+
+    def pair(item: MergeSuggestionDetail) -> MergeSuggestionDetail:
+        return item.model_copy(
+            update={"source": shown[item.source.id], "target": shown[item.target.id]}
+        )
+
+    if isinstance(result, Person):
+        return shown[result.id]
+    if isinstance(result, PeoplePage):
+        return result.model_copy(update={"items": [shown[item.id] for item in result.items]})
+    if isinstance(result, MergeSuggestionDetail):
+        return pair(result)
+    if isinstance(result, MergeSuggestionPage):
+        return result.model_copy(update={"items": [pair(item) for item in result.items]})
+    return result.model_copy(
+        update={
+            "person": shown[result.person.id],
+            "merge_suggestions": [pair(item) for item in result.merge_suggestions],
+            "automatic_merges": [
+                merge.model_copy(update={"merged": shown[merge.merged.id]})
+                for merge in result.automatic_merges
+            ],
+        }
+    )
+
+
+def _owed_soon(commitment: PeopleCommitment, horizon: datetime) -> bool:
+    """An open promise the owner made to a person, with a supported due date in reach."""
+    return (
+        commitment.state == "open"
+        and commitment.debtor.kind == "owner"
+        and commitment.beneficiary.kind == "person"
+        and commitment.beneficiary.id is not None
+        and commitment.due_at is not None
+        and commitment.due_precision in {"instant", "day"}
+        and commitment.due_at <= horizon
+    )
 
 
 async def _supports(
@@ -614,23 +696,8 @@ class PublicPeopleService:
                     if isinstance(row, (PersonMemoryLink, RelationshipAssertion, PeopleCommitment)):
                         if row.unresolved:
                             continue
-                        try:
-                            belief = await uow.memories.get(row.belief_id, principal)
-                        except NotFoundError:
-                            continue
-                        if (
-                            SENSITIVITY_ORDER[belief.sensitivity] > SENSITIVITY_ORDER[ceiling]
-                            or belief.status not in LIVE_MEMORY_STATUSES
-                            or belief.valid_from > self._clock.now()
-                            or (
-                                belief.valid_to is not None and belief.valid_to <= self._clock.now()
-                            )
-                            or (
-                                belief.expires_at is not None
-                                and belief.expires_at <= self._clock.now()
-                            )
-                            or not _safe(belief.statement)
-                        ):
+                        belief = await self._live_belief(uow, principal, row.belief_id, ceiling)
+                        if belief is None:
                             continue
                     if isinstance(row, PersonMemoryLink) and belief is not None:
                         if belief.id not in seen_beliefs:
@@ -702,6 +769,130 @@ class PublicPeopleService:
                     "truncated": truncated,
                 }
             )
+
+    async def _live_belief(
+        self, uow: RepositoryUnitOfWork, principal: Principal, belief_id: UUID, ceiling: Sensitivity
+    ) -> MemoryRecord | None:
+        """The belief behind a People fact, when the owner may see it as live now."""
+        try:
+            belief = await uow.memories.get(belief_id, principal)
+        except NotFoundError:
+            return None
+        now = self._clock.now()
+        if (
+            SENSITIVITY_ORDER[belief.sensitivity] > SENSITIVITY_ORDER[ceiling]
+            or belief.status not in LIVE_MEMORY_STATUSES
+            or belief.valid_from > now
+            or (belief.valid_to is not None and belief.valid_to <= now)
+            or (belief.expires_at is not None and belief.expires_at <= now)
+            or not _safe(belief.statement)
+        ):
+            return None
+        return belief
+
+    async def _open_threads(
+        self, uow: RepositoryUnitOfWork, principal: Principal, ceiling: Sensitivity
+    ) -> dict[UUID, PeopleCommitment]:
+        """Each person's earliest open, owner-owed commitment due in the window (ADR-0217).
+
+        Visible exactly as the person's Open threads section shows it: resolved,
+        safe, and backed by a live belief at the ceiling. `proposed` and
+        `uncertain` commitments never qualify.
+        """
+        horizon = self._clock.now() + OPEN_THREAD_WINDOW
+        query = PeopleQuery(
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            kinds=["commitment"],
+            states=["open"],
+            sensitivity_ceiling=ceiling,
+            limit=100,
+        )
+        found: dict[UUID, PeopleCommitment] = {}
+        for _ in range(_SCAN_PAGES):
+            rows = await uow.people.query(query)
+            for row in rows[:100]:
+                if (
+                    not isinstance(row, PeopleCommitment)
+                    or row.unresolved
+                    or not _owed_soon(row, horizon)
+                    or not _safe(row.model_dump_json())
+                    or await self._live_belief(uow, principal, row.belief_id, ceiling) is None
+                ):
+                    continue
+                person_id = row.beneficiary.id
+                assert person_id is not None and row.due_at is not None
+                current = found.get(person_id)
+                if current is None or (row.due_at, row.id) < (current.due_at, current.id):
+                    found[person_id] = row
+            if len(rows) <= 100:
+                break
+            query = query.model_copy(update={"after": rows[99].id})
+        return found
+
+    async def _directory(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        persons: Sequence[Person],
+        ceiling: Sensitivity,
+        *,
+        as_of: datetime | None = None,
+        threads: dict[UUID, PeopleCommitment] | None = None,
+    ) -> list[DirectoryPerson]:
+        """Persons with their last contact and next owed thread (ADR-0217)."""
+        if not persons:
+            return []
+        last = await uow.people.last_interactions(
+            principal,
+            [person.id for person in persons],
+            ceiling=ceiling,
+            as_of=as_of or self._clock.now(),
+        )
+        if threads is None:
+            threads = await self._open_threads(uow, principal, ceiling)
+        return [
+            DirectoryPerson.model_validate(
+                {
+                    **person.model_dump(),
+                    "last_interaction_at": last.get(person.id),
+                    "next_thread": threads.get(person.id),
+                }
+            )
+            for person in persons
+        ]
+
+    # -- presentation (ADR-0217 part A) ------------------------------------------
+    #
+    # The directory facts are added only where a person is shown: the HTTP
+    # routes and the CLI pass every response through one of these. Service
+    # results stay plain domain records, which callers may write back.
+
+    async def present[
+        P: (Person, PeoplePage, PersonProfile, MergeSuggestionDetail, MergeSuggestionPage)
+    ](
+        self,
+        principal: Principal,
+        result: P,
+        *,
+        ceiling: Sensitivity,
+        as_of: datetime | None = None,
+    ) -> P:
+        """The same result with each person it shows carrying their directory facts.
+
+        The facts read history and open threads, so a caller without
+        `people.read` (a write-only token) gets the person without them.
+        """
+        persons = list(_shown_people(result))
+        if "people.read" in principal.scopes:
+            async with self._uow_factory() as uow:
+                enriched = await self._directory(
+                    uow, principal, persons, self._ceiling(ceiling), as_of=as_of
+                )
+        else:
+            enriched = [DirectoryPerson.model_validate(person.model_dump()) for person in persons]
+        shown = {person.id: person for person in enriched}
+        return cast(P, _with_people(result, shown))
 
     async def _merge_sections(
         self,
@@ -883,9 +1074,55 @@ class PublicPeopleService:
         relationship: PeopleRelationshipFilter | None = None,
         states: Sequence[str] | None = None,
         review: bool = False,
+        open_threads: bool = False,
     ) -> PeoplePage:
         require_scope(principal, "people.read")
         ceiling = self._ceiling(ceiling)
+        if open_threads:
+            if (
+                text
+                or review
+                or relationship is not None
+                or pinned is not None
+                or sort != "id"
+                or state
+                or states
+                or as_of is not None
+            ):
+                raise ToolValidationError("open_threads stands alone among People filters")
+            return await self._open_thread_page(principal, ceiling, limit=limit, cursor=cursor)
+        return await self._list_rows(
+            principal,
+            ceiling=ceiling,
+            text=text,
+            limit=limit,
+            cursor=cursor,
+            as_of=as_of,
+            state=state,
+            pinned=pinned,
+            sort=sort,
+            relationship=relationship,
+            states=states,
+            review=review,
+        )
+
+    async def _list_rows(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        text: str | None,
+        limit: int,
+        cursor: str | None,
+        as_of: datetime | None,
+        state: str | None,
+        pinned: bool | None,
+        sort: str,
+        relationship: PeopleRelationshipFilter | None,
+        states: Sequence[str] | None,
+        review: bool,
+    ) -> PeoplePage:
+        """The directory page under the list's predicates, before enrichment."""
         try:
             normalized = None if not text else normalize_identifier("name", "owner", text)
         except ValueError as exc:
@@ -963,6 +1200,123 @@ class PublicPeopleService:
                 ).encode()
             ).decode()
         return PeoplePage(items=items, next_cursor=next_cursor)
+
+    async def _open_thread_page(
+        self, principal: Principal, ceiling: Sensitivity, *, limit: int, cursor: str | None
+    ) -> PeoplePage:
+        """People the owner owes a reply soon, earliest due first (ADR-0217 part C)."""
+        limit = min(max(limit, 1), 100)
+        after: tuple[datetime, UUID] | None = None
+        if cursor is not None:
+            try:
+                if len(cursor) > 2048:
+                    raise ValueError("cursor too long")
+                decoded = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+                if decoded.get("open_threads") is not True:
+                    raise ValueError("cursor belongs to another list")
+                instant = datetime.fromisoformat(decoded["due_at"])
+                if instant.tzinfo is None:
+                    raise ValueError("cursor time must be aware")
+                after = (instant, UUID(decoded["after"]))
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ConflictError("People cursor is invalid; restart the list") from exc
+        async with self._uow_factory() as uow:
+            threads = await self._open_threads(uow, principal, ceiling)
+            owed = await self._owed_people(uow, principal, ceiling, threads)
+
+            def due_key(person: Person) -> tuple[datetime, UUID]:
+                at = threads[person.id].due_at
+                assert at is not None
+                return (at, person.id)
+
+            ordered = sorted(owed, key=due_key)
+            if after is not None:
+                ordered = [person for person in ordered if due_key(person) > after]
+            shown = ordered[:limit]
+        next_cursor = None
+        if len(ordered) > limit:
+            last = shown[-1]
+            due = threads[last.id].due_at
+            assert due is not None
+            next_cursor = base64.urlsafe_b64encode(
+                json.dumps(
+                    {"open_threads": True, "due_at": due.isoformat(), "after": str(last.id)},
+                    sort_keys=True,
+                ).encode()
+            ).decode()
+        return PeoplePage(items=shown, next_cursor=next_cursor)
+
+    async def _owed_people(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        ceiling: Sensitivity,
+        threads: dict[UUID, PeopleCommitment],
+    ) -> Sequence[Person]:
+        """The directory people a thread names, as the default list would show them."""
+        people: builtins.list[Person] = []
+        for person_id in sorted(threads):
+            person = await uow.people.get(principal, person_id, ceiling=ceiling)
+            if (
+                isinstance(person, Person)
+                and person.state in {"active", "provisional"}
+                and _safe(person.display_name)
+            ):
+                people.append(person)
+        return people
+
+    async def counts(self, principal: Principal, *, ceiling: Sensitivity) -> PeopleCounts:
+        """The sidebar's numbers, each under its own list's predicates (ADR-0217 part B)."""
+        require_scope(principal, "people.read")
+        ceiling = self._ceiling(ceiling)
+
+        async def directory(review: bool) -> set[UUID]:
+            found: set[UUID] = set()
+            cursor = None
+            for _ in range(_SCAN_PAGES):
+                page = await self._list_rows(
+                    principal,
+                    ceiling=ceiling,
+                    text=None,
+                    limit=100,
+                    cursor=cursor,
+                    as_of=None,
+                    state=None,
+                    pinned=None,
+                    sort="id",
+                    relationship=None,
+                    states=["active", "provisional"],
+                    review=review,
+                )
+                found.update(person.id for person in page.items)
+                cursor = page.next_cursor
+                if cursor is None:
+                    break
+            return found
+
+        everyone = await directory(False)
+        needs_review = await directory(True)
+        duplicates, cursor = 0, None
+        for _ in range(_SCAN_PAGES):
+            suggestions = await self.merge_suggestions(
+                principal, ceiling=ceiling, limit=100, cursor=cursor
+            )
+            duplicates += len(suggestions.items)
+            cursor = suggestions.next_cursor
+            if cursor is None:
+                break
+        async with self._uow_factory() as uow:
+            threads = await self._open_threads(uow, principal, ceiling)
+            owed = await self._owed_people(uow, principal, ceiling, threads)
+        owed_ids = {person.id for person in owed}
+        return PeopleCounts(
+            everyone=len(everyone),
+            needs_review=len(needs_review),
+            possible_duplicates=duplicates,
+            open_threads=len(owed_ids),
+            needs_you=len(needs_review | owed_ids),
+            counted_at=self._clock.now(),
+        )
 
     async def section(
         self,

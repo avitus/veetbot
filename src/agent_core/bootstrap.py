@@ -581,6 +581,8 @@ from agent_core.observability.logging import configure_logging
 from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.reliability import ReliabilityReport, ReliabilityThresholds
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
+from agent_core.persona.boundaries import persona_boundaries
+from agent_core.persona.preview import PersonaPreviewer
 from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
@@ -4879,7 +4881,25 @@ async def _compose(
                 memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
             ),
             people=people_service,
-            persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
+            persona=PublicPersonaService(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                # ADR-0216 parts C and D.
+                previewer=(
+                    PersonaPreviewer(
+                        uow_factory=uow_factory,
+                        router=model_router,
+                        providers=model_providers,
+                        clock=clock,
+                        ids=ids,
+                        model_policy=title_profiles.generation.model_policy,
+                    )
+                    if title_profiles.generation.model_policy not in NON_ROUTED_MODEL_POLICIES
+                    else None
+                ),
+                boundaries=persona_boundaries(ruleset, settings),
+            ),
             model_settings=PublicModelSettingsService(
                 uow_factory=uow_factory, clock=clock, ids=ids, catalog=model_settings_catalog
             ),

@@ -3980,9 +3980,25 @@ class GovernedMemoryService:
         belief_id: UUID,
         outcome: MemoryReviewOutcome,
         *,
+        replacement_statement: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
     ) -> MemoryRecord:
-        """Apply one owner review outcome to a flagged belief (ADR-0117)."""
+        """Apply one owner review outcome to a belief (ADR-0117, ADR-0214).
+
+        ``changed`` supersedes the belief with the owner's replacement text and
+        returns the replacement; every other outcome returns the belief itself.
+        """
+        if outcome is MemoryReviewOutcome.CHANGED:
+            if replacement_statement is None:
+                raise ToolValidationError("changed review requires replacement text")
+            return await self.reject(
+                belief_id,
+                RejectionKind.CHANGED,
+                replacement_statement=replacement_statement,
+                existing_uow=existing_uow,
+            )
+        if replacement_statement is not None:
+            raise ToolValidationError("only a changed review carries replacement text")
         if outcome is MemoryReviewOutcome.UNTRUE:
             return await self.reject(belief_id, RejectionKind.UNTRUE, existing_uow=existing_uow)
         if outcome is MemoryReviewOutcome.NOT_HERE:
@@ -4030,17 +4046,76 @@ class GovernedMemoryService:
             await self.delete(belief_id, trace_id=trace_id, existing_uow=existing_uow)
             raise NotFoundError("memory was deleted")
         if existing_uow is not None:
-            stored, current, rejection = await self._reject_in(
+            return await self._reject_and_replace(
                 existing_uow, belief_id, kind, replacement_statement, trace_id
             )
-        else:
-            async with self._uow_factory() as uow:
-                stored, current, rejection = await self._reject_in(
-                    uow, belief_id, kind, replacement_statement, trace_id
-                )
-        if kind is RejectionKind.CHANGED and replacement_statement is not None:
-            return await self._replace_rejected(stored, current, rejection, replacement_statement)
-        return stored
+        async with self._uow_factory() as uow:
+            return await self._reject_and_replace(
+                uow, belief_id, kind, replacement_statement, trace_id
+            )
+
+    async def _reject_and_replace(
+        self,
+        uow: RepositoryUnitOfWork,
+        belief_id: UUID,
+        kind: RejectionKind,
+        replacement_statement: str | None,
+        trace_id: UUID | None,
+    ) -> MemoryRecord:
+        """Reject, and for CHANGED supersede, inside the caller's one unit of work.
+
+        The owner's replacement text is recorded first as a
+        ``memory.owner_correction`` event, which the replacement cites: the
+        superseded belief's evidence never said the new words (ADR-0214).
+        """
+        if kind is not RejectionKind.CHANGED:
+            stored, _current, _rejection = await self._reject_in(
+                uow, belief_id, kind, replacement_statement, trace_id
+            )
+            return stored
+        if replacement_statement is None:
+            raise ToolValidationError("changed rejection requires replacement text")
+        clean = " ".join(replacement_statement.split())
+        current = await uow.memories.get(belief_id, self._principal)
+        correction = await uow.events.append(
+            NewEvent(
+                session_id=_source_session(current),
+                run_id=None,
+                event_type="memory.owner_correction",
+                actor_type="principal",
+                actor_id=self._principal.principal_id,
+                payload={"belief_id": str(current.id), "statement": clean},
+            )
+        )
+        stored, current, rejection = await self._reject_in(
+            uow, belief_id, kind, replacement_statement, trace_id
+        )
+        replacement, _action = await self.remember_formation(
+            session_id=_source_session(current),
+            run_id=None,
+            statement=clean,
+            subject=current.subject,
+            scope=current.scope,
+            belief_type=current.belief_type,
+            portability=current.portability,
+            sensitivity=current.sensitivity,
+            source_event_ids=[correction.sequence],
+            origin_trust=TrustLevel.USER,
+            explicit=True,
+            authority=MemoryAuthority.USER,
+            polarity=Polarity.ASSERT,
+            confidence=None,
+            valid_from=None,
+            expires_at=None,
+            trigger="memory.owner_correction",
+            record_audit=True,
+            existing_uow=uow,
+        )
+        linked = stored.model_copy(update={"superseded_by": replacement.id}, deep=True)
+        await uow.memories.reject(
+            rejection.model_copy(update={"replacement_id": replacement.id}), linked
+        )
+        return replacement
 
     async def _reject_in(
         self,
@@ -4084,35 +4159,6 @@ class GovernedMemoryService:
         stored = await uow.memories.reject(rejection, updated)
         await self._append_event(uow, _source_session(current), None, "memory.rejected", stored)
         return stored, current, rejection
-
-    async def _replace_rejected(
-        self,
-        stored: MemoryRecord,
-        current: MemoryRecord,
-        rejection: BeliefRejection,
-        replacement_statement: str,
-    ) -> MemoryRecord:
-        replacement = await self.remember(
-            session_id=_source_session(current),
-            run_id=None,
-            statement=replacement_statement,
-            subject=current.subject,
-            scope=current.scope,
-            belief_type=current.belief_type,
-            portability=current.portability,
-            sensitivity=current.sensitivity,
-            source_event_ids=current.source_event_ids,
-            origin_trust=TrustLevel.USER,
-            explicit=True,
-        )
-        linked = stored.model_copy(
-            update={"superseded_by": replacement.id, "updated_at": self._clock.now()},
-            deep=True,
-        )
-        linked_rejection = rejection.model_copy(update={"replacement_id": replacement.id})
-        async with self._uow_factory() as uow:
-            await uow.memories.reject(linked_rejection, linked)
-        return replacement
 
     async def correct_from_owner(
         self,

@@ -96,9 +96,15 @@ from agent_core.domain.notifications import (
     NotificationSyncResult,
 )
 from agent_core.domain.persona import (
+    KEEP_PERSONA_FIELD,
     PERSONA_MAX_ENTRIES,
+    PERSONA_MAX_TRAITS,
+    PERSONA_VOICE_MAX_CHARS,
+    PersonaBoundaryList,
     PersonaEntryDraft,
     PersonaNominationState,
+    PersonaPreview,
+    PersonaTrait,
 )
 from agent_core.domain.schedules import (
     ScheduleDefinition,
@@ -118,6 +124,8 @@ from agent_core.domain.views import (
     DeviceView,
     FolderProposalView,
     FolderView,
+    MemoryCountsView,
+    MemoryEvidenceView,
     MemoryView,
     NotificationInboxItem,
     Page,
@@ -233,6 +241,8 @@ class UpdatePersonaEntryRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     sensitivity: Sensitivity = Sensitivity.INTERNAL
     source_belief_id: UUID | None = None
+    # ADR-0216 part B: a switched-off entry is kept but not rendered.
+    enabled: bool = True
 
 
 class UpdatePersonaRequest(BaseModel):
@@ -240,6 +250,18 @@ class UpdatePersonaRequest(BaseModel):
 
     expected_version: int = Field(ge=0)
     entries: list[UpdatePersonaEntryRequest] = Field(max_length=PERSONA_MAX_ENTRIES)
+    # ADR-0216 part A. Omitted keeps the current value; null clears the voice.
+    voice: str | None = Field(default=None, max_length=PERSONA_VOICE_MAX_CHARS)
+    traits: list[PersonaTrait] = Field(default_factory=list, max_length=PERSONA_MAX_TRAITS)
+
+
+class PersonaPreviewRequest(BaseModel):
+    """The unsaved voice and traits a sample reply is generated for (ADR-0216 part C)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    voice: str | None = Field(default=None, max_length=PERSONA_VOICE_MAX_CHARS)
+    traits: list[PersonaTrait] = Field(default_factory=list, max_length=PERSONA_MAX_TRAITS)
 
 
 class FolderNameRequest(BaseModel):
@@ -266,6 +288,18 @@ class MemoryReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     outcome: MemoryReviewOutcome
+    # ADR-0214: `changed` carries the owner's wording; no other outcome may.
+    # Length and content are checked after trimming by the service, so a
+    # refusal never echoes the submitted text.
+    replacement_statement: str | None = Field(default=None, max_length=4000)
+    expected_updated_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _replacement_only_when_changed(self) -> "MemoryReviewRequest":
+        changed = self.outcome is MemoryReviewOutcome.CHANGED
+        if changed != (self.replacement_statement is not None):
+            raise ValueError("replacement_statement belongs to the changed outcome only")
+        return self
 
 
 class CreateSessionRequest(BaseModel):
@@ -1789,6 +1823,27 @@ def create_app(
         except MemoryCursorError as exc:
             raise MalformedRequestError("memory cursor is malformed") from exc
 
+    # ADR-0214 part C. Mounted before `/v1/memories/{memory_id}` so "counts"
+    # never parses as an identifier.
+    @memory_router.get(
+        "/v1/memories/counts",
+        openapi_extra={"required_scope": "memory.read"},
+    )
+    async def count_memories(
+        response: Response,
+        authenticated: Annotated[Principal, secured("memory.read")],
+        ceiling: Sensitivity,
+        include_derived: bool = False,
+    ) -> MemoryCountsView:
+        """Count live, flagged, per-status and per-type beliefs under the list's predicates."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        try:
+            return await services.memory.counts(
+                authenticated, ceiling=ceiling, include_derived=include_derived
+            )
+        except MemoryCursorError as exc:
+            raise MalformedRequestError("derived memory counts are unavailable") from exc
+
     @memory_router.get(
         "/v1/memories/{memory_id}",
         openapi_extra={"required_scope": "memory.read"},
@@ -1802,6 +1857,20 @@ def create_app(
         """Read one memory through the principal's allowed retrieval ceiling."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.get(authenticated, memory_id, ceiling=ceiling)
+
+    @memory_router.get(
+        "/v1/memories/{memory_id}/evidence",
+        openapi_extra={"required_scope": "memory.read"},
+    )
+    async def memory_evidence(
+        memory_id: UUID,
+        response: Response,
+        authenticated: Annotated[Principal, secured("memory.read")],
+        ceiling: Sensitivity,
+    ) -> MemoryEvidenceView:
+        """Up to five cited sources; only the owner's own words carry an excerpt (ADR-0214)."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.memory.evidence(authenticated, memory_id, ceiling=ceiling)
 
     # The two writes of ADR-0117. Both take the caller's ceiling, so a belief
     # above it is as absent to a write as it is to a read, and a bounded
@@ -1837,10 +1906,16 @@ def create_app(
             str, Header(alias="Idempotency-Key", min_length=1, max_length=200)
         ],
     ) -> MemoryView | DerivedMemoryView:
-        """Apply one review outcome to a flagged belief and return its new view."""
+        """Apply one review outcome; `changed` returns the replacement's view."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.review(
-            authenticated, memory_id, body.outcome, ceiling=ceiling, key=idempotency_key
+            authenticated,
+            memory_id,
+            body.outcome,
+            ceiling=ceiling,
+            key=idempotency_key,
+            replacement_statement=body.replacement_statement,
+            expected_updated_at=body.expected_updated_at,
         )
 
     if settings.people_enabled and services.people is not None:
@@ -1890,10 +1965,40 @@ def create_app(
                     text=entry.text,
                     sensitivity=entry.sensitivity,
                     source_belief_id=entry.source_belief_id,
+                    enabled=entry.enabled,
                 )
                 for entry in request.entries
             ],
+            voice=request.voice if "voice" in request.model_fields_set else KEEP_PERSONA_FIELD,
+            traits=request.traits if "traits" in request.model_fields_set else KEEP_PERSONA_FIELD,
         )
+
+    @persona_router.post(
+        "/v1/persona/preview",
+        openapi_extra={"required_scope": "persona.write"},
+    )
+    async def preview_persona(
+        request: PersonaPreviewRequest,
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.write")],
+    ) -> PersonaPreview:
+        """One example reply in an unsaved voice; generated, never saved (ADR-0216)."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.preview(
+            authenticated, voice=request.voice, traits=request.traits
+        )
+
+    @persona_router.get(
+        "/v1/persona/boundaries",
+        openapi_extra={"required_scope": "persona.read"},
+    )
+    async def persona_boundaries(
+        response: Response,
+        authenticated: Annotated[Principal, secured("persona.read")],
+    ) -> PersonaBoundaryList:
+        """The fixed rules the persona cannot change, each with what enforces it."""
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
+        return await services.persona.boundaries(authenticated)
 
     @persona_router.get(
         "/v1/persona/history",

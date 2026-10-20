@@ -50,6 +50,7 @@ from agent_core.domain.persona import (
     PersonaEntrySource,
     PersonaNomination,
     PersonaNominationState,
+    PersonaTrait,
 )
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, FailureReason, Run, RunStatus
 from agent_core.domain.sessions import Session, SessionStatus
@@ -412,6 +413,55 @@ class MemoryView(BaseModel):
         )
 
 
+MemoryEvidenceKind = Literal["owner", "email", "sms", "call", "scheduler", "tool", "unknown"]
+MemoryEvidenceWithheld = Literal["erased", "ceiling", "not_owner_text", "scope", "hazard"]
+MEMORY_EVIDENCE_LIMIT = 5
+MEMORY_EXCERPT_MAX_CHARS = 280
+
+
+class MemoryEvidenceItemView(BaseModel):
+    """One source event a belief cites (ADR-0214 part B).
+
+    Only the owner's own words ever carry an ``excerpt``; every other source
+    is navigation identifiers, and a source that is gone carries only its
+    reference and ``withheld``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_kind: MemoryEvidenceKind
+    session_id: UUID
+    event_sequence: int
+    evidence_at: datetime | None
+    excerpt: str | None = Field(default=None, max_length=MEMORY_EXCERPT_MAX_CHARS)
+    withheld: MemoryEvidenceWithheld | None = None
+
+
+class MemoryEvidenceView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    items: list[MemoryEvidenceItemView] = Field(max_length=MEMORY_EVIDENCE_LIMIT)
+
+
+class MemoryCountsView(BaseModel):
+    """The memory browser's sidebar numbers in one read (ADR-0214 part C).
+
+    ``live`` and ``by_type`` count active and provisional beliefs, as the
+    default browse lists them; ``flagged`` counts the live review queue;
+    ``by_status`` counts every status; ``synthesis`` is null unless derived
+    summaries were asked for and are available.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    live: int = Field(ge=0)
+    flagged: int = Field(ge=0)
+    by_status: dict[MemoryStatus, int]
+    by_type: dict[BeliefType, int]
+    synthesis: int | None = Field(default=None, ge=0)
+    counted_at: datetime
+
+
 class ArtifactView(BaseModel):
     id: UUID
     session_id: UUID
@@ -442,14 +492,20 @@ class PersonaEntryView(BaseModel):
     source: PersonaEntrySource
     source_belief_id: UUID | None
     sensitivity: Sensitivity
+    # ADR-0216: a switched-off entry is kept but not rendered; a stale one's
+    # source belief is no longer live (persona-surface.md, staleness).
+    enabled: bool = True
+    stale: bool = False
 
     @classmethod
-    def from_entry(cls, entry: PersonaEntry) -> PersonaEntryView:
+    def from_entry(cls, entry: PersonaEntry, *, stale: bool = False) -> PersonaEntryView:
         return cls(
             text=entry.text,
             source=entry.source,
             source_belief_id=entry.source_belief_id,
             sensitivity=entry.sensitivity,
+            enabled=entry.enabled,
+            stale=stale,
         )
 
 
@@ -462,14 +518,26 @@ class PersonaView(BaseModel):
     entries: list[PersonaEntryView]
     source: PersonaEntrySource
     created_at: datetime
+    voice: str | None = None
+    traits: list[PersonaTrait] = Field(default_factory=list)
 
     @classmethod
-    def from_document(cls, document: PersonaDocument) -> PersonaView:
+    def from_document(
+        cls, document: PersonaDocument, *, stale: frozenset[UUID] = frozenset()
+    ) -> PersonaView:
         return cls(
             version=document.version,
-            entries=[PersonaEntryView.from_entry(entry) for entry in document.entries],
+            entries=[
+                PersonaEntryView.from_entry(
+                    entry,
+                    stale=entry.source_belief_id is not None and entry.source_belief_id in stale,
+                )
+                for entry in document.entries
+            ],
             source=document.source,
             created_at=document.created_at,
+            voice=document.voice,
+            traits=list(document.traits),
         )
 
 

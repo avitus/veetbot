@@ -517,14 +517,17 @@ DELETE /v1/surfaces/pairings/{pairing_id}            surface.write
 ### The Milestone 17 memory read extension
 
 [memory-read-api-and-browser.md](memory-read-api-and-browser.md) adds two
-read routes with the exact scope `memory.read` and, since ADR-0117, two
-writes with the exact scope `memory.write`, all mounted only when
+read routes with the exact scope `memory.read` (four since ADR-0214 added
+evidence and counts) and, since ADR-0117, two writes with the exact scope
+`memory.write`, all mounted only when
 `AGENT_MEMORY_API_ENABLED` is set. The writes require a bounded
 `Idempotency-Key`; a gate walks the router to keep the table exactly this.
 
 ```text
 GET    /v1/memories                                  memory.read
+GET    /v1/memories/counts                           memory.read
 GET    /v1/memories/{memory_id}                      memory.read
+GET    /v1/memories/{memory_id}/evidence             memory.read
 DELETE /v1/memories/{memory_id}                      memory.write
 POST   /v1/memories/{memory_id}/review               memory.write
 ```
@@ -538,7 +541,8 @@ indistinguishable from one that does not exist.
 
 ### The Milestone 22 persona extension
 
-[persona-surface.md](persona-surface.md) adds six routes and one exact scope
+[persona-surface.md](persona-surface.md) adds eight routes (six in Milestone 22,
+two more in ADR-0216) and one exact scope
 pair, `persona.read` and `persona.write`, mounted only when
 `AGENT_PERSONA_API_ENABLED` is set. The persona document and its nominations
 are a distinct resource: nothing persona-shaped is added under

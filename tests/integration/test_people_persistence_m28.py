@@ -26,9 +26,9 @@ from tests.contract.test_people_store_contract import (
     people_history_paging_contract,
     people_identifier_lookup_contract,
     people_interaction_redirect_contract,
+    people_last_interaction_contract,
     people_merge_suggestion_contract,
     people_preserving_erase_contract,
-    people_recent_directory_contract,
     people_review_directory_contract,
     people_source_visibility_contract,
     people_store_contract,
@@ -298,7 +298,8 @@ async def test_postgres_people_store_contract() -> None:
             await independent_people_support_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await people_email_erasure_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await people_directory_contract(PostgresPeopleStore(session, FixedClock(NOW)))
-            await people_recent_directory_contract(PostgresPeopleStore(session, FixedClock(NOW)))
+            # The last-interaction contract runs the recent-directory one first.
+            await people_last_interaction_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await people_duplicate_source_erasure_contract(
                 PostgresPeopleStore(session, FixedClock(NOW))
             )

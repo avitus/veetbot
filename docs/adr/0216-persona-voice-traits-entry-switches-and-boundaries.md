@@ -131,6 +131,30 @@ with enforcement and must be corrected before it can be shown:
 
 Affirm and decline, durable decline and staleness keep their current design.
 
+## As built (2026-10-20)
+
+Accepted parts were built with these choices, each no weaker than the text
+above:
+
+- **A.** An omitted `voice` or `traits` in `PUT /v1/persona` keeps the head's
+  value and an explicit null or empty list clears it, so a client that
+  predates them cannot clear what another set; an affirmation carries both
+  forward. The voice is refused for injection patterns at write time as well
+  as secrets, like an entry. Voice and traits are two columns on the version
+  row; versions written before them load with neither.
+- **B.** The recommended snapshot rule was built: only enabled entries'
+  beliefs are excluded from the session snapshot, and every promoted belief
+  keeps its marker. `stale` is set when an affirmed entry's belief is no
+  longer live (superseded, retired, expired or gone).
+- **C.** The response also returns the fixed `prompt` it answered, so the
+  client can show the exchange. The model is the title-generation policy; a
+  deployment without a routed model returns `malformed_request` and the client
+  falls back to the labelled illustration. A reply over budget is discarded.
+- **D.** The catalog lives in `agent_core.persona.boundaries`. A claim whose
+  fact is missing is omitted at runtime and fails the gate in tests. Calls are
+  named only when calling is enabled; website task grants are listed with
+  `active` false until enabled.
+
 ## Consequences
 
 - The owner shapes tone without writing entries, and can park an entry

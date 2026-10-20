@@ -68,6 +68,23 @@ class PeopleStore(Protocol):
 
     async def query(self, query: PeopleQuery) -> list[PeopleRecord]: ...
 
+    async def last_interactions(
+        self,
+        owner: Principal,
+        person_ids: Sequence[UUID],
+        *,
+        ceiling: Sensitivity,
+        known_at: datetime | None = None,
+        as_of: datetime | None = None,
+    ) -> dict[UUID, datetime]:
+        """Each person's newest visible dated interaction (ADR-0217 part A).
+
+        Exactly the key ``sort="recent"`` orders by: interactions that reference
+        the person, visible at ``ceiling`` and ``known_at``, not superseded,
+        with a known time no later than ``as_of``. A person with none is absent.
+        """
+        ...
+
     async def put(self, record: PeopleRecord, *, expected_revision: int) -> PeopleRecord: ...
 
     async def fence_for_erasure(self, principal: Principal, record_ids: Sequence[UUID]) -> int:

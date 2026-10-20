@@ -2092,6 +2092,11 @@ class PersonaDocumentRow(Base):
     source: Mapped[str] = mapped_column(Text)
     source_nomination_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # ADR-0216 part A.
+    voice: Mapped[str | None] = mapped_column(Text, nullable=True)
+    traits: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
 
 class PersonaNominationRow(Base):

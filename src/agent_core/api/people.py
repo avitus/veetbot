@@ -23,6 +23,7 @@ from agent_core.domain.people_public import (
     MergeSuggestionPageView,
     MergeSuggestionView,
     OperationView,
+    PeopleCountsView,
     PeoplePageView,
     PeopleSectionPageView,
     PersonProfileView,
@@ -34,6 +35,7 @@ from agent_core.domain.people_views import (
     MergeSuggestionPage,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
+    PeopleCounts,
     PeopleErasureView,
     PeopleEvidenceView,
     PeopleForgetRequest,
@@ -123,8 +125,10 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         relationship: PeopleRelationshipFilter | None = None,
         # Provisional, unpinned people with no confirmed or observed identifier.
         review: bool = False,
+        # ADR-0217: people the owner owes an open reply due soon; stands alone.
+        open_threads: bool = False,
     ) -> PeoplePage:
-        return await service.list(
+        page = await service.list(
             authenticated,
             ceiling=ceiling,
             text=text,
@@ -136,7 +140,9 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
             sort=sort,
             relationship=relationship,
             review=review,
+            open_threads=open_threads,
         )
+        return await service.present(authenticated, page, ceiling=ceiling, as_of=as_of)
 
     @router.post(
         "/v1/people", response_model=PersonView, openapi_extra={"required_scope": "people.write"}
@@ -147,7 +153,8 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         ceiling: Sensitivity,
         idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
     ) -> Person:
-        return await service.create(authenticated, body, key=idempotency_key, ceiling=ceiling)
+        person = await service.create(authenticated, body, key=idempotency_key, ceiling=ceiling)
+        return await service.present(authenticated, person, ceiling=ceiling)
 
     @router.post(
         "/v1/people/identity-operations",
@@ -166,6 +173,18 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
 
     # Static People paths are registered before `/v1/people/{person_id}`.
     @router.get(
+        "/v1/people/counts",
+        response_model=PeopleCountsView,
+        openapi_extra={"required_scope": "people.read"},
+    )
+    async def counts(
+        authenticated: Annotated[Principal, secured("people.read")],
+        ceiling: Sensitivity,
+    ) -> PeopleCounts:
+        """The People sidebar's numbers under the lists' own predicates (ADR-0217)."""
+        return await service.counts(authenticated, ceiling=ceiling)
+
+    @router.get(
         "/v1/people/merge-suggestions",
         response_model=MergeSuggestionPageView,
         openapi_extra={"required_scope": "people.read"},
@@ -177,9 +196,10 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         cursor: Annotated[str | None, Query(max_length=2048)] = None,
     ) -> MergeSuggestionPage:
         """Open possible duplicates the owner can merge or keep apart (ADR-0125)."""
-        return await service.merge_suggestions(
+        page = await service.merge_suggestions(
             authenticated, ceiling=ceiling, limit=limit, cursor=cursor
         )
+        return await service.present(authenticated, page, ceiling=ceiling)
 
     @router.post(
         "/v1/people/merge-suggestions/{suggestion_id}",
@@ -194,9 +214,10 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
     ) -> MergeSuggestionDetail:
         """Merge the pair, or keep them apart so they are never suggested again."""
-        return await service.resolve_merge_suggestion(
+        detail = await service.resolve_merge_suggestion(
             authenticated, suggestion_id, body, key=idempotency_key, ceiling=ceiling
         )
+        return await service.present(authenticated, detail, ceiling=ceiling)
 
     @router.get(
         "/v1/people/operations/{operation_id}",
@@ -278,7 +299,8 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         authenticated: Annotated[Principal, secured("people.read")],
         ceiling: Sensitivity,
     ) -> PersonProfile:
-        return await service.get(authenticated, person_id, ceiling=ceiling)
+        profile = await service.get(authenticated, person_id, ceiling=ceiling)
+        return await service.present(authenticated, profile, ceiling=ceiling)
 
     @router.patch(
         "/v1/people/{person_id}",
@@ -292,9 +314,10 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         ceiling: Sensitivity,
         idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
     ) -> Person:
-        return await service.update(
+        person = await service.update(
             authenticated, person_id, body, key=idempotency_key, ceiling=ceiling
         )
+        return await service.present(authenticated, person, ceiling=ceiling)
 
     @router.get(
         "/v1/people/{person_id}/relationships",

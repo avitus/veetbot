@@ -495,6 +495,8 @@ def test_persona_tables_encode_versioning_and_open_nomination_uniqueness() -> No
         "source",
         "source_nomination_id",
         "created_at",
+        "voice",
+        "traits",
     }
 
     nominations = Base.metadata.tables["persona_nominations"]
