@@ -3310,8 +3310,10 @@ final class ConversationNavigationUITests: XCTestCase {
     private func revealSidebarIfNeeded(for row: XCUIElement) {
         let toggle = app.buttons["sidebar.toggle"]
         if toggle.exists {
+            // A slow runner can drop the hidden list's rows from the tree; a
+            // missing row never turns unhittable, so it counts as hidden too.
             let gone = XCTNSPredicateExpectation(
-                predicate: NSPredicate(format: "hittable == false"), object: row
+                predicate: NSPredicate(format: "exists == false OR hittable == false"), object: row
             )
             guard XCTWaiter().wait(for: [gone], timeout: 1.5) == .completed else { return }
             XCTAssertTrue(toggle.waitForExistence(timeout: 5))
