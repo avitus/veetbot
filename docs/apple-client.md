@@ -655,7 +655,9 @@ folded Cc, Bcc and subject are hairline-parted rows above the body in one
 surface well behind a strong hairline, whose shapes take no clicks. Anything
 the draft waits on (new mail in the thread, an unknown send status, a pending
 approval, an edit from another device) is one amber-ruled card that names the
-decision with its action beside it. Review & Send is the filled capsule; Draft
+decision with its action beside it; a save refused because another device
+edited the draft shows only that card, never the refusal as a second error.
+Review & Send is the filled capsule; Draft
 options is a quiet icon menu at the trailing edge, and Refine with Veetbot
 folds its field and button into one row.
 The bottom bar keeps Discuss in Chat and the reply shortcut on the material

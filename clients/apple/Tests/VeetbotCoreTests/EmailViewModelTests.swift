@@ -1431,6 +1431,32 @@ import SwiftUI
         #expect(model.conflict == nil)
     }
 
+    /// The conflict itself tells the owner another device changed the draft; the
+    /// refused save must not repeat the server's 409 text as a second, red error,
+    /// including when saving the local version meets a still newer edit.
+    @Test func testConflictingSaveShowsOnlyTheConflictNotTheRefusedSaveError() async throws {
+        let serverRevision = EmailRequestRecorder()
+        let model = try makeModel { request in
+            serverRevision.append(request)
+            if request.httpMethod == "PUT" { return (409, Self.error("invalid_state", "Draft changed on another device.")) }
+            if request.url!.path.contains("/drafts/") {
+                let fetches = serverRevision.snapshot.filter { $0.httpMethod == "GET" && $0.url!.path.contains("/drafts/") }
+                return (200, self.draftJSON(revision: 1 + fetches.count, body: "Other device edit \(fetches.count)"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My unfinished edit")
+        #expect(await model.saveDraft() == false)
+        #expect(model.conflict?.body == "Other device edit 1")
+        #expect(model.draftActionMessage == nil)
+
+        await model.keepLocalDraft()
+        #expect(model.conflict?.body == "Other device edit 2")
+        #expect(model.currentEdit?.body == "My unfinished edit")
+        #expect(model.draftActionMessage == nil)
+    }
+
     /// New mail marks a draft stale at its current revision, and the server refuses edits until the
     /// owner confirms the updated thread. That refusal is not another device's edit: reporting it as a
     /// conflict disabled the confirmation, leaving Review & Send unreachable.

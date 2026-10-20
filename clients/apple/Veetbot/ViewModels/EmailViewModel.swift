@@ -754,6 +754,9 @@ public final class EmailViewModel: ObservableObject {
                         return false
                     }
                 }
+                // The conflict already says another device changed the draft; the
+                // refused save's own text would only repeat it as a second error.
+                if conflict?.id == id { return false }
             }
             report(error, draft: true)
             return false
