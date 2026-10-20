@@ -174,7 +174,8 @@ final class ConversationNavigationUITests: XCTestCase {
         for visit in 1...3 {
             for (row, day) in [(yesterday, "Yesterday's"), (today, "Today's")] {
                 openSidebarRow(row)
-                let closing = app.staticTexts["\(day) briefing closing line."].firstMatch
+                let closingText = "\(day) briefing closing line."
+                let closing = app.staticTexts[closingText].firstMatch
                 // The replay streams for about a second; judge the settled transcript.
                 sleep(3)
                 let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
@@ -182,12 +183,23 @@ final class ConversationNavigationUITests: XCTestCase {
                 shot.lifetime = .keepAlways
                 add(shot)
                 XCTAssertTrue(closing.exists, "\(day) visit \(visit)\n\(app.debugDescription)")
+                // A briefing taller than the window opens with its beginning
+                // at the top; a drawn transcript scrolls on to its last line.
+                // A Mac keeps static text in its value, iOS in its label.
+                let transcript = app.scrollViews.containing(
+                    NSPredicate(format: "label == %@ OR value == %@", closingText, closingText)
+                ).firstMatch
                 #if os(macOS)
+                let window = app.windows.firstMatch
+                for _ in 0..<6 where !window.frame.contains(closing.frame) {
+                    transcript.scroll(byDeltaX: 0, deltaY: -250)
+                }
                 XCTAssertTrue(
-                    app.windows.firstMatch.frame.contains(closing.frame),
+                    window.frame.contains(closing.frame),
                     "\(day) visit \(visit)\n\(app.debugDescription)"
                 )
                 #else
+                for _ in 0..<6 where !closing.isHittable { transcript.swipeUp() }
                 XCTAssertTrue(closing.isHittable, "\(day) visit \(visit)\n\(app.debugDescription)")
                 #endif
             }
@@ -199,7 +211,9 @@ final class ConversationNavigationUITests: XCTestCase {
         // The plain sidebar button's vertical midpoint is between its two text lines.
         row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
         #else
-        if !row.isHittable { app.navigationBars.buttons.element(boundBy: 0).tap() }
+        // On an iPhone the first navigation-bar button is People, not the
+        // chat list's toggle, so the list comes back through its own toggle.
+        revealSidebarIfNeeded(for: row)
         row.tap()
         #endif
     }
