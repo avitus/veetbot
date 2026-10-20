@@ -77,7 +77,7 @@ class PeopleStore(Protocol):
         known_at: datetime | None = None,
         as_of: datetime | None = None,
     ) -> dict[UUID, datetime]:
-        """Each person's newest visible dated interaction (ADR-0217 part A).
+        """Each person's newest visible dated interaction (ADR-0227 part A).
 
         Exactly the key ``sort="recent"`` orders by: interactions that reference
         the person, visible at ``ceiling`` and ``known_at``, not superseded,

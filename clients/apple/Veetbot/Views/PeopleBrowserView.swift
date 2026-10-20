@@ -203,7 +203,7 @@ public struct PeopleBrowserView: View {
             .buttonStyle(SecondaryCapsuleButtonStyle())
     }
 
-    /// The owed thread's in-place correction (ADR-0217): the owner's word is
+    /// The owed thread's in-place correction (ADR-0227): the owner's word is
     /// the attributed report a completed or cancelled commitment needs.
     private func threadActions(_ person: PersonView) -> some View {
         HStack(spacing: 8) {
@@ -479,7 +479,7 @@ struct PeopleList<Content: View>: View {
 /// One person in the directory: initials, name, and any identity note.
 private struct PeopleDirectoryRow: View {
     let person: PersonView
-    /// Why the person needs the owner, or their last contact (ADR-0217).
+    /// Why the person needs the owner, or their last contact (ADR-0227).
     var note: String? = nil
 
     var body: some View {

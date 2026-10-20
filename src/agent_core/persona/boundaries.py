@@ -1,4 +1,4 @@
-"""What the persona cannot change, stated only where something enforces it (ADR-0216 part D).
+"""What the persona cannot change, stated only where something enforces it (ADR-0226 part D).
 
 Each boundary names the fact that enforces it: a hardline rule, a policy
 profile rule, a setting, or a code path. A claim whose fact is missing from

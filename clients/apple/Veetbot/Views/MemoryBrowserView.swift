@@ -167,7 +167,7 @@ public struct MemoryBrowserView: View {
     #if os(macOS)
     /// The Mac's first column (MagicPath coolly-breeze-5701): the review
     /// queue, the memories by type and the People directory, then the
-    /// synthesis journal. The numbers come from the counts route (ADR-0214);
+    /// synthesis journal. The numbers come from the counts route (ADR-0224);
     /// an older server leaves the rows without them.
     private var groupSidebar: some View {
         ScrollView {

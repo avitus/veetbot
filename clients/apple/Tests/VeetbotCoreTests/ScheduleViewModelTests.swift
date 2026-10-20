@@ -275,7 +275,7 @@ import FoundationNetworking
         )
     }
 
-    /// ADR-0215 part A: Pause sends the revision the owner saw and confirms
+    /// ADR-0225 part A: Pause sends the revision the owner saw and confirms
     /// with a toast whose Undo resumes; Resume and Stop answer the same way.
     @Test
     func testPauseResumeAndStopSendTheRevisionAndConfirmWithAToast() async throws {
@@ -322,7 +322,7 @@ import FoundationNetworking
         #expect(toasts.current?.text == "Stopped. It stays in Recent History for 30 days.")
     }
 
-    /// ADR-0215 part D: the switch sends the whole definition back with only
+    /// ADR-0225 part D: the switch sends the whole definition back with only
     /// `notify` changed, so fields this client does not model survive.
     @Test
     func testOnlyNotifyWhenNeededSavesTheWholeDefinitionWithTheNewPreference() async throws {
@@ -353,7 +353,7 @@ import FoundationNetworking
         #expect(toasts.current?.text == "Saved. Applies from the next run.")
     }
 
-    /// ADR-0215 part B: the sentence is read into a draft the owner sees
+    /// ADR-0225 part B: the sentence is read into a draft the owner sees
     /// before anything is saved; creating posts the server's own definition.
     @Test
     func testANewScheduleIsReadFirstAndCreatedFromTheServersDefinition() async throws {
@@ -420,7 +420,7 @@ import FoundationNetworking
         #expect(model.draftState == .failed("You have read many schedules in the last hour. Try again later."))
     }
 
-    /// ADR-0215 part C: Run now sends the revision on screen with a key, says
+    /// ADR-0225 part C: Run now sends the revision on screen with a key, says
     /// so with a toast, and refreshes Recent runs; a busy schedule says why.
     @Test
     func testRunNowStartsARunAndExplainsARefusal() async throws {

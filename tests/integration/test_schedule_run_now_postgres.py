@@ -1,4 +1,4 @@
-"""PostgreSQL proof for ADR-0215 part C: manual Run-now occurrences."""
+"""PostgreSQL proof for ADR-0225 part C: manual Run-now occurrences."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""ADR-0217: last contact, owed threads and section counts in the People directory.
+"""ADR-0227: last contact, owed threads and section counts in the People directory.
 
 Every response that shows a person carries `last_interaction_at` (the key
 `sort=recent` orders by) and `next_thread` (the earliest open reply the owner

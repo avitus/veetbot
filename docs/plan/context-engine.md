@@ -126,7 +126,7 @@ active items are still never-yield inputs, not candidates for the history cut.
 Rows 7 and 11 are added by [skills.md](skills.md), which owns their content,
 their caps, and their trust derivation. Row 4 is added at Milestone 22 by
 [persona-surface.md](persona-surface.md), which owns its content (entries, and
-since ADR-0216 an optional voice and traits rendered after a fixed framing
+since ADR-0226 an optional voice and traits rendered after a fixed framing
 line), its cap, its promotion rules, and the row's rotation behavior; an empty
 persona renders no
 bytes at all, so a session without one reproduces the three-row instruction

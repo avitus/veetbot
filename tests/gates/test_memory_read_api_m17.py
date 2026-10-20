@@ -693,7 +693,7 @@ async def test_the_router_exposes_exactly_the_documented_routes() -> None:
     }
     assert table == {
         ("/v1/memories", "GET"): "memory.read",
-        # ADR-0214: two reads join under the same scope; no new scope exists.
+        # ADR-0224: two reads join under the same scope; no new scope exists.
         ("/v1/memories/counts", "GET"): "memory.read",
         ("/v1/memories/{memory_id}", "GET"): "memory.read",
         ("/v1/memories/{memory_id}/evidence", "GET"): "memory.read",

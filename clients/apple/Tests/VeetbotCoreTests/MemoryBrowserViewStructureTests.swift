@@ -17,7 +17,7 @@ import AppKit
 @Suite struct MemoryBrowserViewStructureTests {
     /// The A2 Mac design (MagicPath coolly-breeze-5701): a sidebar with
     /// Review, Browse and Maintenance groups beside the list and the detail,
-    /// each memory group with its number from the counts route (ADR-0214).
+    /// each memory group with its number from the counts route (ADR-0224).
     @Test
     func testTheMacSheetGroupsMemoryInASidebar() throws {
         let source = try memoryBrowserViewSource()
@@ -45,7 +45,7 @@ import AppKit
         #expect(detail.contains(".accessibilityIdentifier(\"memory.review.looks-right\")"))
         #expect(detail.contains("Button(\"Looks right\")"))
         #expect(!detail.contains("Mark reviewed"))
-        // ADR-0214: the wording is corrected by supersession, from the card
+        // ADR-0224: the wording is corrected by supersession, from the card
         // and, for any live memory, from the Review menu.
         #expect(detail.contains("Button(\"Fix the wording\") { editingWording = true }"))
         #expect(detail.contains(".accessibilityIdentifier(\"memory.review.fix-wording\")"))

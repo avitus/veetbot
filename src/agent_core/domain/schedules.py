@@ -223,7 +223,7 @@ class SchedulePauseReason(StrEnum):
 
 
 class ScheduleNotify(StrEnum):
-    """When a schedule's finished runs notify the owner (ADR-0215 part D).
+    """When a schedule's finished runs notify the owner (ADR-0225 part D).
 
     ``every_report`` is the behaviour before the preference existed;
     ``attention_only`` withholds the report notification for a run that
@@ -236,7 +236,7 @@ class ScheduleNotify(StrEnum):
 
 
 class OccurrenceTrigger(StrEnum):
-    """Why an occurrence exists: its cadence fired, or the owner asked (ADR-0215 C)."""
+    """Why an occurrence exists: its cadence fired, or the owner asked (ADR-0225 C)."""
 
     SCHEDULED = "SCHEDULED"
     MANUAL = "MANUAL"
@@ -467,7 +467,7 @@ class ScheduleOccurrence(BaseModel):
     materialized_at: datetime | None = None
     links_erased_at: datetime | None = None
     created_at: datetime
-    # ADR-0215 part C: a manual occurrence's nominal instant is the request
+    # ADR-0225 part C: a manual occurrence's nominal instant is the request
     # time, and its idempotency key is unique per schedule.
     trigger: OccurrenceTrigger = OccurrenceTrigger.SCHEDULED
     manual_request_key: str | None = Field(default=None, min_length=1, max_length=255)
@@ -615,7 +615,7 @@ def _optional_aware_utc(value: datetime | None) -> datetime | None:
 
 
 class ScheduleDraftStatus(StrEnum):
-    """What a plain-words draft came to (ADR-0215 part B)."""
+    """What a plain-words draft came to (ADR-0225 part B)."""
 
     READY = "ready"
     NEEDS_CLARIFICATION = "needs_clarification"

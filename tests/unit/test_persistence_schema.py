@@ -211,7 +211,7 @@ def test_schedule_tables_encode_identity_erasure_and_query_constraints() -> None
     assert len(run_indexes) == 1
     assert run_indexes[0].unique is True
     assert str(run_indexes[0].dialect_options["postgresql"]["where"]) == "run_id IS NOT NULL"
-    # A cadence instant materializes once (ADR-0215 C keeps this for scheduled
+    # A cadence instant materializes once (ADR-0225 C keeps this for scheduled
     # occurrences); a manual Run-now occurrence is unique by its request key.
     partial_unique = {
         tuple(column.name for column in index.columns): str(

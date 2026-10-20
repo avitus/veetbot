@@ -2202,7 +2202,7 @@ class MemoryOwnerActions(Protocol):
     ) -> MemoryRecord: ...
 
 
-# ADR-0214: a corrected wording is a belief statement, bounded like one.
+# ADR-0224: a corrected wording is a belief statement, bounded like one.
 MEMORY_REPLACEMENT_MAX_CHARS = 500
 
 
@@ -2329,7 +2329,7 @@ class PublicMemoryService:
     async def evidence(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
     ) -> MemoryEvidenceView:
-        """The sources a belief cites, shown no further than each may be (ADR-0214)."""
+        """The sources a belief cites, shown no further than each may be (ADR-0224)."""
         require_scope(principal, "memory.read")
         async with self._uow_factory() as uow:
             record = await self._visible(uow, principal, memory_id, ceiling)
@@ -2338,7 +2338,7 @@ class PublicMemoryService:
     async def counts(
         self, principal: Principal, *, ceiling: Sensitivity, include_derived: bool = False
     ) -> MemoryCountsView:
-        """The browser's sidebar numbers under the list's own predicates (ADR-0214)."""
+        """The browser's sidebar numbers under the list's own predicates (ADR-0224)."""
         require_scope(principal, "memory.read")
         if include_derived and not self._derived_enabled:
             raise MemoryCursorError("derived memory browsing is unavailable")
@@ -2419,7 +2419,7 @@ class PublicMemoryService:
     async def _check_replacement(
         uow: RepositoryUnitOfWork, principal: Principal, record: MemoryRecord, replacement: str
     ) -> None:
-        """Refuse a corrected wording before anything is written (ADR-0214).
+        """Refuse a corrected wording before anything is written (ADR-0224).
 
         Messages never quote the submitted text: a refusal is a log surface.
         """
@@ -2540,7 +2540,7 @@ class PublicMemoryService:
     ) -> MemoryView | DerivedMemoryView:
         """Apply one review outcome to a belief; a repeated key replays its live view.
 
-        ``changed`` (ADR-0214) returns the replacement belief's view, and so
+        ``changed`` (ADR-0224) returns the replacement belief's view, and so
         does its replay; the superseded belief stays readable.
         """
         require_scope(principal, "memory.write")
@@ -2646,7 +2646,7 @@ class PublicPersonaService:
     async def preview(
         self, principal: Principal, *, voice: str | None, traits: Sequence[PersonaTrait]
     ) -> PersonaPreview:
-        """A sample reply in an unsaved voice (ADR-0216 part C); nothing is stored."""
+        """A sample reply in an unsaved voice (ADR-0226 part C); nothing is stored."""
         require_scope(principal, "persona.write")
         if self._previewer is None:
             raise PersonaContentError("this server cannot generate a sample reply")
@@ -2709,7 +2709,7 @@ class PublicPersonaService:
     ) -> PersonaView:
         """Replace the document; an omitted voice or trait list keeps the head's.
 
-        Omission rather than null keeps a client that predates ADR-0216 from
+        Omission rather than null keeps a client that predates ADR-0226 from
         clearing a voice it never showed.
         """
         require_scope(principal, "persona.write")

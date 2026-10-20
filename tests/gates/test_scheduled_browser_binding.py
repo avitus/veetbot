@@ -274,7 +274,7 @@ def test_legacy_unbound_schedule_request_hash_is_unchanged() -> None:
 
     definition = ScheduleDefinition.model_validate(_definition())
     # A legacy request had neither the website binding (ADR-0150), a call plan
-    # (ADR-0221) nor the notify preference (ADR-0215).
+    # (ADR-0221) nor the notify preference (ADR-0225).
     legacy = definition.model_dump(
         mode="json", exclude={"browser_profile_id", "call_plan", "notify"}
     )

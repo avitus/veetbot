@@ -3983,7 +3983,7 @@ class GovernedMemoryService:
         replacement_statement: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
     ) -> MemoryRecord:
-        """Apply one owner review outcome to a belief (ADR-0117, ADR-0214).
+        """Apply one owner review outcome to a belief (ADR-0117, ADR-0224).
 
         ``changed`` supersedes the belief with the owner's replacement text and
         returns the replacement; every other outcome returns the belief itself.
@@ -4066,7 +4066,7 @@ class GovernedMemoryService:
 
         The owner's replacement text is recorded first as a
         ``memory.owner_correction`` event, which the replacement cites: the
-        superseded belief's evidence never said the new words (ADR-0214).
+        superseded belief's evidence never said the new words (ADR-0224).
         """
         if kind is not RejectionKind.CHANGED:
             stored, _current, _rejection = await self._reject_in(

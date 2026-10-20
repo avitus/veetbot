@@ -13,6 +13,16 @@ title: Current Milestone
 
 - **Milestone 33 — General memory search and recall:** the owner authorized
   the six-stage plan on 2026-10-11 under ADR-0178.
+  The checkpoint comparison completed all 1,600 observations on 2026-10-19 and
+  failed the original recall, invalid-current-fact and per-case cost thresholds.
+  The owner approved the separate bounded rollout in ADR-0220, subject to actual
+  human findings, production compatibility, final review/CI and verified rollback.
+  This authorization does not mark M33 complete or claim deployment readiness.
+  The owner's later 2026-10-20 direction replaces pre-activation synthetic case
+  review with a daily check-in on real production use under ADR-0223. The new
+  version-three trial requires its own authorized release; recall is not enabled
+  by that direction. Missing review expires the trial after 24 hours, within a
+  fixed seven-day maximum, with all other safety and release gates preserved.
   [General memory recall](general-memory-recall.md) registers twelve gates for
   cross-category evaluation, relevance before candidate limits, measured semantic
   retrieval, task-aware queries, governed source recovery and release evidence.
@@ -132,9 +142,34 @@ title: Current Milestone
   review and exact-head CI must precede new paid collection. Reviewed reliability
   and the independent dreaming release are integrated for existing PR #163, with
   migration ancestry ea3310a1b003 → ea3210a1b00d → ea3310a1b004 → ea3310a1b005.
+  The later v5 on `f837ed3c` stopped at 124 observations; its diagnostic identifies
+  a provider-key-shaped match in OpenAI encrypted continuation, whose original
+  meaning remains unknown. The owner approved the narrow ADR-0210 repair on
+  2026-10-16. Standalone secrets and other providers/fields retain rejection;
+  original replay bytes stay unchanged. Failed attempts remain immutable.
+  Aggregate reported and held cost is USD 88.371792 under the unchanged USD 300
+  cap. Source verification and synthetic native load do not establish full quality;
+  the repaired source needs fresh review, ordinary CI/signing and full evidence.
+  ADR-0216 separately authorizes ordinary signing on the final reviewed
+  `reliability` commit with a temporary exact-revision context restriction,
+  preserving deferred `dev` work and restoring the original restriction afterward.
   Complete confirmation, independent failure review and release publication
   remain outstanding.
-  Optional-channel activation remains evidence-gated.
+  The later v6 on `16153a5f` stopped at 1,239 observations after a cancelled
+  formation call. All originals remain immutable; eight ledgers total
+  USD 135.90882425 including uncertain reservations, leaving USD 164.09117575.
+  The owner approved checkpointed continuation and a focused production comparison
+  (ADR-0212): all 400 scenarios, both paths, formation sparse control versus final
+  hybrid, or 1,600 required observations. Reuse requires unchanged runtime inputs,
+  verified original rows and banks, and complete accounting. The separately verified collector is collecting the remaining positions with
+  append-only checkpoints. The source fixes and current production changes are
+  being integrated on `codex/recall-production-release`; complete scoring, actual
+  independent human failure review and deployment compatibility remain open.
+  No quality threshold or independent human review is waived. Work proceeds independently on `codex/memory-retrieval-evaluation`;
+  unrelated development and releases are not dependencies or held by this run.
+  The owner explicitly authorized the recall pull request when ready, its review,
+  hosted verification and production deployment. The separate hold on pushes to
+  `dev` remains active. Optional-channel activation remains evidence-gated.
   M16/M32 frozen controls and unattended dreaming requirements remain unchanged.
 
 - **Milestone 32 — Memory reconsolidation (dreaming):** authorized on

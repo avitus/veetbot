@@ -241,7 +241,7 @@ class UpdatePersonaEntryRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     sensitivity: Sensitivity = Sensitivity.INTERNAL
     source_belief_id: UUID | None = None
-    # ADR-0216 part B: a switched-off entry is kept but not rendered.
+    # ADR-0226 part B: a switched-off entry is kept but not rendered.
     enabled: bool = True
 
 
@@ -250,13 +250,13 @@ class UpdatePersonaRequest(BaseModel):
 
     expected_version: int = Field(ge=0)
     entries: list[UpdatePersonaEntryRequest] = Field(max_length=PERSONA_MAX_ENTRIES)
-    # ADR-0216 part A. Omitted keeps the current value; null clears the voice.
+    # ADR-0226 part A. Omitted keeps the current value; null clears the voice.
     voice: str | None = Field(default=None, max_length=PERSONA_VOICE_MAX_CHARS)
     traits: list[PersonaTrait] = Field(default_factory=list, max_length=PERSONA_MAX_TRAITS)
 
 
 class PersonaPreviewRequest(BaseModel):
-    """The unsaved voice and traits a sample reply is generated for (ADR-0216 part C)."""
+    """The unsaved voice and traits a sample reply is generated for (ADR-0226 part C)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -288,7 +288,7 @@ class MemoryReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     outcome: MemoryReviewOutcome
-    # ADR-0214: `changed` carries the owner's wording; no other outcome may.
+    # ADR-0224: `changed` carries the owner's wording; no other outcome may.
     # Length and content are checked after trimming by the service, so a
     # refusal never echoes the submitted text.
     replacement_statement: str | None = Field(default=None, max_length=4000)
@@ -1316,7 +1316,7 @@ def create_app(
         response: Response,
         authenticated: Annotated[Principal, secured("schedule.write")],
     ) -> ScheduleDraft:
-        """Read a plain-words description into an unsaved schedule draft (ADR-0215 B)."""
+        """Read a plain-words description into an unsaved schedule draft (ADR-0225 B)."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         drafter: ScheduleDraftService | None = getattr(services, "schedule_drafts", None)
         if drafter is None:
@@ -1431,7 +1431,7 @@ def create_app(
             ),
         ],
     ) -> Response:
-        """Start one owner-requested run of a recurring schedule now (ADR-0215 C)."""
+        """Start one owner-requested run of a recurring schedule now (ADR-0225 C)."""
         runner: ScheduleRunNowService | None = getattr(services, "schedule_runs", None)
         if runner is None:
             raise ScheduleValidationError(
@@ -1823,7 +1823,7 @@ def create_app(
         except MemoryCursorError as exc:
             raise MalformedRequestError("memory cursor is malformed") from exc
 
-    # ADR-0214 part C. Mounted before `/v1/memories/{memory_id}` so "counts"
+    # ADR-0224 part C. Mounted before `/v1/memories/{memory_id}` so "counts"
     # never parses as an identifier.
     @memory_router.get(
         "/v1/memories/counts",
@@ -1868,7 +1868,7 @@ def create_app(
         authenticated: Annotated[Principal, secured("memory.read")],
         ceiling: Sensitivity,
     ) -> MemoryEvidenceView:
-        """Up to five cited sources; only the owner's own words carry an excerpt (ADR-0214)."""
+        """Up to five cited sources; only the owner's own words carry an excerpt (ADR-0224)."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.evidence(authenticated, memory_id, ceiling=ceiling)
 
@@ -1982,7 +1982,7 @@ def create_app(
         response: Response,
         authenticated: Annotated[Principal, secured("persona.write")],
     ) -> PersonaPreview:
-        """One example reply in an unsaved voice; generated, never saved (ADR-0216)."""
+        """One example reply in an unsaved voice; generated, never saved (ADR-0226)."""
         response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.persona.preview(
             authenticated, voice=request.voice, traits=request.traits

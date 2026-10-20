@@ -1,4 +1,4 @@
-"""ADR-0215 part D: a schedule may notify only when something needs the owner.
+"""ADR-0225 part D: a schedule may notify only when something needs the owner.
 
 `notify` is a definition field with a default that matches today's behaviour.
 With `attention_only`, a completed run raises no `schedule_run_finished`
@@ -98,7 +98,7 @@ def test_the_preference_survives_a_conversational_update() -> None:
 
 def test_the_default_leaves_an_existing_idempotency_hash_unchanged() -> None:
     definition = _definition_from_revision(revision())
-    # A request from before ADR-0150, ADR-0215 and ADR-0221 had none of these.
+    # A request from before ADR-0150, ADR-0225 and ADR-0221 had none of these.
     legacy = definition.model_dump(
         mode="json", exclude={"browser_profile_id", "notify", "call_plan"}
     )

@@ -80,7 +80,7 @@ public struct ScheduleDetailView: View {
     }
 
     /// Pause or Resume, and Stop behind an inline confirmation, on a
-    /// schedule that can still run (ADR-0215 part A). Stop is a cancel: the
+    /// schedule that can still run (ADR-0225 part A). Stop is a cancel: the
     /// record is kept, so it never says Delete.
     @ViewBuilder
     private func lifecycleControls(_ record: ScheduleRecordView) -> some View {
@@ -105,7 +105,7 @@ public struct ScheduleDetailView: View {
                     }
                 } else {
                     HStack(spacing: 8) {
-                        // A one-time schedule runs only at its time (ADR-0215 C).
+                        // A one-time schedule runs only at its time (ADR-0225 C).
                         if record.revision.cadence.kind != "ONCE" {
                             Button { Task { await model.runNow(id) } } label: { Label("Run now", systemImage: "play.fill") }
                                 .primaryCapsule()
@@ -137,7 +137,7 @@ public struct ScheduleDetailView: View {
     }
 
     /// Delivery (MagicPath quiet-home-5746): the per-schedule notification
-    /// preference (ADR-0215 part D) and the spending limit each run carries.
+    /// preference (ADR-0225 part D) and the spending limit each run carries.
     /// A server without the preference shows only the limit.
     @ViewBuilder
     private func delivery(_ record: ScheduleRecordView) -> some View {

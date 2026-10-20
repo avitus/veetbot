@@ -26,7 +26,7 @@ NOW = datetime(2026, 9, 1, 12, tzinfo=UTC)
 TENANT = "local"
 PRINCIPAL_ID = "local-user"
 
-# ADR-0216 added the voice and traits, the per-entry switch and the staleness flag.
+# ADR-0226 added the voice and traits, the per-entry switch and the staleness flag.
 PERSONA_VIEW_FIELDS = {"version", "entries", "source", "created_at", "voice", "traits"}
 PERSONA_ENTRY_FIELDS = {"text", "source", "source_belief_id", "sensitivity", "enabled", "stale"}
 NOMINATION_VIEW_FIELDS = {
@@ -364,7 +364,7 @@ async def test_routes_exact_scope_and_memory_read_only() -> None:
         assert {"persona.read", "persona.write"} <= PLATFORM_SCOPES
 
         # The memory router serves only its documented table: four GETs under
-        # memory.read (two since ADR-0214) and, since ADR-0117, the two writes
+        # memory.read (two since ADR-0224) and, since ADR-0117, the two writes
         # under memory.write.
         memory = memory_routes(app)
         assert {

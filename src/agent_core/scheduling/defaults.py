@@ -1,6 +1,6 @@
 """The pins and limits a schedule gets when the owner does not choose them.
 
-`schedule.create` and the plain-words draft (ADR-0215 part B) both derive
+`schedule.create` and the plain-words draft (ADR-0225 part B) both derive
 them here, so a schedule made in the app is no weaker than one made in Chat:
 the configured agent's identity and policy, run limits no higher than either
 the agent's or the deployment's ceilings, the synthesis reserve of ADR-0078,

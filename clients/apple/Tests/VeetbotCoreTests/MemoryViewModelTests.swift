@@ -738,7 +738,7 @@ import Testing
         #expect(model.errorMessage == "This server does not support memory changes yet.")
     }
 
-    // MARK: ADR-0214
+    // MARK: ADR-0224
 
     @Test
     func testCorrectingTheWordingSupersedesTheRowWithTheReplacement() async throws {

@@ -1,4 +1,4 @@
-"""ADR-0216: the CLI sets the persona voice and traits and keeps every entry."""
+"""ADR-0226: the CLI sets the persona voice and traits and keeps every entry."""
 
 from __future__ import annotations
 

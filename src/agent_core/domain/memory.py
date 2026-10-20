@@ -105,7 +105,7 @@ class RejectionKind(StrEnum):
 
 
 class MemoryReviewOutcome(StrEnum):
-    """What the owner decided about a belief (ADR-0117, ADR-0214).
+    """What the owner decided about a belief (ADR-0117, ADR-0224).
 
     ``dismiss`` clears the flag and changes nothing else; ``untrue`` and
     ``not_here`` are the existing rejection kinds of the same name. ``changed``

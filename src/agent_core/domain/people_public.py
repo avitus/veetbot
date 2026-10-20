@@ -31,7 +31,7 @@ class PersonView(EntityView):
     state: Literal["provisional", "active", "merged"]
     pinned: bool
     merged_into: UUID | None
-    # ADR-0217. Required without a default: a response built from a person the
+    # ADR-0227. Required without a default: a response built from a person the
     # directory did not enrich fails loudly instead of reporting "never".
     last_interaction_at: AwareDatetime | None
     next_thread: "CommitmentView | None"

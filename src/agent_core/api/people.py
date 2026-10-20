@@ -125,7 +125,7 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         relationship: PeopleRelationshipFilter | None = None,
         # Provisional, unpinned people with no confirmed or observed identifier.
         review: bool = False,
-        # ADR-0217: people the owner owes an open reply due soon; stands alone.
+        # ADR-0227: people the owner owes an open reply due soon; stands alone.
         open_threads: bool = False,
     ) -> PeoplePage:
         page = await service.list(
@@ -181,7 +181,7 @@ def people_router(service: PeopleService, secured: Callable[[str], object]) -> A
         authenticated: Annotated[Principal, secured("people.read")],
         ceiling: Sensitivity,
     ) -> PeopleCounts:
-        """The People sidebar's numbers under the lists' own predicates (ADR-0217)."""
+        """The People sidebar's numbers under the lists' own predicates (ADR-0227)."""
         return await service.counts(authenticated, ceiling=ceiling)
 
     @router.get(

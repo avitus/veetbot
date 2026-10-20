@@ -1246,7 +1246,7 @@ def memory_review(
         typer.Option("--replacement", help="The corrected wording; only with changed."),
     ] = None,
 ) -> None:
-    """Apply one review outcome to a belief (ADR-0117, ADR-0214)."""
+    """Apply one review outcome to a belief (ADR-0117, ADR-0224)."""
 
     if (outcome is MemoryReviewOutcome.CHANGED) != (replacement is not None):
         raise typer.BadParameter(
@@ -2351,7 +2351,7 @@ def persona_voice(
     ] = None,
     clear: Annotated[bool, typer.Option("--clear", help="Remove the voice.")] = False,
 ) -> None:
-    """Set or clear the persona voice (ADR-0216); entries and traits are kept."""
+    """Set or clear the persona voice (ADR-0226); entries and traits are kept."""
 
     if clear == (text is not None):
         raise typer.BadParameter("give the voice text, or --clear, not both")
@@ -2368,7 +2368,7 @@ def persona_traits(
         typer.Argument(help="Up to three of brief, warm, direct, formal, playful."),
     ] = None,
 ) -> None:
-    """Set the tones the persona leans towards (ADR-0216); none clears them."""
+    """Set the tones the persona leans towards (ADR-0226); none clears them."""
 
     _persona_tone_command(expected_version, KEEP_PERSONA_FIELD, list(trait or []))
 

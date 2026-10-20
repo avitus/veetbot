@@ -67,6 +67,7 @@ nav:
   - Bland Calling Proposal: bland-calling-proposal.md
   - Bland Calling Setup: bland-setup.md
   - People Memory Operations: people-operations.md
+  - Recall Production Trial: recall-production-trial.md
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
       - Bland Calling: plan/bland-calling.md
@@ -176,6 +177,17 @@ nav:
       - "ADR-0206: Session-default memory search": adr/0206-session-default-memory-search.md
       - "ADR-0207: Bounded confirmation concurrency": adr/0207-bounded-confirmation-concurrency.md
       - "ADR-0208: Grounded relationship discovery": adr/0208-grounded-relationship-discovery.md
+      - "ADR-0210: OpenAI opaque continuation credential boundary": adr/0210-openai-opaque-credential-boundary.md
+      - "ADR-0216: Commit-scoped reliability signing": adr/0216-commit-scoped-reliability-signing.md
+      - "ADR-0212: Checkpointed memory confirmation": adr/0212-checkpointed-memory-confirmation.md
+      - "ADR-0217: Bounded interruption recovery": adr/0217-bounded-interruption-recovery.md
+      - "ADR-0218: Checkpoint recall production compatibility": adr/0218-checkpoint-recall-production-compatibility.md
+      - "ADR-0219: Recall release signing": adr/0219-recall-release-signing.md
+      - "ADR-0220: Owner-reviewed bounded recall rollout": adr/0220-bounded-recall-rollout.md
+      - "ADR-0222: Owner-approved recall review scope": adr/0222-owner-approved-recall-review-scope.md
+      - "ADR-0223: Owner production recall trial": adr/0223-owner-production-recall-trial.md
+      - "ADR-0214: Formation deadline repair": adr/0214-formation-deadline-repair.md
+      - "ADR-0215: Formation terminal outcomes and collector cleanup": adr/0215-formation-terminal-outcomes.md
       - ADR-0178 General memory search and recall: adr/0178-general-memory-recall.md
       - ADR-0177 Bounded browser startup recovery: adr/0177-bounded-browser-startup-recovery.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
@@ -343,10 +355,10 @@ nav:
       - ADR-0210 OpenAI opaque credential boundary: adr/0210-openai-opaque-credential-boundary.md
       - ADR-0211 Apple client deployment floors: adr/0211-apple-client-deployment-floors.md
       - ADR-0213 Owner-requested calls without confirmation: adr/0213-owner-requested-calls-without-confirmation.md
-      - ADR-0214 Memory corrections, evidence and counts: adr/0214-memory-corrections-evidence-and-counts-over-http.md
-      - ADR-0215 Native schedule lifecycle and plain-words creation: adr/0215-native-schedule-lifecycle-and-plain-words-creation.md
-      - ADR-0216 Persona voice, traits and boundaries: adr/0216-persona-voice-traits-entry-switches-and-boundaries.md
-      - ADR-0217 People directory attention and counts: adr/0217-people-directory-attention-recent-and-counts.md
+      - ADR-0224 Memory corrections, evidence and counts: adr/0224-memory-corrections-evidence-and-counts-over-http.md
+      - ADR-0225 Native schedule lifecycle and plain-words creation: adr/0225-native-schedule-lifecycle-and-plain-words-creation.md
+      - ADR-0226 Persona voice, traits and boundaries: adr/0226-persona-voice-traits-entry-switches-and-boundaries.md
+      - ADR-0227 People directory attention and counts: adr/0227-people-directory-attention-recent-and-counts.md
       - ADR-0221 Unattended call plans: adr/0221-unattended-call-plans.md
-      - ADR-0222 Smarter Testing partitions: adr/0222-smarter-testing-partitions.md
+      - ADR-0228 Smarter Testing partitions: adr/0228-smarter-testing-partitions.md
   - Changelog: changelog.md

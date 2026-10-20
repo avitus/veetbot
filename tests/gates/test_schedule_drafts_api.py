@@ -1,4 +1,4 @@
-"""ADR-0215 part B at the HTTP boundary: POST /v1/schedules/drafts.
+"""ADR-0225 part B at the HTTP boundary: POST /v1/schedules/drafts.
 
 Happy path through to creation, validation, authorization, an unavailable
 interpreter, and the hourly allowance; nothing is stored by a draft.

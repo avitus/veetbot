@@ -108,7 +108,7 @@ async def test_derived_boundary_validation_isolation_and_replay(
                 ({"outcome": "dismiss", "statement": "fabrication"}, {"Idempotency-Key": "x"}),
                 ({"outcome": "dismiss"}, {}),
                 ({"outcome": "dismiss"}, {"Idempotency-Key": "x" * 201}),
-                # ADR-0214: a summary's corrections belong to reconsolidation.
+                # ADR-0224: a summary's corrections belong to reconsolidation.
                 (
                     {"outcome": "changed", "replacement_statement": "A different summary."},
                     {"Idempotency-Key": "reword"},
@@ -307,7 +307,7 @@ async def test_unavailable_summary_does_not_hide_other_browse_rows(
 
 @pytest.mark.parametrize("kind", ["summary", "hypothesis"])
 async def test_counts_report_the_synthesis_number_only_when_asked(kind: str) -> None:
-    """ADR-0214 part C: `synthesis` counts what the derived browse would list."""
+    """ADR-0224 part C: `synthesis` counts what the derived browse would list."""
     settings = replace(
         memory_settings(), memory_api_enabled=True, memory_reconsolidation_api_enabled=True
     )

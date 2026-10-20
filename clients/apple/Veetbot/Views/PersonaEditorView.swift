@@ -124,7 +124,7 @@ public struct PersonaEditorView: View {
         }
     }
 
-    // MARK: Tone (ADR-0216)
+    // MARK: Tone (ADR-0226)
 
     private var voiceSection: some View {
         VStack(alignment: .leading, spacing: 8) {

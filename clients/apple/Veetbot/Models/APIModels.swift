@@ -776,7 +776,7 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
     public let timezone: String?
     public let misfireGraceSeconds: Int
     public let maxConsecutiveFailures: Int
-    /// `every_report` or `attention_only` (ADR-0215 part D); absent on servers
+    /// `every_report` or `attention_only` (ADR-0225 part D); absent on servers
     /// that predate the preference, which hides the switch.
     public let notify: String?
     public let createdByPrincipalID: String
@@ -803,7 +803,7 @@ public struct ScheduleRecordView: Codable, Equatable, Sendable {
     public let revision: ScheduleRevisionView
 }
 
-/// A schedule read from plain words (`POST /v1/schedules/drafts`, ADR-0215
+/// A schedule read from plain words (`POST /v1/schedules/drafts`, ADR-0225
 /// part B). The definition is kept as the server's JSON so creation posts it
 /// back unchanged; the title and cadence are read out of it for display.
 public struct ScheduleDraftView: Decodable, Equatable, Sendable {
@@ -840,7 +840,7 @@ public struct ScheduleOccurrenceView: Codable, Equatable, Identifiable, Sendable
     public let reasonCode: String?
     public let materializedAt: Date?
     public let linksErasedAt: Date?
-    /// `SCHEDULED` or `MANUAL` (Run now, ADR-0215 part C); absent on older servers.
+    /// `SCHEDULED` or `MANUAL` (Run now, ADR-0225 part C); absent on older servers.
     public let trigger: String?
 
     enum CodingKeys: String, CodingKey {
@@ -908,7 +908,7 @@ public enum MemoryReviewOutcome: String, Codable, CaseIterable, Sendable {
     case notHere = "not_here"
 }
 
-/// One source a belief cites (ADR-0214 part B). Only the owner's own words
+/// One source a belief cites (ADR-0224 part B). Only the owner's own words
 /// carry an `excerpt`; every other source is a reference, and one that is gone
 /// says so through `withheld`.
 public struct MemoryEvidenceItem: Codable, Equatable, Identifiable, Sendable {
@@ -948,7 +948,7 @@ struct MemoryEvidencePage: Codable, Sendable {
     let items: [MemoryEvidenceItem]
 }
 
-/// The memory browser's sidebar numbers (ADR-0214 part C).
+/// The memory browser's sidebar numbers (ADR-0224 part C).
 public struct MemoryCountsView: Codable, Equatable, Sendable {
     public let live: Int
     public let flagged: Int
@@ -1148,7 +1148,7 @@ public struct PersonaEntryView: Codable, Equatable, Sendable {
     public let source: String
     public let sourceBeliefID: UUID?
     public let sensitivity: String
-    /// ADR-0216: a switched-off entry is kept but not used; absent on older servers.
+    /// ADR-0226: a switched-off entry is kept but not used; absent on older servers.
     public let enabled: Bool
     /// The affirmed entry's source belief is no longer live.
     public let stale: Bool
@@ -1188,7 +1188,7 @@ public struct PersonaView: Codable, Equatable, Sendable {
     public let entries: [PersonaEntryView]
     public let source: String
     public let createdAt: Date
-    /// ADR-0216. Both are absent on a server that predates them; `traits` is
+    /// ADR-0226. Both are absent on a server that predates them; `traits` is
     /// always present on one that has them, which is how support is told.
     public let voice: String?
     public let traits: [String]?
@@ -1211,7 +1211,7 @@ public struct PersonaView: Codable, Equatable, Sendable {
     }
 }
 
-/// An example reply in an unsaved voice (ADR-0216 part C).
+/// An example reply in an unsaved voice (ADR-0226 part C).
 public struct PersonaPreviewView: Codable, Equatable, Sendable {
     public let prompt: String
     public let reply: String
@@ -1223,7 +1223,7 @@ public struct PersonaPreviewView: Codable, Equatable, Sendable {
     }
 }
 
-/// One fixed rule the persona cannot change, and what enforces it (ADR-0216 part D).
+/// One fixed rule the persona cannot change, and what enforces it (ADR-0226 part D).
 public struct PersonaBoundaryView: Codable, Equatable, Identifiable, Sendable {
     public struct Fact: Codable, Equatable, Sendable {
         public let kind: String
@@ -1277,7 +1277,7 @@ public struct UpdatePersonaEntryBody: Codable, Equatable, Sendable {
     public let sensitivity: String
     public let sourceBeliefID: UUID?
     /// Sent only when false, so an older server, which refuses the field,
-    /// still accepts every entry that is on (ADR-0216).
+    /// still accepts every entry that is on (ADR-0226).
     public let enabled: Bool
 
     enum CodingKeys: String, CodingKey {

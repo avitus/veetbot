@@ -1,4 +1,4 @@
-# ADR-0215: Native schedule lifecycle, plain-words creation, Run now and delivery preference
+# ADR-0225: Native schedule lifecycle, plain-words creation, Run now and delivery preference
 
 - Status: Accepted (owner, 2026-10-20: "implement all 4")
 - Date: 2026-10-19

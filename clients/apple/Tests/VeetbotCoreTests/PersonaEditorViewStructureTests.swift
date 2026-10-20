@@ -19,7 +19,7 @@ import Testing
             "persona.nomination.decline",
             "persona.conflict.resolve",
             "persona.conflict.use-server",
-            // ADR-0216.
+            // ADR-0226.
             "persona.voice",
             "persona.sample",
             "persona.entry.enabled",
@@ -31,7 +31,7 @@ import Testing
         }
     }
 
-    /// ADR-0216: the tone sections appear only for a server that has them,
+    /// ADR-0226: the tone sections appear only for a server that has them,
     /// and Boundaries lists only what the server says is enforced.
     @Test
     func testToneAndBoundariesFollowTheServer() throws {

@@ -1,4 +1,4 @@
-"""A schedule described in plain words, read into a draft (ADR-0215 part B).
+"""A schedule described in plain words, read into a draft (ADR-0225 part B).
 
 One budgeted, tool-less structured-output call reads the owner's sentence and
 answers with the timing and a short title only. The server turns that into a

@@ -86,7 +86,7 @@ class MemoryStore(Protocol):
     async def browse_counts(
         self, tenant_id: str, principal_id: str, ceiling: Sensitivity
     ) -> dict[tuple[MemoryStatus, BeliefType, bool], int]:
-        """Count the owner's beliefs at or below ``ceiling`` (ADR-0214 part C).
+        """Count the owner's beliefs at or below ``ceiling`` (ADR-0224 part C).
 
         Keyed by status, belief type and review flag, under exactly the
         tenant, principal, erasure and ceiling predicates ``browse`` applies,

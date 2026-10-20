@@ -1,8 +1,8 @@
-# ADR-0217: People directory attention, last contact and section counts
+# ADR-0227: People directory attention, last contact and section counts
 
 - Status: Accepted (owner, 2026-10-20: "implement all 4")
 - Date: 2026-10-19
-- Related: ADR-0121, ADR-0125, ADR-0214; Section 28 of the engineering plan
+- Related: ADR-0121, ADR-0125, ADR-0224; Section 28 of the engineering plan
 - Detailed design: `docs/plan/people-and-relationships.md`
 
 ## Context
@@ -69,7 +69,7 @@ Each count applies the list's principal, tenant, ceiling and suppression
 predicates, so a suppressed or above-ceiling person is never counted. The
 route is mounted before `/v1/people/{person_id}`, as
 `/v1/people/merge-suggestions` already is. A summary route is chosen over a
-`total` on each page for the reason ADR-0214 part C gives: one request fills
+`total` on each page for the reason ADR-0224 part C gives: one request fills
 the sidebar, pages do not pay a count, and keyset pages do not carry a total
 that drifts.
 

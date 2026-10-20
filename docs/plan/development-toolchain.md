@@ -264,7 +264,7 @@ contract tests follow static tests and stay serial. `CHECK_JOBS=1` and
 `STATIC_TEST_WORKERS=0` provide a serial diagnostic run. `PYTEST_ARGS`, empty
 by default, appends pytest arguments to `test-static`, `test-contract`, and
 `test-integration`; CI's Smarter Testing suites pass the selected test files
-and the report path through it (ADR-0222). All targets remain in
+and the report path through it (ADR-0228). All targets remain in
 one Make dependency graph, so explicitly naming `docs-check` or `test-static`
 beside `check` does not execute them twice. Run the aggregate once on final
 inputs; repeat a passed check only after its inputs change. No test-result
@@ -489,7 +489,7 @@ bottleneck. Jobs 1 through 3, job 5, and job 11 publish their pytest JUnit XML t
 CircleCI's test-results collector so failed and slow tests are visible without
 searching raw logs.
 Jobs 1 through 3 run their test target through CircleCI Smarter Testing
-(ADR-0222): `.circleci/test-suites.yml` defines one suite per job, whose
+(ADR-0228): `.circleci/test-suites.yml` defines one suite per job, whose
 discovery and run both invoke that job's Make target, with test files as the
 atoms and reports that name each case's file. Only the free features are
 configured, so every run executes the whole partition; rerunning a workflow from
@@ -583,6 +583,12 @@ package it creates. This job is the live proof that both signing boundaries and
 the headless Apple packaging tools work before a release reaches `main`; the
 package and isolated installer keychain are discarded with the executor.
 
+For the isolated recall release, ADR-0219 additionally selects only
+`codex/recall-production-release`. Its installer context requires temporary
+admission of the final reviewed revision, with original project/group and
+SSH/API-configuration restrictions preserved and restored after the attempt.
+The branch selector alone grants no access to credentials or publication.
+
 Job 8 is delivery, not a verification partition and not part of `make check`.
 After the production API reports the matching tested revision, it installs the
 CircleCI-managed `veetbot-app-store` signing bundle, imports the installer
@@ -656,14 +662,16 @@ Three workflow-level facts complete the definition:
       -d '{"branch": "<source-branch>", "parameters": {"run_verify": true}}'
     ```
 
-    A promotion's source branch is `dev`. CircleCI builds the named branch's
+    An ordinary promotion's source branch is `dev`; the isolated recall release
+    uses `codex/recall-production-release` (ADR-0219). CircleCI builds the named branch's
     current head, so a request naming any other branch verifies the wrong
     commit. The requested pipeline reports its job statuses on that commit, so
     the pull request shows them; confirm the commit they sit on is the pull
     request's head. A pipeline with `run_live: true` selects the manual live
     workflow instead, and wins when both parameters are set.
     The fourth job also runs nightly on `main` at 07:17 UTC. The signing smoke
-    runs only on trusted `dev`, and only in a requested pipeline; it does not
+    selects trusted `dev` or the isolated recall release with its exact-revision
+    context admission, and only in a requested pipeline; it does not
     receive publication credentials.
     Production delivery begins only after all eight required verification jobs
     and both browser-image instances pass. On `main`, each verification job

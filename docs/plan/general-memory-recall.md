@@ -339,8 +339,12 @@ by synthetic analogues; real-data export retains the separate consent rules.
 Public datasets remain operator-supplied, versioned and license-aware, never vendored.
 The scorer never supplies expected labels, categories or answer values to retrieval.
 
-Every scenario exercises automatic and deliberate recall. Record both correctly
-seeded retrieval and the full formation-to-answer path. Include old relevant facts,
+Every scenario exercises automatic and deliberate recall. Under
+[ADR-0212](../adr/0212-checkpointed-memory-confirmation.md), the required production
+comparison records the full formation-to-answer path with sparse control and final
+hybrid retrieval: 1,600 observations across the 400 reviewed scenarios. Correctly
+seeded retrieval and dense-only comparisons remain separately reported diagnostics;
+the legacy release formats continue to require all twelve variants. Include old relevant facts,
 newer unrelated facts, hard semantic distractors, another person's facts, conflicts,
 negation, updates, deletion, historical questions and information never supplied.
 Load tests use 100, 1,000 and 10,000 competing records, with a separately measured
@@ -411,6 +415,57 @@ exclusive paired formation bank. Failures stop new work while already admitted
 requests settle. Setup, native indexing and actual reader runtime are reported
 separately; contention remains part of measured answer latency. No corpus, load,
 quality, monetary or per-answer latency requirement changes.
+
+ADR-0212 supersedes the full-matrix and no-reuse requirements for the separately
+identified checkpointed continuation. It preserves every original failed run,
+retains completed rows without retagging or outcome-based selection, and requires
+byte verification, original formation banks, mechanical reconstruction and complete
+ledger reconciliation before reuse. Durable starts and results prevent duplicate
+sends after an interruption. An uncertain started answer cannot be resent. One
+cancelled formation preparation without any completed answer may receive one
+recorded replacement bank; all charges and uncertainty remain accounted for.
+Publication of this reduced comparison requires a new explicit protocol and its
+verified admission implementation. Existing version-one/two publication does not
+accept a reduced matrix. No activation gate is satisfied by checkpoint retention.
+
+[ADR-0217](../adr/0217-bounded-interruption-recovery.md) adds two owner-approved
+exceptions bound to retained interruption evidence: one final preparation for
+`dev-decisions-03` and one replacement of the admission-halted deliberate/hybrid
+reader for `dev-decisions-04`. Original failed records, completed rows, uncertain
+charges and the absolute deadline remain unchanged. A separately pinned successor
+collector appends the authorization and protocol ancestry; it uses fresh workers
+and a distinct final preparation bank. Either exception failing again stops further
+paid admissions. This does not authorize retries for other readers or preparations,
+change evaluated runtime inputs or relax any quality/security/per-answer limit.
+
+[ADR-0214](../adr/0214-formation-deadline-repair.md) subsequently authorizes a
+root-cause runtime repair: formation@11 has a finite 600-second enclosing stage
+deadline, separate from the unchanged 120-second transport request. Explicit
+caller limits and frozen controls remain unchanged. A pinned source comparison
+and complete request regression restrict compatibility to this deadline and its
+safe audit metadata. The original 413 rows remain byte-identical; new rows name
+a distinct repaired execution identity alongside the original comparison inputs.
+Collection/publication version two requires the exact repair manifest, complete
+protocol ancestry and independent human review of this exception. It cannot
+publish under the unchanged-runtime version or erase the patch from eventual
+deployment binding. Only the repeatedly interrupted pre-answer preparation may
+start a new bank; completed or unknown reader work cannot resend. All prior
+reservations, the original absolute deadline and every quality gate remain.
+The owner permits an aggregate cap up to USD 500 if necessary; any added allowance
+requires fresh reconciliation, and the original allocation is not renewed.
+Independent human review must include both failed attempts and replacements.
+
+[ADR-0215](../adr/0215-formation-terminal-outcomes.md) repairs collector cleanup
+after a settled call: slot context cannot span consumer yields, terminal facts
+are retained before downstream validation, and cleanup cannot mask the original
+failure. An explicitly admitted successor preserves all 418 completed rows,
+derives the five missing report entries only from original events and bytes, and
+keeps missing wall timings null. A supplemental seal accounts for the stopped
+journal without rewriting it or claiming successful original sealing. The failed
+pre-answer preparation and proved-unsent reader receive distinct, one-use recovery
+events; unknown sent work remains blocked. The changed bank and collector modules
+are pinned separately in protocol version four, alongside the existing deadline
+repair and all predecessor inputs. This grants no automatic successor or activation.
 
 ## Release admission mechanism
 
@@ -500,6 +555,28 @@ that the evaluator substituted measured recall but left People semantic binding
 on the original retriever. Binding must follow the same measured instance; the
 compiler and semantic-channel requirements remain unchanged. Neither this repair
 nor diagnostic improvements authorize reusing the failed attempt's observations.
+V5 on `f837ed3c` subsequently stopped at 124 observations. Its bounded diagnostic
+identifies the provider-key detector in OpenAI `reasoning.encrypted_content`,
+but the original match was not retained and its meaning remains unproven. All
+31 result files, both scratch databases and supervision originals are retained.
+Seven original ledgers total USD 88.371792, including USD 5.64272 uncertain
+reservations, leaving USD 211.628208 under the unchanged USD 300 aggregate cap.
+On 2026-10-16 the owner approved the narrow OpenAI repair in
+[ADR-0210](../adr/0210-openai-opaque-credential-boundary.md). Only embedded
+provider-key collisions in the schema-bound opaque value may pass; standalone
+secrets and all other fields/providers retain rejection. Deterministic stream and
+actual adapter/runtime replay regressions precede fresh reviewed source, native
+measurement and complete confirmation. No failed rows are reused, no quality
+gate is weakened, and neither this prefix nor native load establishes full quality.
+That repair's subsequent v6 run on `16153a5f` stopped at 1,239 observations after
+a cancelled formation call. Its complete originals and both scratch databases are
+retained. Eight ledgers total USD 135.90882425 including USD 7.83424 in uncertain
+reservations, leaving USD 164.09117575 under the unchanged cap. The owner then
+approved checkpointed continuation (ADR-0212), replacing the earlier no-reuse
+method for unchanged, verified inputs. Work now proceeds on the isolated
+`codex/memory-retrieval-evaluation` branch without holding unrelated development
+or production releases. Continuation implementation, collection, independent human
+failure review, publication and a separately authorized release route remain open.
 The native historical-index load measurement
 under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
 100,000 competing records. It measures one synthetic information need and cannot
@@ -602,10 +679,72 @@ planning tokens and cost in the measurement. This is an evaluation option, not a
 new unconditional production model call. Optional paired formation banks replay
 identical recorded structured completions and verify identical formed current
 state before each arm, as specified in [ADR-0194](../adr/0194-paired-formation-response-banks.md).
+Version two banks additionally retain the narrow, completed MAX_TOKENS refusal
+defined in [ADR-0215](../adr/0215-formation-terminal-outcomes.md). Recording and
+replay raise the same refusal at the same request position, allowing the same
+audited runtime fallback and requiring identical formed state. Legacy bank bytes
+and all other unsupported or interrupted completion rejections remain unchanged.
 Observations distinguish replayed formation usage from new provider work.
 Reproducible sparse baseline configurations are under
 `evals/capability/general-recall/experiments/`. Reviewed corpus, full comparisons,
 preregistration, load experiments and release publication remain open.
+
+## Owner-reviewed bounded release exception
+
+[ADR-0220](../adr/0220-bounded-recall-rollout.md) records the owner's explicit
+2026-10-19 authorization for a separate bounded release after the complete
+1,600-observation comparison failed the original quality goals. The original
+goals, failed evidence and legacy admission formats remain unchanged. This route
+does not complete M33. It requires better held-out ranked/rendered recall on both
+paths and no reduction in overall strict answer success against sparse control,
+while retaining all numerical exceptions for actual human residual-risk review.
+
+`recall-bounded-evidence@1` binds that complete comparison, original measured
+inputs, interruptions and uncertain charges, the owner authorization, actual human
+findings and all changed target files/dependencies with verification receipts.
+`recall-bounded-admission@1` binds the evidence hash, independently checked target
+input census, active composition dependencies, one tenant/owner, a compatible
+rollback revision and a fixed lifetime of at most seven days. This is an explicit
+[ADR-0218](../adr/0218-checkpoint-recall-production-compatibility.md) compatibility
+assessment, never a byte-equality claim or an inherited descendant approval.
+
+Composition permits only the local encoder and interactive private owner queries
+with existing live-reader authority. Child, delegated and skill-review runs are
+withheld. The existing trusted principal seed check excludes scheduled/system
+messages. Source expansion still requires that live query authority. Remote
+embedding composition and unattended reconsolidation refuse this route. Existing
+context, search/round, latency, request and USD 2 daily indexing ceilings remain.
+Expiry and evidence/source mutation latch withdrawal for the admission handle;
+ordinary sparse recall remains available. Human review must cover difficult
+scenarios and every interruption/uncertain-cost item, with nonempty findings.
+Operator attribution and verification of the reviewer's real authorship remain
+mandatory; synthetic test reviews are never release evidence.
+
+[ADR-0222](../adr/0222-owner-approved-recall-review-scope.md) records the owner's
+2026-10-20 approval of a narrower human coverage requirement for this exact retained
+comparison. Version-two review, evidence and admission formats bind the immutable
+approved scope: 37 individual cases, one summary of all 40 cost-exception rows,
+and four summaries retaining all 18 history items. The 270 omitted difficult cases
+receive no individual attestation. Each selected case and summary requires an
+explicit assessment; concerns require notes, and unacceptable findings cannot
+accompany rollout acceptance. A separate overall finding and residual-risk
+decision remain required. The legacy full-review rule and all other safety,
+compatibility and release requirements remain unchanged. The offline packet
+generator preserves original evidence, starts with empty controls, saves drafts
+and exports only actual scoped findings; it never creates admission evidence.
+
+[ADR-0223](../adr/0223-owner-production-recall-trial.md) records the owner's later
+request to learn from real production use. Version-three evidence carries a
+separate genuine owner trial authorization, not synthetic-case findings. Its
+admission expires after 24 hours unless renewed by a timely actual owner check-in
+covering up to five recent eligible production runs. Each check-in binds its
+selection/provenance receipt, period, owner and trial; negative decisions, missing
+coverage, a serious incident or a missed deadline refuse continuation. Renewed
+evidence requires re-composition and cannot move the original seven-day end.
+The original comparison, compatibility and other admission requirements remain.
+The [trial guide](../recall-production-trial.md) describes the conversational
+review and privacy-preserving operator workflow. Neither approval of the trial
+nor these mechanics establishes actual production quality.
 
 ## Hard gates
 

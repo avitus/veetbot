@@ -419,7 +419,7 @@ private final class ScheduleBrowserWindowResizeNSView: NSView {
 }
 #endif
 
-/// New schedule (MagicPath quiet-home-5746, ADR-0215 part B): the owner says
+/// New schedule (MagicPath quiet-home-5746, ADR-0225 part B): the owner says
 /// what should happen and when; the server reads it, and the sheet shows how
 /// before anything is saved. Create posts the server's own definition.
 struct ScheduleCreateSheet: View {

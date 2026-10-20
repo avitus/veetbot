@@ -420,7 +420,7 @@ MEMORY_EXCERPT_MAX_CHARS = 280
 
 
 class MemoryEvidenceItemView(BaseModel):
-    """One source event a belief cites (ADR-0214 part B).
+    """One source event a belief cites (ADR-0224 part B).
 
     Only the owner's own words ever carry an ``excerpt``; every other source
     is navigation identifiers, and a source that is gone carries only its
@@ -444,7 +444,7 @@ class MemoryEvidenceView(BaseModel):
 
 
 class MemoryCountsView(BaseModel):
-    """The memory browser's sidebar numbers in one read (ADR-0214 part C).
+    """The memory browser's sidebar numbers in one read (ADR-0224 part C).
 
     ``live`` and ``by_type`` count active and provisional beliefs, as the
     default browse lists them; ``flagged`` counts the live review queue;
@@ -492,7 +492,7 @@ class PersonaEntryView(BaseModel):
     source: PersonaEntrySource
     source_belief_id: UUID | None
     sensitivity: Sensitivity
-    # ADR-0216: a switched-off entry is kept but not rendered; a stale one's
+    # ADR-0226: a switched-off entry is kept but not rendered; a stale one's
     # source belief is no longer live (persona-surface.md, staleness).
     enabled: bool = True
     stale: bool = False

@@ -99,7 +99,7 @@ class ScheduleOutcomeAccountant:
                 schedule.id, occurrence.schedule_revision, owner
             )
             failures = schedule.consecutive_failures
-            # ADR-0215 part C: a Run-now result neither resets nor adds to the
+            # ADR-0225 part C: a Run-now result neither resets nor adds to the
             # cadence's failure count, so testing a fix cannot pause a schedule
             # and one manual success cannot hide a failing cadence.
             manual = occurrence.trigger is OccurrenceTrigger.MANUAL
@@ -151,7 +151,7 @@ class ScheduleOutcomeAccountant:
                 )
             )
             self._write_probe("process_event")
-            # ADR-0215 part D: a completed report may stay quiet; a run that
+            # ADR-0225 part D: a completed report may stay quiet; a run that
             # failed or was cancelled always tells the owner.
             quiet = (
                 run.status is RunStatus.COMPLETED

@@ -1437,7 +1437,7 @@ class ScheduleOccurrenceRow(Base):
             name="fk_schedule_occurrences_revision",
             ondelete="RESTRICT",
         ),
-        # ADR-0215 part C: a cadence instant is unique per schedule; a manual
+        # ADR-0225 part C: a cadence instant is unique per schedule; a manual
         # run's nominal instant is its request time, and its key is unique.
         Index(
             "uq_schedule_occurrences_scheduled_nominal",
@@ -2092,7 +2092,7 @@ class PersonaDocumentRow(Base):
     source: Mapped[str] = mapped_column(Text)
     source_nomination_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # ADR-0216 part A.
+    # ADR-0226 part A.
     voice: Mapped[str | None] = mapped_column(Text, nullable=True)
     traits: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")

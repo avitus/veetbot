@@ -145,7 +145,7 @@ async def test_persona_store_round_trips_versions_and_nominations(tmp_path: Path
 
 
 async def test_persona_voice_traits_and_switches_round_trip(tmp_path: Path) -> None:
-    """ADR-0216: the new fields persist; a version written before them loads as before."""
+    """ADR-0226: the new fields persist; a version written before them loads as before."""
     from agent_core.domain.persona import PersonaTrait
 
     _alembic("upgrade", "head")

@@ -1,4 +1,4 @@
-# ADR-0222: CircleCI Smarter Testing runs three pytest partitions
+# ADR-0228: CircleCI Smarter Testing runs three pytest partitions
 
 - Status: Proposed (requested by the repository owner, 2026-10-20)
 - Date: 2026-10-20

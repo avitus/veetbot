@@ -2641,6 +2641,8 @@ milestones:
       - tests/unit/test_recall_release_binding.py
       - tests/contract/test_historical_semantic_recall.py
       - tests/integration/test_historical_semantic_postgres.py
+      - tests/unit/test_openai_opaque_credential_boundary.py
+      - tests/contract/test_openai_opaque_continuation.py
     diagnostic_evidence: evals/observations/general-memory-recall/20261011-candidate-selection/
     retained_measurements:
       - evals/observations/general-memory-recall/20261013-production-baseline-v2/
@@ -2663,7 +2665,32 @@ milestones:
       - Bounded two-worker collection uses separate scratch databases and one shared ledger (ADR-0207); release requires final combined input verification and complete fresh evidence, not reused partial observations
       - V4 on f55c597c stopped after 771 observations at a normalized-stream credential rejection; the triggering field remains unknown, and all originals and both scratch databases are retained
       - V4 development incident checks pass but 37 relationship rows fail semantic certification; the evaluator left People semantic binding on its original retriever, requiring a measured-instance wiring repair and fresh evidence
-      - Aggregate reported and held cost after v4 is USD 83.96363625, leaving USD 216.03636375 under the unchanged USD 300 cap; no paid attempt is active and full quality remains unmeasured
+      - Historical aggregate reported and held cost after v4 was USD 83.96363625, leaving USD 216.03636375 under the unchanged USD 300 cap
+      - V5 on f837ed3c stopped at 124 observations with a provider-key detector match in OpenAI reasoning.encrypted_content; original bytes were not retained, so the meaning remains unproven; all originals and both databases are immutable
+      - The owner approved the narrow OpenAI repair on 2026-10-16 (ADR-0210); embedded opaque collisions may pass with provider/API/type binding while standalone credentials, other detectors, other fields and other providers remain rejected
+      - Seven original ledgers total USD 88.371792 including USD 5.64272 uncertain reservations; USD 211.628208 remains under the unchanged USD 300 cap, no paid attempt is active, and fresh reviewed full quality evidence remains required
+      - ADR-0216 records separate owner approval for ordinary signing on the final reviewed reliability commit only, with temporary exact-revision context access and restoration afterward; deferred dev work stays separate and all release gates remain required
+      - V6 on 16153a5f stopped at 1239 observations after a cancelled formation call; all original results, both databases and supervision evidence remain immutable
+      - Eight original ledgers now total USD 135.90882425 including USD 7.83424 uncertain reservations; USD 164.09117575 remains under the unchanged USD 300 cap, with no paid work active
+      - The owner approved checkpointed continuation and a focused 1600-observation formation comparison across all 400 scenarios, both paths, sparse control and final hybrid (ADR-0212); legacy formats retain their full matrices and all quality thresholds remain unchanged
+      - Durable continuation preserved 411 completed observations, including 410 configuration-selected parent rows, when its first paid segment stopped after a cancelled replacement preparation and an admission-halted reader
+      - Nine retained ledgers total USD 138.14496425 including USD 10.02576 uncertain reservations; the original USD 150 continuation allocation has USD 147.76386 unused, with no paid work active
+      - The owner approved exactly one final preparation for dev-decisions-03 and one replacement of the proved-unsent follow-up reader attempt for dev-decisions-04 deliberate/hybrid (ADR-0217); either recovery failing again stops further paid admissions
+      - Bounded recovery implementation preserves all completed rows, failed attempts, prior charges and the original absolute deadline; final source verification, fresh paid admission, independent human failure review and activation evidence remain outstanding
+      - The bounded reader recovery completed; repeated formation interruption left 413 durable observations and ten ledgers totaling USD 140.42724350 including USD 12.21728 uncertain, with no paid work active
+      - The owner approved a formation root-cause repair including runtime changes and preserving all 413 rows, with an aggregate cap up to USD 500 if necessary (ADR-0214); this permission creates no allocation
+      - Focused regressions verify the separate formation stage deadline with unchanged provider requests; offline recovery preserved 413 observations and 1272 evidence files and verified runtime origins; fresh continuation admission and complete release evidence remain pending
+      - The deadline-repaired segment preserved five additional answers, totaling 418, then stopped after a completed formation call whose response was not retained; a reproduced cross-context generator cleanup defect prevented ledger sealing and report retention, and the exact rejected response remains unknown
+      - Eleven retained ledgers total USD 141.12512275 including USD 12.21728 uncertain; USD 144.78370150 of the original continuation allocation remains, no new allocation exists and no paid work is active
+      - ADR-0215 implements scoped stream cleanup, safe terminal facts, known token-limit refusal replay and evidence-bound collector recovery; source verification, fresh successor admission and complete quality evidence remain outstanding
+      - Recall proceeds independently on codex/memory-retrieval-evaluation without holding unrelated development or production releases; eventual recall release integration is separate
+      - The repaired collector completed all 1600 required positions on 2026-10-19; all rows and twelve ledgers were retained, totaling USD 194.92785075 including USD 12.21728 uncertain reservations, with no paid work active
+      - The completed comparison fails the original recall, invalid-current-fact and per-case cost thresholds; held-out hybrid required-evidence recall is 76.744 percent on both paths and is not a full M33 pass
+      - The owner approved a release-specific bounded rollout with revised acceptance criteria and compatibility review (ADRs 0218 and 0220); actual human failure findings, final source verification and production admission remain pending
+      - On 2026-10-20 the owner explicitly approved the exact 37-case scope and stated residual risk (ADR-0222); version-two review requirements and an offline shorter packet are prepared separately, with actual findings and hosted release verification still pending and no activation or new PR authorization
+      - The owner subsequently requested rollout with periodic review of real production use (ADR-0223); a separate version-three trial replaces pre-activation synthetic findings with actual owner authorization and daily check-ins, preserves original failed evidence and release gates, and awaits verification and explicit PR instruction before production delivery
+      - The owner authorized the recall release PR and verified production delivery on 2026-10-18; integration proceeds on codex/recall-production-release while the measured branch and the dev push hold remain unchanged
+      - Current production differs from the evaluated inputs, including retained recall validation and run-loop time reserves; full deployment equivalence has not been established and no activation is claimed
       - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
       - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; the owner authorized coordination with reliability PR163 for one combined release, final review, exact-head CI and production delivery
       - Remote query provenance remains withheld; the historical extension uses only the explicitly admitted local encoder

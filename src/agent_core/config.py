@@ -131,7 +131,7 @@ class Settings:
     memory_provider_extraction_evidence: Path | None = None
     memory_formation_policy_pin: MemoryFormationPolicyPin | None = None
     schedule_api_enabled: bool = False
-    # ADR-0215 part B: on with the schedule API; AGENT_SCHEDULE_DRAFTS_ENABLED=0 removes it.
+    # ADR-0225 part B: on with the schedule API; AGENT_SCHEDULE_DRAFTS_ENABLED=0 removes it.
     schedule_drafts_enabled: bool = True
     schedule_worker_enabled: bool = False
     notification_api_enabled: bool = False

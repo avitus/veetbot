@@ -51,7 +51,7 @@ from agent_core.ports.schedules import (
 
 WriteProbe = Callable[[str], None]
 
-# ADR-0215 part C: at most this many Run-now occurrences per schedule a day.
+# ADR-0225 part C: at most this many Run-now occurrences per schedule a day.
 MANUAL_RUNS_PER_DAY = 5
 
 
@@ -312,7 +312,7 @@ class ScheduleMaterializer:
         expected_revision: int,
         request_key: str,
     ) -> tuple[ScheduleOccurrence, bool]:
-        """Start one owner-requested run of a recurring schedule now (ADR-0215 C).
+        """Start one owner-requested run of a recurring schedule now (ADR-0225 C).
 
         Returns the occurrence and whether it replayed an earlier request with
         the same key. The schedule's next firing does not move, and the run

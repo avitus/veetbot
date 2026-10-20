@@ -4,7 +4,7 @@ import Testing
 @testable import VeetbotCore
 
 @Suite struct ScheduleBrowserViewStructureTests {
-    /// ADR-0215 part A: Pause or Resume, Stop behind a confirmation (never
+    /// ADR-0225 part A: Pause or Resume, Stop behind a confirmation (never
     /// "Delete"), and Recent runs with Open report in Chat.
     @Test
     func testTheDetailOffersLifecycleControlsAndRecentRuns() throws {

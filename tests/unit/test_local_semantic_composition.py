@@ -60,6 +60,53 @@ async def local_options(tmp_path: Path) -> tuple[dict[str, Any], list[str], list
     return kwargs, credentials, lifecycle, evidence
 
 
+@pytest.mark.parametrize("change", ["remote", "query_disabled", "unattended"])
+async def test_bounded_admission_never_loads_out_of_scope_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from agent_core.memory.bounded_recall_admission import BoundedAdmission
+
+    kwargs, credentials, lifecycle, _ = await local_options(tmp_path)
+    monkeypatch.setattr(
+        "agent_core.memory.semantic_deployment.bind_index_manifest",
+        lambda *args, **kwargs: BoundedAdmission(lambda: True),
+    )
+    if change == "remote":
+        path = kwargs["settings"].config_dir / "memory" / "semantic-index.yaml"
+        from tests.contract.semantic_indexing_cases import INDEX_CONFIG
+
+        remote = INDEX_CONFIG.model_copy(
+            update={
+                "space": INDEX_CONFIG.space.model_copy(update={"provider": "openai"}),
+                "residency_provider": "openai",
+            }
+        )
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "configurations": [
+                        {
+                            "credential_ref": "openai",
+                            "embedding": remote.model_dump(mode="json"),
+                        }
+                    ],
+                }
+            )
+        )
+    elif change == "query_disabled":
+        kwargs["configuration"]["memory"]["retrieval"]["semantic_enabled"] = False
+    else:
+        from dataclasses import replace
+
+        kwargs["settings"] = replace(kwargs["settings"], memory_reconsolidation_enabled=True)
+    with pytest.raises(ConfigurationError):
+        await compose_indexing(**kwargs)
+    assert credentials == [] and lifecycle == []
+
+
 async def test_admitted_local_tuple_loads_without_credentials_and_closes(tmp_path: Path) -> None:
     kwargs, credentials, lifecycle, evidence = await local_options(tmp_path)
     services = await compose_indexing(**kwargs)

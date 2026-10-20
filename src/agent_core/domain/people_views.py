@@ -54,7 +54,7 @@ class UpdatePerson(PeopleValue):
 
 
 class DirectoryPerson(Person):
-    """A person as the directory shows them (ADR-0217).
+    """A person as the directory shows them (ADR-0227).
 
     ``last_interaction_at`` is the newest visible dated interaction, the key
     ``sort=recent`` orders by; ``next_thread`` is the earliest open commitment
@@ -68,7 +68,7 @@ class DirectoryPerson(Person):
 
 
 class PeopleCounts(PeopleValue):
-    """The People sidebar's numbers under the lists' own predicates (ADR-0217)."""
+    """The People sidebar's numbers under the lists' own predicates (ADR-0227)."""
 
     everyone: int = Field(ge=0)
     needs_review: int = Field(ge=0)

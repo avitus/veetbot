@@ -1,4 +1,4 @@
-"""ADR-0215 part B: a schedule described in plain words becomes a draft.
+"""ADR-0225 part B: a schedule described in plain words becomes a draft.
 
 One bounded, tool-less model call reads the owner's sentence and returns only
 the timing and a short title; the server builds the cadence, derives every

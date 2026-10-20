@@ -25,7 +25,7 @@ public final class MemoryViewModel: ObservableObject {
     /// The identifier of the row a write is acting on, so the views can
     /// disable a second action on it until the first settles.
     @Published public private(set) var pendingActionID: UUID?
-    /// The sidebar's numbers (ADR-0214); nil while unknown or when the server
+    /// The sidebar's numbers (ADR-0224); nil while unknown or when the server
     /// predates the counts route, so a row then shows no number rather than 0.
     @Published public private(set) var counts: MemoryCountsView?
 
@@ -179,7 +179,7 @@ public final class MemoryViewModel: ObservableObject {
     static let refusedWordingMessage =
         "That wording can't be saved. It may match the current one, something you removed, or look like a password."
 
-    /// Supersedes a belief with the owner's wording (ADR-0214). The server
+    /// Supersedes a belief with the owner's wording (ADR-0224). The server
     /// answers with the replacement, which takes the original's row; the
     /// original stays on the server as history. Returns the replacement, or
     /// nil when nothing changed.

@@ -795,9 +795,9 @@ class ApplicationServices:
     model_settings: PublicModelSettingsServiceContract | None = None
     # ADR-0129: present only when BROWSER_TASK_GRANTS_ENABLED is set.
     browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
-    # ADR-0215 part B: absent when drafts are off or titles use no routed model.
+    # ADR-0225 part B: absent when drafts are off or titles use no routed model.
     schedule_drafts: ScheduleDrafter | None = None
-    # ADR-0215 part C: Run now materializes on the API's own unit of work.
+    # ADR-0225 part C: Run now materializes on the API's own unit of work.
     schedule_runs: ScheduleMaterializer | None = None
 
 
@@ -4885,7 +4885,7 @@ async def _compose(
                 uow_factory=uow_factory,
                 clock=clock,
                 ids=ids,
-                # ADR-0216 parts C and D.
+                # ADR-0226 parts C and D.
                 previewer=(
                     PersonaPreviewer(
                         uow_factory=uow_factory,

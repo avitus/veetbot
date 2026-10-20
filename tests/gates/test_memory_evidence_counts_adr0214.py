@@ -1,4 +1,4 @@
-"""ADR-0214 parts B and C: evidence quotes and sidebar counts.
+"""ADR-0224 parts B and C: evidence quotes and sidebar counts.
 
 `GET /v1/memories/{id}/evidence` shows at most five cited sources, newest
 first. Only the owner's own authenticated words carry an excerpt, and only at

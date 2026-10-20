@@ -1,4 +1,4 @@
-"""ADR-0214 on Postgres: corrections are one transaction; counts match the list.
+"""ADR-0224 on Postgres: corrections are one transaction; counts match the list.
 
 The owner's correction event, the CHANGED rejection, the replacement belief
 and the supersession link commit together or not at all, and the SQL counts

@@ -41,7 +41,7 @@ def _entry_to_json(entry: PersonaEntry) -> dict[str, Any]:
             str(entry.source_belief_id) if entry.source_belief_id is not None else None
         ),
         "sensitivity": entry.sensitivity.value,
-        # ADR-0216: stored only when switched off, so an entry written before
+        # ADR-0226: stored only when switched off, so an entry written before
         # the switch existed and an enabled one are the same JSON.
         **({} if entry.enabled else {"enabled": False}),
     }

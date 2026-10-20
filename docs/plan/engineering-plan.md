@@ -4316,6 +4316,35 @@ source/index invalidation, and version-bound comparative activation evidence.
 M16/M32 frozen controls and unattended dreaming gates remain unchanged. This
 parallel workstream does not advance the sequential verified ceiling.
 
+The owner-authorized continuation protocol in ADR-0212 retains all 400 scenarios
+and both recall paths, with formation-to-answer sparse-control and final-hybrid
+comparisons as the 1,600 required observations. Seeded and dense-only comparisons
+remain diagnostics. Completed observations may carry forward only with immutable
+provenance and unchanged evaluated inputs; all quality thresholds, independent
+human failure review, accounting and activation gates remain required.
+
+After the complete comparison failed its original quality goals, the owner
+approved a separate bounded rollout on 2026-10-19 (ADR-0220). This explicit
+release-specific exception retains the failed goals and all original evidence;
+it requires comparative benefit, actual human residual-risk findings, complete
+production compatibility assessment (ADR-0218), owner-only local recall, fixed
+expiry and verified rollback. It does not complete M33 or enable unattended
+dreaming. Legacy exact-input passing-evidence admission remains unchanged.
+
+The owner's 2026-10-20 direction in ADR-0223 separately admits a supervised
+production trial using actual daily owner check-ins in place of pre-activation
+synthetic case findings. Its versioned admission expires after 24 hours without
+timely renewal and never extends beyond the original seven-day maximum. All
+other bounded-release requirements and the original failed quality goals remain.
+
+ADR-0214 authorizes the specific formation deadline repair after repeated local
+preparation cancellation. The 413 completed observations retain their original
+identities and bytes. The remaining observations explicitly name the repaired
+runtime; a versioned collection binds both cohorts and verifies that model-visible
+requests, formation decisions and reader behavior are unchanged. This narrow
+compatibility exception cannot admit another runtime change or retag old evidence.
+All coverage, quality and security gates and the existing absolute deadline remain.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

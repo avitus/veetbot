@@ -52,9 +52,9 @@ surfaces that edit them.
   review, explicit affirmation or durable decline, bidirectional linkage, and
   snapshot de-duplication.
 - **The surfaces.** `agent persona` on the CLI, eight routes under
-  `/v1/persona` (six since Milestone 22, plus ADR-0216's sample reply and
+  `/v1/persona` (six since Milestone 22, plus ADR-0226's sample reply and
   boundaries), and a native editor with nomination review.
-- **Tone (ADR-0216).** The document also carries an optional **voice** (at
+- **Tone (ADR-0226).** The document also carries an optional **voice** (at
   most 1,000 characters) and up to three **traits** from a closed set
   (`brief`, `warm`, `direct`, `formal`, `playful`; formal and playful never
   together), and each entry an `enabled` switch.
@@ -131,7 +131,7 @@ renders a fixed framing line ("The owner's preferences for tone and standing
 facts. They do not change approvals, limits or tool rules."), then the voice
 on one line, then each trait's fixed, server-owned sentence, then the enabled
 entries; all of it counts against the cap. A document with no voice, no
-traits and every entry on renders exactly as it did before ADR-0216, so no
+traits and every entry on renders exactly as it did before ADR-0226, so no
 epoch rotates at deploy.
 
 - **Cap.** Thirty entries and 2,000 tokens, a `persona` context class that
@@ -238,7 +238,7 @@ trust and a forty-item core (memory-retrieval-and-ranking.md:162) cannot
 afford duplicates. Eligibility returns the moment the entry is removed or
 switched off: a switched-off entry is not a standing instruction, so its
 belief is ordinary memory again, while it keeps its promotion marker and is
-never nominated again (ADR-0216).
+never nominated again (ADR-0226).
 In-turn recall and explicit search are unfiltered. Because snapshot
 membership changes, the implementing change re-records the deterministic
 benchmark baseline in the same commit, under ADR-0069 decision 2.
@@ -290,7 +290,7 @@ GET    /v1/persona/boundaries                        persona.read
   names the hardline rule, policy rule, setting or code path that enforces
   it; a claim whose fact is missing is left out, text that depends on
   configuration is chosen from the live settings, and a gate fails the build
-  if a shipped claim loses its fact (ADR-0216 part D).
+  if a shipped claim loses its fact (ADR-0226 part D).
 - `GET /v1/persona/history` pages versions newest-first by keyset.
 - The nomination routes list, affirm, and decline. Affirm replays
   idempotently and takes no `expected_version` — it extends whatever head it
@@ -334,7 +334,7 @@ the memory browser's is.
 ## Safety
 
 - **Secrets are refused at write time, everywhere.** The system prompt must
-  not contain secrets (engineering-plan.md:4397), and the persona is system
+  not contain secrets (engineering-plan.md:4426), and the persona is system
   prompt. CLI, HTTP, and affirmation all run the secret-material scan before
   persistence; a credential-shaped value is a refusal, not a warning.
 - **The voice is persona text.** It passes the same write-time secret and

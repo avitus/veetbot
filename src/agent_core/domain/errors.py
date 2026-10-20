@@ -42,7 +42,7 @@ class ModelSettingsChoiceError(AgentCoreError):
 
 
 class MemoryCorrectionError(AgentCoreError):
-    """A memory's replacement wording was refused before any write (ADR-0214):
+    """A memory's replacement wording was refused before any write (ADR-0224):
     empty, over-length, unchanged, secret- or injection-shaped, or the text of
     a statement the owner already deleted or rejected."""
 

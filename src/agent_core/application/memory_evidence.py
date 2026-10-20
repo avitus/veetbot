@@ -1,4 +1,4 @@
-"""What a belief's cited sources may show the owner (ADR-0214 part B).
+"""What a belief's cited sources may show the owner (ADR-0224 part B).
 
 The route follows the People evidence pattern, not ADR-0189 source recovery:
 it reads only the event log, never a mailbox, and shows text only when the
@@ -30,7 +30,7 @@ from agent_core.domain.views import (
 from agent_core.ports.persistence import RepositoryUnitOfWork
 
 # The owner speaking: a chat message, an assertion on a People page, or a
-# wording correction from the memory browser (ADR-0214 part A).
+# wording correction from the memory browser (ADR-0224 part A).
 OWNER_TEXT_EVENTS = {
     "user.message.created": "content",
     "people.owner_assertion": "content",

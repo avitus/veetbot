@@ -292,7 +292,7 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling(
             composition.readiness_probe,
         )
         routes = memory_routes(app)
-        # Four reads (two since ADR-0214) and, since ADR-0117, exactly two writes.
+        # Four reads (two since ADR-0224) and, since ADR-0117, exactly two writes.
         assert len(routes) == 6
         assert {
             (method, (route.openapi_extra or {})["required_scope"])

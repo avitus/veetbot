@@ -969,7 +969,7 @@ def test_only_the_ci_integration_job_marks_its_database_disposable() -> None:
 
 
 def _test_suites() -> dict[str, dict[str, Any]]:
-    """The CircleCI Smarter Testing suites, by name (ADR-0222)."""
+    """The CircleCI Smarter Testing suites, by name (ADR-0228)."""
     path = ROOT / ".circleci" / "test-suites.yml"
     if not path.is_file():
         return {}
@@ -1166,7 +1166,7 @@ def test_ci_has_the_required_partitions() -> None:
     assert verify["jobs"][6] == {
         "apple-signing-smoke": {
             "context": "veetbot-apple-signing",
-            "filters": {"branches": {"only": "dev"}},
+            "filters": {"branches": {"only": ["dev", "codex/recall-production-release"]}},
         }
     }
     assert verify["jobs"][7:10] == [
@@ -1255,15 +1255,14 @@ def test_hosted_verification_is_automatic_only_on_main() -> None:
         ]
     }
 
-    # No job narrows the rule further: the signing smoke stays dev-only and
-    # delivery stays main-only, exactly as before.
+    # Signing selects dev and the isolated recall release; delivery stays main-only.
     filtered = {
         next(iter(job)): next(iter(job.values()))["filters"]
         for job in verify["jobs"]
         if isinstance(job, dict) and "filters" in next(iter(job.values()))
     }
     assert filtered == {
-        "apple-signing-smoke": {"branches": {"only": "dev"}},
+        "apple-signing-smoke": {"branches": {"only": ["dev", "codex/recall-production-release"]}},
         "package-release": {"branches": {"only": "main"}},
         "deploy-app": {"branches": {"only": "main"}},
         "deploy-nginx": {"branches": {"only": "main"}},
@@ -1438,7 +1437,7 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
 
 
 def test_smarter_testing_runs_three_partitions_through_their_make_targets() -> None:
-    """ADR-0222: CircleCI Smarter Testing schedules static, contract and integration.
+    """ADR-0228: CircleCI Smarter Testing schedules static, contract and integration.
 
     Discovery and execution both go through the partition's own Make target, so
     the marker selection stays in the Makefile. Each test atom is a file, and the
@@ -1593,7 +1592,7 @@ def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> N
     )
     assert smoke_invocation == {
         "context": "veetbot-apple-signing",
-        "filters": {"branches": {"only": "dev"}},
+        "filters": {"branches": {"only": ["dev", "codex/recall-production-release"]}},
     }
     assert "Diagnose the managed signing handoff" not in {
         step["run"]["name"]

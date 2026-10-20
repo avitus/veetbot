@@ -1440,7 +1440,7 @@ async def test_prompt_not_authz() -> None:
 
 
 def test_scope_grammar() -> None:
-    assert len(PLATFORM_SCOPES) == 44  # schedule.run joined under ADR-0215
+    assert len(PLATFORM_SCOPES) == 44  # schedule.run joined under ADR-0225
     assert {
         "schedule.read",
         "schedule.write",

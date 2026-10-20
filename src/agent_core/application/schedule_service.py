@@ -684,7 +684,7 @@ def _definition_hash(definition: ScheduleDefinition) -> str:
         payload.pop("browser_profile_id")
     if definition.call_plan is None:
         payload.pop("call_plan")
-    # Requests made before the notify preference keep their hash (ADR-0215 D).
+    # Requests made before the notify preference keep their hash (ADR-0225 D).
     if definition.notify is ScheduleNotify.EVERY_REPORT:
         payload.pop("notify")
     encoded = json.dumps(

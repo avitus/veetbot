@@ -1,4 +1,4 @@
-# CircleCI Smarter Testing suites (ADR-0222). Each suite is one CI job's pytest
+# CircleCI Smarter Testing suites (ADR-0228). Each suite is one CI job's pytest
 # partition and goes through that job's own Make target to discover and to run,
 # so the marker selection lives only in the Makefile. A test atom is a file.
 # Only the free features are configured: no run selects fewer tests than its

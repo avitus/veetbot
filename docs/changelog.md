@@ -84,7 +84,7 @@ title: Changelog
   memories and each kind, the People directory, and Synthesis. A memory that
   needs review asks "Is this right?" with Looks right, Not true and Not
   relevant here. Correcting a memory's wording, editing it and showing the
-  quotes it came from need a server change and wait for the owner (ADR-0214).
+  quotes it came from need a server change and wait for the owner (ADR-0224).
 
 ## 2026-10-19 — Settings by group, notifications and devices, theme, and Connect's last steps
 

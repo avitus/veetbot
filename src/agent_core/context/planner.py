@@ -470,7 +470,7 @@ class EventContextPlanner:
         return (
             rendered,
             document.version,
-            # A switched-off entry is not a standing instruction (ADR-0216), so
+            # A switched-off entry is not a standing instruction (ADR-0226), so
             # its belief takes its place in the snapshot again.
             document.rendered_belief_ids,
             len(rendered.splitlines()) if rendered else 0,

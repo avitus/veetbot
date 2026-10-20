@@ -282,7 +282,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
     private static let scheduleWebsiteLock = NSLock()
     private static var scheduleWebsiteBound = false
-    /// ADR-0215 part A: pause and resume flip this; the detail reads it back.
+    /// ADR-0225 part A: pause and resume flip this; the detail reads it back.
     private static var schedulePaused = false
     private static var scheduleWebsiteJourney: Bool {
         ProcessInfo.processInfo.arguments.contains(
@@ -378,7 +378,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let memoryLock = NSLock()
     /// Set by a governed delete, after which the browser's reads omit the belief.
     private static var memoryDeleted = false
-    /// Set by a `changed` review (ADR-0214): reads then return the replacement.
+    /// Set by a `changed` review (ADR-0224): reads then return the replacement.
     private static var memoryCorrection: String?
     private static var synthesisReviewed = false
     private static var synthesisDeleted = false
@@ -1022,7 +1022,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                     ? Self.boundScheduleDetailJSON : Self.scheduleDetailJSON
             }
         case ("POST", "/v1/schedules/drafts"):
-            // ADR-0215 part B: any sentence reads as weekdays at 07:00.
+            // ADR-0225 part B: any sentence reads as weekdays at 07:00.
             statusCode = 200
             body = #"{"status":"ready","reason":null,"definition":{"title":"Weekday briefing","instruction":"Every weekday at 7 am, tell me what needs me today.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"browser_profile_id":null,"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"5","deadline_at":null,"synthesis_reserve_steps":2,"synthesis_reserve_model_calls":2,"synthesis_reserve_cost":"1"},"run_timeout_seconds":300,"cadence":{"kind":"WEEKLY","local_time":"07:00:00","weekdays":[1,2,3,4,5],"timezone":"America/Los_Angeles"},"misfire_grace_seconds":3600,"max_consecutive_failures":2,"notify":"every_report"},"next_fire_at":["2026-10-20T14:00:00Z","2026-10-21T14:00:00Z","2026-10-22T14:00:00Z"]}"#
         case ("POST", "/v1/schedules"):

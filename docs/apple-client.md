@@ -146,7 +146,7 @@ chooses a colour by mode. The tokens are:
 | `field` | a sunken input or segment | ink at 5 % | ink at 8 % |
 | `ink`, `inkSoft`, `inkFaint` | text in three weights | `#102923`, `#2f4640`, `#566a64` | `#ece6d8`, `#bccbc5`, `#95a8a1` |
 | `teal`, `tealFill`, `tealText`, `tealWash` | marks, filled buttons, links, the owner's capsule | `#0e8b78`, `#0b7a69`, `#086657`, teal at 10 % | `#36d5bb`, `#36d5bb`, `#5ee3c9`, teal at 12 % |
-| `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)` | `#f2a93b` throughout |
+| `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border, a wash | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)`, `rgba(242,169,59,.12)` | `#f2a93b`, `#f2a93b`, `#f2a93b` at 50 %, `#f2a93b` at 10 % |
 | `red` | failure | `#b4452e` | `#e07a62` |
 | `hairline`, `hairlineStrong`, `selected` | dividers, borders, the chosen row | ink at 14 %, 28 %, 9 % | ink at 10 %, 22 %, 12 % |
 | `toastBackground`, `toastText`, `toastAction` | a toast: ink ground, paper text, its Undo | `#102923`, `#fcfaf6`, `#5ee3c9` | `#ece6d8`, `#0c211d`, `#086657` |
@@ -212,7 +212,7 @@ list slides over the conversation from the leading edge. Email follows (see
 People" below), and Persona, Settings and Connect complete the set: the
 persona's entries as a card of hairline rows of fields, a server conflict and
 each nomination from memory in an amber-edged card with Affirm as the filled
-capsule and Decline as a quiet one. With a server that has them (ADR-0216),
+capsule and Decline as a quiet one. With a server that has them (ADR-0226),
 Persona leads with Voice, the Lean towards chips (Brief, Warm, Direct, Formal,
 Playful; up to three, Formal and Playful replacing each other) and How that
 sounds, an example reply the server generates from the unsaved voice and labels
@@ -466,7 +466,9 @@ Approvals, questions, and scheduled outcomes wait thirty seconds before push
 delivery, giving you time to handle them on another device. A loaded conversation
 visible in the active Chat window suppresses its foreground alerts. Active clients
 also clear delivered alerts once the server confirms they are obsolete, and
-viewing a terminal result acknowledges it across devices. Covered or background
+viewing a terminal result acknowledges it across devices. Dismissing the compact
+conversation drawer also clears coverage from its removed sidebar sheets;
+notification navigation can then acknowledge the visible report. Covered or background
 conversations do not count as viewed. Sleeping devices clear obsolete alerts
 when next active; a banner already shown cannot be recalled (ADR-0143).
 
@@ -585,7 +587,7 @@ a group sidebar on deep paper (Review: Needs review; Browse: All memories, each
 belief type and the People directory; Maintenance: Synthesis), the list, and
 the detail; it replaces the collection picker and the review and type
 filters, and each memory group shows its number from the counts route
-(ADR-0214); an older server leaves the numbers off. A flagged memory asks "Is
+(ADR-0224); an older server leaves the numbers off. A flagged memory asks "Is
 this right?" in an amber-edged card with Looks right (the `dismiss` outcome) as
 the filled capsule and Fix the wording, Not true and Not relevant here as quiet
 ones; the Review menu offers the same with Edit wording for any live memory and
@@ -593,7 +595,7 @@ Delete memory, and a row can be swiped to delete after a confirmation (ADR-0117,
 under `memory.write`). Fix the wording and Edit wording open one sheet: saving
 supersedes the memory with the owner's words through the `changed` review
 outcome, the detail then shows the new memory, and the earlier wording stays on
-the server as history and does not form again (ADR-0214). Under "Where this came
+the server as history and does not form again (ADR-0224). Under "Where this came
 from" the detail lists up to five cited sources: the owner's own words as a
 quote, and an email, text, call, schedule or tool source by where it came from,
 never its text. A deleted statement does not form again; its original messages
@@ -605,7 +607,7 @@ people the owner knows or writes to (ADR-0121) in the A2 sections: Needs you
 server's newest-interaction order), Everyone and Pinned, then Possible
 duplicates (each pair answered with Merge or Keep separate, ADR-0125) and All
 identities. The collection picker shows each number from `GET /v1/people/counts`
-(ADR-0217); an older server leaves them off. Needs you also lists the replies
+(ADR-0227); an older server leaves them off. Needs you also lists the replies
 the owner owes someone that are overdue or due within fourteen days, earliest
 first: such a row reads "Needs you · Reply about the lease · due Friday" with
 Done and Not needed beneath it, which send the existing commitment correction;
@@ -639,7 +641,7 @@ capsules, Rename quiet; Manage person holds Merge with another entry, Repair
 identity and Forget person. The Review
 menu, swipe-to-delete and every People journey keep their controls.
 
-Schedules (ADR-0215) can be created and run from the app. New schedule opens a
+Schedules (ADR-0225) can be created and run from the app. New schedule opens a
 sheet where the owner describes the work in plain words; once typing pauses,
 the server reads it (`POST /v1/schedules/drafts`) and the sheet shows "Veetbot
 understood: <cadence> · first run <time>" before anything is saved, and Create

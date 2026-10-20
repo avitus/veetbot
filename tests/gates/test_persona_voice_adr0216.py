@@ -1,4 +1,4 @@
-"""ADR-0216: voice, lean-towards traits, entry switches, sample reply and boundaries.
+"""ADR-0226: voice, lean-towards traits, entry switches, sample reply and boundaries.
 
 A document with no voice, no traits and every entry on renders exactly as it
 did before; a voice or trait adds a fixed framing line, the voice and each

@@ -368,7 +368,7 @@ run.failed                                terminal writer                       
 schedule.run_accounted                    scheduling accountant, same            schedule_run_finished
                                           transaction as the accounting event;   (not for a completed run
                                                                                  under notify:
-                                                                                 attention_only, ADR-0215)
+                                                                                 attention_only, ADR-0225)
 schedule.occurrence.{missed,              scheduling materializer, same          schedule_occurrence_skipped
   skipped_overlap,                        transaction as the occurrence
   authorization_failed,

@@ -6,7 +6,7 @@ import SwiftUI
 /// groups. Rows for a nil or empty field are omitted rather than shown blank.
 /// With a browsing model attached, the view also carries the review and
 /// deletion actions of ADR-0117, the wording correction and evidence quotes
-/// of ADR-0214; People's evidence inspection opens it without one.
+/// of ADR-0224; People's evidence inspection opens it without one.
 public struct MemoryDetailView: View {
     @State private var memory: MemoryView
     private let model: MemoryViewModel?
@@ -123,7 +123,7 @@ public struct MemoryDetailView: View {
 
     /// The amber-edged card that asks whether a flagged memory is right
     /// (MagicPath coolly-breeze-5701): Looks right confirms it, Fix the
-    /// wording supersedes it with the owner's words (ADR-0214), and the quiet
+    /// wording supersedes it with the owner's words (ADR-0224), and the quiet
     /// answers reject it.
     private var reviewCard: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -201,7 +201,7 @@ public struct MemoryDetailView: View {
         return rows
     }
 
-    // MARK: Evidence (ADR-0214 part B)
+    // MARK: Evidence (ADR-0224 part B)
 
     /// Each cited source, newest first: the owner's own words as a quote,
     /// anything else as where it came from. The server decides what may show.
@@ -346,7 +346,7 @@ public struct MemoryDetailView: View {
     }
 }
 
-/// Fix the wording / Edit (ADR-0214 part A). Saving never edits the memory in
+/// Fix the wording / Edit (ADR-0224 part A). Saving never edits the memory in
 /// place: the server keeps the earlier wording as history, will not form it
 /// again, and answers with the new memory, which this view then shows.
 struct MemoryWordingSheet: View {

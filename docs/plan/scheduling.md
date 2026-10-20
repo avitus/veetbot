@@ -166,7 +166,7 @@ class ScheduleRevision(BaseModel):
     timezone: str | None
     misfire_grace_seconds: int
     max_consecutive_failures: int
-    notify: every_report | attention_only = every_report   # ADR-0215 D
+    notify: every_report | attention_only = every_report   # ADR-0225 D
     created_by_principal_id: str
     created_at: datetime
 ```
@@ -217,7 +217,7 @@ class ScheduleOccurrence(BaseModel):
     materialized_at: datetime | None
     links_erased_at: datetime | None
     created_at: datetime
-    trigger: SCHEDULED | MANUAL = SCHEDULED      # ADR-0215 C
+    trigger: SCHEDULED | MANUAL = SCHEDULED      # ADR-0225 C
     manual_request_key: str | None = None       # set exactly when MANUAL
 ```
 
@@ -234,7 +234,7 @@ The database enforces `UNIQUE(schedule_id, nominal_fire_at)` for scheduled
 occurrences (a partial index on `trigger = 'SCHEDULED'`). This is the
 occurrence idempotency key. It prevents two schedule workers, a retry after an
 unknown commit, or a process restart from materializing the same nominal
-instant twice. A manual Run-now occurrence (ADR-0215 part C) takes the request
+instant twice. A manual Run-now occurrence (ADR-0225 part C) takes the request
 time as its nominal instant and is unique per schedule by its
 `manual_request_key`; it is only ever recorded `MATERIALIZED`.
 
@@ -476,7 +476,7 @@ endpoint with `run.cancel`; this separation prevents `schedule.cancel` from
 becoming indirect authority to cancel arbitrary execution.
 
 After a linked run reaches `COMPLETED`, a post-run hook resets
-`consecutive_failures` to zero; a manual Run-now run (ADR-0215 part C) neither
+`consecutive_failures` to zero; a manual Run-now run (ADR-0225 part C) neither
 resets nor increments it and never auto-pauses the schedule. `FAILED`, authorization failure, configuration
 failure, and a missed occurrence increment it. User-cancelled runs and overlap
 skips do not. Reaching `max_consecutive_failures` pauses the schedule with
@@ -574,7 +574,7 @@ repository query before cursor comparison and limiting.
 Cross-tenant or cross-principal access returns the same not-found envelope as
 the existing API. Every route declares its required schedule scope in OpenAPI.
 
-`POST /v1/schedules/drafts` (ADR-0215 part B, `schedule.write`) reads
+`POST /v1/schedules/drafts` (ADR-0225 part B, `schedule.write`) reads
 `{text, timezone}` into a draft and persists nothing. One bounded, tool-less
 structured-output call (the title-generation model policy, at most USD 0.05,
 4,096 input and 1,024 output tokens, 20 seconds) returns only a short title and
@@ -591,7 +591,7 @@ then `429 rate_limited` with reason `schedule.drafts_rate_limited`. The route is
 mounted with the schedule API; `AGENT_SCHEDULE_DRAFTS_ENABLED=0`, or a
 non-routed title policy, answers `schedule.drafts_unavailable`.
 
-`POST /v1/schedules/{id}/run` (ADR-0215 part C, the exact scope
+`POST /v1/schedules/{id}/run` (ADR-0225 part C, the exact scope
 `schedule.run`) takes `{expected_revision}` and an `Idempotency-Key` and starts
 one manual run of an ACTIVE or PAUSED recurring schedule now: `201` with the
 `MANUAL` occurrence, or `200` replaying the same key's occurrence. It refuses
@@ -674,7 +674,7 @@ means schedule browsing is unavailable on that server. The same statuses from
 a point read retain their ordinary HTTP meaning.
 
 The surface changes website-access binding on ACTIVE or PAUSED schedules
-(ADR-0154) and, under ADR-0215 part A, pauses, resumes and stops them and shows
+(ADR-0154) and, under ADR-0225 part A, pauses, resumes and stops them and shows
 their recent occurrences. Reading needs `schedule.read`, listing sign-ins needs
 `browser.profile.read`, saving the binding needs `schedule.write` plus
 `browser.profile.read` when bound, pause and resume need `schedule.write`, and
@@ -1078,7 +1078,7 @@ instead that the platform places the plan's calls and reports the outcome.
 After the occurrence's run is
 accounted, the outbox emits `schedule_run_finished`, which can arrive after the
 nominal instant by the duration of the scheduled run, unless the occurrence's
-pinned revision sets `notify: attention_only` and the run completed (ADR-0215
+pinned revision sets `notify: attention_only` and the run completed (ADR-0225
 part D); a failed or cancelled run, approvals, questions and skipped
 occurrences notify regardless. ADR-0091 subsequently
 authorizes the occurrence's pinned revision title and nominal firing time in

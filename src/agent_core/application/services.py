@@ -526,7 +526,7 @@ class MemoryReadService(Protocol):
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
     ) -> MemoryView | DerivedMemoryView: ...
 
-    # ADR-0214 parts B and C.
+    # ADR-0224 parts B and C.
     async def evidence(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
     ) -> MemoryEvidenceView: ...
@@ -535,7 +535,7 @@ class MemoryReadService(Protocol):
         self, principal: Principal, *, ceiling: Sensitivity, include_derived: bool = False
     ) -> MemoryCountsView: ...
 
-    # The two write routes of ADR-0117 (review gains `changed` in ADR-0214);
+    # The two write routes of ADR-0117 (review gains `changed` in ADR-0224);
     # every other memory change stays on the CLI.
     async def delete(
         self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity, key: str
@@ -745,7 +745,7 @@ class PersonaService(Protocol):
         traits: Sequence[PersonaTrait] | KeepPersonaField = ...,
     ) -> PersonaView: ...
 
-    # ADR-0216 parts C and D.
+    # ADR-0226 parts C and D.
     async def preview(
         self, principal: Principal, *, voice: str | None, traits: Sequence[PersonaTrait]
     ) -> PersonaPreview: ...

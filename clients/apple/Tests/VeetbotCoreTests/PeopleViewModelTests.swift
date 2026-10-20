@@ -636,7 +636,7 @@ import Testing
     }
 }
 
-// MARK: ADR-0217
+// MARK: ADR-0227
 
 @Suite(.serialized) @MainActor struct PeopleDirectoryAttentionTests {
     /// Needs you is the owed replies due soon, earliest first, then the people

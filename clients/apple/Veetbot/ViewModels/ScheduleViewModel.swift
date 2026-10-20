@@ -105,7 +105,7 @@ public final class ScheduleViewModel: ObservableObject {
         self.toasts = toasts ?? .shared
     }
 
-    // MARK: Lifecycle (ADR-0215 part A)
+    // MARK: Lifecycle (ADR-0225 part A)
 
     private enum Lifecycle { case pause, resume, stop }
 
@@ -186,7 +186,7 @@ public final class ScheduleViewModel: ObservableObject {
         )
     }
 
-    // MARK: New schedule (ADR-0215 part B)
+    // MARK: New schedule (ADR-0225 part B)
 
     /// Reads the sentence on the server; the newest reading wins.
     public func readDraft(_ text: String, timezone: String = TimeZone.current.identifier) async {
@@ -261,7 +261,7 @@ public final class ScheduleViewModel: ObservableObject {
         }
     }
 
-    // MARK: Run now (ADR-0215 part C)
+    // MARK: Run now (ADR-0225 part C)
 
     /// Starts one run now. The schedule's next firing does not move, and the
     /// result never counts toward pausing it after failures.
@@ -302,7 +302,7 @@ public final class ScheduleViewModel: ObservableObject {
         }
     }
 
-    // MARK: Delivery (ADR-0215 part D)
+    // MARK: Delivery (ADR-0225 part D)
 
     /// "Only notify when something needs you": a completed report stays quiet;
     /// failures, approvals and questions still notify.
@@ -324,7 +324,7 @@ public final class ScheduleViewModel: ObservableObject {
         }
     }
 
-    // MARK: Recent runs (ADR-0215 part A)
+    // MARK: Recent runs (ADR-0225 part A)
 
     /// The newest occurrences and, for each that started a run, its status.
     public func loadRecentRuns(_ scheduleID: UUID) async {

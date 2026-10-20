@@ -1,4 +1,4 @@
-"""Add the persona voice and lean-towards traits (ADR-0216 part A).
+"""Add the persona voice and lean-towards traits (ADR-0226 part A).
 
 Both belong to a document version. Versions written before them load with no
 voice and no traits, which renders exactly as before, so nothing is backfilled.

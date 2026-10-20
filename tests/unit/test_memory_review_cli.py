@@ -29,7 +29,7 @@ def test_memory_review_takes_one_outcome_and_prints_the_reviewed_belief(
     assert reviewed.exit_code == 0, reviewed.output
     assert json.loads(reviewed.stdout)["flagged_for_review"] is False
     assert seen == [(belief.id, "dismiss", None)]
-    # ADR-0214: changed supersedes with the operator's wording, and only with it.
+    # ADR-0224: changed supersedes with the operator's wording, and only with it.
     refused = runner.invoke(app, ["memory", "review", str(belief.id), "--outcome", "changed"])
     assert refused.exit_code == 2
     stray = runner.invoke(

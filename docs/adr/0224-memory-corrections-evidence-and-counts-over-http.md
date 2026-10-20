@@ -1,4 +1,4 @@
-# ADR-0214: Memory corrections, evidence excerpts and review counts over HTTP
+# ADR-0224: Memory corrections, evidence excerpts and review counts over HTTP
 
 - Status: Accepted (owner, 2026-10-20: "implement all 4")
 - Date: 2026-10-19

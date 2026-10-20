@@ -1,4 +1,4 @@
-"""Add manual Run-now occurrences beside scheduled ones (ADR-0215 part C)."""
+"""Add manual Run-now occurrences beside scheduled ones (ADR-0225 part C)."""
 
 from collections.abc import Sequence
 

@@ -102,7 +102,7 @@ def _safe(text: str) -> bool:
     return not contains_injection_pattern(text) and not contains_secret_material(text)
 
 
-# ADR-0217 part C: an owed reply joins Needs you when it is overdue or due
+# ADR-0227 part C: an owed reply joins Needs you when it is overdue or due
 # within this window. A passive list, never a reminder or a notification.
 OPEN_THREAD_WINDOW = timedelta(days=14)
 # Bounds on the scans that back the counts and the open-thread list.
@@ -793,7 +793,7 @@ class PublicPeopleService:
     async def _open_threads(
         self, uow: RepositoryUnitOfWork, principal: Principal, ceiling: Sensitivity
     ) -> dict[UUID, PeopleCommitment]:
-        """Each person's earliest open, owner-owed commitment due in the window (ADR-0217).
+        """Each person's earliest open, owner-owed commitment due in the window (ADR-0227).
 
         Visible exactly as the person's Open threads section shows it: resolved,
         safe, and backed by a live belief at the ceiling. `proposed` and
@@ -840,7 +840,7 @@ class PublicPeopleService:
         as_of: datetime | None = None,
         threads: dict[UUID, PeopleCommitment] | None = None,
     ) -> list[DirectoryPerson]:
-        """Persons with their last contact and next owed thread (ADR-0217)."""
+        """Persons with their last contact and next owed thread (ADR-0227)."""
         if not persons:
             return []
         last = await uow.people.last_interactions(
@@ -862,7 +862,7 @@ class PublicPeopleService:
             for person in persons
         ]
 
-    # -- presentation (ADR-0217 part A) ------------------------------------------
+    # -- presentation (ADR-0227 part A) ------------------------------------------
     #
     # The directory facts are added only where a person is shown: the HTTP
     # routes and the CLI pass every response through one of these. Service
@@ -1204,7 +1204,7 @@ class PublicPeopleService:
     async def _open_thread_page(
         self, principal: Principal, ceiling: Sensitivity, *, limit: int, cursor: str | None
     ) -> PeoplePage:
-        """People the owner owes a reply soon, earliest due first (ADR-0217 part C)."""
+        """People the owner owes a reply soon, earliest due first (ADR-0227 part C)."""
         limit = min(max(limit, 1), 100)
         after: tuple[datetime, UUID] | None = None
         if cursor is not None:
@@ -1266,7 +1266,7 @@ class PublicPeopleService:
         return people
 
     async def counts(self, principal: Principal, *, ceiling: Sensitivity) -> PeopleCounts:
-        """The sidebar's numbers, each under its own list's predicates (ADR-0217 part B)."""
+        """The sidebar's numbers, each under its own list's predicates (ADR-0227 part B)."""
         require_scope(principal, "people.read")
         ceiling = self._ceiling(ceiling)
 

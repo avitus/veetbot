@@ -356,7 +356,7 @@ matching is by content similarity on the same comparison the resolver already us
 duplicates. A belief that a user has rejected does not come back with a new id.
 
 **"Was true, has changed" is one transaction, and the replacement cites the owner.**
-The CLI, the People correction route and, since ADR-0214, the memory browser's
+The CLI, the People correction route and, since ADR-0224, the memory browser's
 `changed` review outcome reach the same write. One unit of work appends a
 `memory.owner_correction` event carrying the replacement text, applies the
 `CHANGED` rejection, forms the replacement at user authority citing that event

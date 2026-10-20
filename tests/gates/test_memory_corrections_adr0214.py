@@ -1,4 +1,4 @@
-"""ADR-0214 part A: the owner corrects a memory's wording over HTTP.
+"""ADR-0224 part A: the owner corrects a memory's wording over HTTP.
 
 `POST /v1/memories/{id}/review` gains the `changed` outcome. It never edits a
 statement in place: one unit of work records the owner's words as a

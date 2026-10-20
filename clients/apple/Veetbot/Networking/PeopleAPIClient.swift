@@ -8,7 +8,7 @@ extension VeetbotAPIClient {
         var query = peopleQuery
         query.append(URLQueryItem(name: "limit", value: "50"))
         query.append(URLQueryItem(name: "sort", value: sort))
-        // ADR-0217: owed replies due soon; the server takes it alone.
+        // ADR-0227: owed replies due soon; the server takes it alone.
         if openThreads { query.append(URLQueryItem(name: "open_threads", value: "true")) }
         query.append(contentsOf: states.map { URLQueryItem(name: "state", value: $0) })
         if review { query.append(URLQueryItem(name: "review", value: "true")) }
@@ -23,7 +23,7 @@ extension VeetbotAPIClient {
         }
         return try await transport.send(TransportRequest(method: .get, path: "/v1/people", queryItems: query))
     }
-    /// The sidebar's numbers under each list's own predicates (ADR-0217).
+    /// The sidebar's numbers under each list's own predicates (ADR-0227).
     public func peopleCounts() async throws -> PeopleCountsView {
         try await transport.send(TransportRequest(method: .get, path: "/v1/people/counts", queryItems: peopleQuery))
     }

@@ -2669,7 +2669,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["The user prefers dark mode."].exists)
     }
 
-    /// ADR-0214: the detail quotes the owner's own words and names other
+    /// ADR-0224: the detail quotes the owner's own words and names other
     /// sources without their text; Edit wording supersedes the memory with the
     /// owner's words, and the detail then shows the new memory.
     func testMemoryWordingIsCorrectedAndTheOwnersWordsAreQuoted() {
@@ -2749,7 +2749,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
     }
 
-    /// ADR-0215 part A: Pause confirms with a toast whose Undo resumes, and a
+    /// ADR-0225 part A: Pause confirms with a toast whose Undo resumes, and a
     /// recent run opens its report in Chat.
     func testSchedulePausesResumesAndOpensARecentReport() {
         app.launchArguments.append("--ui-testing-unread-report")
@@ -2761,7 +2761,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
         scheduleRow.tap()
 
-        // ADR-0215 part C: Run now starts one run and says so.
+        // ADR-0225 part C: Run now starts one run and says so.
         let runNow = app.buttons["schedule.run-now"]
         XCTAssertTrue(runNow.waitForExistence(timeout: 5), app.debugDescription)
         runNow.tap()
@@ -2788,7 +2788,7 @@ final class ConversationNavigationUITests: XCTestCase {
         )
     }
 
-    /// ADR-0215 part B: a sentence is read and shown before Create saves it.
+    /// ADR-0225 part B: a sentence is read and shown before Create saves it.
     func testANewScheduleIsDescribedInPlainWordsAndConfirmedBeforeSaving() {
         app.launch()
         openSidebarDestination(identifier: "sidebar.schedules")

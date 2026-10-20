@@ -56,7 +56,7 @@ find it here should find the reason here.
    re-derivation. ADR-0070 decision 3 kept the router read-only in round
    one; ADR-0117 superseded that decision with exactly two writes, a delete
    and a review outcome, both routed through the governed formation service
-   rather than around it (see *Writes* below). ADR-0214 let the review
+   rather than around it (see *Writes* below). ADR-0224 let the review
    outcome carry replacement text, as a supersession and never an overwrite.
    Every other correction stays on the `agent memory` CLI, and hard gate 6
    enforces the exact route table structurally rather than by convention.
@@ -86,7 +86,7 @@ entity graph, and belief merge remain excluded exactly as ADR-0069 left them.
 The persona surface left that residue at Milestone 22 (ADR-0079,
 [persona-surface.md](persona-surface.md)); its routes are a distinct resource.
 Of the write half of this milestone's exclusion, ADR-0117 later admitted
-exactly deletion and the review outcomes, and ADR-0214 the `changed` outcome
+exactly deletion and the review outcomes, and ADR-0224 the `changed` outcome
 that supersedes a belief with the owner's wording; an in-place belief edit
 over HTTP stays excluded, with hard gate 6 still walking the memory router to
 prove the table is exactly the documented one.
@@ -94,7 +94,7 @@ prove the table is exactly the documented one.
 ## The routes
 
 Four read routes, all GET under the exact scope `memory.read` (Milestone 17's
-two, and ADR-0214's evidence and counts), and since ADR-0117 two governed
+two, and ADR-0224's evidence and counts), and since ADR-0117 two governed
 writes under the exact scope `memory.write`, all mounted
 only when `AGENT_MEMORY_API_ENABLED` is set. They use the same
 authentication middleware, principal-first application signatures, request-id
@@ -183,7 +183,7 @@ historical restrictions, erasure and receipt contract are specified in
 [memory-reconsolidation.md](memory-reconsolidation.md). Derived detail and writes
 use the same routes and scopes; no additional memory text-write route exists,
 and a summary refuses the `changed` review outcome with `malformed_request`
-because its corrections belong to reconsolidation (ADR-0214).
+because its corrections belong to reconsolidation (ADR-0224).
 
 ### `GET /v1/memories/{memory_id}`
 
@@ -199,7 +199,7 @@ Transparency must not become a disclosure path
 
 ### `GET /v1/memories/{memory_id}/evidence`
 
-ADR-0214 part B. The same `ceiling` and `not_found` rule as the detail read
+ADR-0224 part B. The same `ceiling` and `not_found` rule as the detail read
 decide whether the belief is visible at all. The response is
 `{"items": [...]}`, at most five items, newest cited event first, one per
 cited source event of the belief's source session:
@@ -230,7 +230,7 @@ recall of source text.
 
 ### `GET /v1/memories/counts`
 
-ADR-0214 part C, mounted before the identifier route so `counts` never parses
+ADR-0224 part C, mounted before the identifier route so `counts` never parses
 as one. `ceiling` is required; `include_derived` defaults to false and, while
 the reconsolidation surface is disabled, is `malformed_request` exactly as on
 the list. The response is `{live, flagged, by_status, by_type, synthesis,
@@ -267,7 +267,7 @@ the first retires the belief as never true, the second lowers its portability
 to `local`; both leave it flagged and down-weighted, as the correction table
 says. The response is the belief's new `MemoryView`.
 
-`changed` (ADR-0214 part A) carries `replacement_statement`, which is required
+`changed` (ADR-0224 part A) carries `replacement_statement`, which is required
 for it and refused with every other outcome. The text is trimmed, must be 1 to
 500 characters, must differ from the current statement after case folding,
 must pass the secret and injection scans, and must not hash to a statement the
@@ -292,7 +292,7 @@ stale `expected_updated_at`, and a reworded belief that is no longer live.
 400  malformed_request     missing or unknown ceiling, unknown status or
                            belief type, malformed or undecodable cursor,
                            limit that is not a positive integer, refused
-                           replacement text (ADR-0214)
+                           replacement text (ADR-0224)
 401  authentication_error  no credential, or a credential that does not
                            resolve
 403  authorization_error   a principal without memory.read on a read, or

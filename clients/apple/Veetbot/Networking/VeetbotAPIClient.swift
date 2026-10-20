@@ -659,7 +659,7 @@ public struct VeetbotAPIClient: Sendable {
         }
     }
 
-    /// Supersedes a belief with the owner's wording (ADR-0214 part A). The
+    /// Supersedes a belief with the owner's wording (ADR-0224 part A). The
     /// server answers with the replacement belief; the old one stays readable
     /// as history. `expectedUpdatedAt` makes a stale screen a conflict.
     public func correctMemory(
@@ -691,7 +691,7 @@ public struct VeetbotAPIClient: Sendable {
         }
     }
 
-    /// The sources a belief cites, newest first (ADR-0214 part B).
+    /// The sources a belief cites, newest first (ADR-0224 part B).
     public func memoryEvidence(
         _ id: UUID, ceiling: MemorySensitivityKind
     ) async throws -> [MemoryEvidenceItem] {
@@ -705,7 +705,7 @@ public struct VeetbotAPIClient: Sendable {
         return page.items
     }
 
-    /// The sidebar's numbers under the list's own predicates (ADR-0214 part C).
+    /// The sidebar's numbers under the list's own predicates (ADR-0224 part C).
     public func memoryCounts(ceiling: MemorySensitivityKind) async throws -> MemoryCountsView {
         try await transport.send(
             TransportRequest(
@@ -736,7 +736,7 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
-    /// One example reply in an unsaved voice (ADR-0216 part C).
+    /// One example reply in an unsaved voice (ADR-0226 part C).
     public func previewPersona(voice: String?, traits: [String]) async throws -> PersonaPreviewView {
         try await transport.send(
             TransportRequest(
@@ -747,7 +747,7 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
-    /// The fixed rules the persona cannot change (ADR-0216 part D).
+    /// The fixed rules the persona cannot change (ADR-0226 part D).
     public func personaBoundaries() async throws -> [PersonaBoundaryView] {
         let page: PersonaBoundaryPage = try await transport.send(
             TransportRequest(method: .get, path: "/v1/persona/boundaries")
@@ -953,7 +953,7 @@ public struct VeetbotAPIClient: Sendable {
     }
 
     /// Pause, resume and stop (cancel) through the lifecycle routes, each at
-    /// the revision the owner saw (ADR-0215 part A). Stop needs
+    /// the revision the owner saw (ADR-0225 part A). Stop needs
     /// `schedule.cancel`; the record stays for 30 days (ADR-0089).
     public func pauseSchedule(_ id: UUID, expectedRevision: Int) async throws -> ScheduleRecordView {
         try await transport.send(TransportRequest(
@@ -976,7 +976,7 @@ public struct VeetbotAPIClient: Sendable {
         ))
     }
 
-    /// Starts one owner-requested run now (ADR-0215 part C, `schedule.run`).
+    /// Starts one owner-requested run now (ADR-0225 part C, `schedule.run`).
     public func runScheduleNow(_ id: UUID, expectedRevision: Int, idempotencyKey: String) async throws
         -> ScheduleOccurrenceView
     {
@@ -997,7 +997,7 @@ public struct VeetbotAPIClient: Sendable {
         ))
     }
 
-    /// Reads a plain-words description into an unsaved draft (ADR-0215 part B).
+    /// Reads a plain-words description into an unsaved draft (ADR-0225 part B).
     public func draftSchedule(text: String, timezone: String) async throws -> ScheduleDraftView {
         try await transport.send(TransportRequest(
             method: .post, path: "/v1/schedules/drafts",
@@ -1014,7 +1014,7 @@ public struct VeetbotAPIClient: Sendable {
         ))
     }
 
-    /// Sets when a schedule's finished runs notify (ADR-0215 part D) through
+    /// Sets when a schedule's finished runs notify (ADR-0225 part D) through
     /// the full-definition update, re-reading first so every other field goes
     /// back exactly as the server holds it; a stale revision is retried once.
     public func setScheduleNotify(_ scheduleID: UUID, notify: String) async throws -> ScheduleRecordView {

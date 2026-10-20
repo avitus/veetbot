@@ -1,4 +1,4 @@
-"""How a voice sounds: one bounded, tool-less sample reply (ADR-0216 part C).
+"""How a voice sounds: one bounded, tool-less sample reply (ADR-0226 part C).
 
 The call sees only the unsaved voice and traits, rendered exactly as the
 persona row renders them, and one fixed, data-free owner message from a

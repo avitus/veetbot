@@ -14,7 +14,7 @@ public final class PersonaViewModel: ObservableObject {
         /// Set exactly for a kept affirmation entry; an owner edit may keep,
         /// reword, or drop promoted provenance, never mint it.
         public let sourceBeliefID: UUID?
-        /// ADR-0216: off keeps the entry but stops Veetbot treating it as a
+        /// ADR-0226: off keeps the entry but stops Veetbot treating it as a
         /// standing instruction.
         public var enabled: Bool
         /// The memory it was affirmed from has since changed.
@@ -41,7 +41,7 @@ public final class PersonaViewModel: ObservableObject {
     public static let traitChoices = ["brief", "warm", "direct", "formal", "playful"]
 
     /// A sample reply and what it is: a generated example, or, when the server
-    /// cannot generate one, an illustration of the chips alone (ADR-0216).
+    /// cannot generate one, an illustration of the chips alone (ADR-0226).
     public struct Sample: Equatable, Sendable {
         public let prompt: String
         public let reply: String
@@ -50,7 +50,7 @@ public final class PersonaViewModel: ObservableObject {
 
     @Published public private(set) var version = 0
     @Published public var drafts: [DraftEntry] = []
-    /// ADR-0216: how Veetbot should talk, and up to three tones.
+    /// ADR-0226: how Veetbot should talk, and up to three tones.
     @Published public var voice = ""
     @Published public private(set) var traits: [String] = []
     /// The server reported voice and traits; an older one is never sent them.

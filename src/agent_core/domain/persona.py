@@ -25,7 +25,7 @@ from agent_core.domain.memory import (
 PERSONA_MAX_ENTRIES = 30
 PERSONA_ENTRY_MAX_CHARS = 500
 PERSONA_MAX_OPEN_NOMINATIONS = 5
-# ADR-0216 part A: how the owner wants Veetbot to talk, and up to three tones.
+# ADR-0226 part A: how the owner wants Veetbot to talk, and up to three tones.
 PERSONA_VOICE_MAX_CHARS = 1000
 PERSONA_MAX_TRAITS = 3
 
@@ -87,7 +87,7 @@ class PersonaEntry(BaseModel):
     source: PersonaEntrySource
     source_belief_id: UUID | None = None
     sensitivity: Sensitivity = Sensitivity.INTERNAL
-    # ADR-0216 part B: a switched-off entry is kept and versioned but not
+    # ADR-0226 part B: a switched-off entry is kept and versioned but not
     # rendered, and its belief returns to the session snapshot.
     enabled: bool = True
 
@@ -218,7 +218,7 @@ def render_persona(document: PersonaDocument, *, ceiling: Sensitivity) -> str:
     byte-stable for the life of the prefix epoch. An empty result means the
     prefix carries no persona row at all.
 
-    ADR-0216: switched-off entries are not rendered. A voice or a trait adds a
+    ADR-0226: switched-off entries are not rendered. A voice or a trait adds a
     fixed framing line, then the voice on one line, then each trait's fixed
     sentence, before the entries; a document with neither renders exactly as
     it did before they existed.
@@ -241,7 +241,7 @@ def render_persona(document: PersonaDocument, *, ceiling: Sensitivity) -> str:
 
 
 class PersonaPreview(BaseModel):
-    """An example reply in an unsaved voice; generated, never saved (ADR-0216 part C)."""
+    """An example reply in an unsaved voice; generated, never saved (ADR-0226 part C)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -251,7 +251,7 @@ class PersonaPreview(BaseModel):
 
 
 class BoundaryEnforcement(StrEnum):
-    """What makes a persona boundary true (ADR-0216 part D)."""
+    """What makes a persona boundary true (ADR-0226 part D)."""
 
     HARDLINE_RULE = "hardline_rule"
     POLICY_RULE = "policy_rule"
@@ -286,7 +286,7 @@ class PersonaBoundaryList(BaseModel):
 class KeepPersonaField:
     """Marks a persona field a write left out, so the head's value carries over.
 
-    A client that predates ADR-0216 sends no voice or traits; omission must
+    A client that predates ADR-0226 sends no voice or traits; omission must
     not clear what another client set.
     """
 

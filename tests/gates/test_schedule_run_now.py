@@ -1,4 +1,4 @@
-"""ADR-0215 part C: Run now starts one manual occurrence of a recurring schedule.
+"""ADR-0225 part C: Run now starts one manual occurrence of a recurring schedule.
 
 The run is an ordinary materialized occurrence with trigger MANUAL: the
 cadence's next firing does not move, the result never changes the

@@ -557,7 +557,7 @@ async def test_recent_people_directory_uses_visible_interactions_before_paging()
 
 
 async def people_last_interaction_contract(store: PeopleStore) -> None:
-    """ADR-0217 part A: the reported last contact is exactly the recent sort key."""
+    """ADR-0227 part A: the reported last contact is exactly the recent sort key."""
     await people_recent_directory_contract(store)
     owner = principal()
     people = [UUID(int=9100 + i) for i in range(4)]

@@ -51,7 +51,7 @@ public final class PeopleViewModel: ObservableObject {
     @Published public private(set) var relationship: PeopleRelationshipFilter = .all
     /// The open possible duplicates, on their own page (ADR-0125).
     @Published public private(set) var suggestions: [PeopleMergeSuggestionView] = []
-    /// The sidebar's numbers (ADR-0217); nil while unknown or on an older server.
+    /// The sidebar's numbers (ADR-0227); nil while unknown or on an older server.
     @Published public private(set) var counts: PeopleCountsView?
     /// The person whose owed thread is being corrected from its row.
     @Published public private(set) var resolvingThreadOf: UUID?
@@ -170,7 +170,7 @@ public final class PeopleViewModel: ObservableObject {
                 return
             }
             let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            // ADR-0217: Needs you leads with the replies the owner owes soon. The
+            // ADR-0227: Needs you leads with the replies the owner owes soon. The
             // filter stands alone, so it applies only to the unfiltered list; a
             // row without a thread (an older server ignoring the filter) is dropped.
             var owed: [PersonView] = []
@@ -225,7 +225,7 @@ public final class PeopleViewModel: ObservableObject {
         if !failedPage || items.isEmpty || availability == .changed { await reload() } else { await loadMore() }
     }
 
-    // MARK: ADR-0217
+    // MARK: ADR-0227
 
     /// Fetches the sidebar's numbers. They label the lists and never block
     /// them: any failure, an older server included, leaves them unknown.
@@ -289,7 +289,7 @@ public final class PeopleViewModel: ObservableObject {
     }
 
     /// Marks the owed thread on a Needs you row completed or cancelled through
-    /// the person's existing commitment correction (ADR-0217 part C).
+    /// the person's existing commitment correction (ADR-0227 part C).
     public func resolveThread(of person: PersonView, state: String) async {
         guard isConnectionValid, resolvingThreadOf == nil, let thread = person.nextThread,
               let beliefID = thread.beliefID else { return }
