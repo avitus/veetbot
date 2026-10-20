@@ -85,8 +85,11 @@ then neither clipped at connection nor spoken over a voicemail greeting or a
 call-screening prompt. The provider documents no silence timeout, so a person
 who answers and stays silent hears nothing until they speak, within the call's
 duration limit. The provider may not mark a reached voicemail as such: it
-reported one screened call as `answered_by: "unknown"`. The transcript and
-summary show what happened.
+reported one screened call as `answered_by: "unknown"`. A call its own
+voicemail detection ends also reports `answered_by: "unknown"` and
+`status: "completed"`, but its last transcript entry is the platform's
+assistant line `<Call ended due to voicemail detection>`. Veetbot records that
+call as `voicemail`. Otherwise the transcript and summary show what happened.
 
 ## Repository fit and the required plan change
 

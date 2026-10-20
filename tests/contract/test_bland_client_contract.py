@@ -189,6 +189,78 @@ async def test_bland_final_states_stay_distinct(change: dict[str, Any], status: 
     assert result["status"] == status
 
 
+VOICEMAIL_DETECTED = "<Call ended due to voicemail detection>"
+
+
+def voicemail_detection_hangup() -> dict[str, Any]:
+    """Bland's raw fields for outbound call a1ae418a, 2026-10-20, read on the server.
+
+    No structured field names the voicemail: only the platform's closing
+    transcript entry does.
+    """
+    return {
+        **provider_call(),
+        "to": RECIPIENT,
+        "from": NUMBER,
+        "inbound": False,
+        "completed": True,
+        "queue_status": "complete",
+        "status": "completed",
+        "answered_by": "unknown",
+        "call_ended_by": "ASSISTANT",
+        "error_message": None,
+        "call_length": 0.15,
+        "summary": "Not enough information to generate summary",
+        "transcripts": [
+            {
+                "id": 1046835742,
+                "user": "assistant",
+                "text": VOICEMAIL_DETECTED,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        ],
+        "concatenated_transcript": f"assistant: {VOICEMAIL_DETECTED} \n ",
+    }
+
+
+async def test_bland_voicemail_detection_hangup_is_a_voicemail() -> None:
+    """bland-calling.md: a call that never reached a person is not a conversation."""
+
+    payload = voicemail_detection_hangup()
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as http:
+        result = await BlandClient(KEY, NUMBER, http_client=http).get_call(CALL_ID)
+    assert result["direction"] == "outbound"
+    assert result["status"] == "voicemail"
+    assert result["summary"] == payload["summary"]
+    assert result["transcript"] == payload["concatenated_transcript"]
+
+
+@pytest.mark.parametrize(
+    "transcripts",
+    [
+        [{"user": "user", "text": VOICEMAIL_DETECTED}],
+        [{"user": "assistant", "text": VOICEMAIL_DETECTED}, {"user": "user", "text": "Hello?"}],
+        [{"user": "assistant", "text": f"{VOICEMAIL_DETECTED} Goodbye."}],
+        [],
+        None,
+        "not a list",
+        ["not an object"],
+    ],
+    ids=["spoken", "not-last", "inexact", "empty", "missing", "not-a-list", "not-an-object"],
+)
+async def test_bland_only_the_platform_closing_marker_means_voicemail(
+    transcripts: object,
+) -> None:
+    payload = {**voicemail_detection_hangup(), "transcripts": transcripts}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as http:
+        result = await BlandClient(KEY, NUMBER, http_client=http).get_call(CALL_ID)
+    assert result["status"] == "completed"
+
+
 async def test_bland_call_history_is_number_bound_and_paginates() -> None:
     requests: list[httpx.Request] = []
     second = str(UUID(int=28))

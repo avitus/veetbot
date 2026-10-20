@@ -70,6 +70,18 @@ def _instant(value: object) -> str:
         raise BlandError("bland.provider_output_invalid") from exc
 
 
+def _ended_by_voicemail_detection(transcripts: object) -> bool:
+    """Bland leaves answered_by "unknown" and names the voicemail only in this closing entry."""
+    if not isinstance(transcripts, list) or not transcripts:
+        return False
+    last = transcripts[-1]
+    return (
+        isinstance(last, dict)
+        and last.get("user") == "assistant"
+        and last.get("text") == "<Call ended due to voicemail detection>"
+    )
+
+
 def _approved_voicemail(value: object) -> bool:
     """Hang up, or leave the owner-approved message; SMS variants stay deferred."""
     if value == {"action": "hangup"}:
@@ -217,7 +229,11 @@ class BlandClient:
                 else "failed"
                 if raw_status in {"failed", "error", "canceled", "cancelled"}
                 else "voicemail"
-                if completed and answered in {"voicemail", "machine"}
+                if completed
+                and (
+                    answered in {"voicemail", "machine"}
+                    or _ended_by_voicemail_detection(value.get("transcripts"))
+                )
                 else "completed"
                 if completed
                 else "active"
