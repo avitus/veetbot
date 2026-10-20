@@ -24,6 +24,7 @@ from agent_core.domain.schedules import (
     ScheduleDefinitionLimits,
     ScheduleDefinitionPatch,
     ScheduleIdempotencyRecord,
+    ScheduleNotify,
     ScheduleOccurrence,
     SchedulePauseReason,
     ScheduleRecord,
@@ -535,6 +536,7 @@ def _revision(
         timezone=definition.timezone,
         misfire_grace_seconds=definition.misfire_grace_seconds,
         max_consecutive_failures=definition.max_consecutive_failures,
+        notify=definition.notify,
         created_by_principal_id=principal.principal_id,
         created_at=now,
         call_plan=definition.call_plan,
@@ -569,6 +571,7 @@ def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
         misfire_grace_seconds=revision.misfire_grace_seconds,
         max_consecutive_failures=revision.max_consecutive_failures,
         call_plan=revision.call_plan,
+        notify=revision.notify,
     )
 
 
@@ -681,6 +684,9 @@ def _definition_hash(definition: ScheduleDefinition) -> str:
         payload.pop("browser_profile_id")
     if definition.call_plan is None:
         payload.pop("call_plan")
+    # Requests made before the notify preference keep their hash (ADR-0215 D).
+    if definition.notify is ScheduleNotify.EVERY_REPORT:
+        payload.pop("notify")
     encoded = json.dumps(
         payload,
         ensure_ascii=False,

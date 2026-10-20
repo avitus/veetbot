@@ -222,6 +222,19 @@ class SchedulePauseReason(StrEnum):
     FAILURE_LIMIT = "failure_limit"
 
 
+class ScheduleNotify(StrEnum):
+    """When a schedule's finished runs notify the owner (ADR-0215 part D).
+
+    ``every_report`` is the behaviour before the preference existed;
+    ``attention_only`` withholds the report notification for a run that
+    completed. Approvals, questions, failures and skipped occurrences always
+    notify, because each needs the owner.
+    """
+
+    EVERY_REPORT = "every_report"
+    ATTENTION_ONLY = "attention_only"
+
+
 class OccurrenceDisposition(StrEnum):
     MATERIALIZED = "MATERIALIZED"
     MISSED = "MISSED"
@@ -331,6 +344,7 @@ class ScheduleRevision(BaseModel):
     timezone: str | None
     misfire_grace_seconds: int = Field(gt=0)
     max_consecutive_failures: int = Field(gt=0)
+    notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT
     created_by_principal_id: str = Field(min_length=1)
     created_at: datetime
     call_plan: CallPlan | None = None
@@ -381,6 +395,7 @@ class ScheduleDefinition(BaseModel):
     misfire_grace_seconds: int = Field(gt=0)
     max_consecutive_failures: int = Field(gt=0)
     call_plan: CallPlan | None = None
+    notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT
 
     @model_validator(mode="after")
     def execution_is_finite(self) -> ScheduleDefinition:

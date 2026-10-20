@@ -166,6 +166,7 @@ class ScheduleRevision(BaseModel):
     timezone: str | None
     misfire_grace_seconds: int
     max_consecutive_failures: int
+    notify: every_report | attention_only = every_report   # ADR-0215 D
     created_by_principal_id: str
     created_at: datetime
 ```
@@ -1037,7 +1038,10 @@ Chat to say so when the owner asked for one. With a call plan the text says
 instead that the platform places the plan's calls and reports the outcome.
 After the occurrence's run is
 accounted, the outbox emits `schedule_run_finished`, which can arrive after the
-nominal instant by the duration of the scheduled run. ADR-0091 subsequently
+nominal instant by the duration of the scheduled run, unless the occurrence's
+pinned revision sets `notify: attention_only` and the run completed (ADR-0215
+part D); a failed or cancelled run, approvals, questions and skipped
+occurrences notify regardless. ADR-0091 subsequently
 authorizes the occurrence's pinned revision title and nominal firing time in
 the alert; instructions and run results remain excluded. The accountant and
 materializer pass the already loaded revision to notification production so

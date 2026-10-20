@@ -10,6 +10,7 @@ from agent_core.domain.events import ProcessEvent
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.schedules import (
     Schedule,
+    ScheduleNotify,
     ScheduleOccurrence,
     SchedulePauseReason,
     ScheduleRevision,
@@ -142,8 +143,16 @@ class ScheduleOutcomeAccountant:
                 )
             )
             self._write_probe("process_event")
-            if self._notification_producer is not None and not await _quiet_plan_call(
-                uow, revision, run, owner
+            # ADR-0215 part D: a completed report may stay quiet; a run that
+            # failed or was cancelled always tells the owner.
+            quiet = (
+                run.status is RunStatus.COMPLETED
+                and revision.notify is ScheduleNotify.ATTENTION_ONLY
+            )
+            if (
+                self._notification_producer is not None
+                and not quiet
+                and not await _quiet_plan_call(uow, revision, run, owner)
             ):
                 produced = await self._notification_producer.for_schedule_run_accounted(
                     uow,

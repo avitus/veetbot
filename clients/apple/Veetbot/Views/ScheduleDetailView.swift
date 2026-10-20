@@ -48,6 +48,7 @@ public struct ScheduleDetailView: View {
                 heading(record)
                 lifecycleControls(record)
                 instruction(record)
+                delivery(record)
                 recentRuns
                 A2RecordGroup(title: "Schedule", rows: scheduleRows(record))
                 A2Group(title: "Website access") { websiteAccess(record) }
@@ -126,6 +127,47 @@ public struct ScheduleDetailView: View {
                         .accessibilityIdentifier("schedule.lifecycle.error")
                 }
             }
+        }
+    }
+
+    /// Delivery (MagicPath quiet-home-5746): the per-schedule notification
+    /// preference (ADR-0215 part D) and the spending limit each run carries.
+    /// A server without the preference shows only the limit.
+    @ViewBuilder
+    private func delivery(_ record: ScheduleRecordView) -> some View {
+        let id = record.schedule.id
+        A2Group(title: "Delivery") {
+            if let notify = record.revision.notify {
+                Toggle(isOn: Binding(
+                    get: { notify == "attention_only" },
+                    set: { value in Task { await model.setNotifyOnlyWhenNeeded(id, value) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Only notify when something needs you").veetType(.ui).foregroundColor(AppTheme.ink)
+                        Text("A finished report stays quiet. Failures, approvals and questions still notify.")
+                            .veetType(.meta)
+                            .foregroundColor(AppTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(AppTheme.tealFill)
+                .disabled(
+                    model.isChangingLifecycle(id)
+                        || !scheduleAllowsWebsiteAccessChange(record.schedule.stateKind)
+                )
+                .accessibilityIdentifier("schedule.notify.attention-only")
+                .padding(14)
+                HairlineDivider()
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Spending limit").veetType(.ui).foregroundColor(AppTheme.ink)
+                Spacer(minLength: 8)
+                Text(record.revision.limits.maxCost.map { "Up to $\($0) a run" } ?? "None")
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+            }
+            .padding(14)
         }
     }
 

@@ -776,11 +776,14 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
     public let timezone: String?
     public let misfireGraceSeconds: Int
     public let maxConsecutiveFailures: Int
+    /// `every_report` or `attention_only` (ADR-0215 part D); absent on servers
+    /// that predate the preference, which hides the switch.
+    public let notify: String?
     public let createdByPrincipalID: String
     public let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case revision, title, instruction, limits, cadence, timezone
+        case revision, title, instruction, limits, cadence, timezone, notify
         case scheduleID = "schedule_id"
         case agentID = "agent_id"
         case agentVersion = "agent_version"

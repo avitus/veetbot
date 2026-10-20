@@ -322,6 +322,37 @@ import FoundationNetworking
         #expect(toasts.current?.text == "Stopped. It stays in Recent History for 30 days.")
     }
 
+    /// ADR-0215 part D: the switch sends the whole definition back with only
+    /// `notify` changed, so fields this client does not model survive.
+    @Test
+    func testOnlyNotifyWhenNeededSavesTheWholeDefinitionWithTheNewPreference() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000768"))
+        let recorder = ScheduleRequestRecorder()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            recorder.append(request)
+            if request.httpMethod == "PATCH" {
+                return Self.response(request, body: Self.detailJSON(id: scheduleID, revision: 2, notify: "attention_only"))
+            }
+            return Self.response(request, body: Self.detailJSON(id: scheduleID, notify: "every_report"))
+        }
+        await model.loadDetail(scheduleID)
+        #expect(model.detailRecords[scheduleID]?.revision.notify == "every_report")
+
+        await model.setNotifyOnlyWhenNeeded(scheduleID, true)
+
+        let patch = try #require(recorder.snapshot.last)
+        #expect(patch.httpMethod == "PATCH")
+        let body = try Self.body(patch)
+        #expect(body["expected_revision"] as? Int == 1)
+        let definition = try #require(body["definition"] as? [String: Any])
+        #expect(definition["notify"] as? String == "attention_only")
+        #expect(definition["instruction"] as? String == "Full instruction")
+        #expect(definition["revision"] == nil && definition["schedule_id"] == nil)
+        #expect(model.detailRecords[scheduleID]?.revision.notify == "attention_only")
+        #expect(toasts.current?.text == "Saved. Applies from the next run.")
+    }
+
     /// A revision that moved on is read again and the change retried once.
     @Test
     func testAStaleRevisionIsReadAgainAndRetriedOnce() async throws {
@@ -589,11 +620,13 @@ import FoundationNetworking
         id: UUID,
         revision: Int = 1,
         profile: UUID? = nil,
-        state: String = "ACTIVE"
+        state: String = "ACTIVE",
+        notify: String? = nil
     ) -> String {
+        let notifyField = notify.map { #","notify":"\#($0)""# } ?? ""
         let binding = profile.map { #""\#($0.uuidString.lowercased())""# } ?? "null"
         let scopes = profile == nil ? "[]" : #"["browser.profile.read"]"#
-        return #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"\#(state)","pause_reason":null,"current_revision":\#(revision),"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":\#(revision),"title":"Daily review","instruction":"Full instruction","agent_id":"00000000-0000-0000-0000-000000000742","agent_version":"1","policy_profile":"default","requested_scopes":\#(scopes),"browser_profile_id":\#(binding),"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}"#
+        return #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"\#(state)","pause_reason":null,"current_revision":\#(revision),"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":\#(revision),"title":"Daily review","instruction":"Full instruction","agent_id":"00000000-0000-0000-0000-000000000742","agent_version":"1","policy_profile":"default","requested_scopes":\#(scopes),"browser_profile_id":\#(binding),"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1\#(notifyField),"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}"#
     }
 
     nonisolated private static func profileJSON(id: UUID, origin: String, status: String) -> String {

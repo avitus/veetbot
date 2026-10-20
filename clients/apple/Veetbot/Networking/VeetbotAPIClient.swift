@@ -909,6 +909,32 @@ public struct VeetbotAPIClient: Sendable {
         ))
     }
 
+    /// Sets when a schedule's finished runs notify (ADR-0215 part D) through
+    /// the full-definition update, re-reading first so every other field goes
+    /// back exactly as the server holds it; a stale revision is retried once.
+    public func setScheduleNotify(_ scheduleID: UUID, notify: String) async throws -> ScheduleRecordView {
+        let path = "/v1/schedules/\(scheduleID.uuidString)"
+        var retried = false
+        while true {
+            let (data, _) = try await transport.sendData(TransportRequest(method: .get, path: path))
+            let current = try JSONDecoder.server.decode(ScheduleRecordView.self, from: data)
+            if current.revision.notify == notify { return current }
+            let record = try JSONDecoder.server.decode(JSONValue.self, from: data)
+            let update = try scheduleDefinitionUpdate(from: record) { definition in
+                definition["notify"] = .string(notify)
+            }
+            do {
+                return try await transport.send(TransportRequest(
+                    method: .patch, path: path, body: try JSONEncoder.server.encode(update)
+                ))
+            } catch HTTPTransportError.api(let apiError)
+                where !retried && apiError.details.reason == "schedule.revision_conflict"
+            {
+                retried = true
+            }
+        }
+    }
+
     /// Binds or clears the website sign-in a schedule's future occurrences may
     /// read, through the full-definition update (ADR-0150, ADR-0154). Each
     /// attempt re-reads the schedule and sends the server's own definition back
@@ -960,6 +986,26 @@ private let scheduleWebsiteReadScope = "browser.profile.read"
 private let scheduleRevisionOnlyFields = [
     "schedule_id", "revision", "timezone", "created_by_principal_id", "created_at",
 ]
+
+/// The server's own definition from a point read, minus the fields only a
+/// revision carries, changed by `modify`, at the record's current revision.
+private func scheduleDefinitionUpdate(
+    from record: JSONValue,
+    modify: (inout [String: JSONValue]) -> Void
+) throws -> JSONValue {
+    guard
+        let expectedRevision = record.objectValue?["schedule"]?.objectValue?["current_revision"],
+        expectedRevision.intValue != nil,
+        var definition = record.objectValue?["revision"]?.objectValue
+    else {
+        throw HTTPTransportError.invalidResponse
+    }
+    for field in scheduleRevisionOnlyFields {
+        definition[field] = nil
+    }
+    modify(&definition)
+    return .object(["expected_revision": expectedRevision, "definition": .object(definition)])
+}
 
 private func scheduleWebsiteAccessUpdate(
     from record: JSONValue,
