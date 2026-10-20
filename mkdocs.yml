@@ -361,4 +361,5 @@ nav:
       - ADR-0227 People directory attention and counts: adr/0227-people-directory-attention-recent-and-counts.md
       - ADR-0221 Unattended call plans: adr/0221-unattended-call-plans.md
       - ADR-0228 Smarter Testing partitions: adr/0228-smarter-testing-partitions.md
+      - ADR-0229 Real-browser cases off the desktop: adr/0229-real-browser-cases-run-off-the-owners-desktop.md
   - Changelog: changelog.md

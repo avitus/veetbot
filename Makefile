@@ -6,6 +6,7 @@ STATIC_TEST_WORKERS ?= 2
 # path here (.circleci/test-suites.yml). Empty runs the whole partition.
 PYTEST_ARGS ?=
 BROWSER_IMAGE ?= veetbot-browser-profile-service:check
+HOST_OS ?= $(shell uname -s)
 
 # Keep one Make graph so repeated goals share prerequisites. Independent lanes
 # overlap; static and contract tests retain their specified sequence.
@@ -18,6 +19,7 @@ endif
 
 .PHONY: install format lint typecheck test check db-up migrate env-pull client-build \
 	test-static test-contract test-fast test-integration test-live browser-install test-browser \
+	test-browser-cases \
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-macos-vm \
 	test-apple-ui-ios \
 	test-deploy sandbox-image browser-image test-browser-image \
@@ -76,9 +78,26 @@ test-contract:
 
 test-fast: test-static test-contract
 
+# Hosted browsers are headed. Linux gives each a private Xvfb display; a Mac
+# would open the windows on the owner's desktop, so there both browser targets
+# run on the Linux chunk sidecar instead (ADR-0229). VEETBOT_BROWSER_ON_HOST=1
+# runs them on the Mac deliberately. test-browser-cases runs only the named
+# cases, so it writes no gate report.
+ifeq ($(HOST_OS)$(VEETBOT_BROWSER_ON_HOST),Darwin)
+test-browser:
+	@scripts/run_on_sidecar.sh make test-browser
+
+test-browser-cases:
+	@scripts/run_on_sidecar.sh "make test-browser-cases CASES='$(CASES)'"
+else
 test-browser: browser-install
 	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 -m browser \
 		-p tests.browser_report --browser-report test-results/browser/baseline.json
+
+test-browser-cases: browser-install
+	@test -n "$(CASES)" || { echo 'test-browser-cases needs CASES=<pytest paths or node ids>' >&2; exit 2; }
+	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 $(CASES)
+endif
 
 test-integration:
 	@uv run pytest -m "integration and not sandbox and not browser_image" $(PYTEST_ARGS); \

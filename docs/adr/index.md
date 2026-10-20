@@ -254,6 +254,7 @@ implementation without one.
 - [ADR-0227: People directory attention, last contact and section counts](0227-people-directory-attention-recent-and-counts.md)
 - [ADR-0221: Unattended call plans, with retries and a follow-up](0221-unattended-call-plans.md)
 - [ADR-0228: CircleCI Smarter Testing runs three pytest partitions](0228-smarter-testing-partitions.md)
+- [ADR-0229: Real-browser cases run off the owner's desktop](0229-real-browser-cases-run-off-the-owners-desktop.md)
 
 - [ADR-0212: Checkpointed memory confirmation](0212-checkpointed-memory-confirmation.md)
 - [ADR-0214: Formation deadline repair](0214-formation-deadline-repair.md)

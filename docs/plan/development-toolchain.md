@@ -382,6 +382,14 @@ cases, and an empty partition fail this gate. The normal suite socket guard
 remains in force; only each synthetic HTTPS harness opens its bounded local
 transport.
 
+Hosted browsers are headed, and only Linux gives each one a private display,
+so the partition never runs on the owner's Mac (ADR-0229). There
+`make test-browser`, and `make test-browser-cases CASES=<paths>` for named
+cases, run on the Linux sidecar through `scripts/run_on_sidecar.sh`; a browser
+case collected on a Mac host skips, which this gate counts as unpassed.
+`test-browser-cases` writes no baseline report. `VEETBOT_BROWSER_ON_HOST=1`
+runs either on the Mac deliberately.
+
 `make check` includes `test-browser`, which depends on `browser-install`.
 Hosted CI runs a separate browser job and packaging depends on
 it. The job publishes JUnit and a JSON runtime baseline with source revision,
