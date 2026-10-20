@@ -64,6 +64,15 @@ def test_the_required_apple_ios_status_passes_only_after_both_devices() -> None:
     assert "apple-ios" in entries["package-release"]["requires"]
 
 
+def test_each_device_splits_its_cases_across_two_executors() -> None:
+    job = _config()["jobs"]["apple-ios-device"]
+    assert job["parallelism"] == 2
+    commands = [step["run"]["command"] for step in job["steps"] if "run" in step]
+    assert any(
+        'IOS_UI_SHARD="$CIRCLE_NODE_INDEX/$CIRCLE_NODE_TOTAL"' in command for command in commands
+    )
+
+
 @pytest.mark.parametrize("name", ["static", "integration"])
 def test_the_longest_python_partitions_split_across_two_executors(name: str) -> None:
     assert _config()["jobs"][name]["parallelism"] == 2
@@ -171,6 +180,12 @@ def simulator_checkout(tmp_path: Path) -> Path:
     stand_ins = tmp_path / "bin"
     stand_ins.mkdir()
     (tmp_path / "simctl.json").write_text(json.dumps(_SIMCTL), encoding="utf-8")
+    cases = [f"VeetbotUITests/ConversationNavigationUITests/test{name}" for name in "ABCD"]
+    (tmp_path / "enumeration.json").write_text(
+        json.dumps({"values": [{"enabledTests": [{"identifier": case} for case in cases]}]}),
+        encoding="utf-8",
+    )
+    shutil.copytree(ROOT / "scripts", tmp_path / "scripts", ignore=shutil.ignore_patterns("*.pyc"))
     log = tmp_path / "calls.log"
     for name, body in (
         (
@@ -180,7 +195,16 @@ def simulator_checkout(tmp_path: Path) -> Path:
             '"bootstatus "*) echo Finished ;;\n'
             "esac\n",
         ),
-        ("xcodebuild", ""),
+        (
+            "xcodebuild",
+            # -enumerate-tests writes its JSON to the path after this option.
+            'while test "$#" -gt 0; do\n'
+            '  if test "$1" = -test-enumeration-output-path; then\n'
+            f'    cp "{tmp_path}/enumeration.json" "$2"\n'
+            "  fi\n"
+            "  shift\n"
+            "done\n",
+        ),
     ):
         script = stand_ins / name
         script.write_text(
@@ -257,3 +281,23 @@ def test_the_simulator_target_rejects_an_unknown_device(simulator_checkout: Path
 
     assert result.returncode != 0
     assert "watch" in result.stderr
+
+
+def test_a_shard_runs_every_other_enumerated_case(simulator_checkout: Path) -> None:
+    calls = _run_simulator_target(simulator_checkout, "IOS_UI_DEVICES=ipad", "IOS_UI_SHARD=1/2")
+
+    enumerations = [call for call in calls if "-enumerate-tests" in call]
+    runs = [call for call in calls if "test-without-building" in call and "-enumerate" not in call]
+    assert len(enumerations) == 1 and "id=IPAD-1" in enumerations[0]
+    assert len(runs) == 1
+    assert "ConversationNavigationUITests/testB" in runs[0]
+    assert "ConversationNavigationUITests/testD" in runs[0]
+    assert "testA" not in runs[0] and "testC" not in runs[0]
+
+
+def test_an_unsharded_run_names_the_whole_suite(simulator_checkout: Path) -> None:
+    calls = _run_simulator_target(simulator_checkout, "IOS_UI_DEVICES=iphone")
+
+    assert not any("-enumerate-tests" in call for call in calls)
+    runs = [call for call in calls if "test-without-building" in call]
+    assert len(runs) == 1 and runs[0].endswith("-only-testing:VeetbotUITests")

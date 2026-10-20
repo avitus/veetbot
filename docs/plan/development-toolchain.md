@@ -517,7 +517,9 @@ without executing it, then runs the macOS UI cases with
 iPhone and iPad simulators, as two instances of `apple-ios-device`
 (`apple-ios-iphone` and `apple-ios-ipad`) on separate executors, and a
 step-only `apple-ios` job passes once both have; `IOS_UI_DEVICES` names the
-devices a run builds for, boots, and tests, and defaults to both (ADR-0230). The macOS cases synthesize real pointer and
+devices a run builds for, boots, and tests, and defaults to both. Each device
+job runs on two executors, and `IOS_UI_SHARD=INDEX/TOTAL` makes each run every
+second enumerated case (`scripts/ios_ui_shard.py`, ADR-0230). The macOS cases synthesize real pointer and
 keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
 VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
 both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM

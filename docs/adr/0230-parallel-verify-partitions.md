@@ -26,13 +26,20 @@ ADR-0228 left job parallelism as a separate decision.
    `make test-apple-ui-ios` reads `IOS_UI_DEVICES`, which defaults to
    `iphone ipad`, and builds for, boots, and tests only the named devices, so
    local use is unchanged.
-2. `static` and `integration` set `parallelism: 2`. Smarter Testing's free
+2. Each device job also sets `parallelism: 2`. The suite is one XCTest class,
+   and Xcode's parallel testing divides only by class, so the target reads
+   `IOS_UI_SHARD=INDEX/TOTAL`: after the build it lists the enabled cases with
+   `xcodebuild -enumerate-tests` and `scripts/ios_ui_shard.py` keeps every
+   TOTAL-th one, in name order, from INDEX. The shards of one run together
+   cover every enabled case, and an empty listing fails the run. Without the
+   setting, the whole suite runs as before.
+3. `static` and `integration` set `parallelism: 2`. Smarter Testing's free
    static splitting divides each partition's test files by recorded timing, so
    the two nodes together run the whole partition with no credit-charged
    feature. Each `integration` node has its own PostgreSQL container.
-3. `static` runs its lint, type, deployment, documentation, and client-build
+4. `static` runs its lint, type, deployment, documentation, and client-build
    steps on node 0 only. The reading-lane floor runs on both nodes.
-4. The exact-tree record of ADR-0114 is written per node, keyed
+5. The exact-tree record of ADR-0114 is written per node, keyed
    `verified-v2-<job>-<node>-<tree>`, and names the split as
    `<job>-<node>-of-<total>-<tree>`. On `main` a job halts only when every node
    of its current split has a record. Each run of a split covers the whole
@@ -43,11 +50,13 @@ ADR-0228 left job parallelism as a separate decision.
 
 ## Consequences
 
-- A requested run should be bounded by `apple` (about 15 minutes) instead of
-  `apple-ios` (about 30). The first requested run on this configuration is the
-  evidence.
-- Each device builds the UI-test products on its own executor, so macOS
-  minutes rise by one build.
+- Requested pipeline 1302 measured the device split alone: `integration` took
+  12.3 minutes and `static` 12.7, but each device still took about 30
+  (iPhone 1819 seconds, iPad 1832), as long as both together had on one
+  machine. The cases themselves, not a shared machine, set the time, which is
+  why decision 2 splits them.
+- The simulator lane uses four macOS executors, each building the UI-test
+  products once, so its macOS minutes rise by about three builds.
 - A flaky device reruns alone when the workflow is rerun from failed.
 - Two nodes of `static` and `integration` each pay their own spin-up and
   install, about a minute of credits per node.

@@ -2413,7 +2413,9 @@ def test_apple_ui_builds_once_and_runs_phone_and_tablet_concurrently() -> None:
     assert "-resultBundlePath" in recipe
     assert recipe.count("xcodebuild build-for-testing") == 1
     assert "-testProductsPath" in recipe
-    assert recipe.count("xcodebuild test-without-building") == 1
+    invocations = recipe.split("xcodebuild test-without-building")[1:]
+    # A sharded run first lists the cases (ADR-0230); one invocation runs them.
+    assert sum("-enumerate-tests" not in tail.split(";", 1)[0] for tail in invocations) == 1
     assert "run_ios_ui_tests" in recipe
     assert 'run_ios_ui_tests iphone "$$iphone_device_id" &' in recipe
     assert 'run_ios_ui_tests ipad "$$ipad_device_id" &' in recipe

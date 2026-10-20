@@ -9,6 +9,8 @@ BROWSER_IMAGE ?= veetbot-browser-profile-service:check
 HOST_OS ?= $(shell uname -s)
 # The simulator UI suite runs on these devices; CI gives each its own executor.
 IOS_UI_DEVICES ?= iphone ipad
+# INDEX/TOTAL runs every TOTAL-th enumerated case from INDEX (ADR-0230).
+IOS_UI_SHARD ?=
 
 # Keep one Make graph so repeated goals share prerequisites. Independent lanes
 # overlap; static and contract tests retain their specified sequence.
@@ -307,6 +309,17 @@ test-apple-ui-ios:
 		echo "Apple simulators failed to boot (iPhone=$$iphone_boot_status, iPad=$$ipad_boot_status)." >&2; \
 		exit 1; \
 	fi; \
+	only_testing=-only-testing:VeetbotUITests; \
+	if test -n "$(IOS_UI_SHARD)"; then \
+		DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test-without-building -quiet \
+			-destination "platform=iOS Simulator,id=$${iphone_device_id:-$$ipad_device_id}" \
+			-testProductsPath "$$test_products_path" \
+			-collect-test-diagnostics never \
+			-enumerate-tests -test-enumeration-format json \
+			-test-enumeration-output-path "$$apple_ui_tmp/tests.json" \
+			-only-testing:VeetbotUITests || exit $$?; \
+		only_testing=$$(python3 scripts/ios_ui_shard.py "$$apple_ui_tmp/tests.json" "$(IOS_UI_SHARD)") || exit $$?; \
+	fi; \
 	run_ios_ui_tests() { \
 		device_label="$$1"; \
 		device_id="$$2"; \
@@ -316,7 +329,7 @@ test-apple-ui-ios:
 			-testProductsPath "$$test_products_path" \
 			-resultBundlePath "$$apple_results_run_dir/$$device_label.xcresult" \
 			-collect-test-diagnostics never \
-			-only-testing:VeetbotUITests; \
+			$$only_testing; \
 	}; \
 	run_ios_ui_tests iphone "$$iphone_device_id" & \
 	iphone_pid=$$!; \
