@@ -90,6 +90,7 @@ class PersonaEntry(BaseModel):
     source: Literal["user_edit", "affirmation"]
     source_belief_id: UUID | None   # set exactly when source == "affirmation"
     sensitivity: Sensitivity        # ceiling-filtered at session open
+    enabled: bool = True            # ADR-0226: kept and counted, unrendered when false
 
 class PersonaDocument(BaseModel):
     tenant_id: UUID
@@ -99,10 +100,14 @@ class PersonaDocument(BaseModel):
     source: Literal["user_edit", "affirmation"]   # what created this version
     source_nomination_id: UUID | None
     created_at: AwareDatetime
+    voice: str | None = None        # ADR-0226: 1 to 1,000 characters when present
+    traits: tuple[Literal["brief", "warm", "direct", "formal", "playful"], ...] = ()
+                                    # at most three, each once, never both
+                                    # "formal" and "playful"
 ```
 
-The unwritten persona is version 0 with no entries — a real, readable state,
-not an error — and it renders nothing. Provenance lives on the entry, not in
+The unwritten persona is version 0 with no entries, voice or traits — a real,
+readable state, not an error — and it renders nothing. Provenance lives on the entry, not in
 the prose: an affirmed entry knows its belief, an owner-typed entry knows it
 was typed, and no flat-string representation could carry either.
 

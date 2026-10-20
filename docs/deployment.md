@@ -1594,8 +1594,19 @@ boundary or replace unknown legacy attribution with empty metadata to unblock wo
 
 ### Owner-reviewed bounded recall rollout (ADR-0220)
 
-The bounded exception uses `recall-bounded-evidence@1` and
-`recall-bounded-admission@1`; legacy passing-evidence admission is unchanged.
+Three versions of the bounded exception exist, each with its own review
+requirement; legacy passing-evidence admission is unchanged.
+
+- `recall-bounded-evidence@1` and `recall-bounded-admission@1` (ADR-0220) need
+  the completed human failure review described below.
+- `@2` (ADR-0222) binds the owner-approved 37-case scope and needs the scoped
+  human findings for exactly those cases, the cost and interruption summaries,
+  and the residual-risk statement.
+- `@3` (ADR-0223) is the supervised production trial. It carries the owner's
+  actual instruction instead of a human review, starts with a 24-hour expiry,
+  and renews only on a timely, explicit continue decision, up to seven days.
+  Follow the [production trial guide](recall-production-trial.md) for its
+  activation and renewal, and do not reuse the version-one assembly helper.
 Do not retag the completed failed comparison as a passing M33 release. The
 owner's approval of rollout scope is not a completed human failure review.
 
