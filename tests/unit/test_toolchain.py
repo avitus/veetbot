@@ -1046,7 +1046,7 @@ def test_ci_has_the_required_partitions() -> None:
     for target in ("lint", "typecheck", "test-static", "test-deploy", "docs-check"):
         assert any(f"make {target}" in command for command in commands["static"])
     assert "make test-website" in commands["public-site"]
-    assert "make client-build" in commands["static"]
+    assert any("make client-build" in command for command in commands["static"])
     assert any(
         "python -m scripts.check_reading_lane" in command and "READING_LANE_BASE" in command
         for command in commands["static"]
@@ -1155,27 +1155,28 @@ def test_ci_has_the_required_partitions() -> None:
     workflows = config["workflows"]
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}
     verify = workflows["verify"]
-    assert verify["jobs"][:6] == [
+    assert verify["jobs"][:7] == [
         "static",
         "contract",
         "integration",
         "sandbox",
         "apple",
-        "apple-ios",
+        {"apple-ios": {"name": "apple-ios-iphone", "device": "iphone"}},
+        {"apple-ios": {"name": "apple-ios-ipad", "device": "ipad"}},
     ]
-    assert verify["jobs"][6] == {
+    assert verify["jobs"][7] == {
         "apple-signing-smoke": {
             "context": "veetbot-apple-signing",
             "filters": {"branches": {"only": ["dev", "codex/recall-production-release"]}},
         }
     }
-    assert verify["jobs"][7:10] == [
+    assert verify["jobs"][8:11] == [
         "public-site",
         {"browser-image": {"name": "browser-image-x86_64", "resource_class": "medium"}},
         {"browser-image": {"name": "browser-image-arm64", "resource_class": "arm.medium"}},
     ]
-    assert verify["jobs"][10] == "browser"
-    delivery_jobs = {next(iter(job)): next(iter(job.values())) for job in verify["jobs"][11:]}
+    assert verify["jobs"][11] == "browser"
+    delivery_jobs = {next(iter(job)): next(iter(job.values())) for job in verify["jobs"][12:]}
     assert set(delivery_jobs) == {
         "package-release",
         "deploy-app",
@@ -1188,7 +1189,8 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
-        "apple-ios",
+        "apple-ios-iphone",
+        "apple-ios-ipad",
         "public-site",
         "browser-image-x86_64",
         "browser-image-arm64",
@@ -1277,16 +1279,13 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
 
     # The record is keyed by the source tree, not the commit, so the merge
     # commit that reproduces a verified pull-request head finds it, and a merge
-    # whose tree nothing verified does not (ADR-0114).
+    # whose tree nothing verified does not (ADR-0114). Each node of a parallel
+    # job keeps its own record (ADR-0230, test_ci_parallel_partitions.py).
     skip_steps = commands["skip_verified_tree"]["steps"]
-    record_steps = commands["record_verified_tree"]["steps"]
     assert "git rev-parse 'HEAD^{tree}'" in skip_steps[0]["run"]["command"]
-    key = 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
-    assert skip_steps[1] == {"restore_cache": {"keys": [key]}}
-    skip_command = skip_steps[2]["run"]["command"]
+    skip_command = skip_steps[-1]["run"]["command"]
     assert '"<< pipeline.git.branch >>" == main' in skip_command
     assert "circleci-agent step halt" in skip_command
-    assert record_steps[-1] == {"save_cache": {"key": key, "paths": ["/tmp/veetbot-verified"]}}
 
     # Every verification partition consults the record before its tests and
     # writes it only after its last test passed. The public site still builds
@@ -1300,8 +1299,9 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
             continue
         skip_index = names.index("skip_verified_tree")
         record_index = names.index("record_verified_tree")
-        assert job["steps"][skip_index]["skip_verified_tree"] == {"job": name}
-        assert job["steps"][record_index]["record_verified_tree"] == {"job": name}
+        recorded = "apple-ios-<< parameters.device >>" if name == "apple-ios" else name
+        assert job["steps"][skip_index]["skip_verified_tree"] == {"job": recorded}
+        assert job["steps"][record_index]["record_verified_tree"] == {"job": recorded}
         assert names.index("checkout") < skip_index
         run_indexes = [index for index, step in enumerate(names) if step == "run"]
         test_indexes = [
@@ -1402,7 +1402,10 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
     # The Mac and simulator UI suites run on separate executors at the same time,
     # and each uploads its result bundles as one archive instead of thousands of
     # bundle files.
-    for job_name, platform in (("apple", "macos"), ("apple-ios", "ios")):
+    for job_name, family, platform in (
+        ("apple", "macos", "macos"),
+        ("apple-ios", "ios", "ios-<< parameters.device >>"),
+    ):
         apple_commands = [
             step["run"]["command"]
             for step in jobs[job_name]["steps"]
@@ -1410,7 +1413,7 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
         ]
         assert any(
             'APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results"' in command
-            and f"make test-apple-ui-{platform}" in command
+            and f"make test-apple-ui-{family}" in command
             for command in apple_commands
         )
         assert {"store_apple_test_results": {"platform": platform}} in jobs[job_name]["steps"]

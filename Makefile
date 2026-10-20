@@ -7,6 +7,8 @@ STATIC_TEST_WORKERS ?= 2
 PYTEST_ARGS ?=
 BROWSER_IMAGE ?= veetbot-browser-profile-service:check
 HOST_OS ?= $(shell uname -s)
+# The simulator UI suite runs on these devices; CI gives each its own executor.
+IOS_UI_DEVICES ?= iphone ipad
 
 # Keep one Make graph so repeated goals share prerequisites. Independent lanes
 # overlap; static and contract tests retain their specified sequence.
@@ -233,10 +235,21 @@ test-apple-ui-ios:
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPhone") and not device["deviceTypeIdentifier"].rsplit(".", 1)[-1].startswith("iPhone-Duo")]; print(max(candidates)[1] if candidates else "")'); \
 	ipad_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPad")]; print(max(candidates)[1] if candidates else "")'); \
-	if test -z "$$iphone_device_id" -o -z "$$ipad_device_id"; then \
+	run_iphone=; run_ipad=; \
+	for device in $(IOS_UI_DEVICES); do \
+		case "$$device" in \
+			iphone) run_iphone=1 ;; \
+			ipad) run_ipad=1 ;; \
+			*) echo "IOS_UI_DEVICES names iphone and ipad, not $$device." >&2; exit 2 ;; \
+		esac; \
+	done; \
+	if { test -n "$$run_iphone" && test -z "$$iphone_device_id"; } \
+		|| { test -n "$$run_ipad" && test -z "$$ipad_device_id"; }; then \
 		echo '$@ requires available iPhone and iPad simulator runtimes.' >&2; \
 		exit 1; \
 	fi; \
+	test -n "$$run_iphone" || iphone_device_id=""; \
+	test -n "$$run_ipad" || ipad_device_id=""; \
 	apple_ui_tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/veetbot-apple-ui.XXXXXX"); \
 	simulators_booted_here=""; \
 	finish_apple_ui() { \
@@ -251,10 +264,11 @@ test-apple-ui-ios:
 	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild build-for-testing -quiet \
 		-project clients/apple/Veetbot.xcodeproj \
 		-scheme Veetbot \
-		-destination "platform=iOS Simulator,id=$$iphone_device_id" \
+		-destination "platform=iOS Simulator,id=$${iphone_device_id:-$$ipad_device_id}" \
 		-testProductsPath "$$test_products_path" \
 		-only-testing:VeetbotUITests || exit $$?; \
 	boot_ios_simulator() { \
+		test -n "$$1" || return 0; \
 		boot_report=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl bootstatus "$$1" -b 2>&1) || { \
 			printf '%s\n' "$$boot_report" >&2; \
 			return 1; \
@@ -278,6 +292,7 @@ test-apple-ui-ios:
 		return 1; \
 	}; \
 	for device_id in "$$iphone_device_id" "$$ipad_device_id"; do \
+		test -n "$$device_id" || continue; \
 		if ! DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices booted | grep -q "$$device_id"; then \
 			simulators_booted_here="$$simulators_booted_here $$device_id"; \
 		fi; \
@@ -295,6 +310,7 @@ test-apple-ui-ios:
 	run_ios_ui_tests() { \
 		device_label="$$1"; \
 		device_id="$$2"; \
+		test -n "$$device_id" || return 0; \
 		DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test-without-building -quiet \
 			-destination "platform=iOS Simulator,id=$$device_id" \
 			-testProductsPath "$$test_products_path" \

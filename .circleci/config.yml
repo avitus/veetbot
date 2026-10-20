@@ -44,18 +44,27 @@ commands:
           command: |
             mkdir -p /tmp/veetbot-verified
             git rev-parse 'HEAD^{tree}' > /tmp/veetbot-verified/tree
+      # Each node of a parallel job records its own pass (ADR-0230); a job
+      # runs on at most two nodes.
       - restore_cache:
           keys:
-            - 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
+            - 'verified-v2-<< parameters.job >>-0-{{ checksum "/tmp/veetbot-verified/tree" }}'
+      - restore_cache:
+          keys:
+            - 'verified-v2-<< parameters.job >>-1-{{ checksum "/tmp/veetbot-verified/tree" }}'
       - run:
           name: Skip a tree this job already verified
           command: |
             tree="$(cat /tmp/veetbot-verified/tree)"
-            if [[ "<< pipeline.git.branch >>" == main \
-                  && -f "/tmp/veetbot-verified/<< parameters.job >>-$tree" ]]; then
-              echo "<< parameters.job >> already passed on tree $tree; skipping."
-              circleci-agent step halt
-            fi
+            total="${CIRCLE_NODE_TOTAL:-1}"
+            [[ "<< pipeline.git.branch >>" == main ]] || exit 0
+            # Halt only when every node of this split passed the tree; together
+            # they ran the whole partition.
+            for ((node = 0; node < total; node++)); do
+              [[ -f "/tmp/veetbot-verified/<< parameters.job >>-$node-of-$total-$tree" ]] || exit 0
+            done
+            echo "<< parameters.job >> already passed on tree $tree; skipping."
+            circleci-agent step halt
 
   record_verified_tree:
     parameters:
@@ -70,9 +79,9 @@ commands:
               git status --short --untracked-files=no >&2
               exit 1
             fi
-            touch "/tmp/veetbot-verified/<< parameters.job >>-$(cat /tmp/veetbot-verified/tree)"
+            touch "/tmp/veetbot-verified/<< parameters.job >>-$CIRCLE_NODE_INDEX-of-$CIRCLE_NODE_TOTAL-$(cat /tmp/veetbot-verified/tree)"
       - save_cache:
-          key: 'verified-v1-<< parameters.job >>-{{ checksum "/tmp/veetbot-verified/tree" }}'
+          key: 'verified-v2-<< parameters.job >>-{{ .Environment.CIRCLE_NODE_INDEX }}-{{ checksum "/tmp/veetbot-verified/tree" }}'
           paths:
             - /tmp/veetbot-verified
 
@@ -121,6 +130,8 @@ jobs:
     docker:
       - image: cimg/python:3.12
     resource_class: medium
+    # Smarter Testing splits the static files by recorded timing (ADR-0230).
+    parallelism: 2
     steps:
       - checkout
       - install_uv
@@ -133,13 +144,19 @@ jobs:
           job: static
       - run:
           name: Install Pandoc
-          command: sudo apt-get update && sudo apt-get install -y pandoc
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            sudo apt-get update && sudo apt-get install -y pandoc
       - run:
           name: Lint
-          command: make lint
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            make lint
       - run:
           name: Type check
-          command: make typecheck
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            make typecheck
       - run:
           name: Static tests
           command: circleci testsuite run "static"
@@ -147,13 +164,19 @@ jobs:
           path: test-results/static
       - run:
           name: Deployment tests
-          command: make test-deploy
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            make test-deploy
       - run:
           name: Documentation checks
-          command: make docs-check
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            make docs-check
       - run:
           name: Build downloadable client
-          command: make client-build
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            make client-build
       - record_verified_tree:
           job: static
       - store_artifacts:
@@ -208,6 +231,8 @@ jobs:
           POSTGRES_USER: agent
           POSTGRES_PASSWORD: agent
     resource_class: small
+    # Each node has its own PostgreSQL container (ADR-0228, ADR-0230).
+    parallelism: 2
     environment:
       DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent
       # This job's secondary container is created empty for the run. The URL
@@ -314,21 +339,30 @@ jobs:
       - store_apple_test_results:
           platform: macos
 
+  # One simulator per executor, so the two devices run at the same time
+  # without sharing a machine, and a rerun repeats only the failed one (ADR-0230).
   apple-ios:
+    parameters:
+      device:
+        type: enum
+        enum: [iphone, ipad]
     macos:
       xcode: "27.0.0"
     resource_class: m4pro.medium
     steps:
       - checkout
       - skip_verified_tree:
-          job: apple-ios
+          job: apple-ios-<< parameters.device >>
       - run:
-          name: Apple client iPhone and iPad UI tests
-          command: APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results" make test-apple-ui-ios
+          name: Apple client << parameters.device >> UI tests
+          command: >-
+            IOS_UI_DEVICES=<< parameters.device >>
+            APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results"
+            make test-apple-ui-ios
       - record_verified_tree:
-          job: apple-ios
+          job: apple-ios-<< parameters.device >>
       - store_apple_test_results:
-          platform: ios
+          platform: ios-<< parameters.device >>
 
   apple-testflight:
     macos:
@@ -692,7 +726,12 @@ workflows:
       - integration
       - sandbox
       - apple
-      - apple-ios
+      - apple-ios:
+          name: apple-ios-iphone
+          device: iphone
+      - apple-ios:
+          name: apple-ios-ipad
+          device: ipad
       - apple-signing-smoke:
           context: veetbot-apple-signing
           filters:
@@ -714,7 +753,8 @@ workflows:
             - integration
             - sandbox
             - apple
-            - apple-ios
+            - apple-ios-iphone
+            - apple-ios-ipad
             - public-site
             - browser-image-x86_64
             - browser-image-arm64

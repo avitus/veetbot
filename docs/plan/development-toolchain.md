@@ -503,13 +503,20 @@ atoms and reports that name each case's file. Only the free features are
 configured, so every run executes the whole partition; rerunning a workflow from
 failed runs only the files that failed in the earlier attempt on the same
 commit. No credit-charged feature is enabled: test impact analysis would reduce
-the selection of a required check.
+the selection of a required check. Jobs 1 and 3 run on two executors each
+(`parallelism: 2`, ADR-0230), and the free static splitting divides their test
+files by recorded timing, so the two nodes together run the whole partition.
+Job 3's nodes each have their own PostgreSQL container. Job 1's lint, type,
+deployment, documentation, and client-build steps run on its first node only;
+the reading-lane floor runs on both.
 Job 6 is an additional native-client gate outside `make check`, split across
 two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it, then runs the macOS UI cases with
 `make test-apple-ui-macos`. Job 6b runs `make test-apple-ui-ios` on available
-iPhone and iPad simulators. The macOS cases synthesize real pointer and
+iPhone and iPad simulators, as two instances of one job (`apple-ios-iphone` and
+`apple-ios-ipad`) on separate executors; `IOS_UI_DEVICES` names the devices a
+run builds for, boots, and tests, and defaults to both (ADR-0230). The macOS cases synthesize real pointer and
 keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
 VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
 both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM
@@ -681,15 +688,16 @@ Three workflow-level facts complete the definition:
     selects trusted `dev` or the isolated recall release with its exact-revision
     context admission, and only in a requested pipeline; it does not
     receive publication credentials.
-    Production delivery begins only after all eight required verification jobs
-    and both browser-image instances pass. On `main`, each verification job
+    Production delivery begins only after all eight required verification jobs,
+    both simulator instances of job 6b, and both browser-image instances pass. On `main`, each verification job
     except `public-site` halts
     successfully right after checkout when it finds its own record for the
     commit's source tree, and otherwise runs in full (ADR-0114). A job writes
     that CircleCI cache record, keyed by job and tree hash, only after its last
     step has passed, so a merge commit that reproduces the verified head of its
     pull request is not tested a second time, while any tree nothing verified
-    is. `static` checks the reading-lane floor before it looks for the record,
+    is. Each node of a parallel job writes its own record, and the job halts
+    only when every node of the current split has one (ADR-0230). `static` checks the reading-lane floor before it looks for the record,
     and no branch other than `main` ever skips. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual
