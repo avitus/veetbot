@@ -7,6 +7,8 @@ import SwiftUI
 public struct ScheduleDetailView: View {
     @ObservedObject var model: ScheduleViewModel
     let summary: ScheduleListItemView
+    @Environment(\.openScheduleReport) private var openScheduleReport
+    @State private var confirmingStop = false
 
     public init(model: ScheduleViewModel, summary: ScheduleListItemView) {
         self.model = model
@@ -35,6 +37,7 @@ public struct ScheduleDetailView: View {
         .accessibilityIdentifier("schedule.detail")
         .task {
             await model.loadDetail(summary.id)
+            await model.loadRecentRuns(summary.id)
             await model.loadWebsiteAccessProfiles()
         }
     }
@@ -43,7 +46,9 @@ public struct ScheduleDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 heading(record)
+                lifecycleControls(record)
                 instruction(record)
+                recentRuns
                 A2RecordGroup(title: "Schedule", rows: scheduleRows(record))
                 A2Group(title: "Website access") { websiteAccess(record) }
                 A2RecordGroup(title: "Execution", rows: executionRows(record))
@@ -69,6 +74,95 @@ public struct ScheduleDetailView: View {
                 Text(scheduleTiming(record.revision.cadence, nextFireAt: record.schedule.nextFireAt))
                     .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
+            }
+        }
+    }
+
+    /// Pause or Resume, and Stop behind an inline confirmation, on a
+    /// schedule that can still run (ADR-0215 part A). Stop is a cancel: the
+    /// record is kept, so it never says Delete.
+    @ViewBuilder
+    private func lifecycleControls(_ record: ScheduleRecordView) -> some View {
+        let id = record.schedule.id
+        let state = record.schedule.stateKind
+        if state == .active || state == .paused {
+            VStack(alignment: .leading, spacing: 8) {
+                if confirmingStop {
+                    Text("Stop this schedule? Future runs stop; a run in progress finishes. It stays in Recent History for 30 days.")
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button("Stop schedule") {
+                            confirmingStop = false
+                            Task { await model.stop(id) }
+                        }
+                        .buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red))
+                        .accessibilityIdentifier("schedule.stop.confirm")
+                        Button("Keep") { confirmingStop = false }
+                            .buttonStyle(QuietCapsuleButtonStyle())
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        if state == .active {
+                            Button { Task { await model.pause(id) } } label: { Label("Pause", systemImage: "pause") }
+                                .buttonStyle(SecondaryCapsuleButtonStyle())
+                                .accessibilityIdentifier("schedule.pause")
+                        } else {
+                            Button { Task { await model.resume(id) } } label: { Label("Resume", systemImage: "play") }
+                                .buttonStyle(SecondaryCapsuleButtonStyle())
+                                .accessibilityIdentifier("schedule.resume")
+                        }
+                        Button { confirmingStop = true } label: { Label("Stop", systemImage: "stop") }
+                            .buttonStyle(QuietCapsuleButtonStyle())
+                            .accessibilityIdentifier("schedule.stop")
+                    }
+                    .disabled(model.isChangingLifecycle(id))
+                }
+                if let message = model.lifecycleError(for: id) {
+                    Text(message)
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.red)
+                        .accessibilityIdentifier("schedule.lifecycle.error")
+                }
+            }
+        }
+    }
+
+    /// The newest occurrences: what happened, when, and the report's
+    /// conversation where it still exists (MagicPath quiet-home-5746).
+    @ViewBuilder
+    private var recentRuns: some View {
+        let runs = model.recentRuns(for: summary.id)
+        VStack(alignment: .leading, spacing: 8) {
+            A2SectionHeading(title: "Recent runs")
+            if runs.isEmpty {
+                Text(model.recentRunsError(for: summary.id) ?? "No runs yet.")
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
+                        if index > 0 { HairlineDivider() }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(run.title).veetType(.ui).foregroundColor(AppTheme.ink)
+                                Text(run.occurrence.nominalFireAt.formatted(date: .abbreviated, time: .shortened))
+                                    .veetType(.meta)
+                                    .foregroundColor(AppTheme.inkFaint)
+                            }
+                            Spacer(minLength: 8)
+                            if let sessionID = run.reportSessionID, let openScheduleReport {
+                                Button("Open report in Chat") { openScheduleReport(sessionID) }
+                                    .buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.tealText))
+                                    .accessibilityIdentifier("schedule.run.open.\(run.id.uuidString)")
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
+                }
+                .a2Card()
             }
         }
     }
@@ -209,5 +303,17 @@ public struct ScheduleDetailView: View {
             }
             .buttonStyle(SecondaryCapsuleButtonStyle())
         }
+    }
+}
+
+private struct OpenScheduleReportKey: EnvironmentKey {
+    static let defaultValue: ((UUID) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    /// Closes the schedule browser and opens a report's conversation in Chat.
+    var openScheduleReport: ((UUID) -> Void)? {
+        get { self[OpenScheduleReportKey.self] }
+        set { self[OpenScheduleReportKey.self] = newValue }
     }
 }

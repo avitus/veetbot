@@ -636,11 +636,17 @@ the already loaded rows with an inline retry. A 404 or 405 from the list route
 means schedule browsing is unavailable on that server. The same statuses from
 a point read retain their ordinary HTTP meaning.
 
-The surface is read-only except for website-access binding on ACTIVE or PAUSED
-schedules (ADR-0154). Reading needs `schedule.read`, listing sign-ins needs
-`browser.profile.read`, and saving the binding needs `schedule.write` plus
-`browser.profile.read` when bound. It has no other create, update, pause, resume,
-cancel, delete, occurrence, or run-history control. Swift transport, model, view-model, structure,
+The surface changes website-access binding on ACTIVE or PAUSED schedules
+(ADR-0154) and, under ADR-0215 part A, pauses, resumes and stops them and shows
+their recent occurrences. Reading needs `schedule.read`, listing sign-ins needs
+`browser.profile.read`, saving the binding needs `schedule.write` plus
+`browser.profile.read` when bound, pause and resume need `schedule.write`, and
+Stop is the terminal cancel under `schedule.cancel`; it is never labelled Delete
+because the record stays for thirty days (ADR-0089). Each lifecycle change sends
+the revision on screen and is read again and retried once on
+`schedule.revision_conflict`. Recent runs read the occurrence ledger and each
+linked run's status; Open report in Chat appears only for a materialized
+occurrence whose session link survives. Swift transport, model, view-model, structure,
 and in-process iOS navigation tests are the acceptance evidence under
 ADR-0049's native verification contract. The current/history extension adds no
 route or scope and does not alter the historical milestone gate counts.

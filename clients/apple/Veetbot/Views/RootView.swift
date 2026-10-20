@@ -109,7 +109,13 @@ public struct RootView: View {
         .toastHost(bottomInset: 88)
         .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
-        .sheet(isPresented: $showingGlobalSchedules) { ScheduleBrowserView(model: globalSchedules) }
+        .sheet(isPresented: $showingGlobalSchedules) {
+            ScheduleBrowserView(model: globalSchedules)
+                .environment(\.openScheduleReport) { sessionID in
+                    showingGlobalSchedules = false
+                    Task { await model.openSharedSession(sessionID) }
+                }
+        }
         .onChange(of: coordinator.mode) { updateEmailActivity() }
         .onChange(of: model.isConfigured) { updateEmailActivity() }
         .onChange(of: model.connectionGeneration) {
@@ -635,6 +641,10 @@ private struct SessionSidebar: View {
         }
         .sheet(isPresented: $showingScheduleBrowser) {
             ScheduleBrowserView(model: scheduleViewModel)
+                .environment(\.openScheduleReport) { sessionID in
+                    showingScheduleBrowser = false
+                    Task { await model.openSharedSession(sessionID) }
+                }
         }
     }
 

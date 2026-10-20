@@ -282,6 +282,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
     private static let scheduleWebsiteLock = NSLock()
     private static var scheduleWebsiteBound = false
+    /// ADR-0215 part A: pause and resume flip this; the detail reads it back.
+    private static var schedulePaused = false
     private static var scheduleWebsiteJourney: Bool {
         ProcessInfo.processInfo.arguments.contains(
             ConversationNavigationUITestFixture.scheduleWebsiteAccessLaunchArgument)
@@ -987,8 +989,23 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         case ("GET", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)"):
             statusCode = 200
-            body = Self.scheduleWebsiteLock.withLock { Self.scheduleWebsiteBound }
-                ? Self.boundScheduleDetailJSON : Self.scheduleDetailJSON
+            if Self.scheduleWebsiteLock.withLock({ Self.schedulePaused }) {
+                body = Self.pausedScheduleDetailJSON
+            } else {
+                body = Self.scheduleWebsiteLock.withLock { Self.scheduleWebsiteBound }
+                    ? Self.boundScheduleDetailJSON : Self.scheduleDetailJSON
+            }
+        case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/pause"):
+            Self.scheduleWebsiteLock.withLock { Self.schedulePaused = true }
+            statusCode = 200
+            body = Self.pausedScheduleDetailJSON
+        case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/resume"):
+            Self.scheduleWebsiteLock.withLock { Self.schedulePaused = false }
+            statusCode = 200
+            body = Self.scheduleDetailJSON
+        case ("GET", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/occurrences"):
+            statusCode = 200
+            body = #"{"items":[{"id":"00000000-0000-0000-0000-0000000006a1","schedule_id":"\#(ConversationNavigationUITestFixture.scheduleID)","schedule_revision":1,"nominal_fire_at":"2026-10-07T16:00:00Z","disposition":"MATERIALIZED","session_id":"\#(ConversationNavigationUITestFixture.reportSessionID)","run_id":"\#(Self.reportRunID)","reason_code":null,"authority_version":"v1","materialized_at":"2026-10-07T16:00:00Z","links_erased_at":null,"created_at":"2026-10-07T16:00:00Z"},{"id":"00000000-0000-0000-0000-0000000006a2","schedule_id":"\#(ConversationNavigationUITestFixture.scheduleID)","schedule_revision":1,"nominal_fire_at":"2026-10-06T16:00:00Z","disposition":"SKIPPED_OVERLAP","session_id":null,"run_id":null,"reason_code":"schedule.overlap","authority_version":null,"materialized_at":null,"links_erased_at":null,"created_at":"2026-10-06T16:00:00Z"}],"next_cursor":null}"#
         case ("PATCH", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)")
         where Self.scheduleWebsiteJourney:
             let payload = requestJSON()
@@ -1707,6 +1724,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let scheduleDetailJSON = """
         {"schedule":{"id":"\(ConversationNavigationUITestFixture.scheduleID)","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)","revision":1,"title":"Daily review","instruction":"Full instruction from the schedule point read.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}
+        """
+    private static let pausedScheduleDetailJSON = """
+        {"schedule":{"id":"\(ConversationNavigationUITestFixture.scheduleID)","tenant_id":"local","principal_id":"principal","state":"PAUSED","pause_reason":"user","current_revision":2,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)","revision":2,"title":"Daily review","instruction":"Full instruction from the schedule point read.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}
         """
 
     private static let scheduleWebsiteProfileID = "00000000-0000-0000-0000-0000000007aa"

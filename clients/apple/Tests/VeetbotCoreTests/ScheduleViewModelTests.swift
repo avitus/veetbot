@@ -275,6 +275,115 @@ import FoundationNetworking
         )
     }
 
+    /// ADR-0215 part A: Pause sends the revision the owner saw and confirms
+    /// with a toast whose Undo resumes; Resume and Stop answer the same way.
+    @Test
+    func testPauseResumeAndStopSendTheRevisionAndConfirmWithAToast() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000761"))
+        let recorder = ScheduleRequestRecorder()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            recorder.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("/pause") {
+                return Self.response(request, body: Self.detailJSON(id: scheduleID, revision: 2, state: "PAUSED"))
+            }
+            if path.hasSuffix("/resume") {
+                return Self.response(request, body: Self.detailJSON(id: scheduleID, revision: 3))
+            }
+            if request.httpMethod == "DELETE" {
+                return Self.response(request, body: Self.detailJSON(id: scheduleID, revision: 4, state: "CANCELLED"))
+            }
+            return Self.response(request, body: Self.detailJSON(id: scheduleID))
+        }
+        await model.loadDetail(scheduleID)
+
+        await model.pause(scheduleID)
+        let pause = try #require(recorder.snapshot.last)
+        #expect(pause.url?.path == "/v1/schedules/\(scheduleID.uuidString)/pause")
+        #expect(try Self.body(pause)["expected_revision"] as? Int == 1)
+        #expect(model.detailRecords[scheduleID]?.schedule.stateKind == .paused)
+        #expect(toasts.current?.text == "Paused. Nothing runs until you resume it.")
+        #expect(toasts.current?.undo != nil)
+
+        await toasts.performUndo()
+        let resume = try #require(recorder.snapshot.last)
+        #expect(resume.url?.path == "/v1/schedules/\(scheduleID.uuidString)/resume")
+        #expect(try Self.body(resume)["expected_revision"] as? Int == 2)
+        #expect(model.detailRecords[scheduleID]?.schedule.stateKind == .active)
+        #expect(toasts.current?.text == "Resumed.")
+
+        await model.stop(scheduleID)
+        let stop = try #require(recorder.snapshot.last)
+        #expect(stop.httpMethod == "DELETE")
+        #expect(URLComponents(url: stop.url!, resolvingAgainstBaseURL: false)?.queryItems
+            == [URLQueryItem(name: "expected_revision", value: "3")])
+        #expect(model.detailRecords[scheduleID]?.schedule.stateKind == .cancelled)
+        #expect(toasts.current?.text == "Stopped. It stays in Recent History for 30 days.")
+    }
+
+    /// A revision that moved on is read again and the change retried once.
+    @Test
+    func testAStaleRevisionIsReadAgainAndRetriedOnce() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000762"))
+        let recorder = ScheduleRequestRecorder()
+        let model = try makeModel { request in
+            recorder.append(request)
+            if request.url!.path.hasSuffix("/pause") {
+                let sent = try Self.body(request)["expected_revision"] as? Int
+                if sent == 1 {
+                    return Self.response(request, statusCode: 409, body: #"{"error":{"code":"conflict","message":"Schedule changed.","details":{"reason":"schedule.revision_conflict"},"request_id":"r"}}"#)
+                }
+                return Self.response(request, body: Self.detailJSON(id: scheduleID, revision: 3, state: "PAUSED"))
+            }
+            let reads = recorder.snapshot.filter { $0.httpMethod == "GET" }.count
+            return Self.response(request, body: Self.detailJSON(id: scheduleID, revision: reads > 1 ? 2 : 1))
+        }
+        await model.loadDetail(scheduleID)
+
+        await model.pause(scheduleID)
+
+        let pauses = recorder.snapshot.filter { $0.url!.path.hasSuffix("/pause") }
+        try #require(pauses.count == 2)
+        #expect(try Self.body(pauses[1])["expected_revision"] as? Int == 2)
+        #expect(model.detailRecords[scheduleID]?.schedule.stateKind == .paused)
+        #expect(model.lifecycleError(for: scheduleID) == nil)
+    }
+
+    /// Recent runs read the occurrence ledger; a run's report opens only
+    /// where its conversation still exists.
+    @Test
+    func testRecentRunsReadTheOccurrencesAndTheirRuns() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000763"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000764"))
+        let runID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000765"))
+        let ran = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000766"))
+        let skipped = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000767"))
+        let model = try makeModel { request in
+            let path = request.url!.path
+            if path.hasSuffix("/occurrences") {
+                let items = [
+                    Self.occurrenceJSON(id: ran, schedule: scheduleID, at: "2026-10-19T14:00:00Z", disposition: "MATERIALIZED", session: sessionID, run: runID),
+                    Self.occurrenceJSON(id: skipped, schedule: scheduleID, at: "2026-10-18T14:00:00Z", disposition: "SKIPPED_OVERLAP"),
+                ]
+                return Self.response(request, body: #"{"items":[\#(items.joined(separator: ","))],"next_cursor":null}"#)
+            }
+            if path == "/v1/runs/\(runID.uuidString)" {
+                return Self.response(request, body: Self.runJSON(id: runID, session: sessionID, status: "COMPLETED"))
+            }
+            return Self.response(request, body: Self.detailJSON(id: scheduleID))
+        }
+
+        await model.loadRecentRuns(scheduleID)
+
+        let runs = model.recentRuns(for: scheduleID)
+        #expect(runs.map(\.occurrence.id) == [ran, skipped])
+        #expect(runs.first?.runStatus == .completed)
+        #expect(runs.first?.reportSessionID == sessionID)
+        #expect(runs.last?.reportSessionID == nil)
+        #expect(runs.last?.title == "Skipped: the last run was still going")
+    }
+
     @Test
     func testWebsiteAccessProfilesLoadEveryPage() async throws {
         let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000007A1"))
@@ -397,10 +506,26 @@ import FoundationNetworking
     }
 
     private func makeModel(
+        toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ScheduleViewModel {
         let client = try makeClient(handler: handler)
-        return ScheduleViewModel(makeAPIClient: { client })
+        return ScheduleViewModel(
+            makeAPIClient: { client },
+            toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        )
+    }
+
+    nonisolated private static func occurrenceJSON(
+        id: UUID, schedule: UUID, at: String, disposition: String, session: UUID? = nil, run: UUID? = nil
+    ) -> String {
+        let materialized = disposition == "MATERIALIZED"
+        let sessionValue = session.map { #""\#($0.uuidString)""# } ?? "null"
+        let runValue = run.map { #""\#($0.uuidString)""# } ?? "null"
+        let reason = materialized ? "null" : #""schedule.overlap""#
+        let authority = materialized ? #""v1""# : "null"
+        let materializedAt = materialized ? #""\#(at)""# : "null"
+        return #"{"id":"\#(id.uuidString)","schedule_id":"\#(schedule.uuidString)","schedule_revision":1,"nominal_fire_at":"\#(at)","disposition":"\#(disposition)","session_id":\#(sessionValue),"run_id":\#(runValue),"reason_code":\#(reason),"authority_version":\#(authority),"materialized_at":\#(materializedAt),"links_erased_at":null,"created_at":"\#(at)"}"#
     }
 
     private func makeClient(
@@ -437,6 +562,25 @@ import FoundationNetworking
         return (response, Data(body.utf8))
     }
 
+    nonisolated private static func body(_ request: URLRequest) throws -> [String: Any] {
+        var data = request.httpBody ?? Data()
+        if data.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(buffer, count: count)
+            }
+        }
+        return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+    }
+
+    nonisolated private static func runJSON(id: UUID, session: UUID, status: String) -> String {
+        #"{"id":"\#(id.uuidString)","session_id":"\#(session.uuidString)","parent_run_id":null,"status":"\#(status)","step_count":3,"model_call_count":2,"tool_call_count":1,"usage":{"input_tokens":10,"output_tokens":5,"cost_usd":"0.01"},"limits":{"max_steps":12,"deadline_at":null,"max_cost_usd":"1"},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-19T14:00:00Z","updated_at":"2026-10-19T14:01:00Z"}"#
+    }
+
     nonisolated private static func summaryJSON(id: UUID) -> String {
         #"{"id":"\#(id.uuidString)","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","title":"Daily review","instruction_preview":"Preview","cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"}"#
     }
@@ -444,11 +588,12 @@ import FoundationNetworking
     nonisolated private static func detailJSON(
         id: UUID,
         revision: Int = 1,
-        profile: UUID? = nil
+        profile: UUID? = nil,
+        state: String = "ACTIVE"
     ) -> String {
         let binding = profile.map { #""\#($0.uuidString.lowercased())""# } ?? "null"
         let scopes = profile == nil ? "[]" : #"["browser.profile.read"]"#
-        return #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":\#(revision),"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":\#(revision),"title":"Daily review","instruction":"Full instruction","agent_id":"00000000-0000-0000-0000-000000000742","agent_version":"1","policy_profile":"default","requested_scopes":\#(scopes),"browser_profile_id":\#(binding),"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}"#
+        return #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"\#(state)","pause_reason":null,"current_revision":\#(revision),"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":\#(revision),"title":"Daily review","instruction":"Full instruction","agent_id":"00000000-0000-0000-0000-000000000742","agent_version":"1","policy_profile":"default","requested_scopes":\#(scopes),"browser_profile_id":\#(binding),"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}"#
     }
 
     nonisolated private static func profileJSON(id: UUID, origin: String, status: String) -> String {
@@ -471,6 +616,13 @@ import FoundationNetworking
             lastUsedAt: nil
         )
     }
+}
+
+private final class ScheduleRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [URLRequest] = []
+    func append(_ value: URLRequest) { lock.withLock { values.append(value) } }
+    var snapshot: [URLRequest] { lock.withLock { values } }
 }
 
 private final class ScheduleViewModelURLProtocol: URLProtocol {

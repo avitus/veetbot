@@ -1,6 +1,6 @@
 # ADR-0217: People directory attention, last contact and section counts
 
-- Status: Proposed — awaiting the owner's decision
+- Status: Accepted (owner, 2026-10-20: "implement all 4")
 - Date: 2026-10-19
 - Related: ADR-0121, ADR-0125, ADR-0214; Section 28 of the engineering plan
 - Detailed design: `docs/plan/people-and-relationships.md`

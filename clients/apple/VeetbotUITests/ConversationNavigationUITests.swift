@@ -2691,6 +2691,39 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
     }
 
+    /// ADR-0215 part A: Pause confirms with a toast whose Undo resumes, and a
+    /// recent run opens its report in Chat.
+    func testSchedulePausesResumesAndOpensARecentReport() {
+        app.launchArguments.append("--ui-testing-unread-report")
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.schedules")
+        let scheduleRow = app.descendants(matching: .any)[
+            "schedule.row.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
+        scheduleRow.tap()
+
+        let pause = app.buttons["schedule.pause"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 5), app.debugDescription)
+        pause.tap()
+        XCTAssertTrue(app.buttons["schedule.resume"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Paused. Nothing runs until you resume it."].waitForExistence(timeout: 3))
+        let undo = app.buttons["toast.undo"]
+        XCTAssertTrue(undo.exists)
+        undo.tap()
+        XCTAssertTrue(app.buttons["schedule.pause"].waitForExistence(timeout: 5), app.debugDescription)
+
+        let open = app.buttons["schedule.run.open.00000000-0000-0000-0000-0000000006A1"]
+        scrollUntilVisible(open)
+        XCTAssertTrue(open.exists, app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Skipped: the last run was still going"].exists)
+        open.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["schedule.browser"].waitForNonExistence(timeout: 5),
+            "Opening a report closes the schedule browser"
+        )
+    }
+
     func testScheduleDetailBindsAReadySignInThroughTheServer() {
         app.launchArguments.append("--ui-testing-schedule-website-access")
         app.launch()

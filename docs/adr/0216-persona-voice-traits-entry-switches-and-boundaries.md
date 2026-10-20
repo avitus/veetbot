@@ -1,6 +1,6 @@
 # ADR-0216: Persona voice, lean-towards traits, entry switches, sample reply and boundaries
 
-- Status: Proposed — awaiting the owner's decision
+- Status: Accepted (owner, 2026-10-20: "implement all 4")
 - Date: 2026-10-19
 - Related: ADR-0079, ADR-0117, ADR-0129, ADR-0150, ADR-0213; Sections 10
   and 22 of the engineering plan

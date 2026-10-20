@@ -1,6 +1,6 @@
 # ADR-0214: Memory corrections, evidence excerpts and review counts over HTTP
 
-- Status: Proposed — awaiting the owner's decision
+- Status: Accepted (owner, 2026-10-20: "implement all 4")
 - Date: 2026-10-19
 - Related: ADR-0070, ADR-0117, ADR-0125, ADR-0189; Sections 10 and 22 of the
   engineering plan

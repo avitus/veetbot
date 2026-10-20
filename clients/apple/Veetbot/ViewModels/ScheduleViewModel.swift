@@ -72,8 +72,13 @@ public final class ScheduleViewModel: ObservableObject {
     @Published private var detailLoadingIDs: Set<UUID> = []
     @Published private var websiteAccessErrors: [UUID: String] = [:]
     @Published private var websiteAccessSavingIDs: Set<UUID> = []
+    @Published private var lifecycleErrors: [UUID: String] = [:]
+    @Published private var lifecycleChangingIDs: Set<UUID> = []
+    @Published private var recentRunsByID: [UUID: [ScheduleRecentRun]] = [:]
+    @Published private var recentRunErrors: [UUID: String] = [:]
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
+    private let toasts: ToastCenter
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var reloadRequestID: UUID?
@@ -89,10 +94,117 @@ public final class ScheduleViewModel: ObservableObject {
     public init(
         makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = {
             await ScheduleViewModel.makeDefaultAPIClient()
-        }
+        },
+        toasts: ToastCenter? = nil
     ) {
         self.makeAPIClient = makeAPIClient
+        self.toasts = toasts ?? .shared
     }
+
+    // MARK: Lifecycle (ADR-0215 part A)
+
+    private enum Lifecycle { case pause, resume, stop }
+
+    /// Stops future runs until resumed; the toast's Undo resumes.
+    public func pause(_ scheduleID: UUID) async {
+        guard await change(scheduleID, .pause) else { return }
+        toasts.show("Paused. Nothing runs until you resume it.", restored: "Resumed.") { [weak self] in
+            await self?.change(scheduleID, .resume) ?? false
+        }
+    }
+
+    public func resume(_ scheduleID: UUID) async {
+        guard await change(scheduleID, .resume) else { return }
+        toasts.show("Resumed.")
+    }
+
+    /// Cancels future runs; a run in progress finishes, and the record stays
+    /// in Recent History for 30 days (ADR-0080, ADR-0089). Not undoable.
+    public func stop(_ scheduleID: UUID) async {
+        guard await change(scheduleID, .stop) else { return }
+        toasts.show("Stopped. It stays in Recent History for 30 days.")
+    }
+
+    public func lifecycleError(for scheduleID: UUID) -> String? { lifecycleErrors[scheduleID] }
+
+    public func isChangingLifecycle(_ scheduleID: UUID) -> Bool { lifecycleChangingIDs.contains(scheduleID) }
+
+    /// Sends one lifecycle change at the revision on screen. A revision that
+    /// moved on is read again and retried once, as the website binding does.
+    @discardableResult
+    private func change(_ scheduleID: UUID, _ action: Lifecycle) async -> Bool {
+        guard lifecycleChangingIDs.insert(scheduleID).inserted else { return false }
+        defer { lifecycleChangingIDs.remove(scheduleID) }
+        lifecycleErrors[scheduleID] = nil
+        guard let api = await makeAPIClient() else {
+            lifecycleErrors[scheduleID] = "Connect to a Veetbot server to change this schedule."
+            return false
+        }
+        var retried = false
+        while true {
+            do {
+                let revision: Int
+                if let current = detailRecords[scheduleID] {
+                    revision = current.schedule.currentRevision
+                } else {
+                    revision = try await api.getSchedule(scheduleID).schedule.currentRevision
+                }
+                let record: ScheduleRecordView
+                switch action {
+                case .pause: record = try await api.pauseSchedule(scheduleID, expectedRevision: revision)
+                case .resume: record = try await api.resumeSchedule(scheduleID, expectedRevision: revision)
+                case .stop: record = try await api.cancelSchedule(scheduleID, expectedRevision: revision)
+                }
+                detailRecords[scheduleID] = record
+                updateListRow(from: record)
+                return true
+            } catch HTTPTransportError.api(let apiError)
+                where !retried && apiError.details.reason == "schedule.revision_conflict"
+            {
+                retried = true
+                if let fresh = try? await api.getSchedule(scheduleID) { detailRecords[scheduleID] = fresh }
+            } catch {
+                lifecycleErrors[scheduleID] = displayMessage(for: error)
+                return false
+            }
+        }
+    }
+
+    /// The list row follows the record so its state reads right without a reload.
+    private func updateListRow(from record: ScheduleRecordView) {
+        guard let index = items.firstIndex(where: { $0.id == record.schedule.id }) else { return }
+        let row = items[index]
+        items[index] = ScheduleListItemView(
+            id: row.id, state: record.schedule.state, pauseReason: record.schedule.pauseReason,
+            currentRevision: record.schedule.currentRevision, nextFireAt: record.schedule.nextFireAt,
+            title: row.title, instructionPreview: row.instructionPreview, cadence: row.cadence,
+            createdAt: row.createdAt, updatedAt: record.schedule.updatedAt
+        )
+    }
+
+    // MARK: Recent runs (ADR-0215 part A)
+
+    /// The newest occurrences and, for each that started a run, its status.
+    public func loadRecentRuns(_ scheduleID: UUID) async {
+        guard let api = await makeAPIClient() else { return }
+        recentRunErrors[scheduleID] = nil
+        do {
+            let page = try await api.listScheduleOccurrences(scheduleID, limit: 10)
+            var runs: [ScheduleRecentRun] = []
+            for occurrence in page.items {
+                var status: RunStatus?
+                if let runID = occurrence.runID { status = try? await api.getRun(runID).status }
+                runs.append(ScheduleRecentRun(occurrence: occurrence, runStatus: status))
+            }
+            recentRunsByID[scheduleID] = runs
+        } catch {
+            recentRunErrors[scheduleID] = displayMessage(for: error)
+        }
+    }
+
+    public func recentRuns(for scheduleID: UUID) -> [ScheduleRecentRun] { recentRunsByID[scheduleID] ?? [] }
+
+    public func recentRunsError(for scheduleID: UUID) -> String? { recentRunErrors[scheduleID] }
 
     public static func makeDefaultAPIClient() async -> VeetbotAPIClient? {
         #if DEBUG && os(iOS)
@@ -305,5 +417,38 @@ public final class ScheduleViewModel: ObservableObject {
 
     private func displayMessage(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
+
+/// One line of Recent runs: what happened at a scheduled instant, and the
+/// conversation that holds its report when one exists.
+public struct ScheduleRecentRun: Identifiable, Equatable, Sendable {
+    public let occurrence: ScheduleOccurrenceView
+    public let runStatus: RunStatus?
+    public var id: UUID { occurrence.id }
+
+    /// A report opens only from a run whose conversation still exists.
+    public var reportSessionID: UUID? {
+        occurrence.disposition == "MATERIALIZED" ? occurrence.sessionID : nil
+    }
+
+    public var title: String {
+        switch occurrence.disposition {
+        case "MATERIALIZED":
+            if occurrence.linksErasedAt != nil { return "Ran; the conversation was deleted" }
+            switch runStatus {
+            case .completed: return "Completed"
+            case .failed: return "Failed"
+            case .cancelled: return "Stopped"
+            case .waitingForApproval, .waitingForUser: return "Waiting for you"
+            case .queued, .running: return "Running"
+            default: return "Ran"
+            }
+        case "SKIPPED_OVERLAP": return "Skipped: the last run was still going"
+        case "MISSED": return "Missed: Veetbot was offline past the grace period"
+        case "AUTHORIZATION_FAILED": return "Did not run: permission was missing"
+        case "CONFIGURATION_FAILED": return "Did not run: the schedule needs attention"
+        default: return "Did not run"
+        }
     }
 }

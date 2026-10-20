@@ -1,6 +1,6 @@
 # ADR-0215: Native schedule lifecycle, plain-words creation, Run now and delivery preference
 
-- Status: Proposed — awaiting the owner's decision
+- Status: Accepted (owner, 2026-10-20: "implement all 4")
 - Date: 2026-10-19
 - Related: ADR-0049, ADR-0072, ADR-0075, ADR-0080, ADR-0089, ADR-0091,
   ADR-0109, ADR-0150, ADR-0154, ADR-0213; Sections 16 and 29 of the

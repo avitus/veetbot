@@ -343,9 +343,9 @@ nav:
       - ADR-0210 OpenAI opaque credential boundary: adr/0210-openai-opaque-credential-boundary.md
       - ADR-0211 Apple client deployment floors: adr/0211-apple-client-deployment-floors.md
       - ADR-0213 Owner-requested calls without confirmation: adr/0213-owner-requested-calls-without-confirmation.md
-      - ADR-0214 Memory corrections, evidence and counts (Proposed): adr/0214-memory-corrections-evidence-and-counts-over-http.md
-      - ADR-0215 Native schedule lifecycle and plain-words creation (Proposed): adr/0215-native-schedule-lifecycle-and-plain-words-creation.md
-      - ADR-0216 Persona voice, traits and boundaries (Proposed): adr/0216-persona-voice-traits-entry-switches-and-boundaries.md
-      - ADR-0217 People directory attention and counts (Proposed): adr/0217-people-directory-attention-recent-and-counts.md
+      - ADR-0214 Memory corrections, evidence and counts: adr/0214-memory-corrections-evidence-and-counts-over-http.md
+      - ADR-0215 Native schedule lifecycle and plain-words creation: adr/0215-native-schedule-lifecycle-and-plain-words-creation.md
+      - ADR-0216 Persona voice, traits and boundaries: adr/0216-persona-voice-traits-entry-switches-and-boundaries.md
+      - ADR-0217 People directory attention and counts: adr/0217-people-directory-attention-recent-and-counts.md
       - ADR-0221 Unattended call plans: adr/0221-unattended-call-plans.md
   - Changelog: changelog.md

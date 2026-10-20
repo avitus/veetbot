@@ -800,6 +800,32 @@ public struct ScheduleRecordView: Codable, Equatable, Sendable {
     public let revision: ScheduleRevisionView
 }
 
+/// One entry of a schedule's occurrence ledger (`/v1/schedules/{id}/occurrences`).
+/// Only a materialized occurrence links a session and run, and erasure clears
+/// both links.
+public struct ScheduleOccurrenceView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let scheduleID: UUID
+    public let nominalFireAt: Date
+    public let disposition: String
+    public let sessionID: UUID?
+    public let runID: UUID?
+    public let reasonCode: String?
+    public let materializedAt: Date?
+    public let linksErasedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, disposition
+        case scheduleID = "schedule_id"
+        case nominalFireAt = "nominal_fire_at"
+        case sessionID = "session_id"
+        case runID = "run_id"
+        case reasonCode = "reason_code"
+        case materializedAt = "materialized_at"
+        case linksErasedAt = "links_erased_at"
+    }
+}
+
 public enum MemoryStatusKind: String, Codable, CaseIterable, Sendable {
     case candidate
     case provisional

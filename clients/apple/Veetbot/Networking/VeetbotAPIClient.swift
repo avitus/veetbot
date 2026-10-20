@@ -875,6 +875,40 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    /// Pause, resume and stop (cancel) through the lifecycle routes, each at
+    /// the revision the owner saw (ADR-0215 part A). Stop needs
+    /// `schedule.cancel`; the record stays for 30 days (ADR-0089).
+    public func pauseSchedule(_ id: UUID, expectedRevision: Int) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/\(id.uuidString)/pause",
+            body: try JSONEncoder.server.encode(["expected_revision": expectedRevision])
+        ))
+    }
+
+    public func resumeSchedule(_ id: UUID, expectedRevision: Int) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/\(id.uuidString)/resume",
+            body: try JSONEncoder.server.encode(["expected_revision": expectedRevision])
+        ))
+    }
+
+    public func cancelSchedule(_ id: UUID, expectedRevision: Int) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .delete, path: "/v1/schedules/\(id.uuidString)",
+            queryItems: [URLQueryItem(name: "expected_revision", value: String(expectedRevision))]
+        ))
+    }
+
+    public func listScheduleOccurrences(
+        _ id: UUID, limit: Int = 20, cursor: String? = nil
+    ) async throws -> Page<ScheduleOccurrenceView> {
+        var query = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await transport.send(TransportRequest(
+            method: .get, path: "/v1/schedules/\(id.uuidString)/occurrences", queryItems: query
+        ))
+    }
+
     /// Binds or clears the website sign-in a schedule's future occurrences may
     /// read, through the full-definition update (ADR-0150, ADR-0154). Each
     /// attempt re-reads the schedule and sends the server's own definition back
