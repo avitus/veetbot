@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from datetime import datetime, timedelta
 from time import perf_counter
+from typing import Any
 from uuid import UUID
 
 from agent_core.domain.errors import ArtifactSweepError
@@ -43,9 +44,13 @@ class DurableWorker:
         record_claim_metric: RecordClaimMetric | None = None,
         maintain_browser_leases: Callable[[], Awaitable[None]] | None = None,
         browser_lease_upkeep_seconds: float = 60,
+        heartbeat_wait: Callable[[float], Coroutine[Any, Any, None]] | None = None,
     ) -> None:
         """Bind leased work and validate bounded polling, heartbeat and browser-maintenance
         intervals.
+
+        ``heartbeat_wait`` times the heartbeat and defaults to the clock's sleep;
+        a deterministic composition injects one that leaves simulated time alone.
         """
         if heartbeat_divisor < 2:
             raise ValueError("heartbeat_divisor must be at least two")
@@ -64,6 +69,7 @@ class DurableWorker:
             else "other"
         )
         self._heartbeat_interval = lease_seconds / heartbeat_divisor
+        self._heartbeat_wait = heartbeat_wait or clock.sleep
         self._poll_interval = poll_interval_seconds
         self._record_claim_metric = record_claim_metric
         # Hosted browser leases live in this process, which ran their runs, so
@@ -169,7 +175,7 @@ class DurableWorker:
         cancelled_without_token = False
         try:
             while not execution.done():
-                sleeper = asyncio.create_task(self._clock.sleep(self._heartbeat_interval))
+                sleeper = asyncio.create_task(self._heartbeat_wait(self._heartbeat_interval))
                 done, _pending = await asyncio.wait(
                     {execution, sleeper}, return_when=asyncio.FIRST_COMPLETED
                 )

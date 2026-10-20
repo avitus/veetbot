@@ -55,6 +55,7 @@ from agent_core.adapters.determinism import (
     SystemClock,
     UUID7RequestIdFactory,
     elapsed_time,
+    heartbeat_wait_for,
 )
 from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
@@ -4989,6 +4990,9 @@ async def _compose(
         browser_lease_maintenance = (
             None if browser_provider is None else browser_lease_upkeep(browser_provider)
         )
+        # A heartbeat sleeping on a fixed clock would advance it whenever a run
+        # awaits real I/O (runtime-loop.md, the heartbeat supervisor).
+        heartbeat_wait = heartbeat_wait_for(clock)
 
         return (
             Composition(
@@ -5025,6 +5029,7 @@ async def _compose(
                         )
                     ),
                     maintain_browser_leases=browser_lease_maintenance,
+                    heartbeat_wait=heartbeat_wait,
                 ),
                 async_worker_factory=lambda worker_id: DurableWorker(
                     uow_factory=uow_factory,
@@ -5044,6 +5049,7 @@ async def _compose(
                         )
                     ),
                     maintain_browser_leases=browser_lease_maintenance,
+                    heartbeat_wait=heartbeat_wait,
                 ),
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,

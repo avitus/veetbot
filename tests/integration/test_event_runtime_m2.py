@@ -189,6 +189,30 @@ async def test_two_workers_race_but_only_one_claim_executes_and_releases() -> No
     assert [event.event_type for event in events].count("run.completed") == 1
 
 
+async def test_heartbeats_leave_a_fixed_clock_where_the_run_found_it() -> None:
+    """A heartbeat racing real database I/O does not move simulated time.
+
+    Sleeping on a fixed clock advances it, so a heartbeat timed by the run's
+    clock jumped it a third of a lease whenever the run awaited PostgreSQL:
+    simulated time, and every deadline measured on it, tracked database speed.
+    """
+    script = FakeModelScript(turns=[ScriptedTurn(text="done")])
+    async with build(
+        settings=database_settings(),
+        storage="postgres",
+        script=script,
+        fixed_clock_at=NOW,
+    ) as composition:
+        run_id = await composition.runs.submit("keep simulated time still")
+        worker = composition.worker_factory("still-clock-worker")
+        assert isinstance(worker, DurableWorker)
+        assert await worker.run_once() is True
+        run = await composition.runs.get(run_id)
+        assert composition.clock.now() == NOW
+    assert run.status is RunStatus.COMPLETED
+    assert run.updated_at == NOW
+
+
 async def test_concurrent_idempotent_submissions_return_one_committed_run() -> None:
     async with build(settings=database_settings(), storage="postgres") as composition:
         first, second = await asyncio.gather(

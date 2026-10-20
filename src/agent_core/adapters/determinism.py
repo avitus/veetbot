@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Callable, Coroutine, Iterable
 from datetime import UTC, datetime, timedelta
 from time import monotonic
+from typing import Any
 from uuid import UUID, uuid4
 
 from agent_core.ports.determinism import Clock, IdFactory
@@ -43,6 +44,25 @@ class FixedClock:
 
     def advance(self, delta: timedelta) -> None:
         self._current += delta
+
+
+def heartbeat_wait_for(clock: Clock) -> Callable[[float], Coroutine[Any, Any, None]] | None:
+    """Return the heartbeat's timer beside ``clock``; ``None`` keeps ``clock.sleep``.
+
+    A heartbeat races the run it supervises. ``FixedClock.sleep`` advances the
+    clock, so a heartbeat timed by it would jump simulated time each time the
+    run awaited real I/O, and simulated time would track database speed. Such
+    a clock gets a timer that only yields; a clock whose sleep waits in real
+    time, including a fixed clock that overrides it, keeps its own sleep.
+    """
+    if isinstance(clock, FixedClock) and type(clock).sleep is FixedClock.sleep:
+        return _yield_without_advancing
+    return None
+
+
+async def _yield_without_advancing(seconds: float) -> None:
+    del seconds
+    await asyncio.sleep(0)
 
 
 class RandomIdFactory:
