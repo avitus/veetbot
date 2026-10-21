@@ -47,6 +47,7 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecallQuery,
     RecallTrace,
     RejectionKind,
     Sensitivity,
@@ -493,12 +494,15 @@ class DeterministicCandidateExtractor:
 
     name = "deterministic-formation-v2"
 
-    def __init__(self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS) -> None:
+    def __init__(
+        self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS, *, strict_possessives: bool = True
+    ) -> None:
         if maximum_candidates < 1:
             raise ValueError("maximum memory candidates must be positive")
         if maximum_candidates > MAX_EXTRACTOR_PROPOSALS:
             raise ValueError(f"maximum memory candidates must not exceed {MAX_EXTRACTOR_PROPOSALS}")
         self._maximum_candidates = maximum_candidates
+        self._strict_possessives = strict_possessives
 
     async def extract(
         self,
@@ -818,6 +822,16 @@ class DeterministicCandidateExtractor:
             )
 
         for match in _POSSESSIVE_ENTITY.finditer(stripped):
+            # Bare capitalization also names people, weekdays and platforms.
+            # This fallback requires a model number or a concrete device noun; ordinary
+            # affirmative ownership clauses are handled above without this limit.
+            if self._strict_possessives and not (
+                any(character.isdigit() for character in match.group(1))
+                or re.search(
+                    r"\b(?:watch|phone|laptop|tablet|camera|headphones)$", match.group(1), re.I
+                )
+            ):
+                continue
             cleaned = _clean_object(match.group(1))
             if cleaned is None:
                 continue
@@ -2235,6 +2249,20 @@ class DeterministicSalience:
         return explicit or len(value.split()) >= 3
 
 
+def _resource_restatement_key(statement: str) -> str | None:
+    """A narrow owner assertion, preserving numbers, negation and the full object."""
+    match = re.fullmatch(
+        r"(?:the\s+)?user\s+(has|owns|drives|uses)\s+(?:(?:a|an|the)\s+)?(?:new\s+(?=\d))?(.+?)\.?",
+        statement.strip(),
+        re.I,
+    )
+    if match is None:
+        return None
+    verb, value = match.groups()
+    verb = "has" if verb.casefold() in {"has", "owns"} else verb.casefold()
+    return f"{verb} {' '.join(value.casefold().split())}"
+
+
 class DeterministicConflictResolver:
     @staticmethod
     def _normalized(value: str) -> str:
@@ -2271,6 +2299,24 @@ class DeterministicConflictResolver:
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
+        if (
+            same_session
+            and existing.belief_type is BeliefType.USER_MODEL_ATTR
+            and existing.polarity is polarity is Polarity.ASSERT
+            and (resource := _resource_restatement_key(statement)) is not None
+            and resource == _resource_restatement_key(existing.statement)
+        ):
+            return "duplicate"
+        if existing.belief_type is BeliefType.RELATIONSHIP and polarity is Polarity.ASSERT:
+            generalization = re.fullmatch(
+                r"User has at least one (daughter|son)\.", statement, re.I
+            )
+            if generalization is not None and re.fullmatch(
+                rf"User's {generalization.group(1)} is [^.]+\.", existing.statement, re.I
+            ):
+                # Existence does not contradict the named child, and does not
+                # corroborate that particular child's identity either.
+                return "independent"
         if _AUTHORITY_RANK[authority] < _AUTHORITY_RANK[existing.authority]:
             return "conflict"
         if _AUTHORITY_RANK[authority] == _AUTHORITY_RANK[existing.authority] and not self._ordered(
@@ -2567,6 +2613,37 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
+            if (
+                belief_type is BeliefType.USER_MODEL_ATTR
+                and not clean_subject.startswith("person:")
+                and polarity is Polarity.ASSERT
+                and (resource_key := _resource_restatement_key(clean_statement)) is not None
+            ):
+                candidates = await uow.memories.query(
+                    RecallQuery(
+                        tenant_id=self._principal.tenant_id,
+                        principal_id=self._principal.principal_id,
+                        current_scope=scope,
+                        text=clean_statement,
+                        belief_types=[BeliefType.USER_MODEL_ATTR],
+                        candidate_selection="relevance",
+                        sensitivity_ceiling=Sensitivity.RESTRICTED,
+                        max_items=8,
+                        budget_tokens=2000,
+                        min_score=0,
+                    )
+                )
+                known = {record.id for record in related}
+                related.extend(
+                    record
+                    for record in candidates
+                    if record.id not in known
+                    and record.source_session_id == session_id
+                    and record.polarity is Polarity.ASSERT
+                    and record.derivation is derivation
+                    and resource_key == _resource_restatement_key(record.statement)
+                    and not record.subject.startswith("person:")
+                )
             classified = [
                 (
                     current,

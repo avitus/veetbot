@@ -269,3 +269,5 @@ implementation without one.
 - [ADR-0223: Owner trial with production recall review](0223-owner-production-recall-trial.md)
 
 - [ADR-0231: Email collections and scoped counts](0231-email-collections-and-counts.md)
+
+- [ADR-0232: Bounded owner-memory formation and recall repairs](0232-owner-memory-incident-repairs.md)

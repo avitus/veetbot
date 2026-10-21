@@ -536,7 +536,6 @@ from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
 from agent_core.memory.distillation import (
     NemoriAssistedCandidateExtractor,
-    PeopleAssistedCandidateExtractor,
     distillation_evidence_matches,
 )
 from agent_core.memory.email_semantics import (
@@ -553,6 +552,7 @@ from agent_core.memory.formation import (
 )
 from agent_core.memory.model_choice import OwnerSelectedCandidateExtractor
 from agent_core.memory.people_legacy import link_existing_beliefs
+from agent_core.memory.people_owner_formation import OwnerPeopleCandidateExtractor
 from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
@@ -680,6 +680,7 @@ from agent_core.tools.memory_remember import (
     LegacyMemoryRememberTool,
     MemoryRememberTool,
     PeopleMemoryRememberTool,
+    SessionScopedMemoryRememberTool,
 )
 from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.people import (
@@ -2597,6 +2598,7 @@ async def _compose(
     memory_provider_evaluation_policy: str,
     memory_distillation_evaluation_mode: bool,
     memory_people_evaluation_mode: bool,
+    memory_legacy_formation_control: bool,
     memory_reasoning_effort: ReasoningEffort | None,
     browser_provider: BrowserProvider | None,
     browser_profile_lifecycle: BrowserProfileControlPlane,
@@ -3021,7 +3023,7 @@ async def _compose(
                 selection_reason = "explicit_evaluation_mode"
             elif memory_people_evaluation_mode:
                 assert extraction_provider is not None
-                memory_extractor = PeopleAssistedCandidateExtractor(
+                memory_extractor = OwnerPeopleCandidateExtractor(
                     provider=extraction_provider,
                     resolved_model=extraction_model,
                     uow_factory=uow_factory,
@@ -3051,7 +3053,7 @@ async def _compose(
             ):
                 # ADR-0101: quality evidence measures People; it does not gate access.
                 assert extraction_provider is not None
-                memory_extractor = PeopleAssistedCandidateExtractor(
+                memory_extractor = OwnerPeopleCandidateExtractor(
                     provider=extraction_provider,
                     resolved_model=extraction_model,
                     uow_factory=uow_factory,
@@ -3328,7 +3330,7 @@ async def _compose(
             ):
                 continue
             memory_alternatives[choice] = AttributedCommunicationCandidateExtractor(
-                PeopleAssistedCandidateExtractor(
+                OwnerPeopleCandidateExtractor(
                     provider=alternative_provider,
                     resolved_model=alternative_model,
                     uow_factory=uow_factory,
@@ -3357,7 +3359,10 @@ async def _compose(
     )
     if not evaluating_memory:
         memory_extractor = AttributedCommunicationCandidateExtractor(
-            memory_extractor or DeterministicCandidateExtractor()
+            memory_extractor
+            or DeterministicCandidateExtractor(
+                strict_possessives=not memory_legacy_formation_control
+            )
         )
         if memory_alternatives:
             memory_extractor = OwnerSelectedCandidateExtractor(
@@ -3381,6 +3386,14 @@ async def _compose(
     registry.register(MemoryRememberTool(memory_service))
     if settings.people_enabled:
         registry.register(PeopleMemoryRememberTool(memory_service))
+    registry.register(
+        SessionScopedMemoryRememberTool(
+            PeopleMemoryRememberTool(memory_service)
+            if settings.people_enabled
+            else MemoryRememberTool(memory_service),
+            uow_factory,
+        )
+    )
 
     def recon_admitted() -> bool:
         return False
@@ -3658,7 +3671,7 @@ async def _compose(
                 clock,
                 ids,
                 worker.context.principal,
-                extractor=PeopleAssistedCandidateExtractor(
+                extractor=OwnerPeopleCandidateExtractor(
                     provider=ImportProvider(worker, selected_provider),
                     resolved_model=extraction_model,
                     uow_factory=uow_factory,
@@ -5540,6 +5553,7 @@ async def build(
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
     memory_distillation_evaluation_mode: bool = False,
     memory_people_evaluation_mode: bool = False,
+    memory_legacy_formation_control: bool = False,
     memory_legacy_retrieval_control: bool = False,
     memory_reasoning_effort: ReasoningEffort | None = None,
     model_metadata_only: bool = False,
@@ -6230,6 +6244,7 @@ async def build(
             memory_provider_evaluation_policy=memory_provider_evaluation_policy,
             memory_distillation_evaluation_mode=memory_distillation_evaluation_mode,
             memory_people_evaluation_mode=memory_people_evaluation_mode,
+            memory_legacy_formation_control=memory_legacy_formation_control,
             memory_reasoning_effort=memory_reasoning_effort,
             browser_provider=browser_provider,
             browser_profile_lifecycle=browser_profile_lifecycle,

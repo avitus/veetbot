@@ -364,4 +364,5 @@ nav:
       - ADR-0229 Real-browser cases off the desktop: adr/0229-real-browser-cases-run-off-the-owners-desktop.md
       - ADR-0230 Parallel verify partitions: adr/0230-parallel-verify-partitions.md
       - "0231 — Email collections and scoped counts": adr/0231-email-collections-and-counts.md
+      - "0232 — Owner-memory incident repairs": adr/0232-owner-memory-incident-repairs.md
   - Changelog: changelog.md

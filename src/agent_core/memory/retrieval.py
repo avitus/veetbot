@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from datetime import datetime, timedelta
+from functools import partial
 from time import perf_counter
 from typing import Literal
 from uuid import UUID
@@ -24,6 +25,8 @@ from agent_core.domain.memory import (
     EpisodeQuery,
     MemoryAuthority,
     MemoryCorrection,
+    MemoryDerivation,
+    MemoryLongevity,
     MemoryRecord,
     MemoryStatus,
     PeopleRecallDependencies,
@@ -143,12 +146,17 @@ def _collapse_merges(
     return list(visible.values())
 
 
-def _personal_belief_types(text: str) -> list[BeliefType]:
+def _personal_belief_types(text: str, *, owner_questions: bool = True) -> list[BeliefType]:
     """Anchor each requested kind of personal fact before candidate capping."""
 
     types: set[BeliefType] = set()
     for clause in re.split(r"[,;?!]|\band\b", text, flags=re.I):
         clause = clause.strip()
+        if owner_questions and re.search(
+            r"\babout\s+my\s+(?:family|children|parents|siblings)\b", clause, re.I
+        ):
+            types.add(BeliefType.RELATIONSHIP)
+            continue
         if not _PERSONAL_RECALL.search(clause):
             continue
         if re.search(
@@ -166,6 +174,8 @@ def _personal_belief_types(text: str) -> list[BeliefType]:
             types.add(BeliefType.PREFERENCE)
         else:
             types.add(BeliefType.USER_MODEL_ATTR)
+            if owner_questions and re.search(r"\bwhere\b.*\b(?:live|reside)\b", clause, re.I):
+                types.add(BeliefType.FACT)
             # Routines can be stored as either a personal attribute or a
             # preference, so temporal questions retain both representations.
             if re.search(r"\b(?:when|day|week|often|routine|schedule)\b", clause, re.I):
@@ -173,7 +183,9 @@ def _personal_belief_types(text: str) -> list[BeliefType]:
     return sorted(types, key=lambda item: item.value)
 
 
-def recalls_owned_resources(text: str, *, deliberate: bool = False) -> bool:
+def recalls_owned_resources(
+    text: str, *, deliberate: bool = False, owner_questions: bool = True
+) -> bool:
     """Resolve possessive context without guessing a brand from a generic noun.
 
     Deliberate searches also accept the model's keyword-style owner query.
@@ -181,7 +193,7 @@ def recalls_owned_resources(text: str, *, deliberate: bool = False) -> bool:
     """
 
     for clause in re.split(r"[,;?!]|\band\b", text, flags=re.I):
-        types = _personal_belief_types(clause)
+        types = _personal_belief_types(clause, owner_questions=owner_questions)
         if types and BeliefType.USER_MODEL_ATTR not in types:
             continue
         if re.search(r"\bmy\s+\w", clause, re.I) or (
@@ -237,7 +249,8 @@ class DeterministicQueryFormer:
 
     def from_text(self, text: str, *, current_scope: str | None = None) -> list[RecallQuery]:
         """Share production query formation with source-only evaluation questions."""
-        subjects = sorted(_entities(text))
+        owner_questions = self._candidate_selection == "relevance"
+        subjects = sorted(_entities(text, filter_openers=owner_questions))
         if not text and not subjects:
             return []
         return [
@@ -249,8 +262,12 @@ class DeterministicQueryFormer:
                 current_scope=current_scope or self._scope,
                 text=text or None,
                 subjects=subjects,
-                structured_belief_types=_personal_belief_types(text),
-                include_owned_resources=recalls_owned_resources(text),
+                structured_belief_types=_personal_belief_types(
+                    text, owner_questions=owner_questions
+                ),
+                include_owned_resources=recalls_owned_resources(
+                    text, owner_questions=owner_questions
+                ),
                 candidate_selection=self._candidate_selection,
                 profile=RecallProfile.TASK,
                 budget_tokens=self._budget_tokens,
@@ -660,7 +677,7 @@ class HybridMemoryRetriever:
             )
             if candidate is None:
                 continue
-            if _is_durable(record):
+            if _is_durable(record, owner_facts=effective_query.candidate_selection == "relevance"):
                 durable_ids.add(record.id)
             recalled.append(candidate)
         recalled = _collapse_merges(recalled, merges)
@@ -719,9 +736,21 @@ class HybridMemoryRetriever:
             chosen.add(item.belief_id)
             partners.update(item.conflict_with)
             collapsed.append(item)
+        coverage = effective_query.candidate_selection == "relevance"
+        render = partial(render_memory, bounded=coverage)
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
         measure_tokens = measure_rendered_tokens or _token_estimate
+        owner_core = (
+            moment == RecallMoment.SNAPSHOT.value
+            and effective_query.candidate_selection == "relevance"
+        )
+        if owner_core:
+            # Reserve actual token space, not just item slots, for the core's
+            # purpose: durable owner context. Keep each statement whole.
+            collapsed.sort(key=lambda item: item.belief_id not in durable_ids)
+            policy_version += "+owner-core@1"
+            render_policy += "+owner-core@1"
         # People evidence shares the existing budget. Reserve bounded room before
         # admitting facts so a busy profile cannot starve its identity and history.
         eligible_people = [
@@ -753,12 +782,17 @@ class HybridMemoryRetriever:
         durable_selected = 0
         for index, item in enumerate(collapsed):
             durable = item.belief_id in durable_ids
+            if owner_core and measure_tokens(_line(item)) > min(
+                256, effective_query.budget_tokens // 3
+            ):
+                dropped.append(item.belief_id)
+                continue
             # A slot is held for a durable belief further down the ranking only
             # while one is actually still pending, so the reservation never
             # shrinks a snapshot that has no durable belief left to seat.
             held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
             candidate_tokens = measure_tokens(
-                render_memory(
+                render(
                     [*selected, item],
                     as_of=now,
                     policy_version=render_policy,
@@ -775,9 +809,7 @@ class HybridMemoryRetriever:
             selected.append(item)
             durable_selected += int(durable)
         rendered = (
-            render_memory(
-                selected, as_of=now, policy_version=render_policy, known_at=render_known_at
-            )
+            render(selected, as_of=now, policy_version=render_policy, known_at=render_known_at)
             + people_rendered
         )
         for person_item in eligible_people:
@@ -819,7 +851,7 @@ class HybridMemoryRetriever:
                 claims = {normalize_claim(line[2:]) for line in summary.statement.splitlines()[1:]}
                 if claims & selected_claims:
                     continue
-                proposed = render_memory(
+                proposed = render(
                     [*selected_items, summary],
                     as_of=now,
                     policy_version=render_policy,
@@ -872,7 +904,7 @@ class HybridMemoryRetriever:
                     )
                     proposed_items = list(selected_items)
                     proposed_items[index] = proposed_item
-                    proposed = render_memory(
+                    proposed = render(
                         proposed_items,
                         as_of=now,
                         policy_version=render_policy,
@@ -882,7 +914,17 @@ class HybridMemoryRetriever:
                         item = proposed_item
                         selected_items = proposed_items
                         rendered = proposed
-        rendered_tokens = measure_tokens(rendered) if selected_items or selected_people else 0
+        rendered_tokens = (
+            measure_tokens(rendered) if selected_items or selected_people or coverage else 0
+        )
+        if (
+            not selected_items
+            and not selected_people
+            and rendered_tokens > effective_query.budget_tokens
+        ):
+            # Even metadata is optional under a budget too small for its header.
+            rendered = ""
+            rendered_tokens = 0
         rendered_bytes = rendered.encode("utf-8")
         trace_id = self._ids.new_id()
         trace = RecallTrace(
@@ -1366,6 +1408,7 @@ class HybridMemoryRetriever:
                 max_items=max_items,
                 min_score=0.1,
                 sensitivity_ceiling=sensitivity_ceiling,
+                candidate_selection=self._profile.candidate_selection,
             ),
             session_id=session_id,
             moment=RecallMoment.SNAPSHOT.value,
@@ -1429,10 +1472,21 @@ def _payload_contains(payload: object, needle: str, *, field: str | None = None)
     )
 
 
-def _is_durable(record: MemoryRecord) -> bool:
+def _is_durable(record: MemoryRecord, *, owner_facts: bool = False) -> bool:
     """Name the beliefs the snapshot reserves its durable share for."""
 
-    return record.belief_type in _DURABLE_TYPES or record.scope == "user"
+    return (
+        record.belief_type in _DURABLE_TYPES
+        or record.scope == "user"
+        or (
+            owner_facts
+            and record.belief_type in {BeliefType.FACT, BeliefType.RELATIONSHIP}
+            and record.authority is MemoryAuthority.USER
+            and record.derivation is MemoryDerivation.DIRECT
+            and record.longevity is MemoryLongevity.DURABLE
+            and re.match(r"^(?:the )?user(?:\b|'s)", record.statement, re.I) is not None
+        )
+    )
 
 
 def _durable_reserve(
@@ -1518,7 +1572,11 @@ def _score(
     if semantic_rank is not None:
         arms.append("semantic")
     if query.profile is RecallProfile.CORE:
-        match = 0.5 if _is_durable(record) else 0.15
+        match = (
+            0.5
+            if _is_durable(record, owner_facts=query.candidate_selection == "relevance")
+            else 0.15
+        )
         arms = ["structured"]
     else:
         semantic = (
@@ -1688,6 +1746,7 @@ def render_memory(
     as_of: object,
     policy_version: str = RETRIEVAL_POLICY_VERSION,
     known_at: datetime | None = None,
+    bounded: bool = False,
 ) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
     history = (
@@ -1695,8 +1754,10 @@ def render_memory(
         if known_at is None
         else f' known_at="{html.escape(known_at.isoformat().replace("+00:00", "Z"))}"'
     )
+    coverage = ' search_status="succeeded" coverage="bounded"' if bounded else ""
     lines = [
-        f'<memory as_of="{html.escape(stamp)}"{history} policy="{html.escape(policy_version)}">'
+        f'<memory as_of="{html.escape(stamp)}"{history} '
+        f'policy="{html.escape(policy_version)}"{coverage}>'
     ]
     for item in items:
         lines.append(f"  {_line(item)}")
@@ -1733,8 +1794,14 @@ def _line(item: RecalledItem) -> str:
     return fact + quotes
 
 
-def _entities(text: str) -> set[str]:
-    return {match.group(0) for match in re.finditer(r"\b[A-Z][A-Za-z0-9_-]{2,}\b", text)}
+def _entities(text: str, *, filter_openers: bool = True) -> set[str]:
+    # Capitalization at a sentence boundary is not evidence of a named entity.
+    openers = {"tell", "even", "nothing", "what", "where", "when", "which", "who", "how", "please"}
+    return {
+        match.group(0)
+        for match in re.finditer(r"\b[A-Z][A-Za-z0-9_-]{2,}\b", text)
+        if not filter_openers or match.group(0).casefold() not in openers
+    }
 
 
 def _token_estimate(text: str) -> int:

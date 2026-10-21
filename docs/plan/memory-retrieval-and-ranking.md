@@ -165,6 +165,15 @@ so a burst of project-specific beliefs cannot evict "who am I talking to" — th
 thing the snapshot exists to carry. Unused priming slots are not backfilled. The
 relevance floor still governs: the cap is a ceiling, not a target.
 
+[ADR-0232](../adr/0232-owner-memory-incident-repairs.md) repairs relevance-mode
+snapshot packing: direct durable owner facts and relationships join the durable
+set, which packs first; whole items larger than 256 tokens or one third of the
+current budget are omitted. The existing durable-slot reservation remains in force.
+The trace records `+owner-core@1`; legacy recent-mode selection stays unchanged.
+Successful relevance-mode reads label their bounded coverage in the rendered
+header and count that header against the token budget, including empty results.
+Neither a missing match nor a bounded result establishes a search outage.
+
 The number is then set empirically, against two signals already present in the trace:
 
 - **Snapshot utilization** — the fraction of snapshot beliefs cited at least once in

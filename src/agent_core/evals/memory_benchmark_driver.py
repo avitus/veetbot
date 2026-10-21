@@ -325,6 +325,7 @@ async def scenario_composition(
     async with bootstrap.build(
         settings=settings,
         memory_legacy_retrieval_control=True,
+        memory_legacy_formation_control=True,
         storage="memory",
         script=script,
         principal=EVALUATION_PRINCIPAL,

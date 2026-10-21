@@ -207,6 +207,15 @@ the project it was learned in, and is defined in
 
 ### 5. Resolve against existing memory
 
+[ADR-0232](../adr/0232-owner-memory-incident-repairs.md) adds a bounded,
+same-session possession-restatement match without using broad subject similarity
+as identity. A generic child-existence claim cannot supersede a named child.
+Bare capitalized possessives alone do not establish possessions. The People
+provider path classifies direct owner possessions as attributes while preserving
+the frozen formation@9 classification. New `memory.remember` versions default
+omitted scope to the authenticated session; pinned versions retain required scope.
+No historical scope, belief status, or production record is rewritten.
+
 For each surviving candidate, match against existing beliefs by subject + semantic
 + lexical similarity, then:
 
