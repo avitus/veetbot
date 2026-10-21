@@ -428,6 +428,22 @@ async def test_cancelled_navigation_does_not_retire_the_hosted_lease() -> None:
     assert sessions.sequence == [1]
 
 
+async def test_navigation_required_keeps_the_ready_profile_lease_for_navigation() -> None:
+    class BlankPageSessions(FakeSessions):
+        async def observe(self, lease_ref: str) -> BrowserObservation:
+            raise BrowserProviderError("tool.browser.navigation_required", retryable=False)
+
+    sessions = BlankPageSessions()
+    provider = ready_provider(sessions)
+    await provider.bind_execution(call_at(NOW))
+    with pytest.raises(BrowserProviderError, match="navigation_required"):
+        await provider.observe()
+    await provider.bind_execution(call_at(NOW + timedelta(seconds=10)))
+    assert (await provider.navigate("https://example.org/account")).url.endswith("/account")
+    assert sessions.acquisitions == [(PROFILE_ID, RUN_ID, 1)]
+    assert sessions.closes == []
+
+
 async def test_an_act_can_follow_an_act_on_its_returned_revision() -> None:
     """ADR-0130 decision 6 in hosted mode: act on the page act returned, no observe."""
 

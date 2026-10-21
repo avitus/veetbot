@@ -1324,6 +1324,7 @@ The stable reason-code family includes:
 - `tool.browser.url_disallowed`
 - `tool.browser.provider_unavailable`
 - `tool.browser.navigation_cancelled`
+- `tool.browser.navigation_required`
 - `tool.browser.profile_unavailable`
 - `tool.browser.authentication_required`
 - `tool.browser.needs_user`
@@ -1335,6 +1336,16 @@ The stable reason-code family includes:
 - `tool.browser.grant_not_applicable`
 - `tool.browser.output_invalid`
 - `tool.browser.outcome_unknown`
+
+An observation, expansion or extraction of a live browser's initial `about:blank`
+page returns `tool.browser.navigation_required`, not a profile or authentication
+failure. This includes a new lease after user-input suspension or a new run:
+saved authentication does not preserve an open page. The fixed model message
+directs ordinary `browser.navigate` to the intended allowed website URL, then
+fresh observation references. The refusal retains the lease and sends no
+navigation itself; it never retries an action or requests another sign-in
+without authentication evidence. Closed browsers and disallowed page origins
+retain their existing refusal. Diagnostics use the existing `stale_page` category.
 
 When the runtime dismisses a beforeunload dialog and Chromium aborts navigation
 while the same allowed page remains open, navigation returns
