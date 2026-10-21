@@ -6,6 +6,18 @@ import Foundation
 struct EmailCollectionProbe {
     @MainActor static func main() async throws {
         let api = ConversationNavigationUITestFixture.makeMemoryAPIClientIfRequested()!
+        if ProcessInfo.processInfo.arguments.contains("--probe-call") {
+            let id = UUID(uuidString: "00000000-0000-0000-0000-000000000D01")!
+            let call = try await api.callResult(id)
+            precondition(call.createdAt != nil && call.durationText == "41 s")
+            precondition(call.canFollowUp && call.followUpPrompt(for: .callAgain)?.contains(id.uuidString) == true)
+            let erased = try await api.deleteCallResult(id)
+            precondition(erased.erased == true && !erased.canFollowUp)
+            let retained = try await api.callResult(id)
+            precondition(retained.erased == true && retained.transcript == nil)
+            print("Call result fixture probe passed")
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--probe-persona") {
             let model = PersonaViewModel(makeAPIClient: { api })
             await model.load()

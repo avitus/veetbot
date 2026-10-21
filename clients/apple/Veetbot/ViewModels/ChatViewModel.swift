@@ -497,6 +497,16 @@ public final class ChatViewModel: ObservableObject {
         pushRegistrar?.requestPushRegistration()
     }
 
+    /// Stages an editable follow-up without submitting, redialing, or trusting call content.
+    @discardableResult
+    public func prepareCallFollowUp(_ action: CallFollowUpAction) -> Bool {
+        guard isConfigured, let prompt = callResult?.followUpPrompt(for: action) else { return false }
+        composerText += composerText.isEmpty ? prompt : "\n\n" + prompt
+        dismissCallResult()
+        chatNotificationHandler?()
+        return true
+    }
+
     public func dismissCallResult() {
         callResultRequestID = nil
         callResult = nil

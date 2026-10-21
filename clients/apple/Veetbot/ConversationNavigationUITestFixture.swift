@@ -6,6 +6,8 @@ import AppKit
 
 enum ConversationNavigationUITestFixture {
     static let launchArgument = "--ui-testing-conversation-navigation"
+    static let callResultID = "00000000-0000-0000-0000-000000000D01"
+    static let callResultLaunchArgument = "--ui-testing-call-result"
     static let artifactID = "00000000-0000-0000-0000-000000000A01"
     static let artifactSVG = #"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>"#
     static let firstSessionID = "00000000-0000-0000-0000-000000000123"
@@ -175,6 +177,13 @@ enum ConversationNavigationUITestFixture {
             urlSession: URLSession(configuration: configuration)
         )
         openSessionIfRequested(model)
+        if ProcessInfo.processInfo.arguments.contains(callResultLaunchArgument),
+           let payload = NotificationPushPayload(userInfo: ["veetbot": [
+               "version": 1, "kind": "call_finished", "title": "New call result",
+               "call_id": callResultID, "notification_id": UUID().uuidString,
+           ]]) {
+            Task { @MainActor in await model.openNotification(payload) }
+        }
         return model
     }
 
@@ -211,6 +220,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailRevision = 1
     private static var emailStatus = "ready"
     private static var learningPaused = false
+    private static var callContentErased = false
     private static var emailHandled = false
     private static var emailArchiveTarget: Bool?
     private static var emailArchiveReads = 0
@@ -395,6 +405,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         emailRevision = 1
         emailStatus = "ready"
         learningPaused = false
+        callContentErased = false
         emailHandled = false
         emailArchiveTarget = nil
         emailArchiveReads = 0
@@ -421,6 +432,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         var stagedFrames: [String] = []
         var stagedInterval = 0.01
         switch (request.httpMethod, url.path) {
+        case ("GET", "/v1/calls/\(ConversationNavigationUITestFixture.callResultID)"):
+            statusCode = 200
+            body = Self.callResultJSON
+        case ("DELETE", "/v1/calls/\(ConversationNavigationUITestFixture.callResultID)"):
+            statusCode = 200
+            Self.emailLock.withLock { Self.callContentErased = true }
+            body = Self.callResultJSON
         case ("GET", "/v1/persona"):
             statusCode = 200
             body = #"{"version":1,"voice":"Be clear and direct. Keep practical answers concise.","traits":["brief","direct"],"entries":[{"text":"User values clear explanations and practical next steps.","source":"user_edit","source_belief_id":null,"sensitivity":"internal","enabled":true,"stale":false}],"source":"user_edit","created_at":"2026-10-20T12:00:00Z"}"#
@@ -1415,6 +1433,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             """
     }
     /// Five synthetic priorities exercise real list geometry without using private mail.
+    /// A retained call receipt, with no fabricated calendar or messaging side effects.
+    private static var callResultJSON: String {
+        let id = ConversationNavigationUITestFixture.callResultID
+        if emailLock.withLock({ callContentErased }) {
+            return "{\"call_id\":\"\(id)\",\"erased\":true,\"provider_deleted\":false}"
+        }
+        return #"{"call_id":"\#(id)","direction":"outbound","status":"completed","counterparty":"+15555550100","created_at":"2026-10-20T15:40:00Z","duration_minutes":0.6833333333,"summary":"The office offered Tuesday at 2:30 pm. No appointment change was confirmed.","transcript":"Assistant: Which afternoons are available?\nOffice: Tuesday at 2:30 pm is available.\nAssistant: I will pass that option along.","summary_complete":true,"transcript_complete":true}"#
+    }
+
     private static var fullInboxJSON: String {
         let subjects = ["Board agenda", "Design review for the autumn release", "Friday planning notes",
                         "Updated project timeline", "Travel details for next week"]

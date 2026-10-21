@@ -275,6 +275,18 @@ call result” and only call and notification identifiers. Owner-authenticated
 Apple deep links open a plain-text result sheet in Chat; transcripts never enter
 the push payload and no new client mode is introduced.
 
+The A2 result sheet shows the retained call's `created_at` and
+`duration_minutes` when available, and preserves pending, erased and truncated
+states. It does not derive completed calendar, SMS or other actions from prose,
+parse speaker turns out of an unstructured transcript, or claim provider audio
+retention. **Call again** and **Something is wrong** stage editable Chat text
+containing only the call identifier and the owner's chosen intent. They preserve
+existing composer text, send nothing, and make no report or redial on their own.
+Pending, active and erased results offer no follow-up action. On submission,
+Chat must read the call through its governed reader; neither caller statements
+nor a caller-provided number is copied into owner-trusted composer text. Any
+subsequent call retains the ordinary authorization rules, including ADR-0213.
+
 ## Configuration and activation
 
 All flags default to zero: `AGENT_CALL_ENABLED` enables tools, owner reads and
