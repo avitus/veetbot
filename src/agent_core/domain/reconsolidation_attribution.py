@@ -4,7 +4,13 @@ from uuid import UUID
 
 from pydantic import Field
 
-from agent_core.domain.people import PeopleRecord, PeopleSource, PersonMemoryLink, PersonMention
+from agent_core.domain.people import (
+    PeopleRecord,
+    PeopleSource,
+    PersonMemoryLink,
+    PersonMention,
+    SourceMemoryLink,
+)
 from agent_core.domain.reconsolidation import ReconValue
 
 
@@ -16,7 +22,7 @@ class AttributionFootprint(ReconValue):
 
 
 def attribution_footprint(record: PeopleRecord) -> AttributionFootprint:
-    if isinstance(record, PersonMemoryLink):
+    if isinstance(record, (PersonMemoryLink, SourceMemoryLink)):
         return AttributionFootprint(belief_id=record.belief_id)
     if isinstance(record, PersonMention):
         return AttributionFootprint(source_id=record.source_id)

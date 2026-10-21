@@ -26,6 +26,7 @@ from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.hazards import INJECTION_PATTERN, SECRET_PATTERN
 from agent_core.domain.memory import (
     LIFECYCLE_POLICY_VERSION,
+    LIVE_MEMORY_STATUSES,
     MEMORY_SUBJECT_MAX_LENGTH,
     SENSITIVITY_ORDER,
     BeliefRejection,
@@ -2535,6 +2536,8 @@ class GovernedMemoryService:
         evidence_at: datetime | None = None,
         attributed_external: bool = False,
         semantic_external: bool = False,
+        source_learning: bool = False,
+        source_learning_target: UUID | None = None,
         audit_model: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
@@ -2567,6 +2570,8 @@ class GovernedMemoryService:
             origin_trust is TrustLevel.MEMORY and not explicit
         ):
             raise ToolTrustRejectedError("external content cannot directly write persistent memory")
+        if source_learning and not (attributed_external and attributed_shape):
+            raise ToolTrustRejectedError("source learning requires attributed hypothesis ceilings")
         clean_statement = " ".join(statement.split())
         clean_subject = " ".join(subject.split())
         if not clean_subject or not self._salience.eligible(clean_statement, explicit=explicit):
@@ -2599,7 +2604,7 @@ class GovernedMemoryService:
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
                 model=audit_model or self._extractor.name,
-                policy_version=self._policy_version,
+                policy_version=trigger if source_learning else self._policy_version,
                 candidates_proposed=1,
                 committed=0,
                 reinforced=0,
@@ -2659,6 +2664,20 @@ class GovernedMemoryService:
                 )
                 for current in sorted(related, key=lambda item: item.store_position, reverse=True)
             ]
+            if source_learning:
+                # Source observations never contradict or promote an owner's belief.
+                # Their receipts, not session-local sequence numbers, fence replay.
+                classified = [
+                    (current, "duplicate")
+                    for current in related
+                    if current.statement == clean_statement
+                    and (source_learning_target is None or current.id == source_learning_target)
+                    and current.status in LIVE_MEMORY_STATUSES
+                    and current.authority is MemoryAuthority.INFERRED
+                    and current.derivation is MemoryDerivation.HYPOTHESIS
+                    and current.longevity is MemoryLongevity.TENTATIVE
+                    and current.polarity is Polarity.ASSERT
+                ]
             if semantic_external:
                 # Import order is not evidence order. A historical message cannot
                 # supersede or cast doubt on a newer source merely because its
@@ -2749,6 +2768,38 @@ class GovernedMemoryService:
             for current, relation in classified:
                 if relation == "duplicate":
                     position = await uow.memories.next_position()
+                    if source_learning:
+                        evidence_instant = evidence_at or self._clock.now()
+                        reinforced = current.model_copy(
+                            update={
+                                "evidence_count": current.evidence_count + 1,
+                                "confidence": max(
+                                    current.confidence, min(0.55, current.confidence + 0.1)
+                                ),
+                                "sensitivity": max(
+                                    (current.sensitivity, sensitivity),
+                                    key=SENSITIVITY_ORDER.__getitem__,
+                                ),
+                                "flagged_for_review": True,
+                                "last_evidence_at": max(current.last_evidence_at, evidence_instant),
+                                "expires_at": max(current.last_evidence_at, evidence_instant)
+                                + timedelta(days=30),
+                                "last_reinforced_at": self._clock.now(),
+                                "updated_at": self._clock.now(),
+                                "store_position": position,
+                            }
+                        )
+                        stored = await uow.memories.reinforce(reinforced)
+                        await self._append_event(
+                            uow, session_id, run_id, "memory.reinforced", stored
+                        )
+                        if record_audit:
+                            await uow.memories.record_consolidation(
+                                formation_run.model_copy(
+                                    update={"reinforced": 1, "finished_at": self._clock.now()}
+                                )
+                            )
+                        return stored, "reinforced"
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))
                     portable_scope_promoted = (
                         current.portability is not Portability.LOCAL and len(origin_scopes) >= 2
@@ -2931,6 +2982,8 @@ class GovernedMemoryService:
                 longevity,
                 evidence_at,
             )
+            if source_learning:
+                record = record.model_copy(update={"consolidation_policy_version": trigger})
             stored = await uow.memories.upsert_belief(record)
             await self._append_event(uow, session_id, run_id, "memory.formed", stored)
             if record_audit:

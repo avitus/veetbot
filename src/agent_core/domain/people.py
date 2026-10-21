@@ -85,7 +85,7 @@ class PeopleSource(PeopleEntity):
     kind: Literal["source"] = "source"
     session_id: UUID
     event_sequence: int = Field(ge=1)
-    source_kind: Literal["owner", "email", "sms"]
+    source_kind: Literal["owner", "email", "sms", "web"]
     evidence_at: AwareDatetime
     account_id: str | None = Field(default=None, max_length=200)
     thread_id: str | None = Field(default=None, max_length=512)
@@ -127,6 +127,13 @@ class PersonMemoryLink(PeopleEntity):
     person_id: UUID
     belief_id: UUID
     role: Literal["subject", "object", "speaker", "mentioned"] = "subject"
+
+
+class SourceMemoryLink(PeopleEntity):
+    """Source-only attribution; never creates or links a person's identity."""
+
+    kind: Literal["source_memory_link"] = "source_memory_link"
+    belief_id: UUID
 
 
 class PeopleEndpoint(PeopleValue):
@@ -488,6 +495,7 @@ PeopleRecord = Annotated[
     | PeopleSource
     | PersonMention
     | PersonMemoryLink
+    | SourceMemoryLink
     | OrganizationReference
     | RelationshipAssertion
     | PeopleInteraction

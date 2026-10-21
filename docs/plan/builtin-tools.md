@@ -140,6 +140,7 @@ skill.load                    control     skills
 tool.call                     control     tool-system
 skill.manage                  capability  skills
 memory.remember               capability  memory-formation
+memory.learn                  capability  memory-formation
 memory.search                 capability  memory-retrieval
 memory.recall_episodes        capability  memory-retrieval
 knowledge.ingest              capability  knowledge-documents
@@ -200,10 +201,10 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is every builtin the composition root registers, and
-that is a function of the deployment. Seventeen identities are always
+that is a function of the deployment. Eighteen identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
-`artifact.export`, `context.update_working_state`, the three `memory.*` tools,
+`artifact.export`, `context.update_working_state`, the four `memory.*` tools,
 `skill.load`, `tool.call`, and the two `knowledge.*` tools. The other twenty-two register only
 with their flag or provider: `skill.manage` with skill authoring, the two
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with
@@ -1974,3 +1975,21 @@ overflow under ADR-0123. Owner tokens need the two scopes above. Provider
 charges are not part of language-model token accounting; approval authorizes
 one bounded generation and any selected image inputs. Audio/video references
 and URL inputs remain outside these two tools.
+
+
+## Governed source learning
+
+`memory.learn@1.0.0` is always registered, enabled and deferred through
+`tool.call`. `workspace.write_text` is also deferred to preserve the existing
+browser tool-definition budget when the dispatcher is added. Both remain
+enabled and pinned. Source learning is classified as `MEMORY_WRITE`, with
+`side_effect: NONE`, medium risk, idempotent execution, no additional required
+scopes, no parallel execution, a fifteen-second timeout, a 16,384-byte output
+limit and internal-tool output trust. Its closed observation schema and
+per-observation outcomes are defined in
+[memory formation](memory-formation-and-consolidation.md) and ADR-0233.
+The owner and source admission checks remain mandatory even when tool policy
+allows the call. Default instructions proactively retain useful separate
+observations and search for tentative memories to reinforce, while reporting
+only confirmed tool outcomes. A manual trust refusal does not imply that
+background formation failed or completed.

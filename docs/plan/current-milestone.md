@@ -4,6 +4,11 @@ title: Current Milestone
 
 # Current milestone
 
+- **Owner-directed source learning — ADR-0233:** On 2026-10-21 the owner
+  authorized governed website learning, tentative-memory reinforcement and
+  truthful manual-save reporting. This extends Milestone 21 without changing
+  frozen extraction policies or moving gates. Production delivery remains pending.
+
 - **Independent reliability repair — ADR-0205:** The owner authorized safe
   failure diagnostics, bounded recovery, cleanup isolation and scoped reliability
   reporting on `codex/app-reliability`, with its own pull request to `main`.

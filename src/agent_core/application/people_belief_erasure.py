@@ -80,7 +80,7 @@ async def erase_belief_copies(
     query = PeopleQuery(
         tenant_id=principal.tenant_id,
         principal_id=principal.principal_id,
-        kinds=["memory_link", "relationship", "commitment"],
+        kinds=["memory_link", "source_memory_link", "relationship", "commitment"],
         belief_id=belief.id,
         include_superseded=True,
         sensitivity_ceiling=Sensitivity.RESTRICTED,

@@ -122,16 +122,19 @@ async def test_resumed_run_preserves_tool_pins_across_context_rotation() -> None
             status=RunStatus.RUNNING,
             pending_tool_calls=[{"call_id": "pending"}],
             tool_pins_initialized=True,
-            pinned_tool_names=list(plan.tool_names),
-            pinned_tool_versions={spec.name: spec.version for spec in plan.tool_specs},
-            pinned_tool_specs={spec.name: spec.model_copy(deep=True) for spec in plan.tool_specs},
+            pinned_tool_names=[spec.name for spec in plan.pinned_tool_specs],
+            pinned_tool_versions={spec.name: spec.version for spec in plan.pinned_tool_specs},
+            pinned_tool_specs={
+                spec.name: spec.model_copy(deep=True) for spec in plan.pinned_tool_specs
+            },
             created_at=NOW,
         )
         rotated = plan.model_copy(update={"epoch": plan.epoch + 1})
         composition.executor._apply_tool_pins(checkpoint, rotated, restored=True)
+        assert "memory.learn" in checkpoint.pinned_tool_names
         assert checkpoint.pending_tool_calls == [{"call_id": "pending"}]
         assert checkpoint.pinned_tool_versions == {
-            spec.name: spec.version for spec in plan.tool_specs
+            spec.name: spec.version for spec in plan.pinned_tool_specs
         }
 
         changed_specs = (

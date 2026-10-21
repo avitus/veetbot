@@ -115,8 +115,9 @@ async def test_bound_production_chat_defines_every_browser_tool(tmp_path: Path) 
     assert len(plan.tool_names) == 30
     assert plan.skipped_tool_names == ()
     moved = DISCOVERED_READS - defined
+    # Deferring workspace writes leaves one more slot for a discovered read.
+    assert "mcp.gmail_read.search_threads" in defined
     assert moved == {
-        "mcp.gmail_read.search_threads",
         "mcp.gmail_work_read.get_thread",
         "mcp.gmail_work_read.list_labels",
         "mcp.gmail_work_read.search_threads",

@@ -190,7 +190,7 @@ class PeopleSectionPage(PeopleValue):
 
 class PeopleEvidenceView(PeopleValue):
     reference: UUID
-    source_kind: Literal["owner", "email", "sms"]
+    source_kind: Literal["owner", "email", "sms", "web"]
     session_id: UUID
     event_sequence: int
     evidence_at: AwareDatetime

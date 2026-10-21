@@ -575,6 +575,7 @@ from agent_core.memory.semantic_deployment import (
     compose_indexing,
     configuration_digest,
 )
+from agent_core.memory.source_learning import SourceLearningService
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
@@ -675,6 +676,7 @@ from agent_core.tools.media_generation import (
     LegacyVideoGenerationTool,
     VideoGenerationTool,
 )
+from agent_core.tools.memory_learn import MemoryLearnTool
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
 from agent_core.tools.memory_remember import (
     LegacyMemoryRememberTool,
@@ -888,7 +890,14 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "the text as content or a workspace path. For generated images or videos, use "
     "image.generate or video.generate when available. These tools attach the file to "
     "your reply automatically. Never say a file is attached unless its export or "
-    "generation tool succeeded."
+    "generation tool succeeded. When the owner asks you to learn from or remember a named "
+    "website, proactively retain useful separate observations with memory.learn after reading "
+    "it. Discover the tool through tool.call if deferred. Search existing memories and reinforce "
+    "tentative beliefs only when the cited text supports their full claim. Keep historical "
+    "observations and uncertain relationships tentative; text-only reads do not inspect photos. "
+    "Report only confirmed memory tool outcomes. A failed manual save is separate from "
+    "background formation of owner-stated facts after the reply; do not claim that nothing "
+    "was remembered or that pending formation succeeded."
 )
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}
@@ -3384,6 +3393,7 @@ async def _compose(
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
+    registry.register(MemoryLearnTool(SourceLearningService(memory_service, uow_factory, clock)))
     if settings.people_enabled:
         registry.register(PeopleMemoryRememberTool(memory_service))
     registry.register(
@@ -5856,6 +5866,7 @@ async def build(
         SKILL_LOAD_TOOL_NAME,
         TOOL_CALL_TOOL_NAME,
         "memory.remember",
+        "memory.learn",
         "memory.search",
         "memory.recall_episodes",
         *(
@@ -5907,6 +5918,8 @@ async def build(
     default_deferred_tools = [
         name
         for name in (
+            "memory.learn",
+            "workspace.write_text",
             SCHEDULE_UPDATE_TOOL_NAME,
             SCHEDULE_PAUSE_TOOL_NAME,
             SCHEDULE_RESUME_TOOL_NAME,

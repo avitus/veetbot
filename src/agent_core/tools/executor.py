@@ -279,7 +279,7 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
 
 
 def _action_kind(tool: Tool) -> ActionKind:
-    if tool.spec.name == "memory.remember":
+    if tool.spec.name in {"memory.remember", "memory.learn"}:
         return ActionKind.MEMORY_WRITE
     if tool.spec.name == SKILL_MANAGE_TOOL_NAME:
         return ActionKind.SKILL_AUTHORING
@@ -1359,7 +1359,11 @@ class ToolPipeline:
                             content=[],
                             failure=ToolFailure(
                                 kind=ToolFailureKind.INVALID_ARGUMENTS,
-                                reason_code="tool.trust_rejected",
+                                reason_code=(
+                                    "tool.memory.manual_trust_rejected"
+                                    if tool.spec.name == "memory.remember"
+                                    else "tool.trust_rejected"
+                                ),
                                 detail="tool rejected content with insufficient provenance trust",
                                 retryable=False,
                             ),

@@ -20,7 +20,7 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:526-536). That surface is right for an
+(memory-formation-and-consolidation.md:530-540). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
@@ -202,7 +202,9 @@ Transparency must not become a disclosure path
 ADR-0224 part B. The same `ceiling` and `not_found` rule as the detail read
 decide whether the belief is visible at all. The response is
 `{"items": [...]}`, at most five items, newest cited event first, one per
-cited source event of the belief's source session:
+cited source event. ADR-0233 also includes the source-only evidence links
+from other chats that support owner-directed learning; the same ownership,
+sensitivity and erasure checks apply:
 
 ```text
 source_kind     owner | email | sms | call | scheduler | tool | unknown

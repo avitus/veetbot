@@ -3072,7 +3072,12 @@ Acceptance criteria for this workstream:
   tool or web, foreign-principal, and foreign-tenant content cannot become
   sources. Correspondent content forms only an explicitly attributed,
   short-lived hypothesis and never becomes owner speech.
-- Formation is never inline with the user-visible run: terminal runs enqueue one
+- ADR-0233 additionally admits owner-directed website learning through the
+  explicit governed `memory.learn` tool. Current-run owner authorization, exact
+  retained read evidence, conservative grounding, tentative authority ceilings,
+  replay fences, and source erasure are mandatory. This does not broaden the
+  automatic extractor's source set or promote external content to owner speech.
+- Automatic formation is never inline with the user-visible run: terminal runs enqueue one
   idempotent flag and maintenance performs full extraction only after the idle
   boundary. Session close remains an immediate boundary.
 - Secrets and injection-shaped candidates remain rejected, and one consolidation

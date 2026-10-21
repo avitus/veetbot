@@ -365,4 +365,5 @@ nav:
       - ADR-0230 Parallel verify partitions: adr/0230-parallel-verify-partitions.md
       - "0231 — Email collections and scoped counts": adr/0231-email-collections-and-counts.md
       - "0232 — Owner-memory incident repairs": adr/0232-owner-memory-incident-repairs.md
+      - "0233 — Owner-directed source learning": adr/0233-owner-directed-source-learning.md
   - Changelog: changelog.md
