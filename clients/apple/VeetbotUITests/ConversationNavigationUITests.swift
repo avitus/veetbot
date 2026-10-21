@@ -337,14 +337,14 @@ final class ConversationNavigationUITests: XCTestCase {
 
         let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        // The panel's toggle just relaid the window; a click during that
-        // layout can miss the row, so it is repeated until the chat opens.
-        let loaded = app.staticTexts["Historical answer loaded"]
-        for _ in 0..<3 where !loaded.exists {
-            openSidebarRow(row)
-            _ = loaded.waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(loaded.exists)
+        // On a shared desktop another app can come forward and take the click
+        // (seen 2026-10-21: the row click landed in another app's window). The
+        // app is brought forward and the row must be hittable before the one click.
+        app.activate()
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: row)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 5), .completed, "The row must be clickable")
+        openSidebarRow(row)
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
         let composer = app.descendants(matching: .any)["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.click()
