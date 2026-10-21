@@ -14,34 +14,102 @@ extension EnvironmentValues {
 struct PeopleLookupSheet: View {
     @StateObject private var model: PeopleViewModel
     let sessionID: UUID?
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var selectedPersonID: UUID?
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     init(lookup: PeopleLookup, sessionID: UUID? = nil) {
         self.sessionID = sessionID
         _model = StateObject(wrappedValue: PeopleViewModel(searchText: lookup.text, asOf: lookup.asOf))
     }
     var body: some View {
-        NavigationStack { navigationContent }
+        Group {
+            if usesColumns {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    PeopleDirectorySidebar(model: model)
+                        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("People collections")
+                } content: {
+                    navigationContent
+                        .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 380)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("People directory navigation")
+                } detail: {
+                    NavigationStack {
+                        if let selectedPersonID, model.collection != .duplicates {
+                            PeopleDetailView(personID: selectedPersonID, sessionID: sessionID)
+                                .id(selectedPersonID)
+                        } else {
+                            VStack {
+                                Spacer()
+                                A2EmptyState(systemImage: "person", title: "Choose a person")
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .background(AppTheme.paper)
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Selected person")
+                }
+            } else {
+                NavigationStack { navigationContent }
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("People navigation")
         .environment(\.dismissPeople, { dismiss() })
         .accessibilityLabel("People")
         .toastHost()
         #if os(macOS)
-        .frame(minWidth: 820, minHeight: 650)
+        .frame(minWidth: 960, minHeight: 650)
         .background(PeopleSheetAccessibilityLabel())
         #else
         .frame(minWidth: 320, minHeight: 400)
+        .presentationSizing(.page)
         #endif
         .onReceive(NotificationCenter.default.publisher(for: .peopleConnectionChanged)) { _ in dismiss() }
     }
+    private var usesColumns: Bool {
+        #if os(macOS)
+        true
+        #else
+        sizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
+        #endif
+    }
+
+    private var directory: some View {
+        PeopleBrowserView(model: model, sessionID: sessionID, selection: usesColumns ? $selectedPersonID : nil, showsCollectionControls: !usesColumns)
+            .navigationTitle("People")
+    }
+
+    @ViewBuilder private var searchableDirectory: some View {
+        if usesColumns {
+            directory
+        } else {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
+                    }
+                    TextField("Search people", text: Binding(get: { model.searchText }, set: model.setSearchText))
+                        .textFieldStyle(.plain)
+                        .accessibilityLabel("Search people")
+                        .accessibilityIdentifier("people.search")
+                }
+                .veetType(.ui).padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(AppTheme.field))
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                directory
+            }
+            .background(AppTheme.paper)
+        }
+    }
+
     private var navigationContent: some View {
-            PeopleBrowserView(model: model, sessionID: sessionID)
-                .navigationTitle("People")
-                #if os(iOS)
-                .searchable(text: Binding(get: { model.searchText }, set: model.setSearchText), placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-                #else
-                .searchable(text: Binding(get: { model.searchText }, set: model.setSearchText), prompt: "Search people")
-                #endif
+        searchableDirectory
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button { dismiss() } label: { Image(systemName: "xmark").imageScale(.large) }
@@ -59,13 +127,16 @@ public struct PeopleBrowserView: View {
     /// navigation link there stopped responding after the first choice once the
     /// directory was longer than its column, so that layout selects instead.
     private let selection: Binding<UUID?>?
+    private let showsCollectionControls: Bool
     @State private var showingAdd = false
     @State private var showingImport = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     public init(model: PeopleViewModel, sessionID: UUID? = nil) { self.init(model: model, sessionID: sessionID, selection: nil) }
-    init(model: PeopleViewModel, sessionID: UUID?, selection: Binding<UUID?>?) {
+    init(model: PeopleViewModel, sessionID: UUID?, selection: Binding<UUID?>?, showsCollectionControls: Bool = true) {
         self.model = model
         self.sessionID = sessionID
         self.selection = selection
+        self.showsCollectionControls = showsCollectionControls
     }
 
     public var body: some View {
@@ -76,18 +147,22 @@ public struct PeopleBrowserView: View {
                 PeopleList(label: "People and filters") {
                     #if os(macOS)
                     VStack(alignment: .leading, spacing: 10) {
+                        if showsCollectionControls {
                         PeopleFilter(title: "Show", selection: model.collection, options: PeopleCollection.allCases, label: { model.collectionLabel($0) }) { value in Task { await model.selectCollection(value) } }
+                        }
                         if model.collection != .duplicates {
                             PeopleFilter(title: "Relationship with you", selection: model.relationship, options: PeopleRelationshipFilter.allCases, label: { $0.label }) { value in Task { await model.selectRelationship(value) } }
                         }
                     }
                     .padding(.bottom, 12)
                     #else
+                    if showsCollectionControls {
                     Menu {
                         Picker("Show", selection: Binding(get: { model.collection }, set: { value in Task { await model.selectCollection(value) } })) {
                             ForEach(PeopleCollection.allCases) { Text(model.collectionLabel($0)).tag($0) }
                         }
                     } label: { filterLabel("Show", value: model.collectionLabel(model.collection)) }
+                    }
                     if model.collection != .duplicates {
                         Menu {
                             Picker("Relationship with you", selection: Binding(get: { model.relationship }, set: { value in Task { await model.selectRelationship(value) } })) {
@@ -180,9 +255,15 @@ public struct PeopleBrowserView: View {
                         }
                     }
                     if model.availability != .disabled && model.availability != .denied {
-                        HStack(spacing: 8) { directoryActions }
-                            .padding(.top, 12)
-                            .a2ListRow()
+                        Group {
+                            if dynamicTypeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 12) { directoryActions }
+                            } else {
+                                HStack(spacing: 8) { directoryActions }
+                            }
+                        }
+                        .padding(.top, 12)
+                        .a2ListRow()
                     }
                 }
             }
@@ -526,12 +607,30 @@ extension View {
 }
 
 #if os(macOS)
-/// SwiftUI's sheet hosting container is separate from its labeled content.
+/// SwiftUI's sheet and split-column hosting groups are separate from their
+/// labeled content. Give those native navigation containers a description too.
 private struct PeopleSheetAccessibilityLabel: NSViewRepresentable {
     final class LabelView: NSView {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            labelContainers()
+        }
+        override func layout() {
+            super.layout()
+            labelContainers()
+        }
+        private func labelContainers() {
+            window?.setAccessibilityLabel("People")
             window?.contentView?.setAccessibilityLabel("People")
+            guard let content = window?.contentView else { return }
+            labelGroups(in: content)
+        }
+        private func labelGroups(in view: NSView) {
+            if view.accessibilityRole() == .group,
+               view.accessibilityLabel()?.isEmpty != false {
+                view.setAccessibilityLabel("People navigation")
+            }
+            for child in view.subviews { labelGroups(in: child) }
         }
     }
     func makeNSView(context: Context) -> LabelView { LabelView() }
@@ -577,3 +676,50 @@ private struct PeopleFilter<Option: Identifiable & Equatable>: View {
     }
 }
 #endif
+
+/// Directory navigation shared by the wide People workspace.
+struct PeopleDirectorySidebar: View {
+    @ObservedObject var model: PeopleViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("People").veetType(.display)
+                Text("The people you know or have written to.")
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                TextField("Search people", text: Binding(get: { model.searchText }, set: model.setSearchText))
+                    .textFieldStyle(.plain).a2Field().padding(.vertical, 12)
+                    .accessibilityIdentifier("people.sidebar.search")
+                    .accessibilityLabel("Search people")
+                SidebarSectionLabel(title: "Directory")
+                collection(.review, symbol: "flag")
+                collection(.recent, symbol: "clock")
+                collection(.people, symbol: "person.2")
+                collection(.pinned, symbol: "pin")
+                SidebarSectionLabel(title: "Maintenance")
+                collection(.duplicates, symbol: "person.2.badge.gearshape")
+                collection(.all, symbol: "person.crop.rectangle.stack")
+                Text("Veetbot never merges people on a name alone. Matches wait here for you.")
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+            }.padding(16)
+        }.background(AppTheme.paperDeep)
+    }
+
+    private func collection(_ value: PeopleCollection, symbol: String) -> some View {
+        Button { Task { await model.selectCollection(value) } } label: {
+            SidebarRow {
+                Image(systemName: symbol)
+            } title: {
+                Text(value.rawValue)
+            } trailing: { _ in
+                if let count = model.count(for: value) { Text(count, format: .number) }
+            }
+            .padding(.horizontal, 8)
+            .background(RoundedRectangle(cornerRadius: 7).fill(model.collection == value ? AppTheme.selected : .clear))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(model.collection == value ? .isSelected : [])
+        .accessibilityIdentifier("people.collection.\(value.rawValue)")
+    }
+}

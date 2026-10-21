@@ -31,7 +31,231 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
+    func testA2CallResultDisclosesTranscriptAndStagesANewCall() {
+        app.launchArguments.append("--ui-testing-call-result")
+        app.launch()
+        let again = app.buttons["call.again"]
+        XCTAssertTrue(again.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["call.duration"].exists)
+        let transcript = app.staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@",
+            "Assistant: Which afternoons", "Assistant: Which afternoons"
+        )).firstMatch
+        XCTAssertFalse(transcript.exists)
+        let disclosure = app.descendants(matching: .any)["call.transcript"].firstMatch
+        activate(disclosure)
+        XCTAssertTrue(transcript.waitForExistence(timeout: 5))
+        XCTAssertTrue(again.isHittable)
+        attachEmailScreenshot("A2 Call result and transcript")
+        activate(again)
+        assertCallFollowUpIsEditable()
+        XCTAssertFalse(again.exists)
+    }
+
+    func testA2CallConcernStagesEditableChat() {
+        app.launchArguments.append("--ui-testing-call-result")
+        app.launch()
+        let concern = app.buttons["call.something-wrong"]
+        XCTAssertTrue(concern.waitForExistence(timeout: 10))
+        activate(concern)
+        assertCallFollowUpIsEditable()
+        XCTAssertFalse(concern.exists)
+    }
+
+    private func assertCallFollowUpIsEditable() {
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        #if os(macOS)
+        let text = composer.textViews.firstMatch
+        #else
+        let text = composer
+        #endif
+        let staged = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS[c] %@", "00000000-0000-0000-0000-000000000d01"), object: text)
+        XCTAssertEqual(XCTWaiter.wait(for: [staged], timeout: 5), .completed, app.debugDescription)
+    }
+
+    func testA2MarkdownArtifactRendersAReadableDocument() {
+        app.launchArguments += ["--ui-testing-artifact", "--ui-testing-markdown-artifact"]
+        app.launch()
+        let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        #if os(macOS)
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        #else
+        openSidebarRow(row)
+        #endif
+        let file = app.buttons["appointment.md"]
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+        activate(file)
+        let heading = app.staticTexts["Appointment notes"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["# Appointment notes"].exists)
+        XCTAssertTrue(app.buttons["Download"].isEnabled)
+        attachEmailScreenshot("A2 rendered Markdown artifact")
+        activate(app.buttons["Close"])
+        XCTAssertTrue(file.waitForExistence(timeout: 5))
+    }
+
+    /// Changing the visible section must not discard the in-progress persona edit.
+    func testA2PersonaSectionsPreserveUnsavedVoice() {
+        app.launch()
+        openA2Destination("sidebar.persona")
+        let voice = app.descendants(matching: .any)["persona.voice"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 10), app.debugDescription)
+        activate(voice)
+        voice.typeText(" Keep explanations concrete.")
+        choosePersonaSection("What Veetbot assumes")
+        XCTAssertTrue(app.buttons["persona.add-entry"].waitForExistence(timeout: 5))
+        XCTAssertFalse(voice.exists)
+        choosePersonaSection("Voice")
+        XCTAssertTrue(voice.waitForExistence(timeout: 5))
+        XCTAssertTrue((voice.value as? String ?? "").contains("Keep explanations concrete."))
+        attachEmailScreenshot("A2 Persona voice and sections")
+    }
+
+    func testA2WideMemoryKeepsCollectionsBesideRecords() throws {
+        #if os(iOS)
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Compact Memory uses push navigation")
+        #endif
+        app.launch()
+        openA2Destination("sidebar.memory")
+        let collection = app.buttons["memory.group.all"]
+        let record = app.descendants(matching: .any)["memory.row.00000000-0000-0000-0000-000000000321"]
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        XCTAssertTrue(collection.waitForExistence(timeout: 5))
+        #if os(macOS)
+        // AppKit combines the link's text into its button's accessibility label.
+        let recordContent = record
+        #else
+        // iPad exposes that grouping element with a zero frame; its visible
+        // text supplies the actual column geometry.
+        let recordContent = texts("The user prefers dark mode.").firstMatch
+        #endif
+        XCTAssertTrue(recordContent.waitForExistence(timeout: 5))
+        waitForSettledFrame(of: recordContent, stableFor: 3)
+        XCTAssertTrue(recordContent.isHittable)
+        XCTAssertLessThan(collection.frame.maxX, recordContent.frame.minX)
+        activate(record)
+        XCTAssertTrue(app.descendants(matching: .any)["memory.detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(collection.isHittable)
+        attachEmailScreenshot("A2 Memory columns")
+    }
+
+    func testA2SchedulesKeepListBesideSelectedSchedule() throws {
+        #if os(iOS)
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Compact Schedules uses push navigation")
+        #endif
+        app.launch()
+        openA2Destination("sidebar.schedules")
+        let row = app.descendants(matching: .any)["schedule.row.00000000-0000-0000-0000-000000000654"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        activate(row)
+        let detail = app.descendants(matching: .any)["schedule.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let instruction = texts("Full instruction from the schedule point read.").firstMatch
+        XCTAssertTrue(instruction.waitForExistence(timeout: 5))
+        waitForSettledFrame(of: instruction, stableFor: 3)
+        XCTAssertTrue(instruction.isHittable)
+        XCTAssertTrue(row.isHittable)
+        XCTAssertLessThanOrEqual(row.frame.maxX, instruction.frame.minX)
+        XCTAssertTrue(app.buttons["schedule.new"].isHittable)
+        attachEmailScreenshot("A2 Schedules list and detail")
+    }
+
+    private func openA2Destination(_ identifier: String) {
+        #if os(macOS)
+        let button = app.buttons[identifier]
+        XCTAssertTrue(button.waitForExistence(timeout: 10))
+        activate(button)
+        #else
+        openSidebarDestination(identifier: identifier)
+        #endif
+    }
+
+    private func choosePersonaSection(_ title: String) {
+        let sidebar = app.buttons["persona.section.\(title)"]
+        if sidebar.exists { activate(sidebar); return }
+        let picker = app.buttons["persona.section-picker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        activate(picker)
+        activate(app.buttons[title].firstMatch)
+    }
+
     #if os(macOS)
+    func testA2EmailHasMailboxBesideTheInbox() {
+        app.launch()
+        activate(app.buttons["mode.email"])
+        let mailbox = app.buttons["email.collection.inbox"]
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(mailbox.waitForExistence(timeout: 5))
+        XCTAssertLessThan(mailbox.frame.maxX, row.frame.minX)
+        XCTAssertTrue(app.buttons["email.collection.needsYou"].isHittable)
+        XCTAssertTrue(app.buttons["email.collection.handled"].isHittable)
+        activate(row)
+        let message = texts("Please review the agenda before Friday.").firstMatch
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        XCTAssertTrue(mailbox.isHittable)
+        XCTAssertTrue(row.isHittable)
+        XCTAssertLessThan(row.frame.maxX, message.frame.minX)
+        attachEmailScreenshot("A2 Email mailbox and inbox")
+    }
+
+    func testA2HandledCollectionDoesNotArchiveMail() {
+        app.launch()
+        openEmailMode()
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        activate(row)
+        let actions = app.descendants(matching: .any)["Thread actions"].firstMatch
+        XCTAssertTrue(actions.waitForExistence(timeout: 5))
+        activate(actions)
+        activate(app.menuItems["Mark handled"])
+        activate(app.buttons["email.collection.needsYou"])
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        activate(app.buttons["email.collection.handled"])
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        activate(app.buttons["email.collection.inbox"])
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Handled mail remains in Inbox until separately archived")
+        activate(actions)
+        activate(app.menuItems["Mark not handled"])
+        activate(app.buttons["email.collection.needsYou"])
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+    }
+
+    func testA2PeopleHasDirectoryNavigation() {
+        app.launch()
+        let historical = app.descendants(matching: .any)["sidebar.recent.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10))
+        activate(historical)
+        activate(app.buttons["chat.people"])
+        let everyone = app.buttons["people.collection.Everyone"]
+        XCTAssertTrue(everyone.waitForExistence(timeout: 5))
+        activate(everyone)
+        let person = app.descendants(matching: .any)["people.row.00000000-0000-0000-0000-000000000777"]
+        XCTAssertTrue(person.waitForExistence(timeout: 10))
+        XCTAssertLessThan(everyone.frame.maxX, person.frame.minX)
+        activate(app.buttons["people.collection.Possible duplicates"])
+        XCTAssertFalse(person.exists)
+        attachEmailScreenshot("A2 People directory")
+    }
+
+    func testA2InlineUnsubscribeKeepsTheConfirmation() {
+        addSubscriptionsFixture()
+        app.launch()
+        openEmailMode()
+        openSubscriptions()
+        let action = app.buttons["email.subscription.inline.\(Self.newsSubscriptionID)"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        activate(action)
+        checkConfirmation(title: "Unsubscribe from this sender?",
+                          naming: [("Daily Brief", "One-click request to daily.example.test")])
+        XCTAssertEqual(subscriptionStateCount("Unsubscribed"), 0)
+        activate(app.buttons["email.unsubscribe.confirm"])
+        waitForSubscriptionState("Unsubscribed", count: 1)
+    }
+
     /// A loaded SVG used to rebuild the viewer's implicit navigation columns,
     /// raising an AppKit exception before the owner could save the file.
     func testSVGArtifactCanBeDownloadedOnMac() throws {
@@ -421,6 +645,22 @@ final class ConversationNavigationUITests: XCTestCase {
     /// host and longer beside a second simulator. Five seconds was too near that.
     private static let archiveOutcomeTimeout: TimeInterval = 20
 
+    /// Legacy views live in the Find other mail disclosure on the A2 surface.
+    private func selectLegacyMailView(_ title: String) {
+        #if os(macOS)
+        let choice = app.radioButtons[title]
+        #else
+        let choice = app.buttons[title]
+        #endif
+        if !choice.exists {
+            let disclosure = app.buttons["email.other-mail-views"]
+            XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+            activate(disclosure)
+        }
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        activate(choice)
+    }
+
     /// Archiving the only thread clears detail; reopen it from Other mail to restore its Inbox state.
     private func checkHandledActionInDetail() {
         let action = app.buttons["email.handled.detail"]
@@ -432,11 +672,7 @@ final class ConversationNavigationUITests: XCTestCase {
         action.tap()
         #endif
         XCTAssertFalse(action.exists, "Archiving the last visible email must clear its detail")
-        #if os(macOS)
-        app.radioButtons["Other mail"].click()
-        #else
-        app.buttons["Other mail"].tap()
-        #endif
+        selectLegacyMailView("Other mail")
         let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         #if os(macOS)
@@ -542,14 +778,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(check.exists, "Archiving must remove the row as soon as the tap finishes")
         XCTAssertFalse(progress.exists)
         XCTAssertFalse(app.buttons["email.handled.detail"].exists)
-        #if os(macOS)
-        let other = app.radioButtons["Other mail"]
-        XCTAssertTrue(other.waitForExistence(timeout: 5))
-        other.click()
-        #else
-        let other = app.buttons["Other mail"]
-        other.tap()
-        #endif
+        selectLegacyMailView("Other mail")
         XCTAssertTrue(check.waitForExistence(timeout: Self.archiveOutcomeTimeout))
         XCTAssertEqual(check.label, "Move to Inbox")
     }
@@ -1471,11 +1700,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["email.thread.00000000-0000-0000-0000-000000000801"].waitForExistence(timeout: 5))
         // The initial removal is optimistic. Observe the confirmed state in
         // Other mail before returning to the inbox and asserting it stays out.
-        #if os(macOS)
-        activate(app.radioButtons["Other mail"])
-        #else
-        activate(app.buttons["Other mail"])
-        #endif
+        selectLegacyMailView("Other mail")
         let reported = app.buttons["email.thread.\(Self.spamThreadID)"]
         XCTAssertTrue(reported.waitForExistence(timeout: 10))
         activate(reported)
@@ -1486,10 +1711,8 @@ final class ConversationNavigationUITests: XCTestCase {
         if UIDevice.current.userInterfaceIdiom == .phone {
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
         }
-        activate(app.buttons["Important"])
-        #else
-        activate(app.radioButtons["Important"])
         #endif
+        selectLegacyMailView("Important")
         XCTAssertTrue(reported.waitForNonExistence(timeout: 10),
                       "A confirmed report keeps the conversation out of the inbox")
     }
@@ -1896,7 +2119,8 @@ final class ConversationNavigationUITests: XCTestCase {
         let collection = app.buttons["memory.group.synthesis"]
         #else
         openSidebarDestination(identifier: "sidebar.memory")
-        let collection = app.segmentedControls.buttons["Synthesis"]
+        let sidebar = app.buttons["memory.group.synthesis"]
+        let collection = sidebar.waitForExistence(timeout: 2) ? sidebar : app.segmentedControls.buttons["Synthesis"]
         #endif
         XCTAssertTrue(collection.waitForExistence(timeout: 5))
         activate(collection)
@@ -2069,7 +2293,8 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         openSidebarDestination(identifier: "sidebar.memory")
         XCTAssertTrue(app.descendants(matching: .any)["memory.browser"].waitForExistence(timeout: 5))
-        let peopleCollection = app.segmentedControls.buttons["People"]
+        let sidebar = app.buttons["memory.group.people"]
+        let peopleCollection = sidebar.waitForExistence(timeout: 2) ? sidebar : app.segmentedControls.buttons["People"]
         #endif
         XCTAssertTrue(peopleCollection.waitForExistence(timeout: 5))
         activate(peopleCollection)
@@ -2147,7 +2372,9 @@ final class ConversationNavigationUITests: XCTestCase {
     private func choosePerson(_ row: XCUIElement, showing text: String, in detail: XCUIElement, above: Bool = false) {
         #if os(iOS)
         // The sheet's back button, not the first button of the window's bar behind it.
-        if detail.exists && !row.isHittable { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
+        if detail.exists && !row.isHittable && !app.buttons["memory.group.people"].isHittable {
+            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        }
         #endif
         revealDirectoryRow(row, above: above)
         XCTAssertTrue(row.waitForExistence(timeout: 5))
@@ -2982,13 +3209,12 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(lessImportant.isEnabled)
         target.click()
         app.menuItems["This kind of content"].click()
-        let topic = app.popUpButtons["email.feedback-topic"]
+        let topic = app.buttons["email.feedback-topic-chip.Board planning"]
         XCTAssertFalse(important.isEnabled, "Content feedback requires an explicit topic")
         XCTAssertFalse(lessImportant.isEnabled)
         XCTAssertTrue(topic.waitForExistence(timeout: 5))
-        XCTAssertEqual(topic.value as? String, "Choose a topic")
+        XCTAssertFalse(topic.isSelected)
         topic.click()
-        app.menuItems["Board planning"].click()
         XCTAssertTrue(important.isEnabled)
         XCTAssertTrue(lessImportant.isEnabled)
         important.click()
@@ -3004,7 +3230,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(lessImportant.isEnabled)
         target.click()
         app.menuItems["This kind of content"].click()
-        XCTAssertEqual(topic.value as? String, "Choose a topic")
+        XCTAssertFalse(topic.isSelected)
         XCTAssertFalse(important.isEnabled)
     }
 
@@ -3053,21 +3279,21 @@ final class ConversationNavigationUITests: XCTestCase {
         let first = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         first.click()
-        let search = app.textFields["email.search"]
-        let originalWidth = search.frame.width
+        let inbox = app.descendants(matching: .any)["email.inbox"]
+        let originalWidth = inbox.frame.width
         let divider = app.splitters.firstMatch
         XCTAssertTrue(divider.waitForExistence(timeout: 5))
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         // macOS 27 ignores the touch-style press-drag on a divider; the mouse
         // click-drag still moves it.
         start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
-        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
+        XCTAssertTrue(waitForFrame(of: inbox, timeout: 5) { $0.width > originalWidth + 80 },
                       "Dragging the divider must widen the email list\n\(app.debugDescription)")
-        let resizedWidth = search.frame.width
+        let resizedWidth = inbox.frame.width
         XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
         app.buttons["mode.chat"].click()
         app.buttons["mode.email"].click()
-        XCTAssertEqual(search.frame.width, resizedWidth, accuracy: 3)
+        XCTAssertEqual(inbox.frame.width, resizedWidth, accuracy: 3)
         XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
         attachEmailScreenshot("Resized priority inbox")
     }
@@ -3075,16 +3301,16 @@ final class ConversationNavigationUITests: XCTestCase {
     /// Drags the actual divider, quits, and finds the inbox at the dragged width after relaunch.
     func testEmailSidebarWidthPersistsAcrossApplicationRestart() {
         launchFullEmailInbox()
-        let search = app.textFields["email.search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 10))
-        let originalWidth = search.frame.width
+        let inbox = app.descendants(matching: .any)["email.inbox"]
+        XCTAssertTrue(inbox.waitForExistence(timeout: 10))
+        let originalWidth = inbox.frame.width
         let divider = app.splitters.firstMatch
         XCTAssertTrue(divider.waitForExistence(timeout: 5))
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
-        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
+        XCTAssertTrue(waitForFrame(of: inbox, timeout: 5) { $0.width > originalWidth + 80 },
                       "Dragging the divider must widen the email list\n\(app.debugDescription)")
-        let resizedWidth = search.frame.width
+        let resizedWidth = inbox.frame.width
 
         app.launchEnvironment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] = "1"
         defer { app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH") }
@@ -3092,9 +3318,9 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["mode.email"].waitForExistence(timeout: 10))
         app.buttons["mode.email"].click()
-        XCTAssertTrue(search.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { abs($0.width - resizedWidth) <= 3 },
-                      "The inbox must reopen at \(resizedWidth) points, not \(search.frame.width)")
+        XCTAssertTrue(inbox.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: inbox, timeout: 5) { abs($0.width - resizedWidth) <= 3 },
+                      "The inbox must reopen at \(resizedWidth) points, not \(inbox.frame.width)")
         attachEmailScreenshot("Inbox width after relaunch")
     }
 
@@ -3264,7 +3490,7 @@ final class ConversationNavigationUITests: XCTestCase {
         for _ in 0..<40 {
             Thread.sleep(forTimeInterval: 0.1)
             let next = element.frame
-            if next == frame {
+            if next == frame && next.width > 0 && next.height > 0 {
                 stable += 1
                 if stable >= samples { return }
             } else {

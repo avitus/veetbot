@@ -213,7 +213,10 @@ People" below), and Persona, Settings and Connect complete the set: the
 persona's entries as a card of hairline rows of fields, a server conflict and
 each nomination from memory in an amber-edged card with Affirm as the filled
 capsule and Decline as a quiet one. With a server that has them (ADR-0226),
-Persona leads with Voice, the Lean towards chips (Brief, Warm, Direct, Formal,
+Persona uses a section sidebar on Mac and regular-width iPad, and a section
+menu on compact screens: Voice, What Veetbot assumes, Nominations and
+Boundaries. Moving between sections preserves unsaved edits. Voice contains
+the Lean towards chips (Brief, Warm, Direct, Formal,
 Playful; up to three, Formal and Playful replacing each other) and How that
 sounds, an example reply the server generates from the unsaved voice and labels
 "Example — generated, not saved" (or a labelled illustration of the chips when
@@ -228,7 +231,9 @@ surfaces that follow.
 Website Access lists the authenticated principal's browser profiles and lets the
 user choose one `READY` profile for new conversations. Adding access, or
 signing in again to a profile that is not revoked, uses Sign in on this device
-by default (ADR-0128). The app opens the website in a private sign-in window:
+by default (ADR-0128). The private sign-in window places the instructions and
+confirmation beside the website on Mac and regular-width iPad; compact screens
+keep the explanation above the website and confirmation below it. The app opens
 a `WKWebView` with a non-persistent data store, the platform's own user agent,
 no injected script or message handler, and top-level navigation confined to
 the profile's origins. The user types usernames, passwords, and one-time codes
@@ -242,10 +247,10 @@ page address is persisted, logged, or kept in view state. The service filters
 and verifies the session and decides the outcome. Passkeys and identity
 providers on other origins do not work in that window. Every profile row that
 is not revoked has Sign in again, which opens the same window for that
-profile. When a new website's sign-in cannot start on this device, or its
-session is too large to hand over, the window offers Use Veetbot's remote
-browser: it clears the window's data and continues with the remote ceremony
-below. While any task permission is active (ADR-0129), a compact Task
+profile. For a new website, Use Veetbot's remote browser is also available
+before a sign-in attempt and after a supported failure: it clears the window's
+data and continues with the remote ceremony below. While any task permission
+is active (ADR-0129), a compact Task
 permissions row at the end of Website Access shows how many, and its menu
 stops any one of them at once.
 
@@ -564,8 +569,10 @@ writes artifact bytes to disk. Artifacts can be previewed or exported through
 the operating system file picker. The Mac viewer uses a single-pane sheet with
 Close and Download controls; loading a file does not rebuild navigation columns.
 Cancelling the save picker keeps the viewer open, and saving preserves the
-original bytes, including SVG files whose preview cannot be decoded. The macOS
-UI regression loads an SVG from a reply, cancels a download, then saves it and
+original bytes, including SVG files whose preview cannot be decoded. Markdown
+artifacts use the same bounded native reading renderer as Chat, including
+headings and tables; other text remains literal, and HTML is never executed.
+The macOS UI regression loads an SVG from a reply, cancels a download, then saves it and
 compares the exported bytes.
 
 The current public SSE contract exposes tool result content and trust but does
@@ -633,8 +640,16 @@ instruction's preview and the cadence with the next run. A memory or a
 schedule opens as a reading page: the statement, or the schedule's name on the
 Mac, in the serif face, then its record as titled groups of key-value lines on
 surface cards, the schedule's instruction on a deep-paper block, and a flagged
-memory's reason in an amber-edged card. On the Mac the Schedules sheet keeps
-its index beside the detail column, as the Memory sheet does. The synthesis journal keeps its list
+memory's reason in an amber-edged card. Mac and regular-width iPad keep the
+Memory collection sidebar, records and selected record in three columns. The
+People sheet likewise keeps its Directory and Maintenance navigation beside
+the people list and selected profile, with server counts beside each collection.
+Compact screens push records from the list. People also uses that full-width
+navigation at accessibility text sizes on iPad, so its labels remain readable.
+In that layout, search stays above the list and large-text actions stack vertically.
+Schedules groups its index by state,
+keeps New schedule above it, and shows the selected schedule beside it on Mac
+and regular-width iPad. The synthesis journal keeps its list
 with teal text for its actions. A person's profile keeps its sections and
 actions: Ask Veetbot is the filled capsule, Email, Call and Pin hairline
 capsules, Rename quiet; Manage person holds Merge with another entry, Repair
@@ -667,9 +682,12 @@ and all existing transport-only client boundaries remain mandatory. Milestone
 `AppCoordinator` retains the Chat and Email view models and the mode shell keeps
 both navigation trees mounted. Email uses the Chat connection's authenticated
 transport. Its compact navigation opens a thread from the inbox; regular iPad
-and Mac layouts show the list beside thread detail. The initial inbox requests
-five important threads, with account filtering, search, Other mail, pagination,
-per-account freshness and historical coverage. Background updates preserve row
+and Mac layouts keep a mailbox sidebar beside the list and thread detail.
+Inbox is the initial collection; Needs you and Handled are distinct server
+collections (ADR-0231). Counts cover the filtered collection before pagination;
+older servers omit them. Account filtering, search, Important / Other mail,
+pagination, per-account freshness and historical coverage remain available.
+Background updates preserve row
 order and announce newly qualifying mail. Opening Email or returning it to the
 foreground starts refresh; the client admits a new refresh every sixty seconds
 while Email remains visible, and stops admission when hidden or backgrounded.
@@ -685,15 +703,18 @@ thread read from the same activation instead of replacing it with another reques
 Accounts awaiting their first update show a pending message; the client shows
 an account failure only when the server has recorded a refresh error.
 
-The inbox keeps search, Important / Other mail and account filtering in a compact
-header above the thread list, without a repeated title or introductory copy.
+The wide Email sidebar contains account and search controls, New chat, the
+Chat / Email switch, pending chat attention, and Mailbox navigation for Inbox,
+Needs you, Handled and Subscriptions. Its bottom row opens Chat, Memory, People,
+Schedules, Persona and Settings. The main page has an Email heading, count and
+appearance toggle. Compact screens put the mailbox collections in horizontal
+filter pills. Important / Other mail remains available under Find other mail.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560
-points while retaining at least 360 points for reading. Its width and selected
-thread survive Chat / Email switching. The width the owner drags the divider to
-is kept on this Mac (`veetbot.email.inboxWidth`) and restored at the next
-launch; a window too narrow for it squeezes the inbox without replacing the
-remembered width. Compact iPhone navigation and regular iPad navigation retain
-their platform layouts.
+points while retaining at least 250 points for reading in a small window.
+Its width and selected thread survive Chat / Email switching. The width the
+owner drags the divider to is kept on this Mac (`veetbot.email.inboxWidth`) and
+restored at the next launch; a window too narrow for it squeezes the inbox
+without replacing the remembered width.
 Rows follow the A2 Email reference: a Handled circle leads each row (empty
 while the conversation is in the Inbox, a filled teal check once Gmail has
 archived it, the same reversible label change under the same Archive in Gmail
@@ -718,7 +739,9 @@ its reason; the messages follow as prose, each under its sender's line and
 parted by hairlines, with View in People and Message details kept beside the
 sender. A "Teach Veetbot" card on `paperDeep` opens into the same scoped
 feedback (thread, person, kind of content; Important / Less important; reply
-need) and reports what was applied with Undo. The reply opens with "Your reply"
+need) and reports what was applied with Undo. Topic feedback uses selectable
+chips and still requires an explicit topic. The thread menu offers Mark handled
+and Mark not handled separately from Archive in Gmail. The reply opens with "Your reply"
 in the display face and its save state at the trailing edge. From, To and the
 folded Cc, Bcc and subject are hairline-parted rows above the body in one
 surface well behind a strong hairline, whose shapes take no clicks. Anything
@@ -824,6 +847,22 @@ check still runs the simulator journeys and then skips. An unavailable Apple
 lane is skipped by pytest and remains an unpassed active gate in the gate
 report.
 
+## Call results and text messages
+
+Call results show the retained summary first, provider duration and date when
+available, and the transcript under What was said. Truncation, unverified
+caller statements, local retention and separate provider retention remain
+explicit. Call again and Something is wrong stage an editable Chat follow-up
+without sending, redialing or reporting anything; existing draft text is kept.
+Only the call identifier enters that draft. Pending, active and erased records
+offer no follow-up. Deleting call content retains its exact confirmation.
+
+The SMS sheet adds the recipient and an explanation that the text comes from
+this iPhone, above the system Messages composer. The system's Send tap and
+compose delegate remain the sole send confirmation. The prototype's timer and
+manual "I sent it" control are not completion evidence and are not implemented;
+there is no duplicate approval step (ADR-0081).
+
 ## Subscriptions
 
 Unsubscribe assistance (Milestone 31, `plan/email-unsubscribe.md`) adds a
@@ -837,8 +876,11 @@ for the missing one. Rows come from `GET /v1/email/subscriptions` in the order
 the server returns them, filtered by account and state and paged by cursor;
 each row shows the sender, how many conversations arrived in the window, when
 the last one did, what the sender offers in plain words, and its state.
-Compact iPhone layouts push the detail, while Mac and regular-width iPad show
-it beside the list.
+The census is a flat list with a direct Unsubscribe or Try again action beside
+eligible senders. That action opens the same exact confirmation as the detail
+page; it never sends on the first click. Opening the sender reveals its full
+detail beside the census on Mac and regular iPad, or pushes it on compact
+screens. Closing the detail returns all available width to the flat census.
 
 Selecting is explicit and bounded. Selection stops at twenty-five, and Select
 all additionally skips protected senders and any row that is not eligible —

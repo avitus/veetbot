@@ -5,6 +5,16 @@ import Testing
 
 @Suite @MainActor struct SmsIntegrationTests {
     @Test
+    func testComposeExplainsTheSenderWhileKeepingSystemConfirmation() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let view = try String(contentsOf: root.appendingPathComponent("Veetbot/Views/RootView.swift"), encoding: .utf8)
+        #expect(view.contains("sms.compose-context"))
+        #expect(view.contains("SmsComposeSheet(invocation:"))
+        #expect(view.contains("DeviceInvocationResult(composeResult: result)"))
+    }
+
+    @Test
     func testAppleDeviceRegistrationEncodesCapabilitiesAsAJSONArray() throws {
         let registration = AppleDeviceRegistration(
             clientDeviceID: "installation",

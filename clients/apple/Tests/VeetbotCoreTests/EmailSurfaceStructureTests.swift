@@ -9,6 +9,29 @@ import Testing
 /// the identifier the journeys drive.
 @Suite struct EmailSurfaceStructureTests {
     @Test
+    func testReferenceNavigationAndDirectActionsArePresent() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let people = try source(at: "Veetbot/Views/PeopleBrowserView.swift")
+        let persona = try source(at: "Veetbot/Views/PersonaEditorView.swift")
+        let subscriptions = try source(at: "Veetbot/Views/EmailSubscriptionsView.swift")
+        #expect(email.contains("email.collection."))
+        #expect(email.contains("email.feedback-topic-chip."))
+        #expect(people.contains("people.collection."))
+        #expect(persona.contains("persona.section."))
+        #expect(subscriptions.contains("email.subscription.inline."))
+    }
+
+    @Test
+    func testAuxiliarySurfacesExposeTheReferenceReadingAndDisclosureControls() throws {
+        let artifact = try source(at: "Veetbot/Views/ArtifactViewerView.swift")
+        let signIn = try source(at: "Veetbot/Views/DeviceSignInSheet.swift")
+        let call = try source(at: "Veetbot/Views/CallResultSheet.swift")
+        #expect(artifact.contains("MarkdownContentView(text: preview.text)"))
+        #expect(signIn.contains("device-sign-in.instructions"))
+        #expect(call.contains("call.transcript"))
+    }
+
+    @Test
     func testTheThreadListUsesTheReferenceRowAndKeepsItsControls() throws {
         let source = try source(at: "Veetbot/Views/EmailModeView.swift")
 

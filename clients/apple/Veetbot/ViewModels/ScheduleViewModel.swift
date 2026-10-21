@@ -349,7 +349,7 @@ public final class ScheduleViewModel: ObservableObject {
     public func recentRunsError(for scheduleID: UUID) -> String? { recentRunErrors[scheduleID] }
 
     public static func makeDefaultAPIClient() async -> VeetbotAPIClient? {
-        #if DEBUG && os(iOS)
+        #if DEBUG && !SWIFT_PACKAGE
         if let fixtureClient =
             ConversationNavigationUITestFixture.makeScheduleAPIClientIfRequested()
         {

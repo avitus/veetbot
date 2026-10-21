@@ -27,7 +27,7 @@ import AppKit
         #expect(source.contains("groupHeading(\"Browse\")"))
         #expect(source.contains("groupHeading(\"Maintenance\")"))
         #expect(source.contains(".accessibilityIdentifier(\"memory.group.\\(group.id)\")"))
-        #expect(source.contains("NavigationSplitView {\n            groupSidebar"))
+        #expect(source.contains("NavigationSplitView(columnVisibility: $columnVisibility) {\n            groupSidebar"))
         #expect(source.contains(".task { await model.loadCounts() }"))
         #expect(source.contains(".accessibilityIdentifier(\"memory.group.\\(group.id).count\")"))
     }

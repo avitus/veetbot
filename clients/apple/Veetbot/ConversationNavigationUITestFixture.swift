@@ -10,6 +10,12 @@ enum ConversationNavigationUITestFixture {
     static let callResultLaunchArgument = "--ui-testing-call-result"
     static let artifactID = "00000000-0000-0000-0000-000000000A01"
     static let artifactSVG = #"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>"#
+    static var isMarkdownArtifact: Bool { ProcessInfo.processInfo.arguments.contains("--ui-testing-markdown-artifact") }
+    static var artifactName: String { isMarkdownArtifact ? "appointment.md" : "garden.svg" }
+    static var artifactMediaType: String { isMarkdownArtifact ? "text/markdown" : "image/svg+xml" }
+    static var artifactContent: String {
+        isMarkdownArtifact ? "# Appointment notes\n\nThe office offered **Tuesday at 2:30 pm**.\n\n- Confirm availability\n- Reply to the office" : artifactSVG
+    }
     static let firstSessionID = "00000000-0000-0000-0000-000000000123"
     static let secondSessionID = "00000000-0000-0000-0000-000000000456"
     static let memoryID = "00000000-0000-0000-0000-000000000321"
@@ -471,11 +477,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"):
             statusCode = 200
             body = """
-                {"id":"\(ConversationNavigationUITestFixture.artifactID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","run_id":"\(Self.runID)","name":"garden.svg","media_type":"image/svg+xml","sha256":"fixture","size_bytes":\(ConversationNavigationUITestFixture.artifactSVG.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
+                {"id":"\(ConversationNavigationUITestFixture.artifactID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","run_id":"\(Self.runID)","name":"\(ConversationNavigationUITestFixture.artifactName)","media_type":"\(ConversationNavigationUITestFixture.artifactMediaType)","sha256":"fixture","size_bytes":\(ConversationNavigationUITestFixture.artifactContent.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
                 """
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)/content"):
             statusCode = 200
-            body = ConversationNavigationUITestFixture.artifactSVG
+            body = ConversationNavigationUITestFixture.artifactContent
         case ("GET", "/v1/people") where ProcessInfo.processInfo.arguments.contains(Self.peopleDirectoryArgument):
             statusCode = 200
             let secondPage = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
@@ -866,7 +872,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         ):
             statusCode = 200
             let filePart = ProcessInfo.processInfo.arguments.contains("--ui-testing-artifact")
-                ? ",{\"type\":\"file\",\"artifact_id\":\"\(ConversationNavigationUITestFixture.artifactID)\",\"media_type\":\"image/svg+xml\",\"filename\":\"garden.svg\"}"
+                ? ",{\"type\":\"file\",\"artifact_id\":\"\(ConversationNavigationUITestFixture.artifactID)\",\"media_type\":\"\(ConversationNavigationUITestFixture.artifactMediaType)\",\"filename\":\"\(ConversationNavigationUITestFixture.artifactName)\"}"
                 : ""
             body = """
                 {"items":[

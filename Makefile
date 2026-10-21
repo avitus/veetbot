@@ -158,6 +158,16 @@ test-apple-ui-macos:
 		-scheme Veetbot \
 		-destination 'platform=macOS' \
 		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2PersonaSectionsPreserveUnsavedVoice \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallResultDisclosesTranscriptAndStagesANewCall \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallConcernStagesEditableChat \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2MarkdownArtifactRendersAReadableDocument \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2WideMemoryKeepsCollectionsBesideRecords \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2SchedulesKeepListBesideSelectedSchedule \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2EmailHasMailboxBesideTheInbox \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2HandledCollectionDoesNotArchiveMail \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2PeopleHasDirectoryNavigation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2InlineUnsubscribeKeepsTheConfirmation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalCollapsesAfterApproval \

@@ -5,12 +5,22 @@ import SwiftUI
 import AppKit
 #endif
 
-/// Read-only schedule index over the existing principal-scoped control plane,
+/// Schedule index over the existing principal-scoped control plane,
 /// drawn as an A2 list: a calendar glyph, the name, the preview in soft ink,
 /// and the cadence with the next run on one line.
 public struct ScheduleBrowserView: View {
     @ObservedObject var model: ScheduleViewModel
     @State private var creating = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var selectedID: UUID?
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var usesColumns: Bool {
+        #if os(macOS)
+        true
+        #else
+        sizeClass == .regular
+        #endif
+    }
     @Environment(\.dismiss) private var dismiss
     @State private var section = ScheduleBrowserSection.current
 
@@ -38,6 +48,8 @@ public struct ScheduleBrowserView: View {
         )
         .background(ScheduleBrowserWindowResizeView())
         .scheduleBrowserPresentationSizing()
+        #else
+        .presentationSizing(.page)
         #endif
     }
 
@@ -47,26 +59,27 @@ public struct ScheduleBrowserView: View {
     /// and cut the title and the section picker off above the sheet.
     @ViewBuilder
     private var navigationContainer: some View {
-        #if os(macOS)
-        NavigationSplitView {
-            column
-        } detail: {
-            Text("Select a schedule to read its instruction.")
-                .veetType(.ui)
-                .foregroundColor(AppTheme.inkSoft)
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                .background(AppTheme.paper)
+        if usesColumns {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                column.navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 380)
+            } detail: {
+                if let item = model.items.first(where: { $0.id == selectedID }) {
+                    ScheduleDetailView(model: model, summary: item).id(item.id)
+                } else {
+                    Text("Select a schedule to read its instruction.")
+                        .veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        .background(AppTheme.paper)
+                }
+            }
+        } else {
+            NavigationStack { column }
         }
-        #else
-        NavigationStack {
-            column
-        }
-        #endif
     }
 
     private var column: some View {
         VStack(spacing: 0) {
-            #if os(macOS)
+            if usesColumns {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Schedules").veetType(.display)
                 Text("Work Veetbot does on its own, on a rhythm you set.")
@@ -76,7 +89,10 @@ public struct ScheduleBrowserView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 14)
-            #endif
+            Button { creating = true } label: { Label("New schedule", systemImage: "plus").frame(maxWidth: .infinity) }
+                .primaryCapsule().padding(.horizontal, 16).padding(.top, 12)
+                .accessibilityIdentifier("schedule.new")
+            }
             Picker("Schedule view", selection: $section) {
                 Text("Current").tag(ScheduleBrowserSection.current)
                 Text("Recent History").tag(ScheduleBrowserSection.recentHistory)
@@ -91,7 +107,7 @@ public struct ScheduleBrowserView: View {
             .accessibilityIdentifier("schedule.section")
             content
         }
-        .background(AppTheme.paper)
+        .background(usesColumns ? AppTheme.paperDeep : AppTheme.paper)
         .navigationTitle("Schedules")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -101,8 +117,10 @@ public struct ScheduleBrowserView: View {
                 Button("Close") { dismiss() }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { creating = true } label: { Label("New schedule", systemImage: "plus") }
-                    .accessibilityIdentifier("schedule.new")
+                if !usesColumns {
+                    Button { creating = true } label: { Label("New schedule", systemImage: "plus") }
+                        .accessibilityIdentifier("schedule.new")
+                }
             }
         }
         .sheet(isPresented: $creating, onDismiss: { model.clearDraft() }) {
@@ -128,19 +146,21 @@ public struct ScheduleBrowserView: View {
 
     private var list: some View {
         List {
-            ForEach(model.items) { item in
-                NavigationLink {
-                    ScheduleDetailView(model: model, summary: item)
-                } label: {
-                    ScheduleRow(item: item)
-                }
-                .a2ListRow()
-                .accessibilityIdentifier("schedule.row.\(item.id.uuidString)")
-                .onAppear {
-                    guard item.id == model.items.last?.id else { return }
-                    Task { await model.loadMore() }
+            ForEach(Array(Set(model.items.map(\.state))).sorted(), id: \.self) { state in
+                let items = model.items.filter { $0.state == state }
+                if !items.isEmpty {
+                    Section(state.capitalized) {
+                        ForEach(items) { item in
+                            scheduleLink(item)
+                                .a2ListRow()
+                                .accessibilityIdentifier("schedule.row.\(item.id.uuidString)")
+                        }
+                    }
                 }
             }
+            // Paging is driven by a footer, since state grouping changes row order.
+            Color.clear.frame(height: 1).id(model.items.count)
+                .onAppear { Task { await model.loadMore() } }.a2ListRow()
             if model.isLoadingMore {
                 HStack {
                     Spacer()
@@ -154,6 +174,19 @@ public struct ScheduleBrowserView: View {
             }
         }
         .a2List()
+    }
+
+    @ViewBuilder
+    private func scheduleLink(_ item: ScheduleListItemView) -> some View {
+        if usesColumns {
+            Button { selectedID = item.id } label: {
+                ScheduleRow(item: item)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(selectedID == item.id ? AppTheme.selected : .clear))
+            }.buttonStyle(.plain)
+                .accessibilityAddTraits(selectedID == item.id ? .isSelected : [])
+        } else {
+            NavigationLink { ScheduleDetailView(model: model, summary: item) } label: { ScheduleRow(item: item) }
+        }
     }
 
     private func loadMoreFailureFooter(_ message: String) -> some View {

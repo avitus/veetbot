@@ -279,6 +279,14 @@ struct DeviceSignInSheet: View {
     @StateObject private var session: DeviceSignInWebSession
     @State private var isConfirming = false
     @State private var failure: DeviceSignInFailure?
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var usesColumns: Bool {
+        #if os(macOS)
+        true
+        #else
+        sizeClass == .regular
+        #endif
+    }
 
     init(model: ChatViewModel, request: DeviceSignInRequest) {
         self.model = model
@@ -287,43 +295,77 @@ struct DeviceSignInSheet: View {
     }
 
     var body: some View {
+        Group {
+            if usesColumns {
+                HStack(alignment: .top, spacing: 24) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            header
+                            signInInstructions
+                            footer
+                        }
+                    }.frame(width: 290)
+                    browser.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }.padding(24)
+            } else {
+                VStack(spacing: 0) {
+                    header.padding(16)
+                    browser
+                    footer.padding(16)
+                }
+            }
+        }
+        .background(AppTheme.paper)
+        .tint(AppTheme.tealFill)
+        // Sign-in stays open until the server check finishes.
+        .interactiveDismissDisabled(isConfirming)
+        .onDisappear { Task { await session.destroy() } }
+    }
+
+    private var signInInstructions: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Sign in as you normally would.", systemImage: "1.circle")
+            Label("Tell Veetbot you are signed in.", systemImage: "2.circle")
+            Label("Veetbot checks the session and keeps it in its isolated browser.", systemImage: "3.circle")
+            Text("Passkeys and sign-in through another website's identity provider may not work here. This window cannot be closed while the sign-in is being checked.")
+                .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+        }
+        .veetType(.ui)
+        .accessibilityIdentifier("device-sign-in.instructions")
+    }
+
+    private var browser: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            HStack {
+                Image(systemName: "lock").foregroundColor(AppTheme.tealText)
+                Text(session.currentURL?.host ?? request.startURL.host ?? "Website")
+                    .veetMono().lineLimit(1)
+                Spacer()
+                if session.isLoading { ProgressView().controlSize(.small) }
+            }.padding(10).background(AppTheme.paperDeep)
             if let blockedHost = session.blockedHost {
-                Label(
-                    blockedHost.isEmpty
-                        ? "That page is outside this website, so it was not opened."
-                        : "\(blockedHost) is outside this website, so it was not opened.",
-                    systemImage: "hand.raised.fill"
-                )
-                .veetType(.meta)
-                .foregroundColor(AppTheme.amberText)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppTheme.amberText.opacity(0.08))
-                .accessibilityIdentifier("device-sign-in.blocked")
+                Label(blockedHost.isEmpty
+                      ? "That page is outside this website, so it was not opened."
+                      : "\(blockedHost) is outside this website, so it was not opened.", systemImage: "hand.raised.fill")
+                    .veetType(.meta).foregroundColor(AppTheme.amberText)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.amberText.opacity(0.08))
+                    .accessibilityIdentifier("device-sign-in.blocked")
             }
             DeviceSignInWebView(webView: session.webView)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            footer
         }
-        // Like Cancel, a swipe on the iPad sheet cannot close the window
-        // while the sign-in is being checked.
-        .interactiveDismissDisabled(isConfirming)
-        .onDisappear {
-            Task { await session.destroy() }
-        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.hairlineStrong).allowsHitTesting(false))
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(session.currentURL?.host ?? request.startURL.host ?? "Website")
-                    .veetType(.ui, weight: .semibold)
-                    .lineLimit(1)
+                Label("Private sign-in window", systemImage: "lock")
+                    .veetType(.meta, weight: .semibold).foregroundColor(AppTheme.inkSoft)
+                Text("Sign in to \(session.currentURL?.host ?? request.startURL.host ?? "Website")")
+                    .veetType(.display).fixedSize(horizontal: false, vertical: true)
                 Text(
                     "Sign in to the website here. Veetbot does not see what you type. When you are signed in, tap I'm signed in: only this website's session goes to Veetbot's isolated browser, and this window is cleared."
                 )
@@ -339,9 +381,9 @@ struct DeviceSignInSheet: View {
                 }
             }
             .disabled(isConfirming)
+            .buttonStyle(QuietCapsuleButtonStyle())
             .accessibilityIdentifier("device-sign-in.cancel")
         }
-        .padding(16)
     }
 
     private var footer: some View {
@@ -352,15 +394,7 @@ struct DeviceSignInSheet: View {
                     .foregroundColor(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("device-sign-in.error")
-                if failure.offersRemoteBrowser {
-                    Button("Use Veetbot's remote browser") {
-                        Task {
-                            await session.destroy()
-                            await model.switchDeviceSignInToRemoteBrowser(request)
-                        }
-                    }
-                    .accessibilityIdentifier("device-sign-in.remote-browser")
-                }
+
             }
             HStack(spacing: 12) {
                 if isConfirming {
@@ -373,8 +407,7 @@ struct DeviceSignInSheet: View {
                 Button("I'm signed in") {
                     confirm()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.teal)
+                .primaryCapsule()
                 .disabled(isConfirming || !DeviceSignInNavigationPolicy.canConfirm(
                     currentURL: session.currentURL,
                     isLoading: session.isLoading,
@@ -382,8 +415,18 @@ struct DeviceSignInSheet: View {
                 ) || (failure.map { !$0.canRetry } ?? false))
                 .accessibilityIdentifier("device-sign-in.confirm")
             }
+            if request.profileID == nil, failure == nil || failure?.offersRemoteBrowser == true {
+                Button("Use Veetbot's remote browser") {
+                    Task {
+                        await session.destroy()
+                        await model.switchDeviceSignInToRemoteBrowser(request)
+                    }
+                }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                .disabled(isConfirming)
+                .accessibilityIdentifier("device-sign-in.remote-browser")
+            }
         }
-        .padding(16)
     }
 
     /// The session exists only in this task's locals until the view model

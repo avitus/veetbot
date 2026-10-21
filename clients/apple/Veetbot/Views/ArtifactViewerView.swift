@@ -24,6 +24,8 @@ public struct ArtifactViewerView: View {
 
     public var body: some View {
         presentation
+        .background(AppTheme.paper)
+        .tint(AppTheme.tealFill)
         .task {
             do {
                 artifact = try await model.loadArtifact(artifactID)
@@ -60,7 +62,7 @@ public struct ArtifactViewerView: View {
                     .veetType(.title)
                     .foregroundColor(.secondary)
                 Text(artifact?.metadata.name ?? "Artifact")
-                    .veetType(.ui, weight: .semibold)
+                    .veetType(.display)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
@@ -76,8 +78,10 @@ public struct ArtifactViewerView: View {
             HStack {
                 Spacer()
                 Button("Close") { dismiss() }
+                    .buttonStyle(QuietCapsuleButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button("Download") { exporting = true }
+                    .primaryCapsule()
                     .keyboardShortcut(.defaultAction)
                     .disabled(artifact == nil)
             }
@@ -163,11 +167,19 @@ public struct ArtifactViewerView: View {
 
             if artifact.metadata.mediaType.hasPrefix("text/") {
                 let preview = textPreview(data: artifact.data)
-                ScrollView([.horizontal, .vertical]) {
+                let markdown = artifact.metadata.mediaType == "text/markdown"
+                    || artifact.metadata.mediaType == "text/x-markdown"
+                    || artifact.metadata.name.lowercased().hasSuffix(".md")
+                ScrollView(markdown ? .vertical : [.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(preview.text)
-                            .veetMono()
-                            .textSelection(.enabled)
+                        if markdown {
+                            MarkdownContentView(text: preview.text)
+                                .frame(maxWidth: A2Metrics.transcriptMaxWidth, alignment: .leading)
+                        } else {
+                            Text(preview.text)
+                                .veetMono()
+                                .textSelection(.enabled)
+                        }
                         if preview.isTruncated {
                             Label(
                                 "Preview truncated. Download the artifact for the full content.",

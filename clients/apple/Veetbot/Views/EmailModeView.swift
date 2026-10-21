@@ -162,11 +162,23 @@ public struct EmailModeView: View {
     var inboxWidth = EmailInboxWidthStore.app
     #endif
     let discussInChat: () async -> Void
+    var openChat: () -> Void = {}
+    var newChat: () -> Void = {}
+    var openMemory: () -> Void = {}
+    var openPeople: () -> Void = {}
+    var openSchedules: () -> Void = {}
+    var openPersona: () -> Void = {}
+    var openSettings: () -> Void = {}
+    var chatAttention: [SidebarAttention.Row] = []
+    var openAttention: (UUID) -> Void = { _ in }
+    @EnvironmentObject private var appearance: AppearancePreferences
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.activeClientMode) private var activeMode
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingLearning = false
     @State private var showingSubscriptions = false
     @State private var showingBudgetDetails = false
+    @State private var showingOtherMailViews = false
     @State private var navigationPath: [UUID] = []
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
@@ -183,16 +195,21 @@ public struct EmailModeView: View {
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
-            #if os(macOS)
-            macSplit
-            #else
             if directSelection {
-                NavigationSplitView {
-                    inbox
-                        .frame(height: macColumnHeight)
-                        .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
-                } detail: {
-                    detail.frame(height: macColumnHeight)
+                HStack(spacing: 0) {
+                    mailboxSidebar.frame(width: 232)
+                    VStack(spacing: 0) {
+                        emailHeading
+                        #if os(macOS)
+                        macSplit
+                        #else
+                        HStack(spacing: 0) {
+                            inbox.frame(width: 300)
+                            HairlineDivider().frame(width: 1)
+                            detail.frame(maxWidth: .infinity)
+                        }
+                        #endif
+                    }
                 }
             } else {
                 NavigationStack(path: $navigationPath) {
@@ -201,7 +218,6 @@ public struct EmailModeView: View {
                     }
                 }
             }
-            #endif
         }
         .tint(AppTheme.teal)
         .sheet(isPresented: Binding(get: { model.review != nil }, set: { if !$0 { model.closeReview() } })) {
@@ -243,24 +259,15 @@ public struct EmailModeView: View {
             inbox
                 .frame(minWidth: EmailInboxWidthStore.bounds.lowerBound, idealWidth: 340,
                        maxWidth: EmailInboxWidthStore.bounds.upperBound)
-                .frame(height: macColumnHeight)
+                .frame(maxHeight: .infinity)
                 .background(EmailInboxWidthAutosave(store: inboxWidth))
             detail
-                .frame(minWidth: 360, maxWidth: .infinity)
-                .frame(height: macColumnHeight)
+                .frame(minWidth: 250, maxWidth: .infinity)
+                .frame(maxHeight: .infinity)
                 .layoutPriority(1)
         }
     }
     #endif
-
-    /// Bounds AppKit split-view columns without imposing a fixed height on compact iOS navigation.
-    private var macColumnHeight: CGFloat? {
-        #if os(macOS)
-        viewportHeight
-        #else
-        nil
-        #endif
-    }
 
     private var visibleAccounts: [EmailAccountView] {
         model.accounts.filter { model.selectedAccountID == nil || $0.id == model.selectedAccountID }
@@ -269,8 +276,10 @@ public struct EmailModeView: View {
     /// Groups triage controls above independently actionable rows and per-account freshness below them.
     private var inbox: some View {
         VStack(spacing: 0) {
-            inboxHeader
-                .fixedSize(horizontal: false, vertical: true)
+            if !directSelection {
+                emailHeading
+                inboxHeader.fixedSize(horizontal: false, vertical: true)
+            }
             HairlineDivider()
             List {
                 if model.unavailable {
@@ -292,7 +301,7 @@ public struct EmailModeView: View {
                         .buttonStyle(SecondaryCapsuleButtonStyle())
                     }.padding(.vertical, 16).emailHideSeparator()
                 }
-                if let pause = model.budgetPauseMessage {
+                if !directSelection, let pause = model.budgetPauseMessage {
                     budgetPause(pause)
                         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                         .emailHideSeparator()
@@ -407,6 +416,112 @@ public struct EmailModeView: View {
         .accessibilityIdentifier("email.inbox")
     }
 
+    private var emailHeading: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Email").veetType(.display)
+                Text(threadCount).veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            }
+            Spacer()
+            #if os(iOS)
+            if directSelection { EmailRefreshButton(model: model) }
+            #endif
+            Button { appearance.theme = colorScheme == .dark ? .light : .dark } label: {
+                Image(systemName: colorScheme == .dark ? "sun.max" : "moon")
+            }
+            .buttonStyle(QuietCapsuleButtonStyle())
+            .accessibilityLabel(colorScheme == .dark ? "Switch to light appearance" : "Switch to dark appearance")
+            .accessibilityIdentifier("email.appearance")
+        }
+        .padding(.horizontal, 24).padding(.vertical, 16)
+        .background(AppTheme.paper)
+    }
+
+    private var mailboxSidebar: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    inboxHeader
+                    Button(action: newChat) { Label("New chat", systemImage: "plus").frame(maxWidth: .infinity) }
+                        .primaryCapsule().accessibilityIdentifier("email.new-chat")
+                    ModeSegment(selected: .email) { if $0 == .chat { openChat() } }
+                    if !chatAttention.isEmpty {
+                        SidebarSectionLabel(title: "Needs you")
+                        ForEach(chatAttention) { row in
+                            Button { openAttention(row.entry.sessionID) } label: {
+                                SidebarRow { AttentionDot(kind: row.kind) } title: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(row.label)
+                                        Text(row.entry.title).veetType(.meta).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+                                    }
+                                }
+                            }.buttonStyle(.plain)
+                            .accessibilityLabel("\(row.label), \(row.entry.title)")
+                            .accessibilityIdentifier("email.chat-attention.\(row.id)")
+                        }
+                    }
+                    SidebarSectionLabel(title: "Mailbox")
+                    ForEach(EmailCollection.allCases, id: \.self) { collection in
+                        Button { model.setCollection(collection) } label: {
+                            SidebarRow { Image(systemName: collectionSymbol(collection)) } title: {
+                                Text(collectionTitle(collection))
+                            } trailing: { _ in
+                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                            }
+                            .padding(.horizontal, 8)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(model.listView == collection.rawValue ? AppTheme.selected : .clear))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(model.listView == collection.rawValue ? .isSelected : [])
+                        .accessibilityIdentifier("email.collection.\(collectionID(collection))")
+                    }
+                    if model.unsubscribeAvailable {
+                        Button { showingSubscriptions = true } label: {
+                            SidebarRow { Image(systemName: "tray.full") } title: { Text("Subscriptions") }
+                        }.buttonStyle(.plain)
+                        #if os(macOS)
+                        .accessibilityIdentifier("email.mailbox.subscriptions")
+                        #else
+                        .accessibilityIdentifier("email.subscriptions.open")
+                        #endif
+                    }
+                    Button { showingLearning = true } label: {
+                        SidebarRow { Image(systemName: "slider.horizontal.3") } title: { Text("Email learning") }
+                    }.buttonStyle(.plain)
+                    #if os(iOS)
+                    .accessibilityIdentifier("email.learning")
+                    #endif
+                    if let pause = model.budgetPauseMessage { budgetPause(pause) }
+                }.padding(12)
+            }
+            HStack {
+                globalButton("Chat", "bubble.left", openChat)
+                globalButton("Memory", "brain", openMemory)
+                globalButton("People", "person.2", openPeople)
+                globalButton("Schedules", "calendar.badge.clock", openSchedules)
+                globalButton("Persona", "sparkles", openPersona)
+                globalButton("Settings", "gearshape", openSettings)
+            }.padding(10)
+        }.background(AppTheme.paperDeep)
+    }
+
+    private func globalButton(_ title: String, _ symbol: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).frame(maxWidth: .infinity, minHeight: 32) }
+            .buttonStyle(.plain).foregroundColor(AppTheme.inkSoft)
+            .accessibilityLabel(title).help(title)
+            .accessibilityIdentifier("email.global.\(title.lowercased())")
+    }
+
+    private func collectionID(_ value: EmailCollection) -> String {
+        switch value { case .inbox: "inbox"; case .needsYou: "needsYou"; case .handled: "handled" }
+    }
+    private func collectionTitle(_ value: EmailCollection) -> String {
+        switch value { case .inbox: "Inbox"; case .needsYou: "Needs you"; case .handled: "Handled" }
+    }
+    private func collectionSymbol(_ value: EmailCollection) -> String {
+        switch value { case .inbox: "tray"; case .needsYou: "flag"; case .handled: "checkmark" }
+    }
+
     /// A paused budget is one short note on paperDeep, three lines tall with
     /// its accounting folded, so the first row still starts near the top.
     private func budgetPause(_ pause: String) -> some View {
@@ -458,8 +573,7 @@ public struct EmailModeView: View {
                 .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
                 .accessibilityIdentifier("email.accounts")
                 Spacer(minLength: 8)
-                Text(threadCount)
-                    .veetType(.meta).foregroundColor(AppTheme.inkSoft).fixedSize()
+
             }
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
@@ -478,7 +592,37 @@ public struct EmailModeView: View {
             .veetType(.ui)
             .padding(.horizontal, 10).frame(minHeight: A2Metrics.controlHeight + 4)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.field))
-            mailViewControl
+            if !directSelection {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(EmailCollection.allCases, id: \.self) { collection in
+                            Button {
+                                model.setCollection(collection)
+                            } label: {
+                                Text(collectionTitle(collection))
+                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                            }
+                            .buttonStyle(FilterPillButtonStyle(selected: model.listView == collection.rawValue))
+                            .accessibilityIdentifier("email.collection.\(collectionID(collection))")
+                        }
+                    }
+                }
+            }
+            Button {
+                showingOtherMailViews.toggle()
+            } label: {
+                HStack {
+                    Text("Find other mail")
+                    Spacer()
+                    Image(systemName: showingOtherMailViews ? "chevron.up" : "chevron.down")
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            .accessibilityIdentifier("email.other-mail-views")
+            .accessibilityValue(showingOtherMailViews ? "Expanded" : "Collapsed")
+            if showingOtherMailViews { mailViewControl }
         }.padding(12)
     }
 
@@ -504,11 +648,13 @@ public struct EmailModeView: View {
         #endif
     }
 
-    /// "5 threads · 2 need a reply", counted over the loaded rows as the reference's header line.
+    /// Prefer the server's count across pages; older servers describe only the loaded rows.
     private var threadCount: String {
-        let count = model.items.count
+        let counts = EmailCollection(rawValue: model.listView) == nil ? nil : model.collectionCounts
+        let count = counts?.count(for: model.collection) ?? model.items.count
         var line = "\(count) \(count == 1 ? "thread" : "threads")"
-        let needing = model.items.filter { $0.needsReply && !$0.isHandled && !$0.isArchived }.count
+        let needing = counts?.count(for: .needsYou)
+            ?? model.items.filter { $0.needsReply && !$0.isHandled && !$0.isArchived }.count
         if needing > 0 { line += " · \(needing) \(needing == 1 ? "needs" : "need") a reply" }
         return line
     }
@@ -908,6 +1054,13 @@ private struct EmailThreadScreen: View {
     /// Report spam and exclusion from learning, behind one ellipsis.
     private func threadActionsMenu(_ thread: EmailThreadView) -> some View {
         Menu {
+            Button(thread.isHandled ? "Mark not handled" : "Mark handled") {
+                Task { await model.setThreadHandled(thread, handled: !thread.isHandled) }
+            }
+            .disabled(model.isPerformingAction)
+            .accessibilityIdentifier("email.attention.toggle")
+            Divider()
+
             if model.canReportSpam(thread), !thread.isSuspectedSpam {
                 Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
                     .accessibilityIdentifier("email.spam.menu.report")
@@ -1022,9 +1175,15 @@ private struct EmailThreadScreen: View {
                 .accessibilityIdentifier("email.feedback-person")
             } else if target == .topic {
                 let topics = model.thread?.feedbackTopics ?? []
-                Picker("Content topic", selection: $targetValue) {
-                    Text("Choose a topic").tag("")
-                    ForEach(topics, id: \.self) { topic in Text(topic).tag(topic) }
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(topics, id: \.self) { topic in
+                            Button(topic) { targetValue = targetValue == topic ? "" : topic }
+                                .buttonStyle(FilterPillButtonStyle(selected: targetValue == topic))
+                                .accessibilityAddTraits(targetValue == topic ? .isSelected : [])
+                                .accessibilityIdentifier("email.feedback-topic-chip.\(topic)")
+                        }
+                    }
                 }
                 .accessibilityIdentifier("email.feedback-topic")
                 .onChange(of: topics) { _, values in

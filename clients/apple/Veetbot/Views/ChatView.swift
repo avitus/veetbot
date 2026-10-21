@@ -342,9 +342,9 @@ public struct ChatView: View {
         }
         #endif
         .sheet(item: Binding(get: { model.callResult }, set: { if $0 == nil { model.dismissCallResult() } })) { result in
-            CallResultSheet(result: result, close: model.dismissCallResult) {
-                Task { await model.deleteCallResult() }
-            }
+            CallResultSheet(result: result, close: model.dismissCallResult,
+                delete: { Task { await model.deleteCallResult() } },
+                followUp: { model.prepareCallFollowUp($0) })
         }
         .sheet(isPresented: $showingWebsiteAccess) {
             ConnectionSettingsView(model: model, embedded: false)
