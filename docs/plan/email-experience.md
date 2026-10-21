@@ -281,7 +281,10 @@ eight, so neither waits for the other. A resynchronization resumes changes
 from a watermark read before its inbox re-listing.
 The first display may be partial while pagination completes; report that state
 and keep useful results visible. Invalidate assessments when the source or a
-relevant feedback/profile/model revision changes. Rerank affected existing mail
+relevant feedback/profile/model revision changes. The model revision is the
+email model's provider and model plus the assessment prompt revision; edits to
+other provider profiles, the catalog or cache settings do not invalidate mail,
+and earlier rows stamped with a registry revision stay current. Rerank affected existing mail
 immediately after learning changes, even if Gmail has not changed. A poll with
 unchanged sources and already-current assessment versions does no new model
 work; unfinished eligible historical analysis can still resume. Reuse completed

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -91,6 +92,9 @@ EMAIL_ASSESSMENT_PASSAGE_CHARACTERS = 8192
 EMAIL_CHANGE_EVENT_LIMIT = 1000
 EMAIL_CHANGE_PAGE_LIMIT = 10
 EMAIL_HISTORY_POLICY = "email-history@2:90d"
+# Assessments once embedded the whole provider-registry revision, so any edit to
+# any model profile re-paid for ninety days of mail. Those rows remain current.
+LEGACY_REGISTRY_SEGMENT = re.compile(r"unrouted|[A-Za-z0-9_.-]+@[0-9a-f]{12}\+r[0-9a-f]{8}")
 # Initial server modes; drafting prepares a read server only for source recovery.
 EMAIL_TASK_SERVER_MODES: dict[str, tuple[str, ...]] = {
     "refresh": ("read",),
@@ -838,7 +842,7 @@ class _TaskIO:
             assessment = await uow.email.get(c.principal, "assessment", str(thread.id))
         return assessment is not None and (
             assessment.payload.get("source_fingerprint") == thread.source_fingerprint
-            and assessment.payload.get("model_revision") == self._model_revision()
+            and self._model_current(assessment.payload.get("model_revision"))
             and self._junk_current(assessment.payload, thread)
             and assessment.payload.get("analysis_complete") is True
             # A rejected result keeps its passage for the one promised retry.
@@ -1020,7 +1024,7 @@ class _TaskIO:
                 and not prior.payload.get("junk_bypassed")
                 and prior.payload.get("analysis_complete") is True
                 and prior.payload.get("retry_pending") is not True
-                and prior.payload.get("model_revision") == self._model_revision()
+                and self._model_current(prior.payload.get("model_revision"))
                 and prior.payload.get("source_fingerprint") == thread.source_fingerprint
             )
 
@@ -1532,16 +1536,23 @@ class _TaskIO:
             raise EmailModelResultError("The model returned an invalid email result.") from None
 
     def _model_revision(self) -> str:
-        """Identify the pinned provider, registry, and assessment prompt revision."""
+        """Identify the email model and assessment prompt, not unrelated registry edits."""
         c = self.context
-        registry = (
-            "unrouted"
-            if c.checkpoint.provider_pin is None
-            else c.checkpoint.provider_pin.registry_version
-        )
         # ADR-0165 added the spam verdict: both revisions move past every earlier value.
         revision = "email-assessment@6" if self.semantics.people_enabled else "email-assessment@5"
-        return f"{c.resolved_model.provider}:{c.resolved_model.model}:{registry}:{revision}"
+        return f"{c.resolved_model.provider}:{c.resolved_model.model}:{revision}"
+
+    def _model_current(self, stored: object) -> bool:
+        """Match this model and prompt, with or without a legacy registry segment."""
+        current = self._model_revision()
+        if not isinstance(stored, str) or stored == current:
+            return stored == current
+        model, _, revision = current.rpartition(":")
+        segment = stored.removeprefix(f"{model}:").removesuffix(f":{revision}")
+        return (
+            stored == f"{model}:{segment}:{revision}"
+            and LEGACY_REGISTRY_SEGMENT.fullmatch(segment) is not None
+        )
 
     def _junk_current(self, prior: dict[str, Any], thread: EmailThread) -> bool:
         """Invalidate prior bypasses when mode, policy or admission evidence changes."""
@@ -1566,7 +1577,7 @@ class _TaskIO:
         previous = {} if prior is None else prior.payload
         same_source = (
             previous.get("source_fingerprint") == thread.source_fingerprint
-            and previous.get("model_revision") == self._model_revision()
+            and self._model_current(previous.get("model_revision"))
             and self._junk_current(previous, thread)
         )
         if (

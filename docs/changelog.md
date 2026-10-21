@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-21 — Email: model settings changes no longer re-read your mail
+
+- Changing an unrelated model setting, such as a caching option or another
+  provider's model list, no longer makes Email re-assess every cached
+  conversation from the last ninety days. Re-assessment now happens only when
+  the email model itself, its prompt, the mail or your feedback changes.
+- Mail already assessed under the current model and prompt stays as it is.
+
 ## 2026-10-21 — Email: names, newest first, and no reload when you come back
 
 - Each row names the person who wrote, not their address, and shows one short
