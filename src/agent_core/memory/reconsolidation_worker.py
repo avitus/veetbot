@@ -15,6 +15,7 @@ from agent_core.memory.reconsolidation import ReconsolidationInventoryPass
 from agent_core.memory.reconsolidation_apply import apply_review
 from agent_core.memory.reconsolidation_execution import ReconsolidationBatchExecutor
 from agent_core.memory.reconsolidation_inputs import EgressPolicy
+from agent_core.memory.reconsolidation_selection import fit_selection
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -44,6 +45,7 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
         self._ids = ids
         self._merge_only = merge_only
         self._owner_review = owner_review
+        self._egress_policy = egress_policy
         self._last_execution: ReconsolidationExecution | None = None
         self._proposal_count = 0
         self._executor = ReconsolidationBatchExecutor(
@@ -125,9 +127,25 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
         # rechecks source versions after any writer that wins between these reads.
         sources = await super()._neighbors(source)
         async with self._uow_factory() as uow:
-            return await uow.reconsolidation.selectable_sources(
+            selected = await uow.reconsolidation.selectable_sources(
                 self._principal, sources, self._clock.now()
             )
+        if len(selected) < 2 or source not in selected:
+            return selected
+        async with self._uow_factory() as uow:
+            preview = await uow.reconsolidation.selection_input(
+                self._principal, selected, self._clock.now()
+            )
+        if preview is None:
+            return selected
+        return fit_selection(
+            self._principal,
+            preview,
+            source,
+            model=self._model,
+            egress_policy=self._egress_policy,
+            now=self._clock.now(),
+        )
 
     async def _process(self, lease: ReconsolidationJob) -> int:
         if not self._admitted():

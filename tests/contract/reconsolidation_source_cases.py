@@ -26,14 +26,21 @@ async def preselection_remains_bounded_scoped_and_revalidated(factory: Factory) 
         page = await uow.reconsolidation.inventory(principal(), job.lease_token, NOW)
         selected = await uow.reconsolidation.selectable_sources(principal(), page.sources, NOW)
         assert selected == page.sources
+        preview = await uow.reconsolidation.selection_input(principal(), selected, NOW)
+        assert preview is not None and preview.group.sources == selected
         foreign = principal().model_copy(update={"principal_id": "other-owner"})
         assert await uow.reconsolidation.selectable_sources(foreign, selected, NOW) == ()
+        assert await uow.reconsolidation.selection_input(foreign, selected, NOW) is None
         stale = tuple(
             s.model_copy(update={"content_revision": s.content_revision + 1}) for s in selected
         )
         assert await uow.reconsolidation.selectable_sources(principal(), stale, NOW) == ()
+        assert await uow.reconsolidation.selection_input(principal(), stale, NOW) is None
         with pytest.raises(ValueError, match="At most 32"):
             await uow.reconsolidation.selectable_sources(principal(), selected * 17, NOW)
+        for invalid in (selected[:1], selected * 2, selected * 17):
+            with pytest.raises(ValueError, match="distinct source"):
+                await uow.reconsolidation.selection_input(principal(), invalid, NOW)
         await uow.reconsolidation.checkpoint(principal(), job.lease_token, page, (selected,), NOW)
         group = await uow.reconsolidation.claim_group(principal(), job.lease_token, NOW)
         assert group is not None
@@ -41,6 +48,7 @@ async def preselection_remains_bounded_scoped_and_revalidated(factory: Factory) 
         original = await uow.memories.get(selected[0].belief_id, principal())
         await uow.memories.reinforce(original.model_copy(update={"source_event_ids": [999]}))
     async with factory() as uow:
+        assert await uow.reconsolidation.selection_input(principal(), selected, NOW) is None
         assert (
             await uow.reconsolidation.original_input(principal(), job.lease_token, group.id, NOW)
             is None

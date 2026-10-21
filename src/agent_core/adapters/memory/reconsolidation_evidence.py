@@ -10,7 +10,7 @@ from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import SENSITIVITY_ORDER, MemoryRecord, Portability, Sensitivity
 from agent_core.domain.people import PeopleSource, Person, PersonMemoryLink, PersonMention
 from agent_core.domain.people_sources import source_id
-from agent_core.domain.reconsolidation import ReconsolidationGroup, SourceVersion
+from agent_core.domain.reconsolidation import ReconsolidationGroup, SourceVersion, group_digest
 from agent_core.domain.reconsolidation_inputs import OriginalExcerpt, ReconsolidationInput
 from agent_core.domain.reconsolidation_merge import (
     AttributionRole,
@@ -168,6 +168,29 @@ class ReconsolidationEvidence:
             if snapshots is not None and source_admissible(snapshots[0], principal, now):
                 selected.append(original[1])
         return tuple(selected)
+
+    async def selection_input(
+        self,
+        principal: Principal,
+        originals: tuple[tuple[MemoryRecord, SourceVersion], ...],
+        now: datetime,
+    ) -> ReconsolidationInput | None:
+        """Transient size preview only; zero identities cannot authorize provider work."""
+        if not 2 <= len(originals) <= 32:
+            return None
+        sources = tuple(version for _, version in originals)
+        group = ReconsolidationGroup(
+            id=UUID(int=0),
+            job_id=UUID(int=0),
+            lease_token=UUID(int=0),
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            sources=sources,
+            input_digest=group_digest(sources),
+            created_at=now,
+            state="claimed",
+        )
+        return await self.original_input(principal, group, originals, now)
 
     async def sources(
         self,
