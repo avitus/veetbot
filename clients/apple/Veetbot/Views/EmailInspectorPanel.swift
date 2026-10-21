@@ -54,17 +54,18 @@ struct EmailInspectorPanel: View {
             InspectorSection(title: "Sender") {
                 EmailSenderCard(lookup: lookup, highlighted: inspector.senderRevealCount)
                     .id(lookup.text)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("inspector.email.sender")
             }
         }
         InspectorSection(title: "Why it’s here") {
             priority(thread)
         }
-        InspectorSection(title: "Teach Veetbot") {
-            EmailTeachCard(model: model, explanationFocused: $feedbackFocused, inPanel: true)
-                .id(thread.id)
-                .accessibilityIdentifier("inspector.email.teach")
-        }
+        // The card's own header names it, so it needs no section label.
+        EmailTeachCard(model: model, explanationFocused: $feedbackFocused, inPanel: true)
+            .id(thread.id)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("inspector.email.teach")
         let attachments = (thread.messages ?? []).flatMap { $0.attachments ?? [] }
         InspectorSection(title: "Attachments", trailing: attachments.isEmpty ? nil : "\(attachments.count)") {
             VStack(alignment: .leading, spacing: VeetSpace.s1) {

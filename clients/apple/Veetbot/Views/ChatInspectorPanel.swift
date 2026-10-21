@@ -73,6 +73,7 @@ struct ChatInspectorPanel: View {
             InspectorSection(title: "Working notes") {
                 WorkingStateDetails(state: workingState)
                     .inspectorCard()
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("inspector.chat.notes")
             }
         }

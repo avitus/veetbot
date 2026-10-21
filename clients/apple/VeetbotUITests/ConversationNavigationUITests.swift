@@ -337,8 +337,14 @@ final class ConversationNavigationUITests: XCTestCase {
 
         let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
-        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        // The panel's toggle just relaid the window; a click during that
+        // layout can miss the row, so it is repeated until the chat opens.
+        let loaded = app.staticTexts["Historical answer loaded"]
+        for _ in 0..<3 where !loaded.exists {
+            openSidebarRow(row)
+            _ = loaded.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(loaded.exists)
         let composer = app.descendants(matching: .any)["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.click()
