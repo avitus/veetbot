@@ -1171,13 +1171,13 @@ class RunExecutor:
             and invocation.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
         }
 
-    async def _turn_usage_baseline(
+    async def _turn_controls(
         self, context: RunContext, calls: list[ToolCallItem]
-    ) -> int | None:
-        """Read the pre-batch usage watermark even when its checkpoint was lost."""
+    ) -> tuple[int | None, str | None]:
+        """Read pre-batch usage and synthesis control after checkpoint loss."""
 
         if not calls:
-            return None
+            return None, None
         async with context.uow_factory() as uow:
             event = await uow.events.latest_before(
                 context.run.session_id,
@@ -1187,16 +1187,20 @@ class RunExecutor:
                 run_id=context.run.id,
             )
         if event is None:
-            return None
+            return None, None
         recorded_calls = [
             item.get("call_id")
             for item in event.payload.get("conversation_items", [])
             if isinstance(item, dict) and item.get("kind") == "tool_call"
         ]
         if recorded_calls != [call.call_id for call in calls]:
-            return None
+            return None, None
         baseline = event.payload.get("tool_call_count_before_turn")
-        return baseline if type(baseline) is int and baseline >= 0 else None
+        synthesis = event.payload.get("synthesis_reserve")
+        return (
+            baseline if type(baseline) is int and baseline >= 0 else None,
+            synthesis if isinstance(synthesis, str) else None,
+        )
 
     async def _resume_pending_tools(self, context: RunContext) -> RunOutcome | None:
         """Reconcile durable tool results, usage and unfinished calls before resuming."""
@@ -1211,7 +1215,7 @@ class RunExecutor:
                 turn = []
         adopted = await self._adopt_committed_history(context)
         latest, answered = self._latest_turn(restored.conversation)
-        durable_baseline = await self._turn_usage_baseline(context, latest)
+        durable_baseline, requested_synthesis = await self._turn_controls(context, latest)
         step = Step(
             run_id=context.run.id,
             step_number=max(1, context.run.step_count),
@@ -1243,7 +1247,9 @@ class RunExecutor:
             # run's count is still the one a batch with an unanswered call was
             # fitted to.
             if latest and not answered:
-                guarded = guard_tool_turn(context, latest, step)
+                guarded = guard_tool_turn(
+                    context, latest, step, requested_synthesis=requested_synthesis
+                )
                 if guarded is not None:
                     return guarded
             adopted_baseline = (
@@ -1276,7 +1282,9 @@ class RunExecutor:
                 raise ConflictError("checkpoint tool-usage watermark is malformed")
             if turn:
                 if not answered:
-                    guarded = guard_tool_turn(context, turn, step)
+                    guarded = guard_tool_turn(
+                        context, turn, step, requested_synthesis=requested_synthesis
+                    )
                     if guarded is not None:
                         return guarded
                 # The checkpoint's tool-usage watermark is the count the turn

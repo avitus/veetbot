@@ -116,6 +116,7 @@ class _LeaseState:
     acquired_at: datetime
     # The live expiry, which renewal extends.
     expires_at: datetime
+    entry_url: str | None = None
     sequence: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     closed: bool = False
@@ -349,6 +350,11 @@ class HostedProfileSessionService:
                     runtime=runtime,
                     acquired_at=now,
                     expires_at=expires_at,
+                    entry_url=(
+                        definition.origin + definition.protected_path
+                        if definition is not None
+                        else None
+                    ),
                 )
                 published = True
                 self._verification_browsers -= 1
@@ -393,7 +399,17 @@ class HostedProfileSessionService:
         async with state.lock:
             if state.closed:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-            return _snapshot(state.runtime, await state.runtime.navigate(url))
+            target = url
+            requested = urlsplit(url)
+            if (
+                state.entry_url is not None
+                and browser_origin(url) == browser_origin(state.entry_url)
+                and requested.path in {"", "/"}
+                and not requested.query
+                and not requested.fragment
+            ):
+                target = state.entry_url
+            return _snapshot(state.runtime, await state.runtime.navigate(target))
 
     async def observe_snapshot(
         self,

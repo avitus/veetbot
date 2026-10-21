@@ -87,9 +87,11 @@ without lease renewal, plus the tool fixes a lesson needs.
      price plus 8,192 output tokens. That is about USD 3.05 on Astra (a
      272,000-token window) and about USD 10.33 on Claude Fable (a
      1,000,000-token window). A lesson call costs about USD 0.10 to 0.35.
-   - Once USD 3 or less remains, the run may only answer. A tool request from
-     the call that reached the reserve, or from any later call, fails the run
-     with `budget_exceeded` (ADR-0078).
+   - Once USD 3 or less remains, the run may only answer. ADR-0229 amends the
+     original fatal transition: tools from the call that first reaches the
+     reserve receive durable refusals and the next request is synthesis-only.
+     A tool request that ignores an already synthesis-only request still fails
+     with `budget_exceeded` (ADR-0078). Hard limits remain unchanged.
    - A delegated child's cost limit is carved from what the parent has left,
      and the child follows the same rule.
    - A model priced at zero, such as the local model, has no effective cost

@@ -634,8 +634,9 @@ def _fit_tool_batch(
 
     count = run.tool_call_count if used is None else used
     remaining = max(0, run.limits.max_tool_calls - count)
-    time_reserved = _synthesis_reserve_dimension(run, now=now) == "time"
-    if time_reserved:
+    reserve = _synthesis_reserve_dimension(run, now=now) if now is not None else None
+    answer_reserved = reserve in {"time", "cost"}
+    if answer_reserved:
         remaining = 0
     fitted = calls[:remaining]
     refused: list[tuple[ToolCallItem, ToolResultItem]] = []
@@ -645,9 +646,9 @@ def _fit_tool_batch(
             action=call.name,
             reason_code="tool.budget_exhausted",
             message=(
-                "Not performed. The remaining time is reserved for the final answer; "
+                f"Not performed. The remaining {reserve} is reserved for the final answer; "
                 "answer from the evidence already gathered."
-                if time_reserved
+                if answer_reserved
                 else "Not performed. The run's tool-call budget is exhausted; "
                 "answer from the evidence already gathered."
             ),
@@ -1188,6 +1189,9 @@ async def _invoke_model(
                 # This survives checkpoint loss and distinguishes an answered
                 # batch from one whose usage was already committed.
                 "tool_call_count_before_turn": context.run.tool_call_count,
+                # Recovery must distinguish a newly crossed cost boundary from
+                # a response that ignored an already tool-free request.
+                "synthesis_reserve": synthesis_reserve,
                 "conversation_items": [
                     item.model_dump(mode="json")
                     for item in [
@@ -1215,17 +1219,17 @@ async def _invoke_model(
             stop_reason=terminal.stop_reason,
         )
         _reconcile_context_estimate(context, attempt_request, terminal.turn.usage)
-        if synthesis_reserve == "time" and terminal.turn.tool_calls:
+        if synthesis_reserve in {"time", "cost"} and terminal.turn.tool_calls:
             return _failure(
                 context,
                 FailureReason.BUDGET_EXCEEDED,
                 "SynthesisReserveViolation",
                 (
-                    "The model requested another tool while the remaining time "
+                    f"The model requested another tool while the remaining {synthesis_reserve} "
                     "was reserved for its answer."
                 ),
                 step,
-                {"synthesis_reserve": "time"},
+                {"synthesis_reserve": synthesis_reserve},
             )
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
@@ -1255,6 +1259,7 @@ def guard_tool_turn(
     step: Step,
     *,
     loop_synthesis: bool | None = None,
+    requested_synthesis: str | None = None,
 ) -> RunOutcome | None:
     """Apply the same pre-dispatch guards to fresh and recovered model turns.
 
@@ -1271,7 +1276,11 @@ def guard_tool_turn(
     )
     if context.checkpoint.working_state.get("browser_workflow_report_only"):
         synthesis_reserve = "browser_workflow"
-    if synthesis_reserve is not None:
+    if requested_synthesis in {"time", "cost"}:
+        synthesis_reserve = requested_synthesis
+    if synthesis_reserve is not None and (
+        synthesis_reserve != "cost" or requested_synthesis == "cost"
+    ):
         return _failure(
             context,
             FailureReason.BUDGET_EXCEEDED,
@@ -1280,6 +1289,11 @@ def guard_tool_turn(
             step,
             {"synthesis_reserve": synthesis_reserve},
         )
+
+    if synthesis_reserve == "cost":
+        # This response's charge crossed the reserve. Batch fitting will record
+        # refusals, then the next request gets its first synthesis opportunity.
+        return None
 
     if loop_synthesis:
         return _failure(

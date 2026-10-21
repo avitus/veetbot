@@ -1809,6 +1809,13 @@ Lease startup and protected-page verification reserve capacity and exclude other
 acquisitions for that profile without holding the service-wide admission lock.
 Publication rechecks the profile identity, revocation and deadline; failure or
 cancellation releases capacity only after the runtime closes.
+After this verification, navigation to the configured bare
+origin opens its protected path (ADR-0229). Only an empty or slash path without
+query or fragment qualifies; explicit routes and other origins retain their
+meaning. Repeated bare-origin requests use the same entrypoint, so a retry cannot
+fall through to a sign-out route. The target remains private trusted configuration and
+the returned observation describes the actual destination. Unconfigured profiles
+retain ordinary navigation and the `navigation_required` recovery above.
 Readiness is recorded only after sealing succeeds. An older ceremony cannot
 change a profile once a newer ceremony exists.
 
