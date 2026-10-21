@@ -66,6 +66,7 @@ class BrowserDiagnostics(BaseModel):
 
 _FAILURES: dict[str, Failure] = {
     "tool.browser.page_changed": "stale_page",
+    "tool.browser.navigation_required": "stale_page",
     "tool.browser.element_not_found": "target_missing",
     "tool.browser.region_not_actionable": "unsupported",
     "tool.browser.focus_required": "unsupported",

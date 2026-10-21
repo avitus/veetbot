@@ -1324,6 +1324,7 @@ The stable reason-code family includes:
 - `tool.browser.url_disallowed`
 - `tool.browser.provider_unavailable`
 - `tool.browser.navigation_cancelled`
+- `tool.browser.navigation_required`
 - `tool.browser.profile_unavailable`
 - `tool.browser.authentication_required`
 - `tool.browser.needs_user`
@@ -1335,6 +1336,16 @@ The stable reason-code family includes:
 - `tool.browser.grant_not_applicable`
 - `tool.browser.output_invalid`
 - `tool.browser.outcome_unknown`
+
+An observation, expansion or extraction of a live browser's initial `about:blank`
+page returns `tool.browser.navigation_required`, not a profile or authentication
+failure. This includes a new lease after user-input suspension or a new run:
+saved authentication does not preserve an open page. The fixed model message
+directs ordinary `browser.navigate` to the intended allowed website URL, then
+fresh observation references. The refusal retains the lease and sends no
+navigation itself; it never retries an action or requests another sign-in
+without authentication evidence. Closed browsers and disallowed page origins
+retain their existing refusal. Diagnostics use the existing `stale_page` category.
 
 When the runtime dismisses a beforeunload dialog and Chromium aborts navigation
 while the same allowed page remains open, navigation returns
@@ -1798,6 +1809,13 @@ Lease startup and protected-page verification reserve capacity and exclude other
 acquisitions for that profile without holding the service-wide admission lock.
 Publication rechecks the profile identity, revocation and deadline; failure or
 cancellation releases capacity only after the runtime closes.
+After this verification, navigation to the configured bare
+origin opens its protected path (ADR-0229). Only an empty or slash path without
+query or fragment qualifies; explicit routes and other origins retain their
+meaning. Repeated bare-origin requests use the same entrypoint, so a retry cannot
+fall through to a sign-out route. The target remains private trusted configuration and
+the returned observation describes the actual destination. Unconfigured profiles
+retain ordinary navigation and the `navigation_required` recovery above.
 Readiness is recorded only after sealing succeeds. An older ceremony cannot
 change a profile once a newer ceremony exists.
 

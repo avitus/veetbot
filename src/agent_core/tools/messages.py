@@ -113,6 +113,11 @@ TOOL_MESSAGES: dict[str, str] = {
         "Start a region read with region_ref and expected_revision without text_offset; "
         "continue only with its returned next_text. Never replay an uncertain action."
     ),
+    "tool.browser.navigation_required": (
+        "The browser has no open website page. Use browser.navigate with the intended allowed "
+        "website URL, then use its fresh observation. Do not ask the user to sign in again "
+        "unless the website then requires authentication. Never replay an uncertain action."
+    ),
     "tool.browser.outcome_unknown": (
         "The action may already have happened. Do not repeat it. "
         "Use read-only evidence to reconcile the result, or report the uncertainty."
