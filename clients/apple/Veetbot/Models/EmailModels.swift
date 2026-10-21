@@ -326,3 +326,51 @@ public struct EmailDraftEdit: Equatable, Sendable {
             .filter { !$0.isEmpty }
     }
 }
+
+/// Server collections of cached Inbox mail, independent of Gmail write actions.
+public enum EmailCollection: String, CaseIterable, Codable, Sendable {
+    case inbox
+    case needsYou = "needs_you"
+    case handled
+
+    public var title: String {
+        switch self {
+        case .inbox: "Inbox"
+        case .needsYou: "Needs you"
+        case .handled: "Handled"
+        }
+    }
+}
+
+/// Counts cover the authorized account/search result before pagination.
+public struct EmailCollectionCounts: Codable, Equatable, Sendable {
+    public let inbox: Int
+    public let needsYou: Int
+    public let handled: Int
+
+    public func count(for collection: EmailCollection) -> Int {
+        switch collection {
+        case .inbox: inbox
+        case .needsYou: needsYou
+        case .handled: handled
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case inbox, handled
+        case needsYou = "needs_you"
+    }
+}
+
+/// Older servers omit collection counts; absence must not be displayed as zero.
+public struct EmailThreadPage: Codable, Sendable {
+    public let items: [EmailThreadView]
+    public let nextCursor: String?
+    public let collectionCounts: EmailCollectionCounts?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case nextCursor = "next_cursor"
+        case collectionCounts = "collection_counts"
+    }
+}

@@ -4045,7 +4045,9 @@ Implement:
 - A shared Chat/Email mode shell on iPhone, iPad and Mac, preserving one owner,
   agent, persona, memory, connection and ordinary run machinery and existing Chat
   state. A mode changes presentation and task context, never authority.
-- Both existing Gmail accounts in a short high-precision priority view. Refresh
+- Both existing Gmail accounts in a short high-precision priority view. ADR-0231
+  extends the approved A2 presentation with Inbox, Needs you, and Handled
+  collections and authorized cached-thread counts; the priority view remains available. Refresh
   on entry and foreground return and every sixty seconds while visible. Only
   fresh client requests admit bounded work; no unattended monitor is authorized.
 - Owner-requested archive and move-to-Inbox actions from the Email checkbox,

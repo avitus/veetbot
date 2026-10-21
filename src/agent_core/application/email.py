@@ -327,7 +327,7 @@ class EmailExperienceService:
         self,
         principal: Principal,
         *,
-        view: Literal["priority", "other", "all"] = "priority",
+        view: Literal["priority", "other", "all", "inbox", "needs_you", "handled"] = "priority",
         account_id: str | None = None,
         text: str | None = None,
         cursor: str | None = None,
@@ -349,6 +349,7 @@ class EmailExperienceService:
                     continue
                 threads.append(stored)
         eligible: list[EmailThread] = []
+        counts = {"inbox": 0, "needs_you": 0, "handled": 0}
         for thread in threads:
             if (
                 thread.archive_operation is not None
@@ -374,8 +375,6 @@ class EmailExperienceService:
                 and thread.priority >= 0.7
                 and thread.dismissed_revision != thread.revision
             )
-            if (view == "priority" and not priority) or (view == "other" and priority):
-                continue
             if account_id is not None and account_id != thread.account_id:
                 continue
             if (
@@ -386,6 +385,18 @@ class EmailExperienceService:
                 ).casefold()
             ):
                 continue
+            handled = thread.dismissed_revision == thread.revision
+            collections = {
+                "inbox": thread.in_inbox,
+                "needs_you": thread.in_inbox and thread.needs_reply and not handled,
+                "handled": thread.in_inbox and handled,
+            }
+            for collection, matches in collections.items():
+                counts[collection] += int(matches)
+            if (view == "priority" and not priority) or (view == "other" and priority):
+                continue
+            if view in collections and not collections[view]:
+                continue
             eligible.append(thread)
         eligible.sort(key=lambda item: (-item.priority, -item.updated_at.timestamp(), str(item.id)))
         start = int(cursor or "0")
@@ -393,6 +404,7 @@ class EmailExperienceService:
         return {
             "items": [thread_summary(thread) for thread in page],
             "next_cursor": str(start + limit) if start + limit < len(eligible) else None,
+            "collection_counts": counts,
         }
 
     async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]:

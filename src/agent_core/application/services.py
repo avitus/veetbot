@@ -853,7 +853,7 @@ class EmailService(Protocol):
         self,
         principal: Principal,
         *,
-        view: Literal["priority", "other", "all"] = "priority",
+        view: Literal["priority", "other", "all", "inbox", "needs_you", "handled"] = "priority",
         account_id: str | None = None,
         text: str | None = None,
         cursor: str | None = None,

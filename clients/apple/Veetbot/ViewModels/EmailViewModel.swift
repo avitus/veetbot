@@ -71,7 +71,20 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var feedbackID: UUID?
     @Published public private(set) var hasMore = false
     @Published public private(set) var selectedAccountID: String?
-    @Published public private(set) var listView = "priority"
+    @Published public private(set) var listView = "inbox"
+    @Published private var loadedCollectionCounts: EmailCollectionCounts?
+    /// A pending optimistic mailbox change makes the last confirmed counts stale.
+    public var collectionCounts: EmailCollectionCounts? {
+        archiveHiddenThreads.isEmpty ? loadedCollectionCounts : nil
+    }
+    private var queryListView: String {
+        searchText.isEmpty || EmailCollection(rawValue: listView) != nil ? listView : "all"
+    }
+    public var collection: EmailCollection { EmailCollection(rawValue: listView) ?? .inbox }
+
+    public func setCollection(_ value: EmailCollection) {
+        setListView(value.rawValue)
+    }
     @Published public private(set) var searchText = ""
     @Published public private(set) var selectedThreadID: UUID?
     @Published public private(set) var learning: EmailLearningState?
@@ -252,6 +265,9 @@ public final class EmailViewModel: ObservableObject {
         reviewDraft = nil
         selectedThreadID = nil
         selectedAccountID = nil
+        loadedCollectionCounts = nil
+        listView = "inbox"
+        searchText = ""
         nextCursor = nil
         hasMore = false
         unavailable = false
@@ -282,6 +298,7 @@ public final class EmailViewModel: ObservableObject {
     public func setAccount(_ id: String?) {
         guard id != selectedAccountID else { return }
         selectedAccountID = id
+        loadedCollectionCounts = nil
         clearSelection()
         let foreground = active ? activation : nil
         Task { await reload(activation: foreground) }
@@ -291,6 +308,8 @@ public final class EmailViewModel: ObservableObject {
     public func setListView(_ value: String) {
         guard value != listView else { return }
         listView = value
+        loadedCollectionCounts = nil
+        listRequest = UUID()
         let foreground = active ? activation : nil
         Task { await reload(activation: foreground) }
     }
@@ -298,6 +317,7 @@ public final class EmailViewModel: ObservableObject {
     /// Debounces search changes and binds the eventual reload to the visit that scheduled it.
     public func setSearchText(_ text: String) {
         searchText = text
+        loadedCollectionCounts = nil
         searchTask?.cancel()
         listRequest = UUID()
         let foreground = active ? activation : nil
@@ -320,6 +340,7 @@ public final class EmailViewModel: ObservableObject {
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         let requestID = UUID()
         listRequest = requestID
+        loadedCollectionCounts = nil
         let visibleCount = preserveOrder ? max(5, inboxItems.count) : 5
         isLoading = !preserveOrder
         if !preserveOrder {
@@ -332,13 +353,14 @@ public final class EmailViewModel: ObservableObject {
         do {
             async let accountPage = api.emailAccounts()
             async let threadPage = readInbox(api: api,
-                accountID: selectedAccountID, view: searchText.isEmpty ? listView : "all",
+                accountID: selectedAccountID, view: queryListView,
                 text: searchText, count: visibleCount, connection: connection, activation: foreground
             )
             let (loadedAccounts, page) = try await (accountPage, threadPage)
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
             accounts = loadedAccounts.items
+            loadedCollectionCounts = page.collectionCounts
             recordAccountFreshness(loadedAccounts.items)
             unavailable = false
             seenCursors = []
@@ -366,8 +388,9 @@ public final class EmailViewModel: ObservableObject {
 
     /// Stops paging when the original connection or foreground visit no longer owns the read.
     private func readInbox(api: VeetbotAPIClient, accountID: String?, view: String, text: String, count: Int,
-                           connection: UUID, activation foreground: UUID?) async throws -> Page<EmailThreadView> {
+                           connection: UUID, activation foreground: UUID?) async throws -> EmailThreadPage {
         var rows: [EmailThreadView] = []
+        var counts: EmailCollectionCounts?
         var ids: Set<UUID> = []
         var cursor: String?
         var cursors: Set<String> = []
@@ -376,10 +399,11 @@ public final class EmailViewModel: ObservableObject {
             let page = try await api.emailThreads(accountID: accountID, view: view, text: text,
                                                  limit: min(100, count - rows.count), cursor: cursor)
             guard acceptsRead(connection: connection, activation: foreground) else { throw CancellationError() }
+            counts = page.collectionCounts
             rows.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
             cursor = try nextPageCursor(page.nextCursor, seen: &cursors)
         } while count > 100 && rows.count < count && cursor != nil
-        return Page(items: rows, nextCursor: cursor)
+        return EmailThreadPage(items: rows, nextCursor: cursor, collectionCounts: counts)
     }
 
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
@@ -394,10 +418,11 @@ public final class EmailViewModel: ObservableObject {
         defer { if listRequest == requestID { isLoading = false } }
         do {
             let page = try await api.emailThreads(
-                accountID: selectedAccountID, view: searchText.isEmpty ? listView : "all",
+                accountID: selectedAccountID, view: queryListView,
                 text: searchText, limit: 5, cursor: cursor
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            loadedCollectionCounts = page.collectionCounts
             var ids = Set(inboxItems.map(\.id))
             let loaded = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
             inboxItems.append(contentsOf: loaded.filter { ids.insert($0.id).inserted })

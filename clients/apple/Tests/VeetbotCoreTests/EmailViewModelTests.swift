@@ -1115,6 +1115,56 @@ import SwiftUI
         #expect(model.thread?.isHandled == true)
     }
 
+    /// Counts come from the whole server collection, never the visible first page.
+    @Test func testCollectionCountsAndSwitchPreserveUnsentDraft() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") {
+                return (200, self.pageJSON().replacingOccurrences(of: "\"next_cursor\":null",
+                    with: "\"next_cursor\":\"5\",\"collection_counts\":{\"inbox\":23,\"needs_you\":9,\"handled\":4}"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        #expect(model.collectionCounts?.count(for: .inbox) == 23)
+        #expect(model.collectionCounts?.count(for: .needsYou) == 9)
+        #expect(model.items.count == 1)
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Keep my words")
+        model.setCollection(.handled)
+        for _ in 0..<100 {
+            if requests.snapshot.contains(where: { $0.url?.query?.contains("view=handled") == true }) { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(requests.snapshot.contains { $0.url?.query?.contains("view=handled") == true })
+        #expect(model.collection == .handled)
+        #expect(model.currentEdit?.body == "Keep my words")
+        model.resetConnection()
+        #expect(model.collectionCounts == nil)
+    }
+
+    /// Search stays in the selected collection and old servers never imply zero counts.
+    @Test func testCollectionSearchAndUnknownCounts() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, self.pageJSON())
+        }
+        model.setCollection(.needsYou)
+        model.setSearchText("board")
+        await model.reload()
+        #expect(requests.snapshot.contains {
+            $0.url?.query?.contains("view=needs_you") == true && $0.url?.query?.contains("text=board") == true
+        })
+        #expect(model.collectionCounts == nil)
+        model.resetConnection()
+        #expect(model.collection == .inbox)
+        #expect(model.searchText.isEmpty)
+    }
+
     /// Undo clears attention state, while a newer source revision reopens an older dismissal.
     @Test func testHandledStateCanBeUndoneAndNewSourceReopensIt() async throws {
         let requests = EmailRequestRecorder()

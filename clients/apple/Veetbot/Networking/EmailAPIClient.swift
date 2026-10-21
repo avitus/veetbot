@@ -8,7 +8,7 @@ extension VeetbotAPIClient {
     public func emailThreads(
         accountID: String? = nil, view: String = "priority", text: String = "",
         limit: Int = 5, cursor: String? = nil
-    ) async throws -> Page<EmailThreadView> {
+    ) async throws -> EmailThreadPage {
         var query = [URLQueryItem(name: "view", value: view), URLQueryItem(name: "limit", value: String(limit))]
         if let accountID { query.append(URLQueryItem(name: "account_id", value: accountID)) }
         if !text.isEmpty { query.append(URLQueryItem(name: "text", value: text)) }

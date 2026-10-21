@@ -267,3 +267,5 @@ implementation without one.
 - [ADR-0220: Owner-reviewed bounded recall rollout](0220-bounded-recall-rollout.md)
 - [ADR-0222: Owner-approved scope for the retained recall review](0222-owner-approved-recall-review-scope.md)
 - [ADR-0223: Owner trial with production recall review](0223-owner-production-recall-trial.md)
+
+- [ADR-0231: Email collections and scoped counts](0231-email-collections-and-counts.md)

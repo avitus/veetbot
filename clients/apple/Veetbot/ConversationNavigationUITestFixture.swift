@@ -421,6 +421,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         var stagedFrames: [String] = []
         var stagedInterval = 0.01
         switch (request.httpMethod, url.path) {
+        case ("GET", "/v1/persona"):
+            statusCode = 200
+            body = #"{"version":1,"voice":"Be clear and direct. Keep practical answers concise.","traits":["brief","direct"],"entries":[{"text":"User values clear explanations and practical next steps.","source":"user_edit","source_belief_id":null,"sensitivity":"internal","enabled":true,"stale":false}],"source":"user_edit","created_at":"2026-10-20T12:00:00Z"}"#
+        case ("GET", "/v1/persona/nominations"):
+            statusCode = 200
+            body = #"{"items":[],"next_cursor":null}"#
+        case ("GET", "/v1/persona/boundaries"):
+            statusCode = 200
+            body = #"{"items":[{"id":"payments_ask","text":"Payments ask you first.","enforced_by":{"kind":"policy_rule","ref":"rules.financial=require_approval"},"active":true},{"id":"publishing_asks","text":"Posting anything publicly asks you first.","enforced_by":{"kind":"policy_rule","ref":"rules.publication=require_approval"},"active":true}]}"#
         case (_, let path) where path.hasPrefix("/v1/memory-reconsolidations") || path.hasPrefix("/v1/memories/00000000-0000-0000-0000-00000000320"):
             let result = Self.synthesisResponse(request)
             statusCode = result.0
@@ -597,22 +606,52 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = Self.readSubscriptionOperation(url.lastPathComponent)
         case ("GET", "/v1/email/threads"):
             statusCode = 200
-            let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
-            let handled = Self.emailLock.withLock { Self.emailHandled || Self.emailArchived }
-            let included = view == "all" || (view == "other" ? handled : !handled)
-            var items = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
-                ? Self.fullInboxJSON : (included ? Self.emailThreadJSON : "")
-            if view == "priority", ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-next") {
-                items += (items.isEmpty ? "" : ",") + Self.nextEmailThreadJSON
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let view = query.first { $0.name == "view" }?.value ?? "priority"
+            var rawItems = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
+                ? Self.fullInboxJSON : Self.emailThreadJSON
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-next") {
+                rawItems += "," + Self.nextEmailThreadJSON
             }
-            if view == "priority", Self.bulkThreadEnabled {
-                items += (items.isEmpty ? "" : ",") + Self.bulkEmailThreadJSON
+            if Self.bulkThreadEnabled { rawItems += "," + Self.bulkEmailThreadJSON }
+            if Self.suspectedSpamEnabled { rawItems += "," + Self.spamThreadJSON }
+            let rows = (try? JSONSerialization.jsonObject(with: Data("[\(rawItems)]".utf8))) as? [[String: Any]] ?? []
+            let account = query.first { $0.name == "account_id" }?.value
+            let text = query.first { $0.name == "text" }?.value?.lowercased() ?? ""
+            let matching = rows.filter { row in
+                let searchable = [row["subject"] as? String ?? "", row["summary"] as? String ?? ""]
+                    + (row["senders"] as? [String] ?? [])
+                return (account == nil || row["account_id"] as? String == account)
+                    && (text.isEmpty || searchable.joined(separator: " ").lowercased().contains(text))
             }
-            // A reported conversation leaves the priority view, as the server's does.
-            if Self.suspectedSpamEnabled, view != "priority" || !Self.emailLock.withLock({ Self.spamInSpam }) {
-                items += (items.isEmpty ? "" : ",") + Self.spamThreadJSON
+            func handled(_ row: [String: Any]) -> Bool {
+                guard let revision = row["dismissed_revision"] as? Int else { return false }
+                return revision == row["revision"] as? Int
             }
-            body = "{\"items\":[\(items)],\"next_cursor\":null}"
+            func inbox(_ row: [String: Any]) -> Bool { row["in_inbox"] as? Bool == true }
+            func needs(_ row: [String: Any]) -> Bool {
+                inbox(row) && row["needs_reply"] as? Bool == true && !handled(row)
+            }
+            let counts = ["inbox": matching.filter(inbox).count,
+                          "needs_you": matching.filter(needs).count,
+                          "handled": matching.filter { inbox($0) && handled($0) }.count]
+            let selected = matching.filter { row in
+                switch view {
+                case "inbox": return inbox(row)
+                case "needs_you": return needs(row)
+                case "handled": return inbox(row) && handled(row)
+                case "all": return true
+                case "other": return !inbox(row) || handled(row)
+                default: return inbox(row) && !handled(row)
+                }
+            }
+            let limit = max(1, Int(query.first { $0.name == "limit" }?.value ?? "5") ?? 5)
+            let offset = max(0, Int(query.first { $0.name == "cursor" }?.value ?? "0") ?? 0)
+            let page = Array(selected.dropFirst(offset).prefix(limit))
+            let cursor: Any = offset + limit < selected.count ? String(offset + limit) : NSNull()
+            let payload: [String: Any] = ["items": page, "next_cursor": cursor, "collection_counts": counts]
+            body = String(data: try! JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!
+
         case ("GET", "/v1/email/threads/00000000-0000-0000-0000-000000000899"):
             statusCode = 200
             body = Self.nextEmailThreadJSON
