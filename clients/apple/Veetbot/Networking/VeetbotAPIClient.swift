@@ -334,6 +334,19 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    /// Queues a content-free test notification for one device (202; a
+    /// replayed key answers 200). The body names only the notification id.
+    public func sendTestNotification(to deviceID: UUID, idempotencyKey: String) async throws {
+        _ = try await transport.sendData(
+            TransportRequest(
+                method: .post,
+                path: "/v1/devices/\(deviceID.uuidString)/test-notification",
+                headers: ["Idempotency-Key": idempotencyKey],
+                retryAttempts: 2
+            )
+        )
+    }
+
     public func revokeDevice(_ deviceID: UUID) async throws -> DeviceView {
         try await transport.send(
             TransportRequest(
@@ -646,23 +659,104 @@ public struct VeetbotAPIClient: Sendable {
         }
     }
 
+    /// Supersedes a belief with the owner's wording (ADR-0224 part A). The
+    /// server answers with the replacement belief; the old one stays readable
+    /// as history. `expectedUpdatedAt` makes a stale screen a conflict.
+    public func correctMemory(
+        _ id: UUID,
+        wording: String,
+        expectedUpdatedAt: Date,
+        ceiling: MemorySensitivityKind,
+        key: String = UUID().uuidString
+    ) async throws -> MemoryView {
+        // Milliseconds, the precision the server compares at; whole seconds
+        // would make every unchanged memory a conflict.
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: expectedUpdatedAt)
+        do {
+            return try await transport.send(
+                TransportRequest(
+                    method: .post,
+                    path: "/v1/memories/\(id.uuidString)/review",
+                    queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)],
+                    body: try JSONEncoder.server.encode([
+                        "outcome": "changed",
+                        "replacement_statement": wording,
+                        "expected_updated_at": stamp,
+                    ]),
+                    headers: ["Idempotency-Key": key],
+                    retryAttempts: 2
+                )
+            )
+        } catch {
+            throw memoryChangesCompatibilityError(from: error, missingRouteIsUnsupported: true)
+                ?? error
+        }
+    }
+
+    /// The sources a belief cites, newest first (ADR-0224 part B).
+    public func memoryEvidence(
+        _ id: UUID, ceiling: MemorySensitivityKind
+    ) async throws -> [MemoryEvidenceItem] {
+        let page: MemoryEvidencePage = try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/memories/\(id.uuidString)/evidence",
+                queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)]
+            )
+        )
+        return page.items
+    }
+
+    /// The sidebar's numbers under the list's own predicates (ADR-0224 part C).
+    public func memoryCounts(ceiling: MemorySensitivityKind) async throws -> MemoryCountsView {
+        try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/memories/counts",
+                queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)]
+            )
+        )
+    }
+
     public func getPersona() async throws -> PersonaView {
         try await transport.send(TransportRequest(method: .get, path: "/v1/persona"))
     }
 
     public func updatePersona(
         expectedVersion: Int,
-        entries: [UpdatePersonaEntryBody]
+        entries: [UpdatePersonaEntryBody],
+        tone: UpdatePersonaBody.Tone? = nil
     ) async throws -> PersonaView {
         try await transport.send(
             TransportRequest(
                 method: .put,
                 path: "/v1/persona",
                 body: try JSONEncoder.server.encode(
-                    UpdatePersonaBody(expectedVersion: expectedVersion, entries: entries)
+                    UpdatePersonaBody(expectedVersion: expectedVersion, entries: entries, tone: tone)
                 )
             )
         )
+    }
+
+    /// One example reply in an unsaved voice (ADR-0226 part C).
+    public func previewPersona(voice: String?, traits: [String]) async throws -> PersonaPreviewView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/persona/preview",
+                body: try JSONEncoder.server.encode(UpdatePersonaBody.Tone(voice: voice, traits: traits))
+            )
+        )
+    }
+
+    /// The fixed rules the persona cannot change (ADR-0226 part D).
+    public func personaBoundaries() async throws -> [PersonaBoundaryView] {
+        let page: PersonaBoundaryPage = try await transport.send(
+            TransportRequest(method: .get, path: "/v1/persona/boundaries")
+        )
+        return page.items
     }
 
     public func personaHistory(limit: Int = 20) async throws -> Page<PersonaView> {
@@ -862,6 +956,94 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    /// Pause, resume and stop (cancel) through the lifecycle routes, each at
+    /// the revision the owner saw (ADR-0225 part A). Stop needs
+    /// `schedule.cancel`; the record stays for 30 days (ADR-0089).
+    public func pauseSchedule(_ id: UUID, expectedRevision: Int) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/\(id.uuidString)/pause",
+            body: try JSONEncoder.server.encode(["expected_revision": expectedRevision])
+        ))
+    }
+
+    public func resumeSchedule(_ id: UUID, expectedRevision: Int) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/\(id.uuidString)/resume",
+            body: try JSONEncoder.server.encode(["expected_revision": expectedRevision])
+        ))
+    }
+
+    public func cancelSchedule(_ id: UUID, expectedRevision: Int) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .delete, path: "/v1/schedules/\(id.uuidString)",
+            queryItems: [URLQueryItem(name: "expected_revision", value: String(expectedRevision))]
+        ))
+    }
+
+    /// Starts one owner-requested run now (ADR-0225 part C, `schedule.run`).
+    public func runScheduleNow(_ id: UUID, expectedRevision: Int, idempotencyKey: String) async throws
+        -> ScheduleOccurrenceView
+    {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/\(id.uuidString)/run",
+            body: try JSONEncoder.server.encode(["expected_revision": expectedRevision]),
+            headers: ["Idempotency-Key": idempotencyKey]
+        ))
+    }
+
+    public func listScheduleOccurrences(
+        _ id: UUID, limit: Int = 20, cursor: String? = nil
+    ) async throws -> Page<ScheduleOccurrenceView> {
+        var query = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await transport.send(TransportRequest(
+            method: .get, path: "/v1/schedules/\(id.uuidString)/occurrences", queryItems: query
+        ))
+    }
+
+    /// Reads a plain-words description into an unsaved draft (ADR-0225 part B).
+    public func draftSchedule(text: String, timezone: String) async throws -> ScheduleDraftView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules/drafts",
+            body: try JSONEncoder.server.encode(["text": text, "timezone": timezone])
+        ))
+    }
+
+    /// Creates a schedule from a definition the server derived, unchanged.
+    public func createSchedule(definition: JSONValue, idempotencyKey: String) async throws -> ScheduleRecordView {
+        try await transport.send(TransportRequest(
+            method: .post, path: "/v1/schedules",
+            body: try JSONEncoder.server.encode(definition),
+            headers: ["Idempotency-Key": idempotencyKey]
+        ))
+    }
+
+    /// Sets when a schedule's finished runs notify (ADR-0225 part D) through
+    /// the full-definition update, re-reading first so every other field goes
+    /// back exactly as the server holds it; a stale revision is retried once.
+    public func setScheduleNotify(_ scheduleID: UUID, notify: String) async throws -> ScheduleRecordView {
+        let path = "/v1/schedules/\(scheduleID.uuidString)"
+        var retried = false
+        while true {
+            let (data, _) = try await transport.sendData(TransportRequest(method: .get, path: path))
+            let current = try JSONDecoder.server.decode(ScheduleRecordView.self, from: data)
+            if current.revision.notify == notify { return current }
+            let record = try JSONDecoder.server.decode(JSONValue.self, from: data)
+            let update = try scheduleDefinitionUpdate(from: record) { definition in
+                definition["notify"] = .string(notify)
+            }
+            do {
+                return try await transport.send(TransportRequest(
+                    method: .patch, path: path, body: try JSONEncoder.server.encode(update)
+                ))
+            } catch HTTPTransportError.api(let apiError)
+                where !retried && apiError.details.reason == "schedule.revision_conflict"
+            {
+                retried = true
+            }
+        }
+    }
+
     /// Binds or clears the website sign-in a schedule's future occurrences may
     /// read, through the full-definition update (ADR-0150, ADR-0154). Each
     /// attempt re-reads the schedule and sends the server's own definition back
@@ -913,6 +1095,26 @@ private let scheduleWebsiteReadScope = "browser.profile.read"
 private let scheduleRevisionOnlyFields = [
     "schedule_id", "revision", "timezone", "created_by_principal_id", "created_at",
 ]
+
+/// The server's own definition from a point read, minus the fields only a
+/// revision carries, changed by `modify`, at the record's current revision.
+private func scheduleDefinitionUpdate(
+    from record: JSONValue,
+    modify: (inout [String: JSONValue]) -> Void
+) throws -> JSONValue {
+    guard
+        let expectedRevision = record.objectValue?["schedule"]?.objectValue?["current_revision"],
+        expectedRevision.intValue != nil,
+        var definition = record.objectValue?["revision"]?.objectValue
+    else {
+        throw HTTPTransportError.invalidResponse
+    }
+    for field in scheduleRevisionOnlyFields {
+        definition[field] = nil
+    }
+    modify(&definition)
+    return .object(["expected_revision": expectedRevision, "definition": .object(definition)])
+}
 
 private func scheduleWebsiteAccessUpdate(
     from record: JSONValue,

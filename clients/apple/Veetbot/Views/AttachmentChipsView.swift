@@ -40,7 +40,7 @@ private struct AttachmentChip: View {
                 .foregroundColor(AppTheme.teal)
             VStack(alignment: .leading, spacing: 3) {
                 Text(attachment.filename)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 status
@@ -84,11 +84,11 @@ private struct AttachmentChip: View {
                 .accessibilityLabel("Uploading")
         case .uploaded:
             Text("Ready")
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(.secondary)
         case .failed(let message):
             Text(message)
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(.red)
                 .lineLimit(2)
         }
@@ -156,7 +156,7 @@ struct AttachmentDropHighlight: View {
             )
             .overlay(
                 Label("Drop files to attach", systemImage: "paperclip")
-                    .appFont(.headline)
+                    .veetType(.ui, weight: .semibold)
                     .padding(12)
                     .background(.regularMaterial, in: Capsule())
             )

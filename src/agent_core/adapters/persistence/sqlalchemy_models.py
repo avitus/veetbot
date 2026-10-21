@@ -1437,7 +1437,30 @@ class ScheduleOccurrenceRow(Base):
             name="fk_schedule_occurrences_revision",
             ondelete="RESTRICT",
         ),
-        UniqueConstraint("schedule_id", "nominal_fire_at", name="uq_schedule_occurrence_nominal"),
+        # ADR-0225 part C: a cadence instant is unique per schedule; a manual
+        # run's nominal instant is its request time, and its key is unique.
+        Index(
+            "uq_schedule_occurrences_scheduled_nominal",
+            "schedule_id",
+            "nominal_fire_at",
+            unique=True,
+            postgresql_where=text("trigger = 'SCHEDULED'"),
+        ),
+        CheckConstraint(
+            "trigger IN ('SCHEDULED','MANUAL')",
+            name="schedule_occurrence_trigger_values",
+        ),
+        CheckConstraint(
+            "(trigger = 'MANUAL') = (manual_request_key IS NOT NULL)",
+            name="schedule_occurrence_manual_key",
+        ),
+        Index(
+            "uq_schedule_occurrences_manual_request",
+            "schedule_id",
+            "manual_request_key",
+            unique=True,
+            postgresql_where=text("manual_request_key IS NOT NULL"),
+        ),
         CheckConstraint(
             "disposition IN ('MATERIALIZED','MISSED','SKIPPED_OVERLAP',"
             "'AUTHORIZATION_FAILED','CONFIGURATION_FAILED')",
@@ -1482,6 +1505,8 @@ class ScheduleOccurrenceRow(Base):
     materialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     links_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    trigger: Mapped[str] = mapped_column(String(16), server_default="SCHEDULED")
+    manual_request_key: Mapped[str | None] = mapped_column(Text)
 
 
 class ScheduleIdempotencyKeyRow(Base):
@@ -2067,6 +2092,11 @@ class PersonaDocumentRow(Base):
     source: Mapped[str] = mapped_column(Text)
     source_nomination_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # ADR-0226 part A.
+    voice: Mapped[str | None] = mapped_column(Text, nullable=True)
+    traits: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
 
 class PersonaNominationRow(Base):

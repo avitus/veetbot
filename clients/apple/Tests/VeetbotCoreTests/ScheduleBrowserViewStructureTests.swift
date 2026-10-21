@@ -4,6 +4,24 @@ import Testing
 @testable import VeetbotCore
 
 @Suite struct ScheduleBrowserViewStructureTests {
+    /// ADR-0225 part A: Pause or Resume, Stop behind a confirmation (never
+    /// "Delete"), and Recent runs with Open report in Chat.
+    @Test
+    func testTheDetailOffersLifecycleControlsAndRecentRuns() throws {
+        let detail = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Veetbot/Views/ScheduleDetailView.swift"),
+            encoding: .utf8
+        )
+        #expect(detail.contains(".accessibilityIdentifier(\"schedule.pause\")"))
+        #expect(detail.contains(".accessibilityIdentifier(\"schedule.resume\")"))
+        #expect(detail.contains(".accessibilityIdentifier(\"schedule.stop.confirm\")"))
+        #expect(detail.contains("A2SectionHeading(title: \"Recent runs\")"))
+        #expect(detail.contains("Button(\"Open report in Chat\")"))
+        #expect(!detail.contains("Button(\"Delete"))
+    }
+
     @Test
     func testBrowserRetainsPopulatedRowsAcrossLaterFailuresAndPagesByCursor() throws {
         let source = try source(at: "Veetbot/Views/ScheduleBrowserView.swift")

@@ -71,6 +71,35 @@ import Testing
         #expect(try self.profile(aliases: [alias("Gracie", kind: "name")]).primaryContact == nil)
     }
 
+    /// Email and Call appear only for a person with a current address or
+    /// number; each opens Chat with a request that names the person and
+    /// never the number, so content cannot choose who is called (ADR-0213).
+    @Test func contactActionsFollowTheCurrentAddressesAndNumbers() throws {
+        let both = try profile(aliases: [
+            alias("priya@example.com", kind: "email"), alias("+1 530 555 0171", kind: "phone"),
+        ])
+        #expect(both.contactActions == [.email, .call])
+        let gone = try profile(aliases: [alias("+1 530 555 0171", kind: "phone", validTo: "2026-01-01T00:00:00Z")])
+        #expect(gone.contactActions.isEmpty)
+
+        #expect(PeopleConversationIntent.ask.prompt(for: "Priya Natarajan") == "Help me prepare for my next conversation with Priya Natarajan.")
+        #expect(PeopleConversationIntent.email.prompt(for: "Priya Natarajan") == "Draft an email to Priya Natarajan about ")
+        #expect(PeopleConversationIntent.call.prompt(for: "Priya Natarajan") == "Call Priya Natarajan about ")
+        #expect(PeopleConversationIntent.ask.buttonTitle(for: "Priya Natarajan") == "Ask Veetbot about Priya")
+    }
+
+    @Test func theProfileOffersAskEmailCallAndMerge() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let detail = try String(contentsOf: root.appendingPathComponent("Veetbot/Views/PeopleDetailView.swift"), encoding: .utf8)
+
+        #expect(detail.contains(".accessibilityIdentifier(\"people.action.ask\")"))
+        #expect(detail.contains(".accessibilityIdentifier(\"people.action.email\")"))
+        #expect(detail.contains(".accessibilityIdentifier(\"people.action.call\")"))
+        #expect(detail.contains("Button(\"Merge with another entry…\")"))
+        #expect(!detail.contains("Prepare for a conversation"))
+    }
+
     @Test func initialsUseTheFirstAndLastWordsThatStartWithALetter() {
         #expect(PeopleMonogram.initials(of: "Maya Chen") == "MC")
         #expect(PeopleMonogram.initials(of: "maya") == "M")

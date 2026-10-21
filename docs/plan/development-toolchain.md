@@ -261,7 +261,10 @@ disposable opt-in described below, and has run the third job as well.
 Locally, `make check` schedules two independent Make jobs by default, starting
 the Python and browser lanes first. Static tests use two load-scope workers;
 contract tests follow static tests and stay serial. `CHECK_JOBS=1` and
-`STATIC_TEST_WORKERS=0` provide a serial diagnostic run. All targets remain in
+`STATIC_TEST_WORKERS=0` provide a serial diagnostic run. `PYTEST_ARGS`, empty
+by default, appends pytest arguments to `test-static`, `test-contract`, and
+`test-integration`; CI's Smarter Testing suites pass the selected test files
+and the report path through it (ADR-0228). All targets remain in
 one Make dependency graph, so explicitly naming `docs-check` or `test-static`
 beside `check` does not execute them twice. Run the aggregate once on final
 inputs; repeat a passed check only after its inputs change. No test-result
@@ -485,14 +488,37 @@ targets are separate CircleCI steps so timing data identifies the remaining
 bottleneck. Jobs 1 through 3, job 5, and job 11 publish their pytest JUnit XML through
 CircleCI's test-results collector so failed and slow tests are visible without
 searching raw logs.
+Jobs 1 through 3 run their test target through CircleCI Smarter Testing
+(ADR-0228): `.circleci/test-suites.yml` defines one suite per job, whose
+discovery and run both invoke that job's Make target, with test files as the
+atoms and reports that name each case's file. Only the free features are
+configured, so every run executes the whole partition; rerunning a workflow from
+failed runs only the files that failed in the earlier attempt on the same
+commit. No credit-charged feature is enabled: test impact analysis would reduce
+the selection of a required check.
 Job 6 is an additional native-client gate outside `make check`, split across
 two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it, then runs the macOS UI cases with
 `make test-apple-ui-macos`. Job 6b runs `make test-apple-ui-ios` on available
-iPhone and iPad simulators. Locally, `make test-apple-ui` runs the macOS target
-and then the simulator target, never both at once, because the macOS cases
-drive the real desktop. The macOS case resizes the
+iPhone and iPad simulators. The macOS cases synthesize real pointer and
+keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
+VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
+both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM
+(`veetbot-macos-ui`, cloned once from
+`ghcr.io/cirruslabs/macos-tahoe-xcode:27`, the macOS 26 and Xcode 27 pairing
+CircleCI uses) without a window and with the checkout shared read-only. It
+switches the guest to a 1728×1117-point display on every boot, because the
+guest otherwise starts at 1024×768, where seven Mac cases fail on window
+geometry. It then copies the checkout to the guest disk, where the guest's build cache persists,
+and runs the unchanged `make test-apple-ui-macos` there, or the command given
+to the script as arguments, such as one `xcodebuild test -only-testing:` case. It writes the result
+bundle back to `APPLE_TEST_RESULTS_DIR` and stops the VM, and a second run
+waits for the first. The native gates under `tests/native/` send their macOS
+journeys through the same script (`tests/native_mac_vm.py`) and skip, an
+unpassed gate, when the VM is missing. Tart is an optional local tool that no
+other target needs. `make test-apple-ui-macos` on the host remains the target CI runs. The
+macOS case resizes the
 real SwiftUI window, terminates the application, and asserts that its size is
 restored after relaunch; a second Mac case verifies Email mode and exact draft
 approval. The simulator cases use a debug-only in-process

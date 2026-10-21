@@ -148,6 +148,258 @@ final class ConversationNavigationUITests: XCTestCase {
         checkAnswerStaysVisible(answer, below: summary)
     }
 
+    /// The owner reads a short scheduled report, then opens the weekday
+    /// briefing, which is about as tall as their window. Each visit must draw
+    /// its report rather than a blank, unscrollable transcript.
+    func testBriefingAboutAWindowTallIsDrawnAfterAShortReport() {
+        app.launchArguments += ["--ui-testing-unread-report", "--ui-testing-briefing-replay"]
+        for key in ["VEETBOT_UI_TEST_BRIEFING_STORIES", "VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] {
+            if let value = ProcessInfo.processInfo.environment[key] { app.launchEnvironment[key] = value }
+        }
+        app.launch()
+        let group = app.descendants(matching: .any)[
+            "sidebar.schedule.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(group.waitForExistence(timeout: 10))
+        let today = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A1"
+        ]
+        let yesterday = app.descendants(matching: .any)[
+            "sidebar.session.00000000-0000-0000-0000-0000000005A3"
+        ]
+        for _ in 0..<3 where !yesterday.waitForExistence(timeout: 2) {
+            if group.value as? String != "Expanded" { openSidebarRow(group) }
+        }
+        XCTAssertTrue(today.waitForExistence(timeout: 5))
+        for visit in 1...3 {
+            for (row, day) in [(yesterday, "Yesterday's"), (today, "Today's")] {
+                openSidebarRow(row)
+                let closingText = "\(day) briefing closing line."
+                let closing = app.staticTexts[closingText].firstMatch
+                // The replay streams for about a second; judge the settled transcript.
+                sleep(3)
+                let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+                shot.name = "\(day)-\(visit)"
+                shot.lifetime = .keepAlways
+                add(shot)
+                XCTAssertTrue(closing.exists, "\(day) visit \(visit)\n\(app.debugDescription)")
+                // A briefing taller than the window opens with its beginning
+                // at the top, below the bars, not scrolled past it.
+                let heading = staticTextFrame("\(day) briefing")
+                let top = transcriptTop()
+                XCTAssertNotNil(heading, "\(day) visit \(visit)\n\(app.debugDescription)")
+                XCTAssertGreaterThanOrEqual(
+                    heading?.minY ?? -.infinity, top - 1, "\(day) visit \(visit): heading \(String(describing: heading)) top \(top)"
+                )
+                // A drawn transcript scrolls on to its last line.
+                // A Mac keeps static text in its value, iOS in its label.
+                let transcript = app.scrollViews.containing(
+                    NSPredicate(format: "label == %@ OR value == %@", closingText, closingText)
+                ).firstMatch
+                #if os(macOS)
+                let window = app.windows.firstMatch
+                for _ in 0..<6 where !window.frame.contains(closing.frame) {
+                    transcript.scroll(byDeltaX: 0, deltaY: -250)
+                }
+                XCTAssertTrue(
+                    window.frame.contains(closing.frame),
+                    "\(day) visit \(visit)\n\(app.debugDescription)"
+                )
+                #else
+                for _ in 0..<6 where !closing.isHittable { transcript.swipeUp() }
+                XCTAssertTrue(closing.isHittable, "\(day) visit \(visit)\n\(app.debugDescription)")
+                #endif
+            }
+        }
+    }
+
+    private func openSidebarRow(_ row: XCUIElement) {
+        #if os(macOS)
+        // The plain sidebar button's vertical midpoint is between its two text lines.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        #else
+        // On an iPhone the first navigation-bar button is People, not the
+        // chat list's toggle, so the list comes back through its own toggle.
+        revealSidebarIfNeeded(for: row)
+        row.tap()
+        #endif
+    }
+
+    /// The composer floats over the end of the transcript, so an answer that
+    /// grows while it streams has to keep its end clear of it.
+    func testStreamedAnswerEndsAboveTheComposer() {
+        app.launchArguments.append("--ui-testing-streamed-answer")
+        app.launch()
+        let composer = sendStreamedAnswerRequest()
+        let lastLine = streamedText("The answer's last line.")
+        XCTAssertTrue(lastLine.waitForExistence(timeout: 10))
+        let firstLine = streamedParagraph(1)
+        XCTAssertTrue(firstLine.waitForExistence(timeout: 5))
+        waitForStreamedAnswerToSettle()
+        attachEmailScreenshot("Streamed answer")
+        // The answer's own actions end the transcript, beneath its last line;
+        // they show on hover on the Mac and after a tap on an iPad.
+        revealMessageActions(lastLine)
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label == %@", "Copy message")).firstMatch
+                .waitForExistence(timeout: 5)
+        )
+        let answerActions = app.buttons
+            .matching(NSPredicate(format: "label == %@", "Copy message"))
+            .allElementsBoundByIndex
+            .map(\.frame)
+            .max { $0.maxY < $1.maxY } ?? .null
+        let geometry = "last line \(lastLine.frame) actions \(answerActions) first line \(firstLine.frame) composer \(composer.frame)"
+        XCTAssertGreaterThan(answerActions.minY, lastLine.frame.maxY, geometry)
+        XCTAssertLessThanOrEqual(answerActions.maxY, composer.frame.minY, geometry)
+        XCTAssertGreaterThan(firstLine.frame.minY, app.windows.firstMatch.frame.minY, geometry)
+    }
+
+    /// An answer taller than the window keeps its beginning in view while it
+    /// streams and after the run ends, so it can be read from the top.
+    func testLongStreamedAnswerKeepsItsBeginningInView() {
+        app.launchArguments += ["--ui-testing-streamed-answer", "--ui-testing-long-answer"]
+        app.launch()
+        let composer = sendStreamedAnswerRequest()
+        XCTAssertTrue(streamedParagraph(2).waitForExistence(timeout: 10))
+        waitForStreamedAnswerToSettle()
+        attachEmailScreenshot("Long streamed answer")
+        let firstLine = streamedParagraph(1)
+        XCTAssertTrue(firstLine.exists)
+        let top = transcriptTop()
+        let geometry = "first line \(firstLine.frame) composer \(composer.frame) transcript top \(top)"
+        XCTAssertGreaterThanOrEqual(firstLine.frame.minY, top - 1, geometry)
+        XCTAssertLessThan(firstLine.frame.maxY, composer.frame.minY, geometry)
+    }
+
+    #if os(iOS)
+    /// The paper runs under the home indicator: the strip below the composer
+    /// is the transcript's paper, not the window's white.
+    func testPaperReachesTheBottomEdgeBelowTheComposer() {
+        app.launchArguments.append("--ui-testing-streamed-answer")
+        app.launch()
+        _ = sendStreamedAnswerRequest()
+        let lastLine = streamedText("The answer's last line.")
+        XCTAssertTrue(lastLine.waitForExistence(timeout: 10))
+        waitForStreamedAnswerToSettle()
+        let window = app.windows.firstMatch.frame
+        let screenshot = XCUIScreen.main.screenshot().image
+        // Both points sit in the conversation's column (beside the iPad's
+        // sidebar): paper just past the short last line, clear of the
+        // composer's shadow, and the window's bottom edge below it.
+        let column = lastLine.frame.maxX + 24
+        let paper = pixel(in: screenshot, at: CGPoint(x: column, y: lastLine.frame.midY))
+        let bottomEdge = pixel(in: screenshot, at: CGPoint(x: column, y: window.maxY - 2))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Bottom edge"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let difference = zip(paper, bottomEdge).map { abs($0 - $1) }.max() ?? 255
+        XCTAssertLessThanOrEqual(difference, 3, "paper \(paper), bottom edge \(bottomEdge)")
+    }
+
+    /// The red, green and blue values of one point of a screenshot.
+    private func pixel(in image: UIImage, at point: CGPoint) -> [Int] {
+        guard let cgImage = image.cgImage else { return [] }
+        let x = Int(point.x * image.scale)
+        let y = Int(point.y * image.scale)
+        var data = [UInt8](repeating: 0, count: 4)
+        data.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return }
+            // Core Graphics counts rows from the bottom.
+            context.draw(
+                cgImage,
+                in: CGRect(
+                    x: -x, y: -(cgImage.height - 1 - y), width: cgImage.width, height: cgImage.height
+                )
+            )
+        }
+        return data.prefix(3).map(Int.init)
+    }
+    #endif
+
+    /// Opens the fixture conversation and sends the message the streamed answer replies to.
+    private func sendStreamedAnswerRequest() -> XCUIElement {
+        let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        #if os(macOS)
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        #else
+        row.tap()
+        #endif
+        XCTAssertTrue(app.staticTexts["Historical answer loaded"].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        #if os(macOS)
+        composer.click()
+        #else
+        composer.tap()
+        #endif
+        composer.typeText("Stream an answer")
+        #if os(macOS)
+        app.buttons["Send"].click()
+        #else
+        app.buttons["Send"].tap()
+        #endif
+        return composer
+    }
+
+    private func streamedParagraph(_ number: Int) -> XCUIElement {
+        streamedText("Streamed paragraph \(number) of the answer.")
+    }
+
+    /// Mac static text carries its words in `value`, iOS in `label`.
+    private func streamedText(_ text: String) -> XCUIElement {
+        app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text))
+            .firstMatch
+    }
+
+    /// The frame of the static text that reads exactly `text`, from one
+    /// snapshot of the app: a query by label does not find a Markdown
+    /// heading on the Mac, though the snapshot holds it.
+    private func staticTextFrame(_ text: String) -> CGRect? {
+        guard let root = try? app.snapshot() else { return nil }
+        var pending = [root]
+        while let node = pending.popLast() {
+            if node.elementType == .staticText, node.label == text || node.value as? String == text {
+                return node.frame
+            }
+            pending += node.children
+        }
+        return nil
+    }
+
+    /// The top of the transcript's readable area: below the navigation bar
+    /// it scrolls under on iOS, and the top of its own frame on the Mac.
+    private func transcriptTop() -> CGFloat {
+        let transcript = app.scrollViews.containing(
+            NSPredicate(format: "identifier == %@", "chat.heading")
+        ).firstMatch
+        var top = transcript.exists ? transcript.frame.minY : app.windows.firstMatch.frame.minY
+        #if os(iOS)
+        let bar = app.navigationBars.allElementsBoundByIndex
+            .map(\.frame)
+            .filter { $0.minX < transcript.frame.midX && $0.maxX > transcript.frame.midX }
+            .map(\.maxY)
+            .max()
+        if let bar { top = max(top, bar) }
+        #endif
+        return top
+    }
+
+    /// Waits for the run to end and any scroll to come to rest before frames are read.
+    private func waitForStreamedAnswerToSettle() {
+        let completed = NSPredicate(format: "exists == false")
+        expectation(for: completed, evaluatedWith: app.descendants(matching: .any)["chat.activity"])
+        waitForExpectations(timeout: 20)
+        Thread.sleep(forTimeInterval: 1)
+    }
+
     /// Keeps the answer on screen under the summary row.
     ///
     /// macOS 27 reports SwiftUI's message text as disabled in the accessibility
@@ -473,6 +725,37 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(waitForFolder(header, expanded: false))
     }
 
+    /// A conversation's move menu (design system revision 2): on the Mac it
+    /// replaces the row's trailing slot while the pointer is over the row; on
+    /// touch it is Move to Folder in the row's long-press menu.
+    private func openMoveMenu(for row: XCUIElement, sessionID: String) {
+        XCTAssertTrue(reveal(row))
+        let move = element("sidebar.session.move.\(sessionID)")
+        #if os(macOS)
+        row.hover()
+        XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
+        move.click()
+        #else
+        row.press(forDuration: 1.2)
+        let submenu = move.waitForExistence(timeout: 3) ? move : app.buttons["Move to Folder"]
+        XCTAssertTrue(submenu.waitForExistence(timeout: 5), app.debugDescription)
+        submenu.tap()
+        #endif
+    }
+
+    /// A menu item by its identifier. A SwiftUI context menu on iOS drops
+    /// its items' identifiers, so there the item is the unidentified button
+    /// with its label (a folder row of the same name carries an identifier).
+    private func menuItem(_ identifier: String, label: String) -> XCUIElement {
+        let byIdentifier = element(identifier)
+        #if os(iOS)
+        if !byIdentifier.waitForExistence(timeout: 2) {
+            return app.buttons.matching(NSPredicate(format: "label == %@ AND identifier == ''", label)).firstMatch
+        }
+        #endif
+        return byIdentifier
+    }
+
     private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval = 5) {
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
         wait(for: [gone], timeout: timeout)
@@ -548,7 +831,7 @@ final class ConversationNavigationUITests: XCTestCase {
                          "00000000-0000-0000-0000-0000000004A2",
                          "00000000-0000-0000-0000-0000000004A3"]
         for id in recentIDs {
-            XCTAssertTrue(element("sidebar.recent.session.\(id)").exists)
+            XCTAssertTrue(element("sidebar.recent.session.\(id)").waitForExistence(timeout: 5), app.debugDescription)
         }
         XCTAssertFalse(element("sidebar.recent.session.00000000-0000-0000-0000-0000000004A4").exists)
         attachFolderScreenshot("Five recent chats including filed conversations")
@@ -802,12 +1085,13 @@ final class ConversationNavigationUITests: XCTestCase {
         let travel = folderHeader(Self.folderID)
         XCTAssertTrue(waitForFolder(travel, label: "Travel", expanded: false, timeout: 10))
         let row = sessionRow(Self.firstSessionID)
-        let move = element("sidebar.session.move.\(Self.firstSessionID)")
-        XCTAssertTrue(reveal(move))
-        activate(move)
-        let intoTravel = element("sidebar.session.move.to.\(Self.folderID)")
+        openMoveMenu(for: row, sessionID: Self.firstSessionID)
+        let intoTravel = menuItem("sidebar.session.move.to.\(Self.folderID)", label: "Travel")
         XCTAssertTrue(intoTravel.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(element("sidebar.session.move.none").exists, "An unfiled conversation has no folder to leave")
+        XCTAssertFalse(
+            menuItem("sidebar.session.move.none", label: "Remove from folder").exists,
+            "An unfiled conversation has no folder to leave"
+        )
         activate(intoTravel)
         // Filed in the collapsed Travel folder, the row leaves the history.
         waitForDisappearance(of: row, timeout: 10)
@@ -821,9 +1105,8 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(reveal(row))
         XCTAssertTrue(sessionRow(Self.secondSessionID).exists)
 
-        XCTAssertTrue(reveal(move))
-        activate(move)
-        let unfile = element("sidebar.session.move.none")
+        openMoveMenu(for: row, sessionID: Self.firstSessionID)
+        let unfile = menuItem("sidebar.session.move.none", label: "Remove from folder")
         XCTAssertTrue(unfile.waitForExistence(timeout: 5))
         activate(unfile)
         // Back in the history, the row stays in view when Travel closes again.
@@ -1001,6 +1284,9 @@ final class ConversationNavigationUITests: XCTestCase {
         let selected = app.buttons["email.subscriptions.unsubscribe-selected"]
         XCTAssertTrue(selected.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(selected.label, "Unsubscribe 2")
+        // A crowded iPhone navigation bar folds trailing items into an overflow menu.
+        XCTAssertTrue(app.buttons["email.subscriptions.select"].isHittable, "Done stays in reach while selecting")
+        attachEmailScreenshot("Selecting subscriptions")
         func choice(_ id: String) -> XCUIElement { element("email.subscription.select.\(id)") }
         XCTAssertEqual(choice(Self.newsSubscriptionID).value as? String, "Selected")
         XCTAssertEqual(choice(Self.dealsSubscriptionID).value as? String, "Selected")
@@ -1216,6 +1502,24 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
     }
 
+    /// Settings shows one group per page: the Mac and iPad pick it from a
+    /// sidebar, the iPhone pushes it from the list of groups, going back to
+    /// that list first when another group is open.
+    private func openSettingsGroup(_ group: String) {
+        let row = app.buttons["settings.group.\(group)"]
+        #if os(iOS)
+        // A pushed group leaves the list's rows out of the tree; its own
+        // navigation bar's Back returns to them (the Chat bar behind the
+        // sheet has no Back button).
+        if !(row.waitForExistence(timeout: 2) && row.isHittable) {
+            let back = app.buttons["BackButton"].firstMatch
+            if back.waitForExistence(timeout: 2) { back.tap() }
+        }
+        #endif
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        activate(row)
+    }
+
     /// Retains the synthetic mailbox rendering for visual verification even when the test passes.
     private func attachEmailScreenshot(_ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -1356,10 +1660,14 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(historical)
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
 
+        // Copy and Select Text show on hover on the Mac, after a tap on an
+        // iPad without a pointer, and always on the iPhone.
+        revealMessageActions(app.staticTexts["Historical question"].firstMatch)
+        XCTAssertTrue(app.buttons["chat.message.copy.event-1"].waitForExistence(timeout: 5))
+        revealMessageActions(app.staticTexts["Historical answer loaded"].firstMatch)
         let copy = app.buttons["chat.message.copy.event-2"]
         XCTAssertTrue(copy.waitForExistence(timeout: 5))
         XCTAssertEqual(copy.label, "Copy message")
-        XCTAssertTrue(app.buttons["chat.message.copy.event-1"].exists)
         let select = app.buttons["chat.message.select.event-2"]
         XCTAssertTrue(select.exists)
 
@@ -1371,6 +1679,15 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Historical answer loaded"].firstMatch.waitForExistence(timeout: 5))
     }
 
+    private func revealMessageActions(_ message: XCUIElement) {
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        #if os(macOS)
+        message.hover()
+        #else
+        if UIDevice.current.userInterfaceIdiom == .pad { message.tap() }
+        #endif
+    }
+
     func testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings() {
         app.launch()
         #if os(macOS)
@@ -1380,6 +1697,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #else
         openSidebarDestination(identifier: "sidebar.settings")
         #endif
+        openSettingsGroup("websiteAccess")
         func reveal(_ element: XCUIElement) {
             #if os(macOS)
             let scroll = app.scrollViews.firstMatch
@@ -1574,7 +1892,8 @@ final class ConversationNavigationUITests: XCTestCase {
         let memory = app.buttons["sidebar.memory"]
         XCTAssertTrue(memory.waitForExistence(timeout: 10))
         activate(memory)
-        let collection = app.sheets.radioButtons["Synthesis"]
+        // The Mac sheet's group sidebar holds Synthesis under Maintenance.
+        let collection = app.buttons["memory.group.synthesis"]
         #else
         openSidebarDestination(identifier: "sidebar.memory")
         let collection = app.segmentedControls.buttons["Synthesis"]
@@ -1745,8 +2064,8 @@ final class ConversationNavigationUITests: XCTestCase {
         let memory = app.buttons["sidebar.memory"]
         XCTAssertTrue(memory.waitForExistence(timeout: 10))
         activate(memory)
-        // The Mac sheet exposes the collection picker but not the browser's identifier.
-        let peopleCollection = app.sheets.radioButtons["People"]
+        // The Mac sheet's group sidebar lists the People directory under Browse.
+        let peopleCollection = app.buttons["memory.group.people"]
         #else
         openSidebarDestination(identifier: "sidebar.memory")
         XCTAssertTrue(app.descendants(matching: .any)["memory.browser"].waitForExistence(timeout: 5))
@@ -2106,16 +2425,11 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(newConversationRow.waitForExistence(timeout: 5))
         newConversationRow.tap()
 
-        // The conversation's title is the window's on the Mac and the navigation bar's on iOS.
-        #if os(macOS)
-        let window = app.windows.firstMatch
-        XCTAssertTrue(window.waitForExistence(timeout: 5))
-        XCTAssertEqual(window.title, "New conversation")
-        #else
+        // The conversation's title heads the transcript; the toolbar shows it
+        // only once that heading has scrolled away (type revision 2).
         let heading = app.staticTexts["chat.heading"]
         XCTAssertTrue(heading.waitForExistence(timeout: 5))
         XCTAssertEqual(heading.label, "New conversation")
-        #endif
         XCTAssertTrue(app.descendants(matching: .any)["chat.composer"].exists)
     }
 
@@ -2355,6 +2669,53 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["The user prefers dark mode."].exists)
     }
 
+    /// ADR-0224: the detail quotes the owner's own words and names other
+    /// sources without their text; Edit wording supersedes the memory with the
+    /// owner's words, and the detail then shows the new memory.
+    func testMemoryWordingIsCorrectedAndTheOwnersWordsAreQuoted() {
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.memory")
+        let row = app.descendants(matching: .any)["memory.row.00000000-0000-0000-0000-000000000321"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let evidence = app.descendants(matching: .any)["memory.detail.evidence"]
+        XCTAssertTrue(evidence.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "I prefer dark mode everywhere."))
+                .firstMatch.exists,
+            app.debugDescription
+        )
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "From an email"))
+                .firstMatch.exists
+        )
+
+        let review = app.buttons["memory.detail.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        review.tap()
+        let edit = app.buttons["memory.detail.edit"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5), app.debugDescription)
+        edit.tap()
+        let save = app.buttons["memory.wording.save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(save.isEnabled, "The unchanged wording cannot be saved")
+        let field = app.textFields["memory.wording.text"].exists
+            ? app.textFields["memory.wording.text"] : app.textViews["memory.wording.text"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        // The sheet focuses the field with the caret after the wording, so a
+        // tap (which would move the caret) is not needed to clear it.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40) + "The user prefers light mode.")
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        XCTAssertTrue(
+            app.staticTexts["Updated. The earlier wording is kept as history."].waitForExistence(timeout: 3),
+            app.debugDescription
+        )
+        XCTAssertTrue(save.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["The user prefers light mode."].waitForExistence(timeout: 5))
+    }
+
     func testScheduleBrowserListsAndOpensPointReadDetail() {
         app.launch()
         openSidebarDestination(identifier: "sidebar.schedules")
@@ -2375,6 +2736,72 @@ final class ConversationNavigationUITests: XCTestCase {
             app.descendants(matching: .any)["schedule.detail"].waitForExistence(timeout: 5)
         )
         XCTAssertTrue(app.staticTexts["Full instruction from the schedule point read."].exists)
+    }
+
+    /// ADR-0225 part A: Pause confirms with a toast whose Undo resumes, and a
+    /// recent run opens its report in Chat.
+    func testSchedulePausesResumesAndOpensARecentReport() {
+        app.launchArguments.append("--ui-testing-unread-report")
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.schedules")
+        let scheduleRow = app.descendants(matching: .any)[
+            "schedule.row.00000000-0000-0000-0000-000000000654"
+        ]
+        XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
+        scheduleRow.tap()
+
+        // ADR-0225 part C: Run now starts one run and says so.
+        let runNow = app.buttons["schedule.run-now"]
+        XCTAssertTrue(runNow.waitForExistence(timeout: 5), app.debugDescription)
+        runNow.tap()
+        XCTAssertTrue(app.staticTexts["Running now. The report arrives in Chat."].waitForExistence(timeout: 3))
+
+        let pause = app.buttons["schedule.pause"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 5), app.debugDescription)
+        pause.tap()
+        XCTAssertTrue(app.buttons["schedule.resume"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Paused. Nothing runs until you resume it."].waitForExistence(timeout: 3))
+        let undo = app.buttons["toast.undo"]
+        XCTAssertTrue(undo.exists)
+        undo.tap()
+        XCTAssertTrue(app.buttons["schedule.pause"].waitForExistence(timeout: 5), app.debugDescription)
+
+        let open = app.buttons["schedule.run.open.00000000-0000-0000-0000-0000000006A1"]
+        scrollUntilVisible(open)
+        XCTAssertTrue(open.exists, app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Skipped: the last run was still going"].exists)
+        open.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["schedule.browser"].waitForNonExistence(timeout: 5),
+            "Opening a report closes the schedule browser"
+        )
+    }
+
+    /// ADR-0225 part B: a sentence is read and shown before Create saves it.
+    func testANewScheduleIsDescribedInPlainWordsAndConfirmedBeforeSaving() {
+        app.launch()
+        openSidebarDestination(identifier: "sidebar.schedules")
+        let new = app.buttons["schedule.new"]
+        XCTAssertTrue(new.waitForExistence(timeout: 5), app.debugDescription)
+        new.tap()
+        let create = app.buttons["schedule.new.create"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        XCTAssertFalse(create.isEnabled, "Nothing can be saved before the timing is read")
+        let field = app.textFields["schedule.new.text"].exists
+            ? app.textFields["schedule.new.text"] : app.textViews["schedule.new.text"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Every weekday at 7 am, tell me what needs me today.")
+        let understood = app.staticTexts["schedule.new.understood"]
+        XCTAssertTrue(understood.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(create.isEnabled)
+        create.tap()
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Scheduled. The first run is"))
+                .firstMatch.waitForExistence(timeout: 3),
+            app.debugDescription
+        )
+        XCTAssertTrue(create.waitForNonExistence(timeout: 5))
     }
 
     func testScheduleDetailBindsAReadySignInThroughTheServer() {
@@ -2443,6 +2870,7 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         openSidebarDestination(identifier: "sidebar.settings")
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        openSettingsGroup("models")
         let chatModel = app.buttons["settings.models.chat.model"]
         let memoryModel = app.buttons["settings.models.memory.model"]
         let memoryEffort = app.buttons["settings.models.memory.effort"]
@@ -2465,6 +2893,7 @@ final class ConversationNavigationUITests: XCTestCase {
         close.tap()
         XCTAssertTrue(close.waitForNonExistence(timeout: 5))
         openSidebarDestination(identifier: "sidebar.settings")
+        openSettingsGroup("models")
         scrollUntilVisible(memoryEffort)
         waitForSavedLabel("Chat model, Claude Fable 5.1", on: chatModel)
         XCTAssertEqual(memoryModel.label, "Memory model, GPT-6 Astra")
@@ -2491,6 +2920,7 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         openSidebarDestination(identifier: "sidebar.settings")
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        openSettingsGroup("websiteAccess")
 
         let websiteAccess = app.staticTexts["Website Access"]
         scrollUntilVisible(websiteAccess)
@@ -2521,6 +2951,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(continueInBrowser.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Start over"].exists)
 
+        openSettingsGroup("dataAndPrivacy")
         let clientBuild = app.staticTexts["Client build"]
         scrollUntilVisible(clientBuild)
         XCTAssertTrue(clientBuild.exists)
@@ -2639,6 +3070,32 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(search.frame.width, resizedWidth, accuracy: 3)
         XCTAssertTrue(app.buttons["email.jump-to-reply"].isHittable)
         attachEmailScreenshot("Resized priority inbox")
+    }
+
+    /// Drags the actual divider, quits, and finds the inbox at the dragged width after relaunch.
+    func testEmailSidebarWidthPersistsAcrossApplicationRestart() {
+        launchFullEmailInbox()
+        let search = app.textFields["email.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        let originalWidth = search.frame.width
+        let divider = app.splitters.firstMatch
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 130, dy: 0)))
+        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { $0.width > originalWidth + 80 },
+                      "Dragging the divider must widen the email list\n\(app.debugDescription)")
+        let resizedWidth = search.frame.width
+
+        app.launchEnvironment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] = "1"
+        defer { app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH") }
+        // Launching again ends the running app first, as quitting it would.
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.email"].waitForExistence(timeout: 10))
+        app.buttons["mode.email"].click()
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: search, timeout: 5) { abs($0.width - resizedWidth) <= 3 },
+                      "The inbox must reopen at \(resizedWidth) points, not \(search.frame.width)")
+        attachEmailScreenshot("Inbox width after relaunch")
     }
 
     /// Launch the five-priority email fixture in a deterministic Mac window.
@@ -2853,10 +3310,14 @@ final class ConversationNavigationUITests: XCTestCase {
     private func revealSidebarIfNeeded(for row: XCUIElement) {
         let toggle = app.buttons["sidebar.toggle"]
         if toggle.exists {
+            // A slow runner can drop the hidden list's rows from the tree; a
+            // missing row never turns unhittable, so it counts as hidden too.
+            // Settling a missing row takes XCTest several existence retries,
+            // which outlast a 1.5 s wait on CircleCI's simulators.
             let gone = XCTNSPredicateExpectation(
-                predicate: NSPredicate(format: "hittable == false"), object: row
+                predicate: NSPredicate(format: "exists == false OR hittable == false"), object: row
             )
-            guard XCTWaiter().wait(for: [gone], timeout: 1.5) == .completed else { return }
+            guard XCTWaiter().wait(for: [gone], timeout: 5) == .completed else { return }
             XCTAssertTrue(toggle.waitForExistence(timeout: 5))
             toggle.tap()
             return
@@ -2881,8 +3342,11 @@ final class ConversationNavigationUITests: XCTestCase {
         for _ in 0..<8 {
             let bottom = app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY - 12 : app.frame.maxY - 50
             if element.exists && element.isHittable && element.frame.maxY < bottom { return }
-            scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.7))
-                .press(forDuration: 0.05, thenDragTo: scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.3)))
+            // Inside the content's right margin: a drag that starts in the
+            // 30-point scroll-indicator strip (dx 0.98) can scrub the
+            // indicator instead and leave the view where it was.
+            scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.7))
+                .press(forDuration: 0.05, thenDragTo: scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3)))
         }
     }
     #endif

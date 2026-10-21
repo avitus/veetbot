@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -25,8 +24,8 @@ from agent_core.domain.policies import (
 from agent_core.domain.runs import Run, RunLimits
 from agent_core.domain.schedules import (
     Cadence,
+    CallPlan,
     OnceCadence,
-    ScheduleDefinition,
     ScheduleDefinitionLimits,
 )
 from agent_core.domain.tools import (
@@ -37,21 +36,46 @@ from agent_core.domain.tools import (
     ToolSpec,
 )
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.scheduling.defaults import (
+    DEFAULT_MAX_CONSECUTIVE_FAILURES,
+    DEFAULT_MAX_COST,
+    DEFAULT_MISFIRE_GRACE_SECONDS,
+    DEFAULT_RUN_TIMEOUT_SECONDS,
+    DEFAULT_SYNTHESIS_RESERVE_COST,
+    DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS,
+    DEFAULT_SYNTHESIS_RESERVE_STEPS,
+    derived_definition,
+    schedule_run_limits,
+)
+
+__all__ = [
+    "DEFAULT_MAX_CONSECUTIVE_FAILURES",
+    "DEFAULT_MAX_COST",
+    "DEFAULT_MISFIRE_GRACE_SECONDS",
+    "DEFAULT_RUN_TIMEOUT_SECONDS",
+    "DEFAULT_SYNTHESIS_RESERVE_COST",
+    "DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS",
+    "DEFAULT_SYNTHESIS_RESERVE_STEPS",
+]
 
 SCHEDULE_CREATE_TOOL_NAME = "schedule.create"
 SCHEDULE_WRITE_SCOPE = "schedule.write"
-DEFAULT_RUN_TIMEOUT_SECONDS = 300
-DEFAULT_MISFIRE_GRACE_SECONDS = 3600
-DEFAULT_MAX_CONSECUTIVE_FAILURES = 2
-DEFAULT_MAX_COST = Decimal("5")
-# Final-synthesis headroom (ADR-0078): near its budget, a research run writes its
-# answer from the evidence it already has instead of failing without one.
-DEFAULT_SYNTHESIS_RESERVE_STEPS = 2
-DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS = 2
-DEFAULT_SYNTHESIS_RESERVE_COST = Decimal("1")
 # ADR-0213: a call schedule delegates exactly the calling scopes, so its
 # occurrence can place the call and read back how it went.
-CALL_SCOPES = frozenset({"mcp.bland_call.use", "mcp.bland_read.use"})
+CALL_PLACE_SCOPE = "mcp.bland_call.use"
+CALL_SCOPES = frozenset({CALL_PLACE_SCOPE, "mcp.bland_read.use"})
+# Those scopes are all the occurrence holds, so it can never schedule a later
+# attempt; Chat must not confirm a retry or follow-up it cannot arrange.
+CALL_SCHEDULE_LIMITS = (
+    "When it fires, its run can place calls but cannot create or change schedules or "
+    "wait for a later time, so no retry or follow-up that depends on how a call went is "
+    "arranged. If the owner asked for one, say it will not happen."
+)
+CALL_PLAN_NARRATION = (
+    "When it fires, its run places the first call. The platform places each retry and "
+    "the follow-up this call plan sets from the calls' results, then reports the outcome "
+    "in this schedule; it arranges nothing else."
+)
 
 _FORBIDDEN_CADENCE_FIELD_SCHEMA: dict[str, Any] = {"not": {}}
 
@@ -136,7 +160,7 @@ RECURRING_CADENCE_INPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
-INPUT_SCHEMA: dict[str, Any] = {
+SINGLE_CALL_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "use_website": {"type": "boolean"},
@@ -153,10 +177,30 @@ INPUT_SCHEMA: dict[str, Any] = {
     ],
     "additionalProperties": False,
 }
+# ADR-0221: retries and a follow-up the platform places from each call's result.
+CALL_PLAN_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "retry_every_minutes": {"type": "integer", "minimum": 1, "maximum": 30},
+        "retry_until": {"type": "string", "format": "date-time"},
+        "follow_up_after_answer_minutes": {"type": "integer", "minimum": 1, "maximum": 60},
+    },
+    "additionalProperties": False,
+}
+INPUT_SCHEMA: dict[str, Any] = {
+    **SINGLE_CALL_INPUT_SCHEMA,
+    "properties": {**SINGLE_CALL_INPUT_SCHEMA["properties"], "call_plan": CALL_PLAN_INPUT_SCHEMA},
+}
 CADENCE_ADAPTER: TypeAdapter[Cadence] = TypeAdapter(Cadence)
 
 
 class CadenceInputError(ValueError):
+    def __init__(self, reason_code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.reason_code = reason_code
+
+
+class CallPlanInputError(ValueError):
     def __init__(self, reason_code: str, detail: str) -> None:
         super().__init__(detail)
         self.reason_code = reason_code
@@ -199,31 +243,54 @@ def _failure(
     )
 
 
-class ScheduleCreateTool:
-    """Create an approval-gated schedule with no delegated tool scopes."""
+# Version 1.3.0 (ADR-0213), kept byte-identical for runs already pinned to it.
+_SINGLE_CALL_SPEC = ToolSpec(
+    name=SCHEDULE_CREATE_TOOL_NAME,
+    version="1.3.0",
+    description=(
+        "Create one future one-time or recurring schedule. For recurrence, supply a "
+        "complete IANA-zone cadence; ask about ambiguous dates or times. For tasks requiring "
+        "a signed-in website, set use_website=true to pin this chat's selected website. "
+        "Connect Website Access first if missing; never promise authenticated work without it. "
+        "When the scheduled task is to place a phone call, set place_call=true and put the "
+        "recipient's E.164 number, the brief and any voicemail text in the instruction; "
+        "without place_call the scheduled run cannot call."
+    ),
+    input_schema=SINGLE_CALL_INPUT_SCHEMA,
+    output_schema=OUTPUT_SCHEMA,
+    side_effect=SideEffectClass.EXTERNAL_WRITE,
+    risk=RiskLevel.HIGH,
+    idempotency=IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+    required_scopes={SCHEDULE_WRITE_SCOPE},
+    timeout_seconds=15,
+    maximum_output_bytes=4096,
+    allow_parallel=False,
+    output_trust=TrustLevel.INTERNAL_TOOL,
+)
 
-    spec = ToolSpec(
-        name=SCHEDULE_CREATE_TOOL_NAME,
-        version="1.3.0",
-        description=(
-            "Create one future one-time or recurring schedule. For recurrence, supply a "
-            "complete IANA-zone cadence; ask about ambiguous dates or times. For tasks requiring "
-            "a signed-in website, set use_website=true to pin this chat's selected website. "
-            "Connect Website Access first if missing; never promise authenticated work without it. "
-            "When the scheduled task is to place a phone call, set place_call=true and put the "
-            "recipient's E.164 number, the brief and any voicemail text in the instruction; "
-            "without place_call the scheduled run cannot call."
-        ),
-        input_schema=INPUT_SCHEMA,
-        output_schema=OUTPUT_SCHEMA,
-        side_effect=SideEffectClass.EXTERNAL_WRITE,
-        risk=RiskLevel.HIGH,
-        idempotency=IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
-        required_scopes={SCHEDULE_WRITE_SCOPE},
-        timeout_seconds=15,
-        maximum_output_bytes=4096,
-        allow_parallel=False,
-        output_trust=TrustLevel.INTERNAL_TOOL,
+
+class ScheduleCreateTool:
+    """Create an approval-gated schedule that delegates only what its flags select."""
+
+    spec = _SINGLE_CALL_SPEC.model_copy(
+        update={
+            "version": "1.4.0",
+            "description": (
+                "Create one future one-time or recurring schedule. For recurrence, supply a "
+                "complete IANA-zone cadence; ask about ambiguous dates or times. For tasks "
+                "requiring a signed-in website, set use_website=true to pin this chat's selected "
+                "website. Connect Website Access first if missing; never promise authenticated "
+                "work without it. When the scheduled task is to place a phone call, set "
+                "place_call=true and put the recipient's E.164 number, the brief and any "
+                "voicemail text in the instruction; without place_call the scheduled run cannot "
+                "call. For a one-time call that should be retried until answered or followed up "
+                "after an answer, also set call_plan: retry_every_minutes with retry_until (at "
+                "most ten calls within an hour of at) and/or follow_up_after_answer_minutes. The "
+                "platform places those calls from each call's result and reports the outcome; "
+                "without call_plan no retry or follow-up happens."
+            ),
+            "input_schema": INPUT_SCHEMA,
+        }
     )
 
     def __init__(
@@ -255,6 +322,11 @@ class ScheduleCreateTool:
             "requested_scopes": sorted(_requested_scopes(arguments)),
             **({"use_website": True} if arguments.get("use_website") else {}),
             **({"place_call": True} if arguments.get("place_call") else {}),
+            **(
+                {"call_plan": arguments["call_plan"]}
+                if arguments.get("call_plan") is not None
+                else {}
+            ),
         }
         try:
             cadence = parse_cadence(arguments)
@@ -315,6 +387,15 @@ class ScheduleCreateTool:
                 "Calling is not set up, so a scheduled call could not be placed.",
                 retryable=False,
             )
+        try:
+            call_plan = _call_plan(arguments, cadence)
+        except CallPlanInputError as exc:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                exc.reason_code,
+                str(exc),
+                retryable=True,
+            )
         selected_profile = None
         if arguments.get("use_website"):
             if self._uow_factory is not None:
@@ -328,25 +409,15 @@ class ScheduleCreateTool:
                     "Connect Website Access in this conversation before creating this schedule.",
                     retryable=False,
                 )
-        definition = ScheduleDefinition(
+        definition = derived_definition(
+            self._agent,
+            self._limits,
             title=str(arguments["title"]),
             instruction=str(arguments["instruction"]),
-            agent_id=self._agent.id,
-            agent_version=self._agent.version,
-            policy_profile=self._agent.policy_profile,
+            cadence=cadence,
             requested_scopes=_requested_scopes(arguments),
             browser_profile_id=UUID(selected_profile) if selected_profile else None,
-            limits=self._run_limits(),
-            run_timeout_seconds=min(
-                DEFAULT_RUN_TIMEOUT_SECONDS,
-                self._limits.max_run_timeout_seconds,
-            ),
-            cadence=cadence,
-            misfire_grace_seconds=min(
-                DEFAULT_MISFIRE_GRACE_SECONDS,
-                self._limits.max_misfire_grace_seconds,
-            ),
-            max_consecutive_failures=DEFAULT_MAX_CONSECUTIVE_FAILURES,
+            call_plan=call_plan,
         )
         try:
             await context.mark_effect_sent()
@@ -391,6 +462,10 @@ class ScheduleCreateTool:
                 f"Schedule {record.schedule.id} already exists and is "
                 f"{record.schedule.state.value.lower()}; it will not fire again."
             )
+        if call_plan is not None:
+            narration = f"{narration} {CALL_PLAN_NARRATION}"
+        elif arguments.get("place_call"):
+            narration = f"{narration} {CALL_SCHEDULE_LIMITS}"
         return ToolResult(
             ok=True,
             content=[TextPart(text=narration)],
@@ -398,43 +473,46 @@ class ScheduleCreateTool:
         )
 
     def _run_limits(self) -> RunLimits:
-        current = self._agent.limits
-        max_steps = min(current.max_steps, self._limits.max_steps_per_run)
-        max_model_calls = min(current.max_model_calls, self._limits.max_model_calls_per_run)
-        max_cost = min(current.max_cost or DEFAULT_MAX_COST, self._limits.max_cost_per_run)
-        return RunLimits(
-            max_steps=max_steps,
-            max_model_calls=max_model_calls,
-            max_tool_calls=min(
-                current.max_tool_calls,
-                self._limits.max_tool_calls_per_run,
-            ),
-            max_input_tokens=current.max_input_tokens,
-            max_output_tokens=current.max_output_tokens,
-            max_cost=max_cost,
-            synthesis_reserve_steps=_reserve_within(DEFAULT_SYNTHESIS_RESERVE_STEPS, max_steps),
-            synthesis_reserve_model_calls=_reserve_within(
-                DEFAULT_SYNTHESIS_RESERVE_MODEL_CALLS, max_model_calls
-            ),
-            synthesis_reserve_cost=_reserve_within(DEFAULT_SYNTHESIS_RESERVE_COST, max_cost),
-        )
+        return schedule_run_limits(self._agent, self._limits)
 
 
 def _requested_scopes(arguments: dict[str, Any]) -> frozenset[str]:
-    """The model selects capabilities by flag; it never names a scope."""
+    """The model selects capabilities by flag; it never names a scope.
 
+    A planned call's run reads no call record: the platform reads each result,
+    so the run keeps the owner-request authority ADR-0213 gives (ADR-0221).
+    """
+
+    calling = (
+        ({CALL_PLACE_SCOPE} if arguments.get("call_plan") is not None else CALL_SCOPES)
+        if arguments.get("place_call")
+        else frozenset()
+    )
     return frozenset(
-        {
-            *(("browser.profile.read",) if arguments.get("use_website") else ()),
-            *(CALL_SCOPES if arguments.get("place_call") else ()),
-        }
+        {*(("browser.profile.read",) if arguments.get("use_website") else ()), *calling}
     )
 
 
-def _reserve_within[T: (int, Decimal)](reserve: T, limit: T) -> T:
-    """Keep a reserve only when its limit leaves room to research before it."""
+def _call_plan(arguments: dict[str, Any], cadence: Cadence) -> CallPlan | None:
+    """ADR-0221: a call plan follows one call schedule's single first call."""
 
-    return reserve if reserve < limit else type(reserve)(0)
+    raw = arguments.get("call_plan")
+    if raw is None:
+        return None
+    if not arguments.get("place_call"):
+        raise CallPlanInputError(
+            "schedule.call_plan_needs_call", "a call plan needs place_call=true"
+        )
+    if not isinstance(cadence, OnceCadence):
+        raise CallPlanInputError(
+            "schedule.call_plan_needs_one_time", "a call plan needs a one-time schedule"
+        )
+    try:
+        plan = CallPlan.model_validate(raw)
+        plan.validate_for(cadence.at)
+    except (ValidationError, ValueError) as exc:
+        raise CallPlanInputError("schedule.call_plan_invalid", str(exc)) from exc
+    return plan
 
 
 def parse_cadence(arguments: dict[str, Any]) -> Cadence:
@@ -463,10 +541,16 @@ def parse_cadence(arguments: dict[str, Any]) -> Cadence:
     return cadence
 
 
+class SingleCallScheduleCreateTool(ScheduleCreateTool):
+    """Retain version 1.3.0, whose call schedules had no call plan, for pinned runs."""
+
+    spec = _SINGLE_CALL_SPEC
+
+
 class PreviousScheduleCreateTool(ScheduleCreateTool):
     """Retain version 1.2.0, which had no call schedules, for already pinned runs."""
 
-    spec = ScheduleCreateTool.spec.model_copy(
+    spec = _SINGLE_CALL_SPEC.model_copy(
         update={
             "version": "1.2.0",
             "description": (
@@ -477,10 +561,10 @@ class PreviousScheduleCreateTool(ScheduleCreateTool):
                 "work without it."
             ),
             "input_schema": {
-                **INPUT_SCHEMA,
+                **SINGLE_CALL_INPUT_SCHEMA,
                 "properties": {
                     key: value
-                    for key, value in INPUT_SCHEMA["properties"].items()
+                    for key, value in SINGLE_CALL_INPUT_SCHEMA["properties"].items()
                     if key != "place_call"
                 },
             },
@@ -491,7 +575,7 @@ class PreviousScheduleCreateTool(ScheduleCreateTool):
 class LegacyScheduleCreateTool(ScheduleCreateTool):
     """Retain the closed input shown to already pinned runs."""
 
-    spec = ScheduleCreateTool.spec.model_copy(
+    spec = _SINGLE_CALL_SPEC.model_copy(
         update={
             "version": "1.1.1",
             "description": (
@@ -499,10 +583,10 @@ class LegacyScheduleCreateTool(ScheduleCreateTool):
                 "complete IANA-zone cadence; ask about ambiguous dates or times."
             ),
             "input_schema": {
-                **INPUT_SCHEMA,
+                **SINGLE_CALL_INPUT_SCHEMA,
                 "properties": {
                     key: value
-                    for key, value in INPUT_SCHEMA["properties"].items()
+                    for key, value in SINGLE_CALL_INPUT_SCHEMA["properties"].items()
                     if key not in {"use_website", "place_call"}
                 },
             },

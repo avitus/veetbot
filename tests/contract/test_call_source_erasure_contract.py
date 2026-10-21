@@ -1,6 +1,7 @@
 """Call erasure removes retained and derived copies while preserving owner input."""
 
 import json
+from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 from agent_core.domain.events import NewEvent
@@ -13,7 +14,14 @@ from tests.contract.support import NOW, memory_uow_factory, principal, run, sess
 from tests.contract.test_bland_client_contract import CALL_ID
 
 
-async def assert_call_source_erasure(factory: UnitOfWorkFactory) -> None:
+async def assert_call_source_erasure(
+    factory: UnitOfWorkFactory, erase: Callable[[], Awaitable[None]] | None = None
+) -> None:
+    """Seed a call's derived copies, erase them, and check what remains.
+
+    ``erase`` replaces the direct repository erasure, so a caller can reach it
+    through another path, such as the call worker's retention sweep.
+    """
     sid, rid, later_rid, iid = uuid4(), uuid4(), uuid4(), uuid4()
     private_text = "PRIVATE CALL TRANSCRIPT CANARY"
     source = {
@@ -122,9 +130,12 @@ async def assert_call_source_erasure(factory: UnitOfWorkFactory) -> None:
                 updated_at=NOW,
             )
         )
-    async with factory() as uow:
-        counts = await uow.session_deletions.erase_call_source(principal(), CALL_ID, NOW)
-    assert counts["events"] >= 1 and counts["checkpoints"] == 1
+    if erase is None:
+        async with factory() as uow:
+            counts = await uow.session_deletions.erase_call_source(principal(), CALL_ID, NOW)
+        assert counts["events"] >= 1 and counts["checkpoints"] == 1
+    else:
+        await erase()
     async with factory() as uow:
         events = await uow.events.list_after(sid, 0, principal())
         serialized = json.dumps([event.model_dump(mode="json") for event in events])

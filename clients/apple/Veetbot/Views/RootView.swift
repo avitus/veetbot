@@ -25,6 +25,8 @@ struct VeetbotSceneRoot: View {
     /// Applies shared appearance and platform bounds without changing the scene's autosave identity.
     var body: some View {
         RootView(model: model)
+            .onAppear { AppThemeApplier.apply(appearance.theme) }
+            .onChange(of: appearance.theme) { AppThemeApplier.apply(appearance.theme) }
             .environmentObject(appearance)
             .environmentObject(smsIntegration)
             .environmentObject(folderSidebar)
@@ -60,6 +62,8 @@ public struct RootView: View {
     @State private var showingGlobalMemory = false
     @State private var showingGlobalPersona = false
     @State private var showingGlobalSchedules = false
+    /// Connect's steps 2 and 3, shown once the first-run connection succeeds.
+    @State private var onboarding: ConnectOnboardingStep?
     #if !os(macOS)
     @State private var showingSettings = false
     @State private var chatListPresented = false
@@ -88,15 +92,30 @@ public struct RootView: View {
 
     public var body: some View {
         Group {
-            if model.isBootstrapping || model.isConfigured {
+            if onboarding != nil, model.isConfigured {
+                ConnectOnboardingView(model: model, step: $onboarding)
+            } else if model.isBootstrapping || model.isConfigured {
                 configuredContent
             } else {
-                ConnectionSettingsView(model: model, embedded: true)
+                ConnectionSettingsView(model: model, embedded: true, onConnecting: {
+                    // Step 2 asks about notifications, so connecting must not
+                    // raise the system prompt first.
+                    NotificationPermissionGate.askLater = true
+                    onboarding = .notifications
+                })
             }
         }
+        // Clears the composer at the foot of Chat.
+        .toastHost(bottomInset: 88)
         .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
-        .sheet(isPresented: $showingGlobalSchedules) { ScheduleBrowserView(model: globalSchedules) }
+        .sheet(isPresented: $showingGlobalSchedules) {
+            ScheduleBrowserView(model: globalSchedules)
+                .environment(\.openScheduleReport) { sessionID in
+                    showingGlobalSchedules = false
+                    Task { await model.openSharedSession(sessionID) }
+                }
+        }
         .onChange(of: coordinator.mode) { updateEmailActivity() }
         .onChange(of: model.isConfigured) { updateEmailActivity() }
         .onChange(of: model.connectionGeneration) {
@@ -127,7 +146,9 @@ public struct RootView: View {
         }
         #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
+            // The iPad gives the group sidebar and its page a full page.
             ConnectionSettingsView(model: model, embedded: false)
+                .presentationSizing(.page)
         }
         #endif
         #if os(iOS)
@@ -223,6 +244,9 @@ public struct RootView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
+        // Clipping each tree to the space above the home indicator also clips
+        // its own full-bleed paper, so the paper under them reaches the edge.
+        .background(AppTheme.paper.ignoresSafeArea(edges: .bottom))
         .environment(\.activeClientMode, coordinator.mode)
         #if os(macOS)
         // One window-level owner prevents the hidden navigation tree from replacing active controls.
@@ -331,6 +355,10 @@ public struct RootView: View {
                 model: model,
                 usesDirectActivation: usesDirectSidebarActivation,
                 openSettings: presentSettings
+            )
+            .navigationSplitViewColumnWidth(
+                min: A2Metrics.sidebarWidth - VeetSpace.s7, ideal: A2Metrics.sidebarWidth,
+                max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
             )
         } detail: {
             ChatView(model: model)
@@ -507,6 +535,8 @@ private struct SessionSidebar: View {
     /// Called after a row opens a conversation, so a drawer can close.
     var onActivate: () -> Void = {}
     @State private var deletionCandidate: SessionHistoryEntry?
+    /// The sidebar search: rows filter by title while it holds text.
+    @State private var query = ""
     @State private var newConversationDestination =
         SessionSidebarDestination.freshConversation()
     @StateObject private var memoryViewModel = MemoryViewModel()
@@ -541,9 +571,11 @@ private struct SessionSidebar: View {
             #if os(iOS)
             if inDrawer { drawerHeader }
             #endif
+            sidebarTop
             sidebarList
                 .scrollContentBackground(.hidden)
                 .listStyle(.sidebar)
+                .environment(\.defaultMinListRowHeight, 0)
         }
         .background(AppTheme.paperDeep.ignoresSafeArea())
         .navigationTitle("Veetbot")
@@ -613,6 +645,10 @@ private struct SessionSidebar: View {
         }
         .sheet(isPresented: $showingScheduleBrowser) {
             ScheduleBrowserView(model: scheduleViewModel)
+                .environment(\.openScheduleReport) { sessionID in
+                    showingScheduleBrowser = false
+                    Task { await model.openSharedSession(sessionID) }
+                }
         }
     }
 
@@ -620,16 +656,16 @@ private struct SessionSidebar: View {
     /// The drawer's own top: the app's name in the display face and the
     /// overflow menu the navigation bar would otherwise hold.
     private var drawerHeader: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: VeetSpace.s2) {
             Text("Veetbot")
-                .appDisplayFont(.title3)
+                .veetType(.title)
                 .foregroundColor(AppTheme.ink)
             Spacer()
             moreMenu
         }
-        .padding(.leading, 20)
-        .padding(.trailing, 8)
-        .padding(.top, 8)
+        .padding(.leading, A2Metrics.sidebarGutter)
+        .padding(.trailing, VeetSpace.s2)
+        .padding(.top, VeetSpace.s2)
     }
 
     private var moreMenu: some View {
@@ -687,44 +723,60 @@ private struct SessionSidebar: View {
         #endif
     }
 
-    private var directlyActivatingList: some View {
-        List {
+    /// The top of the sidebar: search, and New chat as a teal compose
+    /// button beside it.
+    private var sidebarTop: some View {
+        HStack(spacing: VeetSpace.s2) {
+            SidebarSearchField(text: $query)
+            newConversationButton
+        }
+        .padding(.horizontal, A2Metrics.sidebarGutter)
+        .padding(.top, VeetSpace.s2)
+        .padding(.bottom, VeetSpace.s1)
+    }
+
+    @ViewBuilder
+    private var newConversationButton: some View {
+        if usesDirectActivation {
             Button {
                 activate(newConversationDestination)
             } label: {
-                newConversationLabel
+                ComposeButton { Image(systemName: "square.and.pencil") }
             }
-            .buttonStyle(PrimaryCapsuleButtonStyle(expands: true))
+            .buttonStyle(.plain)
+            .help("New chat")
+            .accessibilityLabel("New chat")
             .accessibilityIdentifier("sidebar.new-conversation")
-            .sidebarRow()
+        } else {
+            NavigationLink {
+                ChatDestination(model: model, entry: nil)
+            } label: {
+                ComposeButton { Image(systemName: "square.and.pencil") }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("New chat")
+            .accessibilityIdentifier("sidebar.new-conversation")
+        }
+    }
 
+    private var directlyActivatingList: some View {
+        List {
             needsYouSection { entry in
                 activate(.session(entry.sessionID))
             }
 
-            historySections { entry, isRecent in
-                HStack(spacing: 8) {
+            historySections { entry, isRecent, nested in
+                chatRow(entry, isRecent: isRecent, nested: nested) { label in
                     Button {
                         activate(.session(entry.sessionID))
                     } label: {
-                        historyLabel(entry)
-                            .contentShape(Rectangle())
+                        label
                     }
-                    .accessibilityIdentifier(
-                        isRecent
-                            ? "sidebar.recent.session.\(entry.sessionID.uuidString)"
-                            : "sidebar.session.\(entry.sessionID.uuidString)"
-                    )
                     .buttonStyle(.plain)
-
-                    moveMenu(for: entry, isRecent: isRecent)
-                    deleteButton(for: entry)
                 }
-                .sidebarRow(selected: entry.sessionID == model.selectedSessionID)
             }
         }
     }
-
 
     /// What needs the owner, ahead of every conversation: an approval waiting
     /// or a report not yet read, each naming its conversation.
@@ -734,30 +786,24 @@ private struct SessionSidebar: View {
             history: model.history,
             sessionsAwaitingApproval: model.sessionsNeedingApproval,
             hasUnreadReport: model.hasUnreadReport
-        )
+        ).filter { matches($0.entry.title) }
         if !rows.isEmpty {
-            Section {
-                ForEach(rows) { row in
-                    Button {
-                        open(row.entry)
-                    } label: {
-                        HStack(spacing: 8) {
-                            AttentionDot(kind: row.kind)
-                                .frame(width: 16)
-                            Text("\(Text(row.label).fontWeight(.medium))\(Text(verbatim: " · \(row.entry.title)").foregroundColor(AppTheme.inkSoft))")
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundColor(AppTheme.ink)
-                        .contentShape(Rectangle())
+            SidebarSectionLabel(title: "Needs you")
+                .sidebarRow()
+            ForEach(rows) { row in
+                Button {
+                    open(row.entry)
+                } label: {
+                    SidebarRow {
+                        AttentionDot(kind: row.kind)
+                    } title: {
+                        Text("\(Text(row.label).fontWeight(.medium))\(Text(verbatim: " · \(row.entry.title)").foregroundColor(AppTheme.inkFaint))")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(row.label), \(row.entry.title)")
-                    .accessibilityIdentifier("sidebar.needs-you.\(row.id)")
-                    .sidebarRow(selected: row.entry.sessionID == model.selectedSessionID)
                 }
-            } header: {
-                SidebarSectionLabel(title: "Needs you")
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(row.label), \(row.entry.title)")
+                .accessibilityIdentifier("sidebar.needs-you.\(row.id)")
+                .sidebarRow(selected: row.entry.sessionID == model.selectedSessionID)
             }
         }
     }
@@ -771,151 +817,173 @@ private struct SessionSidebar: View {
 
     private var navigationList: some View {
         List {
-            NavigationLink {
-                ChatDestination(model: model, entry: nil)
-            } label: {
-                newConversationLabel
-            }
-            .accessibilityIdentifier("sidebar.new-conversation")
-            .sidebarRow()
-
             needsYouSection { entry in
                 Task { await model.selectSession(entry) }
             }
 
-            historySections { entry, isRecent in
-                HStack(spacing: 8) {
+            historySections { entry, isRecent, nested in
+                chatRow(entry, isRecent: isRecent, nested: nested) { label in
                     NavigationLink {
                         ChatDestination(model: model, entry: entry)
                     } label: {
-                        historyLabel(entry)
+                        label
                     }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// A conversation's row: the shared row anatomy (an unread report's dot
+    /// in the icon column), History rows dated in the trailing slot, and the
+    /// move and delete actions replacing that slot on hover. The same actions
+    /// sit in the context menu, a right-click on the Mac and a long press on
+    /// touch, where nothing hovers.
+    private func chatRow<Open: View>(
+        _ entry: SessionHistoryEntry,
+        isRecent: Bool,
+        nested: Bool,
+        @ViewBuilder open: @escaping (AnyView) -> Open
+    ) -> some View {
+        SidebarChatRow(
+            nested: nested,
+            hasUnreadReport: model.hasUnreadReport(entry),
+            title: entry.title,
+            date: isRecent || nested ? nil : entry.updatedAt,
+            open: { label in
+                open(label)
                     .accessibilityIdentifier(
                         isRecent
                             ? "sidebar.recent.session.\(entry.sessionID.uuidString)"
                             : "sidebar.session.\(entry.sessionID.uuidString)"
                     )
-                    .buttonStyle(.plain)
-
+            },
+            actions: {
+                HStack(spacing: VeetSpace.s1) {
                     moveMenu(for: entry, isRecent: isRecent)
                     deleteButton(for: entry)
                 }
-                .sidebarRow(selected: entry.sessionID == model.selectedSessionID)
             }
-        }
+        )
+        .contextMenu { rowContextMenu(for: entry, isRecent: isRecent) }
+        .sidebarRow(selected: entry.sessionID == model.selectedSessionID)
     }
 
     /// One builder for both list variants, so folder sections cannot drift
     /// between the direct-activation and the compact-navigation sidebars.
-    /// Order: recent chats, suggested folders, folders, scheduled groups, then
-    /// unfiled history; with folders unavailable no folder section or control
-    /// renders, while schedule groups still do (ADR-0113). Folders and groups
-    /// each share one section, each header followed by its conversations while
-    /// it is expanded, so no per-folder section gap separates them.
+    /// Order (design system revision 2): Needs you (above), Recent, suggested
+    /// folders, Folders, Scheduled, then History. With folders unavailable no
+    /// folder section or control renders, while schedule groups still do
+    /// (ADR-0113). Every label is a row in one list, aligned with the icon
+    /// column, so no per-section gap separates a header from its rows. While
+    /// the owner searches, rows filter by title and a folder or schedule with
+    /// a match shows its matches open.
     @ViewBuilder
     private func historySections<Row: View>(
-        @ViewBuilder row: @escaping (SessionHistoryEntry, Bool) -> Row
+        @ViewBuilder row: @escaping (SessionHistoryEntry, _ isRecent: Bool, _ nested: Bool) -> Row
     ) -> some View {
         let grouped = model.groupedHistory
-        if !grouped.recent.isEmpty {
-            Section {
-                RecentChatsHeaderRow(
-                    count: grouped.recent.count,
-                    isExpanded: folderSidebar.recentChatsExpanded,
-                    onToggle: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            folderSidebar.recentChatsExpanded.toggle()
-                        }
+        let searching = !trimmedQuery.isEmpty
+        let recent = grouped.recent.filter { matches($0.title) }
+        if !recent.isEmpty {
+            RecentChatsHeaderRow(
+                isExpanded: folderSidebar.recentChatsExpanded,
+                onToggle: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        folderSidebar.recentChatsExpanded.toggle()
+                    }
+                }
+            )
+            .sidebarRow()
+            if folderSidebar.recentChatsExpanded {
+                ForEach(SidebarKeyedEntry.keyed(recent, in: "recent")) { keyed in
+                    row(keyed.entry, true, false)
+                }
+            }
+        }
+        if model.foldersAvailable, !model.suggestedFolders.isEmpty, !searching {
+            SidebarSectionLabel(title: "Suggested folders")
+                .sidebarRow()
+            ForEach(model.suggestedFolders) { proposal in
+                SuggestedFolderRow(proposal: proposal, model: model) {
+                    folderEditor = .acceptProposal(proposal)
+                }
+                .sidebarRow()
+            }
+        }
+        let folders = grouped.folders.filter { section in
+            !searching || matches(section.folder.name) || section.entries.contains { matches($0.title) }
+        }
+        if model.foldersAvailable || !folders.isEmpty {
+            SidebarSectionLabel(title: "Folders") {
+                if model.foldersAvailable {
+                    SidebarSectionAction(systemImage: "plus", label: "New folder") {
+                        folderEditor = .create(moving: nil)
+                    }
+                    .accessibilityIdentifier("sidebar.new-folder")
+                }
+            }
+            .sidebarRow()
+            ForEach(folders) { section in
+                let expanded = folderSidebar.expansion.isExpanded(section.id)
+                FolderHeaderRow(
+                    folder: section.folder,
+                    count: section.entries.count,
+                    isExpanded: expanded || searching,
+                    solo: folderSidebar.expansion.solo,
+                    onToggle: { setFolder(section.id, expanded: !expanded) },
+                    onRename: { folderEditor = .rename(section.folder) },
+                    onDelete: { folderDeletionCandidate = section.folder },
+                    onSetSolo: { solo in
+                        folderSidebar.expansion.setSolo(solo, order: grouped.folders.map(\.id))
                     }
                 )
                 .sidebarRow()
-                if folderSidebar.recentChatsExpanded {
-                    ForEach(grouped.recent) { entry in
-                        row(entry, true)
-                            .padding(.leading, 24)
+                if expanded || searching {
+                    ForEach(SidebarKeyedEntry.keyed(section.entries.filter { matches($0.title) }, in: "folder")) { keyed in
+                        row(keyed.entry, false, true)
                     }
                 }
             }
         }
-        if model.foldersAvailable, !model.suggestedFolders.isEmpty {
-            Section {
-                ForEach(model.suggestedFolders) { proposal in
-                    SuggestedFolderRow(proposal: proposal, model: model) {
-                        folderEditor = .acceptProposal(proposal)
-                    }
-                    .sidebarRow()
-                }
-            } header: {
-                SidebarSectionLabel(title: "Suggested folders")
-            }
+        let schedules = grouped.schedules.filter { group in
+            !searching || matches(group.title) || group.entries.contains { matches($0.title) }
         }
-        if !grouped.folders.isEmpty {
-            Section {
-                ForEach(grouped.folders) { section in
-                    let expanded = folderSidebar.expansion.isExpanded(section.id)
-                    FolderHeaderRow(
-                        folder: section.folder,
-                        count: section.entries.count,
-                        isExpanded: expanded,
-                        solo: folderSidebar.expansion.solo,
-                        onToggle: { setFolder(section.id, expanded: !expanded) },
-                        onRename: { folderEditor = .rename(section.folder) },
-                        onDelete: { folderDeletionCandidate = section.folder },
-                        onSetSolo: { solo in
-                            folderSidebar.expansion.setSolo(solo, order: grouped.folders.map(\.id))
-                        }
-                    )
-                    .sidebarRow()
-                    if expanded {
-                        ForEach(section.entries) { entry in
-                            row(entry, false)
-                                .padding(.leading, 24)
-                        }
-                    }
-                }
-            }
-        }
-        if !grouped.schedules.isEmpty {
-            Section {
-                ForEach(grouped.schedules) { group in
-                    let expanded = scheduleGroups.isExpanded(group.id)
-                    ScheduleGroupHeaderRow(
-                        group: group,
-                        isExpanded: expanded,
-                        hasUnreadReport: group.entries.contains { model.hasUnreadReport($0) },
-                        onToggle: { setScheduleGroup(group.id, expanded: !expanded) }
-                    )
-                    .sidebarRow()
-                    if expanded {
-                        ForEach(group.entries) { entry in
-                            row(entry, false)
-                                .padding(.leading, 24)
-                        }
-                    }
-                }
-            } header: {
-                SidebarSectionLabel(title: "Scheduled")
-            }
-        }
-        Section {
-            ForEach(grouped.uncategorized) { entry in
-                row(entry, false)
-            }
-            if model.foldersAvailable {
-                Button {
-                    folderEditor = .create(moving: nil)
-                } label: {
-                    Label("New folder", systemImage: "folder.badge.plus")
-                        .appFont(.callout)
-                        .foregroundColor(AppTheme.inkSoft)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("sidebar.new-folder")
+        if !schedules.isEmpty {
+            SidebarSectionLabel(title: "Scheduled")
                 .sidebarRow()
+            ForEach(schedules) { group in
+                let expanded = scheduleGroups.isExpanded(group.id)
+                ScheduleGroupHeaderRow(
+                    group: group,
+                    isExpanded: expanded || searching,
+                    hasUnreadReport: group.entries.contains { model.hasUnreadReport($0) },
+                    onToggle: { setScheduleGroup(group.id, expanded: !expanded) }
+                )
+                .sidebarRow()
+                if expanded || searching {
+                    ForEach(SidebarKeyedEntry.keyed(group.entries.filter { matches($0.title) }, in: "schedule")) { keyed in
+                        row(keyed.entry, false, true)
+                    }
+                }
             }
-        } header: {
-            SidebarSectionLabel(title: "History")
         }
+        let history = grouped.uncategorized.filter { matches($0.title) }
+        if !history.isEmpty {
+            SidebarSectionLabel(title: "History")
+                .sidebarRow()
+            ForEach(SidebarKeyedEntry.keyed(history, in: "history")) { keyed in
+                row(keyed.entry, false, false)
+            }
+        }
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func matches(_ title: String) -> Bool {
+        trimmedQuery.isEmpty || title.localizedCaseInsensitiveContains(trimmedQuery)
     }
 
     /// Only the owner's own toggle changes what is expanded; in solo mode,
@@ -939,36 +1007,16 @@ private struct SessionSidebar: View {
     private func moveMenu(for entry: SessionHistoryEntry, isRecent: Bool) -> some View {
         if model.foldersAvailable, entry.scheduleID == nil {
             Menu {
-                ForEach(model.folders) { folder in
-                    Button {
-                        Task { await model.moveSession(entry.sessionID, toFolder: folder.id) }
-                    } label: {
-                        if entry.folderID == folder.id {
-                            Label(folder.name, systemImage: "checkmark")
-                        } else {
-                            Text(folder.name)
-                        }
-                    }
-                    .accessibilityIdentifier("sidebar.session.move.to.\(folder.id.uuidString)")
-                }
-                if entry.folderID != nil {
-                    Button("Remove from folder") {
-                        Task { await model.moveSession(entry.sessionID, toFolder: nil) }
-                    }
-                    .accessibilityIdentifier("sidebar.session.move.none")
-                }
-                Divider()
-                Button("New folder…") {
-                    folderEditor = .create(moving: entry.sessionID)
-                }
-                .accessibilityIdentifier("sidebar.session.move.new")
+                moveMenuItems(for: entry)
             } label: {
                 Image(systemName: "folder")
+                    .veetIcon(.small)
                     .foregroundColor(AppTheme.inkFaint)
             }
             .menuIndicator(.hidden)
             #if os(macOS)
             .menuStyle(.borderlessButton)
+            .fixedSize()
             #endif
             .accessibilityLabel("Move \(entry.title) to a folder")
             .accessibilityIdentifier(
@@ -976,6 +1024,53 @@ private struct SessionSidebar: View {
                     ? "sidebar.recent.session.move.\(entry.sessionID.uuidString)"
                     : "sidebar.session.move.\(entry.sessionID.uuidString)"
             )
+        }
+    }
+
+    @ViewBuilder
+    private func moveMenuItems(for entry: SessionHistoryEntry) -> some View {
+        ForEach(model.folders) { folder in
+            Button {
+                Task { await model.moveSession(entry.sessionID, toFolder: folder.id) }
+            } label: {
+                if entry.folderID == folder.id {
+                    Label(folder.name, systemImage: "checkmark")
+                } else {
+                    Text(folder.name)
+                }
+            }
+            .accessibilityIdentifier("sidebar.session.move.to.\(folder.id.uuidString)")
+        }
+        if entry.folderID != nil {
+            Button("Remove from folder") {
+                Task { await model.moveSession(entry.sessionID, toFolder: nil) }
+            }
+            .accessibilityIdentifier("sidebar.session.move.none")
+        }
+        Divider()
+        Button("New folder…") {
+            folderEditor = .create(moving: entry.sessionID)
+        }
+        .accessibilityIdentifier("sidebar.session.move.new")
+    }
+
+    /// The row's actions where nothing hovers: Move to Folder and Delete.
+    @ViewBuilder
+    private func rowContextMenu(for entry: SessionHistoryEntry, isRecent: Bool) -> some View {
+        if model.foldersAvailable, entry.scheduleID == nil {
+            #if os(iOS)
+            Menu("Move to Folder") { moveMenuItems(for: entry) }
+                .accessibilityIdentifier(
+                    isRecent
+                        ? "sidebar.recent.session.move.\(entry.sessionID.uuidString)"
+                        : "sidebar.session.move.\(entry.sessionID.uuidString)"
+                )
+            #else
+            Menu("Move to Folder") { moveMenuItems(for: entry) }
+            #endif
+        }
+        Button("Delete Everywhere…", role: .destructive) {
+            deletionCandidate = entry
         }
     }
 
@@ -988,34 +1083,12 @@ private struct SessionSidebar: View {
         )
     }
 
-    private var newConversationLabel: some View {
-        Label("New chat", systemImage: "plus")
-            .frame(maxWidth: .infinity)
-    }
-
-    /// One line: the conversation's symbol, its title, and a dot while a
-    /// scheduled report waits to be read.
-    private func historyLabel(_ entry: SessionHistoryEntry) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: entry.scheduleID != nil ? "calendar.badge.clock" : "bubble.left")
-                .font(.system(size: 13))
-                .foregroundColor(AppTheme.inkSoft)
-                .frame(width: 16)
-                .accessibilityHidden(true)
-            Text(entry.title)
-                .lineLimit(1)
-                .foregroundColor(AppTheme.ink)
-            if model.hasUnreadReport(entry) { NewReportIndicator() }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: A2Metrics.rowHeight - 8)
-    }
-
     private func deleteButton(for entry: SessionHistoryEntry) -> some View {
         Button(role: .destructive) {
             deletionCandidate = entry
         } label: {
             Image(systemName: "trash")
+                .veetIcon(.small)
                 .foregroundColor(AppTheme.inkFaint)
         }
         .buttonStyle(.plain)
@@ -1034,6 +1107,20 @@ private struct SessionSidebar: View {
             Task { await model.selectSession(entry) }
         }
         onActivate()
+    }
+}
+
+/// A conversation's row identity within one sidebar section. Recent repeats
+/// conversations that also sit in a folder or History, and with every row in
+/// one list the Mac reused a History row for its Recent twin unless each
+/// section keys its own.
+private struct SidebarKeyedEntry: Identifiable {
+    let section: String
+    let entry: SessionHistoryEntry
+    var id: String { "\(section).\(entry.id)" }
+
+    static func keyed(_ entries: [SessionHistoryEntry], in section: String) -> [SidebarKeyedEntry] {
+        entries.map { SidebarKeyedEntry(section: section, entry: $0) }
     }
 }
 
@@ -1172,8 +1259,9 @@ enum MainWindowConfiguration {
 enum SettingsWindowConfiguration {
     static let frameName: NSWindow.FrameAutosaveName = "VeetbotSettingsWindow"
     static let storageKey = "veetbot.settingsWindow.contentSize"
-    static let minimumSize = NSSize(width: 520, height: 440)
-    static let initialSize = NSSize(width: 720, height: 680)
+    // The group sidebar (232 pt) sits beside each group's page.
+    static let minimumSize = NSSize(width: 720, height: 480)
+    static let initialSize = NSSize(width: 920, height: 680)
     static let maximumSize = NSSize(width: 10_000, height: 10_000)
 
     @MainActor
@@ -1457,7 +1545,7 @@ private struct ModeSegment: View {
                 Button { choose(mode) } label: {
                     Label(mode.title, systemImage: mode.symbol)
                         .labelStyle(.titleOnly)
-                        .appFont(.caption, weight: .medium)
+                        .veetType(.meta, weight: .medium)
                         .foregroundColor(selected == mode ? AppTheme.ink : AppTheme.inkSoft)
                         .padding(.horizontal, 18)
                         .frame(minHeight: 24)
@@ -1531,30 +1619,3 @@ struct ChatListDrawer<Content: View>: View {
     }
 }
 #endif
-
-/// A sidebar row: the selected row's soft ink wash inset like the
-/// reference's rounded rows, and on iOS, where list rows otherwise come
-/// white with separators, neither.
-private struct SidebarRowModifier: ViewModifier {
-    let selected: Bool
-
-    func body(content: Content) -> some View {
-        #if os(iOS)
-        content.listRowSeparator(.hidden).listRowBackground(background)
-        #else
-        content.listRowBackground(background)
-        #endif
-    }
-
-    private var background: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(selected ? AppTheme.selected : Color.clear)
-            .padding(.horizontal, 6)
-    }
-}
-
-extension View {
-    fileprivate func sidebarRow(selected: Bool = false) -> some View {
-        modifier(SidebarRowModifier(selected: selected))
-    }
-}

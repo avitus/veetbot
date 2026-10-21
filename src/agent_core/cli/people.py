@@ -136,7 +136,8 @@ async def read(
         owner = composition.principal
         if action == "list":
             result = await service.list(owner, ceiling=ceiling, text=text, cursor=cursor)
-            return PeoplePageView.model_validate(result).model_dump(mode="json")
+            shown = await service.present(owner, result, ceiling=ceiling)
+            return PeoplePageView.model_validate(shown).model_dump(mode="json")
         assert person_id is not None
         if action == "history":
             section = await service.section(
@@ -161,7 +162,8 @@ async def read(
                 "coverage": profile.coverage,
                 "injected": "Use the run's recall trace to inspect actual injection.",
             }
-        return PersonProfileView.model_validate(profile).model_dump(mode="json")
+        shown_profile = await service.present(owner, profile, ceiling=ceiling)
+        return PersonProfileView.model_validate(shown_profile).model_dump(mode="json")
 
 
 @app.command("list")

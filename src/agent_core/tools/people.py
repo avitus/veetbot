@@ -9,6 +9,7 @@ from agent_core.application.authorization import require_scope
 from agent_core.application.people import PublicPeopleService, _safe
 from agent_core.application.people_context import PeopleContextService
 from agent_core.domain import people_tools_v1
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import RecallQuery, Sensitivity
 from agent_core.domain.messages import TextPart
@@ -24,7 +25,13 @@ from agent_core.domain.people_tools import (
 )
 from agent_core.domain.people_views import PeopleSectionQuery
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
+from agent_core.domain.tools import (
+    ToolExecutionContext,
+    ToolFailure,
+    ToolFailureKind,
+    ToolResult,
+    ToolSpec,
+)
 from agent_core.memory.people import resolve_identity
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -52,6 +59,21 @@ def _spec(
         maximum_output_bytes=65536,
         allow_parallel=True,
         output_trust=TrustLevel.MEMORY,
+    )
+
+
+def _not_found() -> ToolResult:
+    # An id the model copied from a recalled interaction or relationship is not
+    # a person; it must come back as a correctable failure, not end the run.
+    return ToolResult(
+        ok=False,
+        content=[],
+        failure=ToolFailure(
+            kind=ToolFailureKind.NOT_FOUND,
+            reason_code="people.not_found",
+            detail="no visible person has that id",
+            retryable=False,
+        ),
     )
 
 
@@ -127,24 +149,27 @@ class PeopleContextTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         request = PeopleContextArgs.model_validate(arguments)
-        result = await self._service.recall(
-            context.principal,
-            request.person_ids,
-            RecallQuery(
-                tenant_id=context.tenant_id,
-                principal_id=context.principal.principal_id,
-                current_scope=request.scope,
-                text=request.text,
-                as_of=request.as_of,
-                known_at=request.known_at,
-                budget_tokens=2000,
-                max_items=20,
-                min_score=0.1,
-                sensitivity_ceiling=Sensitivity.SENSITIVE,
-            ),
-            session_id=context.session_id,
-            run_id=context.run_id,
-        )
+        try:
+            result = await self._service.recall(
+                context.principal,
+                request.person_ids,
+                RecallQuery(
+                    tenant_id=context.tenant_id,
+                    principal_id=context.principal.principal_id,
+                    current_scope=request.scope,
+                    text=request.text,
+                    as_of=request.as_of,
+                    known_at=request.known_at,
+                    budget_tokens=2000,
+                    max_items=20,
+                    min_score=0.1,
+                    sensitivity_ceiling=Sensitivity.SENSITIVE,
+                ),
+                session_id=context.session_id,
+                run_id=context.run_id,
+            )
+        except NotFoundError:
+            return _not_found()
         return ToolResult(
             ok=True,
             content=[TextPart(text=result.rendered)],
@@ -170,14 +195,17 @@ class PeopleHistoryTool:
         request = PeopleHistoryArgs.model_validate(arguments)
         if request.source_id is not None:
             # Original mail is untrusted evidence, never memory (ADR-0126).
-            source = await self._service.source_text(
-                context.principal,
-                request.person_id,
-                request.source_id,
-                ceiling=Sensitivity.SENSITIVE,
-                offset=request.offset,
-                run_id=context.run_id,
-            )
+            try:
+                source = await self._service.source_text(
+                    context.principal,
+                    request.person_id,
+                    request.source_id,
+                    ceiling=Sensitivity.SENSITIVE,
+                    offset=request.offset,
+                    run_id=context.run_id,
+                )
+            except NotFoundError:
+                return _not_found()
             result = PeopleHistoryResult(items=[], next_cursor=None, coverage="", source=source)
             return ToolResult(
                 ok=True,
@@ -185,7 +213,10 @@ class PeopleHistoryTool:
                 structured=result.model_dump(mode="json"),
                 output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
             )
-        result = await self._history(request, context, email=True)
+        try:
+            result = await self._history(request, context, email=True)
+        except NotFoundError:
+            return _not_found()
         return ToolResult(
             ok=True,
             content=[TextPart(text=result.model_dump_json())],
@@ -258,9 +289,12 @@ class LegacyPeopleHistoryTool(PeopleHistoryTool):
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         request = people_tools_v1.PeopleHistoryArgs.model_validate(arguments)
-        result = await self._history(
-            PeopleHistoryArgs.model_validate(request.model_dump()), context, email=False
-        )
+        try:
+            result = await self._history(
+                PeopleHistoryArgs.model_validate(request.model_dump()), context, email=False
+            )
+        except NotFoundError:
+            return _not_found()
         legacy = people_tools_v1.PeopleHistoryResult.model_validate(
             result.model_dump(exclude={"source": True, "items": {"__all__": {"email"}}})
         )

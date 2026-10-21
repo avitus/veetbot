@@ -96,11 +96,8 @@ import UIKit
 
 #if os(macOS)
     @Test @MainActor
-    func testSystemComposerFontUsesThePreferredBodyPointSize() {
-        #expect(
-            composerBaseFont(textSize: .system).pointSize
-                == NSFont.preferredFont(forTextStyle: .body).pointSize
-        )
+    func testSystemComposerFontUsesTheBodyRolePointSize() {
+        #expect(composerBaseFont(textSize: .system).pointSize == VeetType.pointSize(.body, on: .mac))
         #expect(
             composerBaseFont(textSize: .large).pointSize
                 == appPointSize(for: .body, textSize: .large)

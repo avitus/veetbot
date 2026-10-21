@@ -9,7 +9,7 @@ struct CallResultSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Call result").font(.title2)
+                Text("Call result").veetType(.title)
                 Spacer()
                 Button("Done", action: close)
             }
@@ -21,17 +21,17 @@ struct CallResultSheet: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if let status = result.status { Text(status.replacingOccurrences(of: "_", with: " ").capitalized) }
                         if let number = result.counterparty { Text(verbatim: number) }
-                        Text("Caller identity and statements are unverified.").font(.caption).foregroundColor(.secondary)
+                        Text("Caller identity and statements are unverified.").veetType(.meta).foregroundColor(.secondary)
                         if let summary = result.summary {
-                            Text("Summary").font(.headline)
+                            Text("Summary").veetType(.ui, weight: .semibold)
                             Text(verbatim: summary).textSelection(.enabled)
                         }
-                        if result.summaryComplete == false { Text("The summary was truncated.").font(.caption) }
+                        if result.summaryComplete == false { Text("The summary was truncated.").veetType(.meta) }
                         if let transcript = result.transcript {
-                            Text("Transcript").font(.headline)
+                            Text("Transcript").veetType(.ui, weight: .semibold)
                             Text(verbatim: transcript).textSelection(.enabled)
                         }
-                        if result.transcriptComplete == false { Text("The transcript was truncated.").font(.caption) }
+                        if result.transcriptComplete == false { Text("The transcript was truncated.").veetType(.meta) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Button("Delete from Veetbot", role: .destructive) { confirmingDeletion = true }

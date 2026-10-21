@@ -1714,3 +1714,19 @@ on new evidence without reconstructing uncertain legacy attribution. Individual
 approval still applies each proposal; unattended activation and all evaluation
 floors remain unchanged. A run with no eligible new group is a valid no-change
 outcome. The migration refuses downgrade after a cutover has been established.
+
+Before provider-backed inventory queues a group, it checks each of the at most
+thirty-two selected neighbors independently under the owner and People guards.
+The existing authenticated text-only source, forward boundary, attribution,
+visibility, rejection and source-admissibility checks determine which originals
+remain. An attachment-bearing original or a hidden People dependency cannot
+prevent otherwise valid neighbors from forming their own group. Fewer than two
+surviving originals queues no work; the input digest and deduplication use exactly
+the surviving membership. A group whose own anchor did not survive is not queued
+either: its other members may all lie outside the inspected page, which would make
+checkpoint refuse the batch and leave the owner's inventory stuck at that cursor;
+those members form their groups when they are anchors themselves. Inventory-only coverage remains independent of provider
+readiness. This is a selection preview: queued membership is never silently
+trimmed, and preparation, verification and application still revalidate every
+queued original together. No source type, privacy classification or daily budget
+is widened by this repair.

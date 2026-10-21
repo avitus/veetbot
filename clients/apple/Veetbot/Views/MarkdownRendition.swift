@@ -37,9 +37,10 @@ extension MarkdownRendition {
     }
 }
 
+/// The transcript's body role: fixed on the Mac, Dynamic Type on touch.
 private func systemBodyPointSize() -> CGFloat {
     #if os(macOS)
-    return NSFont.preferredFont(forTextStyle: .body, options: [:]).pointSize
+    return VeetType.pointSize(.body, on: .mac)
     #else
     return UIFont.preferredFont(forTextStyle: .body).pointSize
     #endif
@@ -266,23 +267,14 @@ private struct RenditionWriter {
     }
 
     private func boldBodyFont() -> RenditionFont {
-        RenditionFont.systemFont(ofSize: bodySize, weight: .bold)
+        RenditionFont.systemFont(ofSize: bodySize, weight: .semibold)
     }
 
-    /// The transcript's heading scale (`MarkdownBlockView.headingTextStyle`)
-    /// relative to body text, with its weights.
+    /// The transcript's headings (`MarkdownBlockView`): levels 1 to 3 in the
+    /// title role, the rest body text, all at 600.
     private func headingFont(_ level: Int) -> RenditionFont {
-        let scale: CGFloat
-        let weight: RenditionFont.Weight
-        switch level {
-        case 1: (scale, weight) = (2.0, .bold)
-        case 2: (scale, weight) = (1.3, .bold)
-        case 3: (scale, weight) = (1.15, .semibold)
-        case 4: (scale, weight) = (1.0, .bold)
-        case 5: (scale, weight) = (0.87, .semibold)
-        default: (scale, weight) = (0.77, .regular)
-        }
-        return RenditionFont.systemFont(ofSize: bodySize * scale, weight: weight)
+        let title = VeetType.pointSize(.title, on: .current) / VeetType.pointSize(.body, on: .current)
+        return RenditionFont.systemFont(ofSize: bodySize * (level <= 3 ? title : 1), weight: .semibold)
     }
 }
 
@@ -369,9 +361,9 @@ private func styledFont(_ base: RenditionFont, bold: Bool, italic: Bool, code: B
     var font = base
     if code {
         font = RenditionFont.monospacedSystemFont(
-            ofSize: base.pointSize * 0.92, weight: bold ? .bold : .regular)
+            ofSize: base.pointSize * 0.92, weight: bold ? .semibold : .regular)
     } else if bold {
-        font = RenditionFont.systemFont(ofSize: base.pointSize, weight: .bold)
+        font = RenditionFont.systemFont(ofSize: base.pointSize, weight: .semibold)
     }
     guard italic else { return font }
     #if os(macOS)

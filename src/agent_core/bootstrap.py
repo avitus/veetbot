@@ -284,6 +284,7 @@ from agent_core.application.browser_task_grants import (
     sweep_expired_task_grants,
 )
 from agent_core.application.call_authorization import OwnerCallAuthorizer
+from agent_core.application.call_plans import CallPlanSweep
 from agent_core.application.call_worker import CallWorker
 from agent_core.application.calling import CallService
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
@@ -580,6 +581,8 @@ from agent_core.observability.logging import configure_logging
 from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.reliability import ReliabilityReport, ReliabilityThresholds
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
+from agent_core.persona.boundaries import persona_boundaries
+from agent_core.persona.preview import PersonaPreviewer
 from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
@@ -631,6 +634,7 @@ from agent_core.runtime.scheduled_browser import (
 )
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.scheduling.accounting import ScheduleOutcomeAccountant
+from agent_core.scheduling.drafts import ScheduleDrafter, ScheduleDraftInterpreter
 from agent_core.scheduling.materializer import ScheduleMaterializer
 from agent_core.scheduling.worker import ScheduleWorker
 from agent_core.skills.catalog import SkillCatalogService
@@ -690,6 +694,7 @@ from agent_core.tools.schedule_create import (
     LegacyScheduleCreateTool,
     PreviousScheduleCreateTool,
     ScheduleCreateTool,
+    SingleCallScheduleCreateTool,
 )
 from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_CANCEL_TOOL_NAME,
@@ -790,6 +795,10 @@ class ApplicationServices:
     model_settings: PublicModelSettingsServiceContract | None = None
     # ADR-0129: present only when BROWSER_TASK_GRANTS_ENABLED is set.
     browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
+    # ADR-0225 part B: absent when drafts are off or titles use no routed model.
+    schedule_drafts: ScheduleDrafter | None = None
+    # ADR-0225 part C: Run now materializes on the API's own unit of work.
+    schedule_runs: ScheduleMaterializer | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -833,6 +842,7 @@ class Composition:
     judgment_provider: JudgmentProvider | None = None
     attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
+    call_plans: CallPlanSweep | None = None
     # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
     latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
     reliability_report: Callable[[datetime, datetime], Awaitable[ReliabilityReport]] | None = None
@@ -2821,6 +2831,15 @@ async def _compose(
             )
         )
         registry.register(
+            SingleCallScheduleCreateTool(
+                schedule_service,
+                agent,
+                schedule_definition_limits,
+                uow_factory=uow_factory,
+                calling_enabled=settings.call_enabled,
+            )
+        )
+        registry.register(
             ScheduleCreateTool(
                 schedule_service,
                 agent,
@@ -4560,6 +4579,20 @@ async def _compose(
                     limit=schedule_terminal_purge_batch,
                 )
 
+        call_plan_sweep = (
+            CallPlanSweep(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                wake_scheduler=schedule_notify,
+            )
+            if settings.call_enabled
+            and settings.schedule_api_enabled
+            and settings.schedule_worker_enabled
+            else None
+        )
+
         async def sweep_device_invocations() -> int:
             async with uow_factory() as uow:
                 return await uow.device_invocations.expire_overdue(
@@ -4808,6 +4841,34 @@ async def _compose(
             browser_profiles=browser_profile_service,
             browser_grants=browser_grant_service,
             schedules=schedule_service,
+            schedule_drafts=(
+                ScheduleDrafter(
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    agent=agent,
+                    limits=schedule_definition_limits,
+                    interpreter=ScheduleDraftInterpreter(
+                        router=model_router,
+                        providers=model_providers,
+                        clock=clock,
+                        ids=ids,
+                        model_policy=title_profiles.generation.model_policy,
+                    ),
+                )
+                if settings.schedule_drafts_enabled
+                and title_profiles.generation.model_policy not in NON_ROUTED_MODEL_POLICIES
+                else None
+            ),
+            schedule_runs=ScheduleMaterializer(
+                uow_factory=uow_factory,
+                principals=ConfiguredSchedulePrincipalDirectory(principal),
+                clock=clock,
+                ids=ids,
+                seed_checkpoint=checkpoint_seeder,
+                metrics=schedule_metrics,
+                notification_producer=notification_producer,
+            ),
             devices=device_service,
             device_ingest=device_ingest_service,
             notifications=notification_inbox,
@@ -4820,7 +4881,25 @@ async def _compose(
                 memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
             ),
             people=people_service,
-            persona=PublicPersonaService(uow_factory=uow_factory, clock=clock, ids=ids),
+            persona=PublicPersonaService(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                # ADR-0226 parts C and D.
+                previewer=(
+                    PersonaPreviewer(
+                        uow_factory=uow_factory,
+                        router=model_router,
+                        providers=model_providers,
+                        clock=clock,
+                        ids=ids,
+                        model_policy=title_profiles.generation.model_policy,
+                    )
+                    if title_profiles.generation.model_policy not in NON_ROUTED_MODEL_POLICIES
+                    else None
+                ),
+                boundaries=persona_boundaries(ruleset, settings),
+            ),
             model_settings=PublicModelSettingsService(
                 uow_factory=uow_factory, clock=clock, ids=ids, catalog=model_settings_catalog
             ),
@@ -4989,6 +5068,9 @@ async def _compose(
                     sweep_people_erasures=lambda: people_erasure.resume_pending(principal),
                     sweep_people_duplicates=_duplicate_sweep(people_duplicates, principal),
                     sweep_terminal_schedules=sweep_terminal_schedules,
+                    sweep_call_plans=(
+                        call_plan_sweep.run_once if call_plan_sweep is not None else None
+                    ),
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
                     ),
@@ -5040,6 +5122,7 @@ async def _compose(
                 local_import_tasks=local_import_tasks,
                 judgment_provider=judgment_provider,
                 people_repair=people_repair,
+                call_plans=call_plan_sweep,
             ),
             list(effective_providers.values()),
         )

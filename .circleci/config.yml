@@ -142,10 +142,7 @@ jobs:
           command: make typecheck
       - run:
           name: Static tests
-          command: |
-            mkdir -p test-results/static
-            PYTEST_ADDOPTS="-n 2 --dist loadscope --junitxml=test-results/static/results.xml" \
-              make test-static
+          command: circleci testsuite run "static"
       - store_test_results:
           path: test-results/static
       - run:
@@ -196,10 +193,7 @@ jobs:
       - install_uv
       - run:
           name: Contract tests
-          command: |
-            mkdir -p test-results/contract
-            PYTEST_ADDOPTS="--junitxml=test-results/contract/results.xml" \
-              make test-contract
+          command: circleci testsuite run "contract"
       - record_verified_tree:
           job: contract
       - store_test_results:
@@ -233,10 +227,7 @@ jobs:
           command: make migrate
       - run:
           name: Integration tests
-          command: |
-            mkdir -p test-results/integration
-            PYTEST_ADDOPTS="--junitxml=test-results/integration/results.xml" \
-              make test-integration
+          command: circleci testsuite run "integration"
       - record_verified_tree:
           job: integration
       - store_test_results:

@@ -25,6 +25,7 @@ from agent_core.domain.persona import (
     PersonaEntrySource,
     PersonaNomination,
     PersonaNominationState,
+    PersonaTrait,
 )
 
 
@@ -40,6 +41,9 @@ def _entry_to_json(entry: PersonaEntry) -> dict[str, Any]:
             str(entry.source_belief_id) if entry.source_belief_id is not None else None
         ),
         "sensitivity": entry.sensitivity.value,
+        # ADR-0226: stored only when switched off, so an entry written before
+        # the switch existed and an enabled one are the same JSON.
+        **({} if entry.enabled else {"enabled": False}),
     }
 
 
@@ -50,6 +54,7 @@ def _entry_from_json(value: dict[str, Any]) -> PersonaEntry:
         source=PersonaEntrySource(value["source"]),
         source_belief_id=UUID(raw_belief) if raw_belief else None,
         sensitivity=Sensitivity(value["sensitivity"]),
+        enabled=bool(value.get("enabled", True)),
     )
 
 
@@ -62,6 +67,8 @@ def _document_from_row(row: PersonaDocumentRow) -> PersonaDocument:
         source=PersonaEntrySource(row.source),
         source_nomination_id=row.source_nomination_id,
         created_at=row.created_at,
+        voice=row.voice,
+        traits=tuple(PersonaTrait(trait) for trait in row.traits or ()),
     )
 
 
@@ -151,6 +158,8 @@ class PostgresPersonaStore:
                     source=document.source.value,
                     source_nomination_id=document.source_nomination_id,
                     created_at=document.created_at,
+                    voice=document.voice,
+                    traits=[trait.value for trait in document.traits],
                 )
             )
         except IntegrityError as error:

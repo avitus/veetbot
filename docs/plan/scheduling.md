@@ -166,6 +166,7 @@ class ScheduleRevision(BaseModel):
     timezone: str | None
     misfire_grace_seconds: int
     max_consecutive_failures: int
+    notify: every_report | attention_only = every_report   # ADR-0225 D
     created_by_principal_id: str
     created_at: datetime
 ```
@@ -216,6 +217,8 @@ class ScheduleOccurrence(BaseModel):
     materialized_at: datetime | None
     links_erased_at: datetime | None
     created_at: datetime
+    trigger: SCHEDULED | MANUAL = SCHEDULED      # ADR-0225 C
+    manual_request_key: str | None = None       # set exactly when MANUAL
 ```
 
 `MATERIALIZED` requires `session_id`, `run_id`, `materialized_at`, and the
@@ -227,10 +230,13 @@ disposition forbids the identifiers and `links_erased_at` and requires a stable
 reason code. Run progress and outcome are read by joining the linked run rather
 than copied onto the occurrence.
 
-The database enforces `UNIQUE(schedule_id, nominal_fire_at)`. This is the
+The database enforces `UNIQUE(schedule_id, nominal_fire_at)` for scheduled
+occurrences (a partial index on `trigger = 'SCHEDULED'`). This is the
 occurrence idempotency key. It prevents two schedule workers, a retry after an
 unknown commit, or a process restart from materializing the same nominal
-instant twice.
+instant twice. A manual Run-now occurrence (ADR-0225 part C) takes the request
+time as its nominal instant and is unique per schedule by its
+`manual_request_key`; it is only ever recorded `MATERIALIZED`.
 
 ## Cadence and civil time
 
@@ -470,7 +476,8 @@ endpoint with `run.cancel`; this separation prevents `schedule.cancel` from
 becoming indirect authority to cancel arbitrary execution.
 
 After a linked run reaches `COMPLETED`, a post-run hook resets
-`consecutive_failures` to zero. `FAILED`, authorization failure, configuration
+`consecutive_failures` to zero; a manual Run-now run (ADR-0225 part C) neither
+resets nor increments it and never auto-pauses the schedule. `FAILED`, authorization failure, configuration
 failure, and a missed occurrence increment it. User-cancelled runs and overlap
 skips do not. Reaching `max_consecutive_failures` pauses the schedule with
 `pause_reason = failure_limit` and emits `schedule.auto_paused`. The hook is
@@ -567,6 +574,36 @@ repository query before cursor comparison and limiting.
 Cross-tenant or cross-principal access returns the same not-found envelope as
 the existing API. Every route declares its required schedule scope in OpenAPI.
 
+`POST /v1/schedules/drafts` (ADR-0225 part B, `schedule.write`) reads
+`{text, timezone}` into a draft and persists nothing. One bounded, tool-less
+structured-output call (the title-generation model policy, at most USD 0.05,
+4,096 input and 1,024 output tokens, 20 seconds) returns only a short title and
+the timing as closed fields; the server builds the cadence in the given IANA
+zone, takes the owner's sentence verbatim as the instruction, derives every pin
+and limit through `scheduling.defaults` exactly as `schedule.create` does, and
+computes the next three firings with the recurrence engine. The answer is
+`{status: ready | needs_clarification | failed, reason, definition,
+next_fire_at}`; the client posts a ready `definition` unchanged to `POST
+/v1/schedules`. A secret-looking sentence or an unknown zone is refused before
+any model call (`schedule_validation_error`); thirty drafts per principal per
+hour, counted from content-free `schedule.draft_interpreted` process events,
+then `429 rate_limited` with reason `schedule.drafts_rate_limited`. The route is
+mounted with the schedule API; `AGENT_SCHEDULE_DRAFTS_ENABLED=0`, or a
+non-routed title policy, answers `schedule.drafts_unavailable`.
+
+`POST /v1/schedules/{id}/run` (ADR-0225 part C, the exact scope
+`schedule.run`) takes `{expected_revision}` and an `Idempotency-Key` and starts
+one manual run of an ACTIVE or PAUSED recurring schedule now: `201` with the
+`MANUAL` occurrence, or `200` replaying the same key's occurrence. It refuses
+a one-time schedule (`409 schedule.run_now_one_time`), a terminal one
+(`schedule.terminal`), a stale revision (`schedule.revision_conflict`) and any
+schedule whose latest materialized run is not terminal (`schedule.run_active`);
+after five manual occurrences in a rolling day it answers `429
+schedule.run_now_daily_limit`. Authority, scopes, the pinned agent and policy,
+and tenant admission are checked as at materialization and refused instead of
+recorded. `next_fire_at` does not move; a cadence instant due while the manual
+run is active is `SKIPPED_OVERLAP` by the existing rule.
+
 Validation rejects unknown cadence fields, naive datetimes, invalid IANA zones,
 duplicate or out-of-range weekdays, duplicate or out-of-range monthly days,
 empty monthly selectors, duplicate or impossible yearly dates, empty yearly
@@ -636,11 +673,17 @@ the already loaded rows with an inline retry. A 404 or 405 from the list route
 means schedule browsing is unavailable on that server. The same statuses from
 a point read retain their ordinary HTTP meaning.
 
-The surface is read-only except for website-access binding on ACTIVE or PAUSED
-schedules (ADR-0154). Reading needs `schedule.read`, listing sign-ins needs
-`browser.profile.read`, and saving the binding needs `schedule.write` plus
-`browser.profile.read` when bound. It has no other create, update, pause, resume,
-cancel, delete, occurrence, or run-history control. Swift transport, model, view-model, structure,
+The surface changes website-access binding on ACTIVE or PAUSED schedules
+(ADR-0154) and, under ADR-0225 part A, pauses, resumes and stops them and shows
+their recent occurrences. Reading needs `schedule.read`, listing sign-ins needs
+`browser.profile.read`, saving the binding needs `schedule.write` plus
+`browser.profile.read` when bound, pause and resume need `schedule.write`, and
+Stop is the terminal cancel under `schedule.cancel`; it is never labelled Delete
+because the record stays for thirty days (ADR-0089). Each lifecycle change sends
+the revision on screen and is read again and retried once on
+`schedule.revision_conflict`. Recent runs read the occurrence ledger and each
+linked run's status; Open report in Chat appears only for a materialized
+occurrence whose session link survives. Swift transport, model, view-model, structure,
 and in-process iOS navigation tests are the acceptance evidence under
 ADR-0049's native verification contract. The current/history extension adds no
 route or scope and does not alter the historical milestone gate counts.
@@ -700,6 +743,7 @@ schedule.occurrence.authorization_failed
 schedule.occurrence.configuration_failed
 schedule.misfires_coalesced
 schedule.next_fire_repaired
+schedule.call_plan.step
 ```
 
 Every event carries `schedule_id`, revision, tenant, principal, actor, event
@@ -834,7 +878,10 @@ schedule_occurrences
   materialized_at TIMESTAMPTZ NULL
   links_erased_at TIMESTAMPTZ NULL
   created_at TIMESTAMPTZ NOT NULL
-  UNIQUE (schedule_id, nominal_fire_at)
+  trigger TEXT NOT NULL DEFAULT 'SCHEDULED'      -- SCHEDULED | MANUAL
+  manual_request_key TEXT NULL                   -- NOT NULL exactly when MANUAL
+  UNIQUE (schedule_id, nominal_fire_at) WHERE trigger = 'SCHEDULED'
+  UNIQUE (schedule_id, manual_request_key) WHERE manual_request_key IS NOT NULL
 
 schedule_idempotency_keys
   tenant_id TEXT NOT NULL
@@ -1010,7 +1057,8 @@ sets `requested_scopes = frozenset()` unless `use_website=true` supplies the
 validated website dependency described above (ADR-0172), or `place_call=true`
 (version 1.3.0, ADR-0213) requests exactly `mcp.bland_call.use` and
 `mcp.bland_read.use`; that flag fails as `schedule.calling_unavailable` when
-calling is not composed. Its step, model-call, and tool-call
+calling is not composed. A `call_plan` (version 1.4.0, ADR-0221) narrows a call
+schedule to `mcp.bland_call.use` alone. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
 ceilings. Cost is the minimum of the active agent's finite cost or `5` and the
 schedule cost ceiling; run timeout is the lesser of 300 seconds and its
@@ -1022,13 +1070,50 @@ the second consecutive failure (ADR-0109). No model argument can widen any of
 these values.
 
 The successful result contains `schedule_id`, `state`, `next_fire_at`, and
-whether the application request replayed. After the occurrence's run is
+whether the application request replayed. A call schedule's result text adds
+that its occurrence can call but cannot create or change schedules or wait, so
+no retry or follow-up that depends on a call's outcome is arranged, and asks
+Chat to say so when the owner asked for one. With a call plan the text says
+instead that the platform places the plan's calls and reports the outcome.
+After the occurrence's run is
 accounted, the outbox emits `schedule_run_finished`, which can arrive after the
-nominal instant by the duration of the scheduled run. ADR-0091 subsequently
+nominal instant by the duration of the scheduled run, unless the occurrence's
+pinned revision sets `notify: attention_only` and the run completed (ADR-0225
+part D); a failed or cancelled run, approvals, questions and skipped
+occurrences notify regardless. ADR-0091 subsequently
 authorizes the occurrence's pinned revision title and nominal firing time in
 the alert; instructions and run results remain excluded. The accountant and
 materializer pass the already loaded revision to notification production so
 both terminal and skipped outcomes preserve the schedule identity at firing.
+
+### Call plans (ADR-0221)
+
+`call_plan` requires `place_call=true` and a one-time `at`; otherwise creation
+fails with `schedule.call_plan_needs_call` or
+`schedule.call_plan_needs_one_time`. It holds `retry_every_minutes` (1–30) with
+`retry_until`, and/or `follow_up_after_answer_minutes` (1–60). At most ten calls
+fit within an hour of `at`; anything else is `schedule.call_plan_invalid`. The
+revision stores the plan in its definition only when present. A plan cannot
+change after its first call (`schedule.call_plan_started`).
+
+The first call materializes at `at` like any one-time occurrence. A plan's
+schedule then stays `ACTIVE` with no `next_fire_at` while it awaits that call's
+result. The maintenance sweep, which can read the call ledger, finds such
+schedules every pass. It reads only each call's closed dispatch status and
+decides the next step from it. It appends that step as the process event
+`schedule.call_plan.step`, keyed by schedule and call number, and sets
+`next_fire_at`. The scheduler cannot read the ledger and gains no grant for
+it. For a plan schedule it materializes at `next_fire_at` instead of the
+cadence instant, and reads the step event to build the run.
+
+Each run's seed is the instruction followed by a platform note: the call's
+number in the plan and earlier results, the follow-up's opening, or the plan's
+outcome. The note gives times as hours and minutes and holds no phone-like
+digit run. The final step runs with no scopes and completes the schedule. A
+missing step event records `CONFIGURATION_FAILED` with
+`schedule.call_plan_step_missing`. The accountant skips
+`schedule_run_finished` for a plan's completed calls, so the final step is the
+plan's only alert; failed or cancelled calls still alert.
 
 ## Model-callable lifecycle
 

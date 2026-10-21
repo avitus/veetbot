@@ -53,6 +53,32 @@ class UpdatePerson(PeopleValue):
     )
 
 
+class DirectoryPerson(Person):
+    """A person as the directory shows them (ADR-0227).
+
+    ``last_interaction_at`` is the newest visible dated interaction, the key
+    ``sort=recent`` orders by; ``next_thread`` is the earliest open commitment
+    the owner owes them that is overdue or due within the window. Both are
+    computed for every public response that shows a person, so null always
+    means "none", never "not computed".
+    """
+
+    last_interaction_at: AwareDatetime | None = None
+    next_thread: PeopleCommitment | None = None
+
+
+class PeopleCounts(PeopleValue):
+    """The People sidebar's numbers under the lists' own predicates (ADR-0227)."""
+
+    everyone: int = Field(ge=0)
+    needs_review: int = Field(ge=0)
+    possible_duplicates: int = Field(ge=0)
+    open_threads: int | None = Field(default=None, ge=0)
+    # The native Needs you: the review set and the owed-thread set, each person once.
+    needs_you: int = Field(ge=0)
+    counted_at: AwareDatetime
+
+
 class PeoplePage(PeopleValue):
     items: list[Person]
     next_cursor: str | None = None

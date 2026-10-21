@@ -6,17 +6,39 @@ import SwiftUI
 /// limits its label to one line: the Dynamic Type audit reads a one-line
 /// limit as text that larger sizes would clip.
 enum A2Metrics {
-    #if os(macOS)
-    static let controlHeight: CGFloat = 28
-    static let rowHeight: CGFloat = 28
-    static let composerRadius: CGFloat = 22
-    #else
-    static let controlHeight: CGFloat = 36
-    static let rowHeight: CGFloat = 44
-    static let composerRadius: CGFloat = 24
-    #endif
+    // Design system revision 2: Mac, iPad and iPhone values.
+    static var controlHeight: CGFloat { value(mac: 28, iPad: 36, iPhone: 44) }
+    static var rowHeight: CGFloat { value(mac: 28, iPad: 40, iPhone: 44) }
+    /// Every sidebar row's leading icon column; titles start after it.
+    static var sidebarIconColumn: CGFloat { value(mac: 16, iPad: 18, iPhone: 20) }
+    /// The sidebar's side gutter.
+    static var sidebarGutter: CGFloat { value(mac: 12, iPad: 16, iPhone: 20) }
+    static var rowRadius: CGFloat { value(mac: 6, iPad: 10, iPhone: 12) }
+    /// The sidebar column: 260 on the Mac, 300 on the iPad.
+    static var sidebarWidth: CGFloat { value(mac: 260, iPad: 300, iPhone: 300) }
+    static var fieldRadius: CGFloat { value(mac: 8, iPad: 10, iPhone: 12) }
+    /// The transcript's side padding: 32 on the Mac and iPad, 16 on the iPhone.
+    static var transcriptSidePadding: CGFloat {
+        value(mac: VeetSpace.s6, iPad: VeetSpace.s6, iPhone: VeetSpace.s4)
+    }
+    static var transcriptMaxWidth: CGFloat { value(mac: 680, iPad: 640, iPhone: 640) }
+    static let composerRadius: CGFloat = 14
+    static let tableRadius: CGFloat = 10
     static let cardRadius: CGFloat = 14
-    static let transcriptMaxWidth: CGFloat = 760
+    /// How far a toast sits above the bottom of its window or sheet.
+    #if os(macOS)
+    static let toastBottomInset: CGFloat = 24
+    #else
+    static let toastBottomInset: CGFloat = 16
+    #endif
+
+    private static func value(mac: CGFloat, iPad: CGFloat, iPhone: CGFloat) -> CGFloat {
+        switch VeetType.Platform.current {
+        case .mac: return mac
+        case .iPad: return iPad
+        case .iPhone: return iPhone
+        }
+    }
 }
 
 /// The outline of an A2 button: a capsule, or a rounded rectangle at the
@@ -31,7 +53,7 @@ struct A2ButtonShape {
             : AnyShape(Capsule())
     }
 
-    var verticalPadding: CGFloat { typeSize.isAccessibilitySize ? 8 : 0 }
+    var verticalPadding: CGFloat { typeSize.isAccessibilitySize ? VeetSpace.s2 : 0 }
 }
 
 /// A filled teal capsule: the one action the owner most likely takes.
@@ -43,8 +65,8 @@ struct PrimaryCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let outline = A2ButtonShape(typeSize: typeSize)
         return configuration.label
-            .appFont(.callout, weight: .medium)
-            .padding(.horizontal, 14)
+            .veetType(.ui, weight: .medium)
+            .padding(.horizontal, VeetSpace.s4)
             .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(AppTheme.onTeal)
@@ -63,8 +85,8 @@ struct SecondaryCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let outline = A2ButtonShape(typeSize: typeSize)
         return configuration.label
-            .appFont(.callout, weight: .medium)
-            .padding(.horizontal, 14)
+            .veetType(.ui, weight: .medium)
+            .padding(.horizontal, VeetSpace.s4)
             .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(AppTheme.ink)
@@ -88,8 +110,8 @@ struct QuietCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let outline = A2ButtonShape(typeSize: typeSize)
         return configuration.label
-            .appFont(.callout, weight: .medium)
-            .padding(.horizontal, 12)
+            .veetType(.ui, weight: .medium)
+            .padding(.horizontal, VeetSpace.s3)
             .padding(.vertical, outline.verticalPadding)
             .frame(maxWidth: expands ? .infinity : nil, minHeight: A2Metrics.controlHeight)
             .foregroundColor(tint ?? (configuration.isPressed ? AppTheme.ink : AppTheme.inkSoft))
@@ -107,9 +129,9 @@ struct FilterPillButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .appFont(.subheadline, weight: .medium)
-            .padding(.horizontal, 14)
-            .frame(minHeight: 32)
+            .veetType(.ui, weight: .medium)
+            .padding(.horizontal, VeetSpace.s4)
+            .frame(minHeight: A2Metrics.controlHeight)
             .foregroundColor(selected ? AppTheme.paper : AppTheme.inkSoft)
             .background(Capsule().fill(selected ? AppTheme.ink : AppTheme.field))
             .opacity(configuration.isPressed ? 0.85 : 1)
@@ -129,7 +151,7 @@ struct HairlineDivider: View {
 
 /// A text field or box on the surface colour behind a strong hairline.
 struct A2FieldModifier: ViewModifier {
-    var radius: CGFloat = 8
+    var radius: CGFloat = A2Metrics.fieldRadius
 
     func body(content: Content) -> some View {
         // The well's shapes take no clicks: on a 1x Mac display (macOS 26)
@@ -137,8 +159,8 @@ struct A2FieldModifier: ViewModifier {
         // them, so nothing in Settings could be focused by clicking there;
         // a 2x display never showed it.
         content
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, VeetSpace.s2)
+            .padding(.vertical, VeetSpace.s1)
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(AppTheme.surface)
@@ -154,7 +176,7 @@ struct A2FieldModifier: ViewModifier {
 
 extension View {
     /// Draws the view as an A2 field: surface colour, strong hairline, small radius.
-    func a2Field(radius: CGFloat = 8) -> some View {
+    func a2Field(radius: CGFloat = A2Metrics.fieldRadius) -> some View {
         modifier(A2FieldModifier(radius: radius))
     }
 
@@ -209,7 +231,7 @@ struct AssistantMark: View {
         Circle()
             .fill(AppTheme.teal)
             .frame(width: 8, height: 8)
-            .background(Circle().fill(AppTheme.tealWash).padding(-3))
+            .background(Circle().fill(AppTheme.tealWash).padding(-VeetSpace.s1))
             .accessibilityHidden(true)
     }
 }
@@ -225,21 +247,9 @@ struct WaitingLine: View {
         } icon: {
             Image(systemName: "flag")
         }
-        .appFont(.callout, weight: .semibold)
+        .veetType(.meta)
         .foregroundColor(AppTheme.amberText)
         .accessibilityIdentifier("chat.waiting")
-    }
-}
-
-/// A sidebar section heading in the A2 voice: small, semibold, soft ink.
-struct SidebarSectionLabel: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .appFont(.caption, weight: .semibold)
-            .foregroundColor(AppTheme.inkSoft)
-            .textCase(nil)
     }
 }
 
@@ -263,7 +273,7 @@ struct A2SectionHeading: View {
 
     var body: some View {
         Text(title)
-            .appFont(.subheadline, weight: .semibold)
+            .veetType(.label)
             .foregroundColor(AppTheme.inkSoft)
             .accessibilityAddTraits(.isHeader)
     }
@@ -275,9 +285,7 @@ struct A2KindLabel: View {
 
     var body: some View {
         Text(text)
-            .textCase(.uppercase)
-            .appFont(.caption2, weight: .bold)
-            .tracking(0.6)
+            .veetType(.label)
             .foregroundColor(AppTheme.inkSoft)
     }
 }
@@ -290,7 +298,7 @@ struct A2SheetHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).appDisplayFont(.title2)
+            Text(title).veetType(.display)
             Spacer()
             Button(dismissTitle, action: dismiss).buttonStyle(QuietCapsuleButtonStyle())
         }
@@ -315,7 +323,7 @@ struct A2Group<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: VeetSpace.s2) {
             if let title { A2SectionHeading(title: title) }
             VStack(alignment: .leading, spacing: 0) { content() }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -333,21 +341,21 @@ struct A2RecordGroup: View {
     var body: some View {
         A2Group(title: title) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 { HairlineDivider().padding(.leading, 14) }
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                if index > 0 { HairlineDivider().padding(.leading, VeetSpace.s4) }
+                HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s3) {
                     Text(row.key)
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .frame(minWidth: 96, alignment: .leading)
                     Spacer(minLength: 0)
                     Text(row.value)
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.ink)
                         .multilineTextAlignment(.trailing)
                         .textSelection(.enabled)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
+                .padding(.horizontal, VeetSpace.s4)
+                .padding(.vertical, VeetSpace.s2)
                 .accessibilityElement(children: .combine)
             }
         }
@@ -362,14 +370,14 @@ struct A2Quote<Content: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             Rectangle().fill(AppTheme.teal).frame(width: 2).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: VeetSpace.s1) {
                 content()
                 if let cite {
-                    Text(cite).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    Text(cite).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, VeetSpace.s3)
+            .padding(.vertical, VeetSpace.s2)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(AppTheme.surface)
@@ -404,20 +412,20 @@ struct A2EmptyState<Actions: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: VeetSpace.s3) {
             Image(systemName: systemImage)
-                .font(.system(size: 28, weight: .light))
+                .veetIcon(.emptyState)
                 .foregroundColor(AppTheme.tealText)
                 .frame(width: 60, height: 60)
                 .background(Circle().fill(AppTheme.tealWash))
                 .accessibilityHidden(true)
             Text(title)
-                .appFont(.body, weight: .medium)
+                .veetType(.ui, weight: .medium)
                 .foregroundColor(AppTheme.ink)
                 .multilineTextAlignment(.center)
             if let message {
                 Text(message)
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
                     .multilineTextAlignment(.center)
             }
@@ -425,7 +433,7 @@ struct A2EmptyState<Actions: View>: View {
         }
         .frame(maxWidth: 360)
         .fixedSize(horizontal: false, vertical: true)
-        .padding(24)
+        .padding(VeetSpace.s5)
         // The ideal height bounds the intrinsic size a Mac sheet column reports
         // for this state: without it the column lays out at the screen's
         // height and the title above it is cut off.

@@ -52,10 +52,11 @@ import AppKit
 
 @MainActor
 func composerBaseFont(textSize: AppTextSize) -> NSFont {
-    guard let pointSize = appPointSize(for: .body, textSize: textSize) else {
-        return NSFont.preferredFont(forTextStyle: .body)
-    }
-    return NSFont.systemFont(ofSize: pointSize)
+    // The composer writes transcript body text: the body role, scaled by
+    // the owner's text size.
+    NSFont.systemFont(
+        ofSize: appPointSize(for: .body, textSize: textSize) ?? VeetType.pointSize(.body, on: .mac)
+    )
 }
 
 struct ComposerTextEditor: NSViewRepresentable {

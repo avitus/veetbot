@@ -49,6 +49,10 @@ enum ConversationNavigationUITestFixture {
     static let reportSessionID = "00000000-0000-0000-0000-0000000005A1"
     /// The schedule's earlier occurrence, already read, so the two form a group.
     static let previousReportSessionID = "00000000-0000-0000-0000-0000000005A3"
+    /// With the unread report: both reports are briefings whose runs replay a
+    /// dozen web calls over time, as the production weekday briefing does.
+    /// Today's runs about as tall as a large window; yesterday's is short.
+    static let briefingReplayLaunchArgument = "--ui-testing-briefing-replay"
     static let newsSubscriptionID = "00000000-0000-0000-0000-000000000B01"
     static let dealsSubscriptionID = "00000000-0000-0000-0000-000000000B02"
     static let clubSubscriptionID = "00000000-0000-0000-0000-000000000B03"
@@ -82,6 +86,21 @@ enum ConversationNavigationUITestFixture {
         defaults.removePersistentDomain(forName: suiteName)
         return FolderSidebarPreferences(defaults: defaults)
     }
+
+    #if os(macOS)
+    /// The Email inbox width lives in a suite of its own, emptied at launch so
+    /// a journey never inherits another's, or the owner's, divider. A relaunch
+    /// journey keeps it to see the width the previous launch remembered.
+    static func makeEmailInboxWidthIfRequested() -> EmailInboxWidthStore? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.email-inbox-width"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] != "1" {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return EmailInboxWidthStore(defaults: defaults)
+    }
+    #endif
 
     /// Whether a launch asked for one conversation to open by itself.
     static var opensSessionAtLaunch: Bool {
@@ -186,6 +205,7 @@ enum ConversationNavigationUITestFixture {
 
 private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private var pendingResponse: DispatchWorkItem?
+    private var stagedDeliveries: [DispatchWorkItem] = []
     private static let emailLock = NSLock()
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
     private static var emailRevision = 1
@@ -262,6 +282,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
     private static let scheduleWebsiteLock = NSLock()
     private static var scheduleWebsiteBound = false
+    /// ADR-0225 part A: pause and resume flip this; the detail reads it back.
+    private static var schedulePaused = false
     private static var scheduleWebsiteJourney: Bool {
         ProcessInfo.processInfo.arguments.contains(
             ConversationNavigationUITestFixture.scheduleWebsiteAccessLaunchArgument)
@@ -345,6 +367,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let reportLock = NSLock()
     /// Set once a notification sync names the report among its seen runs.
     private static var reportSeen = false
+    private static var briefingReplayEnabled: Bool {
+        unreadReportEnabled
+            && ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.briefingReplayLaunchArgument)
+    }
     private static var unreadReportEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.unreadReportLaunchArgument)
     }
@@ -352,11 +378,14 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let memoryLock = NSLock()
     /// Set by a governed delete, after which the browser's reads omit the belief.
     private static var memoryDeleted = false
+    /// Set by a `changed` review (ADR-0224): reads then return the replacement.
+    private static var memoryCorrection: String?
     private static var synthesisReviewed = false
     private static var synthesisDeleted = false
     private static var synthesisUndone = false
     static func resetMemory() { memoryLock.withLock {
-        memoryDeleted = false; synthesisReviewed = false; synthesisDeleted = false; synthesisUndone = false
+        memoryDeleted = false; memoryCorrection = nil
+        synthesisReviewed = false; synthesisDeleted = false; synthesisUndone = false
     } }
     /// Starts each native UI test with independent draft, learning and attention state.
     static func resetEmail() {
@@ -389,6 +418,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let body: String
         let statusCode: Int
         var holdOpen = false
+        var stagedFrames: [String] = []
+        var stagedInterval = 0.01
         switch (request.httpMethod, url.path) {
         case (_, let path) where path.hasPrefix("/v1/memory-reconsolidations") || path.hasPrefix("/v1/memories/00000000-0000-0000-0000-00000000320"):
             let result = Self.synthesisResponse(request)
@@ -397,6 +428,19 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/memories/\(ConversationNavigationUITestFixture.memoryID)"):
             statusCode = 200
             body = Self.memoryJSON
+        case ("GET", "/v1/memories/counts"):
+            let corrected = Self.memoryLock.withLock { Self.memoryCorrection != nil }
+            statusCode = 200
+            body = #"{"live":1,"flagged":0,"by_status":{"active":1,"provisional":0,"superseded":\#(corrected ? 1 : 0),"retired":0,"expired":0,"candidate":0},"by_type":{"preference":1,"fact":0,"relationship":0,"user_model_attr":0,"procedure_pointer":0},"synthesis":null,"counted_at":"2026-10-20T15:00:00Z"}"#
+        case ("GET", let path) where path.hasPrefix("/v1/memories/") && path.hasSuffix("/evidence"):
+            statusCode = 200
+            body = """
+                {"items":[{"source_kind":"owner","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","event_sequence":11,"evidence_at":"2026-08-15T00:00:00Z","excerpt":"I prefer dark mode everywhere.","withheld":null},{"source_kind":"email","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","event_sequence":10,"evidence_at":"2026-08-14T00:00:00Z","excerpt":null,"withheld":"not_owner_text"}]}
+                """
+        case ("GET", "/v1/memories/\(Self.correctedMemoryID)"):
+            let wording = Self.memoryLock.withLock { Self.memoryCorrection }
+            statusCode = wording == nil ? 404 : 200
+            body = wording.map(Self.correctedMemoryJSON) ?? #"{"error":{"code":"not_found","message":"memory not found","details":{},"request_id":"fixture"}}"#
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"):
             statusCode = 200
             body = """
@@ -697,6 +741,28 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)") where Self.unreadReportEnabled:
             statusCode = 200
             body = Self.reportSessionJSON
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)/messages") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.briefingMessagesJSON(day: "Today's")
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.previousReportSessionID)") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.previousReportSessionJSON
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.previousReportSessionID)/messages") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.briefingMessagesJSON(day: "Yesterday's")
+        case ("GET", "/v1/runs/\(Self.previousReportRunID)") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = Self.completedRunJSON(id: Self.previousReportRunID, sessionID: ConversationNavigationUITestFixture.previousReportSessionID)
+        case ("GET", "/v1/runs/\(Self.previousReportRunID)/events") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = ""
+            stagedFrames = Self.briefingReplayFrames(runID: Self.previousReportRunID, day: "Yesterday's")
+            holdOpen = true
+        case ("GET", "/v1/runs/\(Self.reportRunID)/events") where Self.briefingReplayEnabled:
+            statusCode = 200
+            body = ""
+            stagedFrames = Self.briefingReplayFrames(runID: Self.reportRunID, day: "Today's")
+            holdOpen = true
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.reportSessionID)/messages") where Self.unreadReportEnabled:
             statusCode = 200
             body = """
@@ -762,6 +828,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 statusCode = 202
                 body = "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
             }
+        case ("GET", "/v1/runs/\(Self.runID)/events")
+        where ProcessInfo.processInfo.arguments.contains("--ui-testing-streamed-answer"):
+            statusCode = 200
+            body = ""
+            // Slow enough that the answer grows across several renders, the
+            // way a model's stream does.
+            stagedFrames = Self.streamedAnswerEvents
+            stagedInterval = 0.15
+            holdOpen = true
         case ("GET", "/v1/runs/\(Self.runID)/events"):
             statusCode = 200
             body = ProcessInfo.processInfo.arguments.contains("--ui-testing-mixed-tools")
@@ -900,8 +975,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 204
             body = ""
         case ("POST", let path) where path.hasPrefix("/v1/memories/") && path.hasSuffix("/review"):
-            statusCode = 200
-            body = Self.memoryJSON
+            let review = requestJSON()
+            if review["outcome"] as? String == "changed",
+                let wording = review["replacement_statement"] as? String
+            {
+                Self.memoryLock.withLock { Self.memoryCorrection = wording }
+                statusCode = 200
+                body = Self.correctedMemoryJSON(wording)
+            } else {
+                statusCode = 200
+                body = Self.memoryJSON
+            }
         case ("GET", "/v1/memories"):
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             guard query.contains(URLQueryItem(name: "ceiling", value: "restricted")) else {
@@ -909,9 +993,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 return
             }
             statusCode = 200
-            let deleted = Self.memoryLock.withLock { Self.memoryDeleted }
+            let (deleted, correction) = Self.memoryLock.withLock { (Self.memoryDeleted, Self.memoryCorrection) }
+            let row = correction.map(Self.correctedMemoryJSON) ?? Self.memoryJSON
             body = """
-                {"items":[\(deleted ? "" : Self.memoryJSON)],"next_cursor":null}
+                {"items":[\(deleted ? "" : row)],"next_cursor":null}
                 """
         case ("GET", "/v1/schedules"):
             let states = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -930,8 +1015,33 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         case ("GET", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)"):
             statusCode = 200
-            body = Self.scheduleWebsiteLock.withLock { Self.scheduleWebsiteBound }
-                ? Self.boundScheduleDetailJSON : Self.scheduleDetailJSON
+            if Self.scheduleWebsiteLock.withLock({ Self.schedulePaused }) {
+                body = Self.pausedScheduleDetailJSON
+            } else {
+                body = Self.scheduleWebsiteLock.withLock { Self.scheduleWebsiteBound }
+                    ? Self.boundScheduleDetailJSON : Self.scheduleDetailJSON
+            }
+        case ("POST", "/v1/schedules/drafts"):
+            // ADR-0225 part B: any sentence reads as weekdays at 07:00.
+            statusCode = 200
+            body = #"{"status":"ready","reason":null,"definition":{"title":"Weekday briefing","instruction":"Every weekday at 7 am, tell me what needs me today.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"browser_profile_id":null,"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"5","deadline_at":null,"synthesis_reserve_steps":2,"synthesis_reserve_model_calls":2,"synthesis_reserve_cost":"1"},"run_timeout_seconds":300,"cadence":{"kind":"WEEKLY","local_time":"07:00:00","weekdays":[1,2,3,4,5],"timezone":"America/Los_Angeles"},"misfire_grace_seconds":3600,"max_consecutive_failures":2,"notify":"every_report"},"next_fire_at":["2026-10-20T14:00:00Z","2026-10-21T14:00:00Z","2026-10-22T14:00:00Z"]}"#
+        case ("POST", "/v1/schedules"):
+            statusCode = 201
+            body = Self.scheduleDetailJSON
+        case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/run"):
+            statusCode = 201
+            body = #"{"id":"00000000-0000-0000-0000-0000000006a3","schedule_id":"\#(ConversationNavigationUITestFixture.scheduleID)","schedule_revision":1,"nominal_fire_at":"2026-10-08T16:00:00Z","disposition":"MATERIALIZED","session_id":"\#(ConversationNavigationUITestFixture.reportSessionID)","run_id":"\#(Self.reportRunID)","reason_code":null,"authority_version":"v1","materialized_at":"2026-10-08T16:00:00Z","links_erased_at":null,"created_at":"2026-10-08T16:00:00Z","trigger":"MANUAL","manual_request_key":"ui"}"#
+        case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/pause"):
+            Self.scheduleWebsiteLock.withLock { Self.schedulePaused = true }
+            statusCode = 200
+            body = Self.pausedScheduleDetailJSON
+        case ("POST", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/resume"):
+            Self.scheduleWebsiteLock.withLock { Self.schedulePaused = false }
+            statusCode = 200
+            body = Self.scheduleDetailJSON
+        case ("GET", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)/occurrences"):
+            statusCode = 200
+            body = #"{"items":[{"id":"00000000-0000-0000-0000-0000000006a1","schedule_id":"\#(ConversationNavigationUITestFixture.scheduleID)","schedule_revision":1,"nominal_fire_at":"2026-10-07T16:00:00Z","disposition":"MATERIALIZED","session_id":"\#(ConversationNavigationUITestFixture.reportSessionID)","run_id":"\#(Self.reportRunID)","reason_code":null,"authority_version":"v1","materialized_at":"2026-10-07T16:00:00Z","links_erased_at":null,"created_at":"2026-10-07T16:00:00Z"},{"id":"00000000-0000-0000-0000-0000000006a2","schedule_id":"\#(ConversationNavigationUITestFixture.scheduleID)","schedule_revision":1,"nominal_fire_at":"2026-10-06T16:00:00Z","disposition":"SKIPPED_OVERLAP","session_id":null,"run_id":null,"reason_code":"schedule.overlap","authority_version":null,"materialized_at":null,"links_erased_at":null,"created_at":"2026-10-06T16:00:00Z"}],"next_cursor":null}"#
         case ("PATCH", "/v1/schedules/\(ConversationNavigationUITestFixture.scheduleID)")
         where Self.scheduleWebsiteJourney:
             let payload = requestJSON()
@@ -1078,6 +1188,23 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
         }
         pendingResponse = deliver
+        if !stagedFrames.isEmpty {
+            // A replay reaches the client a few frames at a time, as large tool
+            // results do over the network, so the view lays out between them.
+            deliver.perform()
+            stagedDeliveries = stagedFrames.enumerated().map { index, frame in
+                let item = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.client?.urlProtocol(self, didLoad: Data(frame.utf8))
+                    if index == stagedFrames.count - 1 {
+                        self.client?.urlProtocolDidFinishLoading(self)
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + stagedInterval * Double(index + 1), execute: item)
+                return item
+            }
+            return
+        }
         let slowChat = ProcessInfo.processInfo.arguments.contains("--ui-testing-chat-slow-send")
         let isSubmission = request.httpMethod == "POST" && url.path.hasSuffix("/messages")
         let isRunStream = url.path == "/v1/runs/\(Self.runID)/events"
@@ -1096,6 +1223,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     override func stopLoading() {
         pendingResponse?.cancel()
         pendingResponse = nil
+        stagedDeliveries.forEach { $0.cancel() }
+        stagedDeliveries = []
     }
 
     private func requestJSON() -> [String: Any] {
@@ -1320,7 +1449,91 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         return frames.joined()
     }
 
+    /// An answer that streams in paragraph by paragraph and ends with a line
+    /// the composer must not cover; a long one is taller than the window.
+    private static var streamedAnswerEvents: [String] {
+        let count = ProcessInfo.processInfo.arguments.contains("--ui-testing-long-answer") ? 40 : 12
+        let paragraphs = (1...count).map { "Streamed paragraph \($0) of the answer." } + ["The answer's last line."]
+        var frames = paragraphs.enumerated().map { index, paragraph in
+            let text = (index == 0 ? "" : "\n\n") + paragraph
+            return "id: \(100 + index)\nevent: message.delta\ndata: {\"run_id\":\"\(runID)\",\"text\":\"\(text.replacingOccurrences(of: "\n", with: "\\n"))\"}\n\n"
+        }
+        let full = paragraphs.joined(separator: "\\n\\n")
+        frames.append("id: \(100 + count + 1)\nevent: assistant.message.completed\ndata: {\"message\":{\"kind\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"\(full)\"}]}}\n\n")
+        frames.append("id: \(100 + count + 2)\nevent: run.completed\ndata: {\"run_id\":\"\(runID)\"}\n\n")
+        return frames
+    }
+
     private static let reportRunID = "00000000-0000-0000-0000-0000000005A2"
+    private static let previousReportRunID = "00000000-0000-0000-0000-0000000005A4"
+
+    private static func briefingMessagesJSON(day: String) -> String {
+        // The two reports end at different sequences, as the production
+        // briefing (94) and the morning summary before it (99) do.
+        "{\"items\":[{\"sequence\":\(answerSequence(day: day)),\"role\":\"assistant\",\"content\":\(briefingContentJSON(day: day))}],\"next_cursor\":null}"
+    }
+
+    private static func answerSequence(day: String) -> Int { day == "Today's" ? 94 : 99 }
+
+    private static func completedRunJSON(id: String, sessionID: String) -> String {
+        """
+            {"id":"\(id)","session_id":"\(sessionID)","parent_run_id":null,"status":"COMPLETED","step_count":4,"model_call_count":4,"tool_call_count":12,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":12,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-06T16:00:00Z","updated_at":"2026-10-06T16:01:07Z"}
+            """
+    }
+
+    /// The production briefing's shape: a heading, an introduction, then
+    /// stories of two paragraphs and a source link each. Today's has as many
+    /// stories as `VEETBOT_UI_TEST_BRIEFING_STORIES` asks (three by default).
+    private static func briefingContentJSON(day: String) -> String {
+        let count = day == "Today's"
+            ? Int(ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_BRIEFING_STORIES"] ?? "") ?? 3
+            : 1
+        let sentence = "This development matters to the companies the owner follows closely. "
+        let stories = (1...count).map { story in
+            "### \(story). Briefing story \(story)\n\n"
+                + String(repeating: sentence, count: 4) + "\n\n"
+                + String(repeating: sentence, count: 4) + "\n\n"
+                + "[Source \(story)](https://example.com/story/\(story))"
+        }
+        let text = "## \(day) briefing\n\n" + String(repeating: sentence, count: 2) + "\n\n"
+            + stories.joined(separator: "\n\n") + "\n\n\(day) briefing closing line."
+        let data = try! JSONSerialization.data(withJSONObject: [["type": "text", "text": text]])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Four model steps that run a dozen web calls in parallel batches, each
+    /// result tens of kilobytes, then the answer the transcript already holds.
+    private static func briefingReplayFrames(runID: String, day: String) -> [String] {
+        let run = "\"run_id\":\"\(runID)\""
+        var sequence = 2
+        var frames: [String] = []
+        func frame(_ event: String, _ data: String) {
+            sequence += 1
+            frames.append("id: \(sequence)\nevent: \(event)\ndata: {\(run)\(data.isEmpty ? "" : "," + data)}\n\n")
+        }
+        frame("run.queued", "")
+        frame("run.started", "")
+        let result = String(repeating: "Search result text. ", count: 1_000)
+        var call = 0
+        for batch in [2, 5, 5] {
+            frame("model.response.completed", "\"conversation_items\":[]")
+            let calls = (1...batch).map { _ -> String in call += 1; return "\(day.prefix(5).lowercased())-\(call)" }
+            for id in calls { frame("tool.call.proposed", "\"call_id\":\"\(id)\",\"name\":\"web.search\"") }
+            for id in calls { frame("tool.call.started", "\"call_id\":\"\(id)\",\"name\":\"web.search\"") }
+            for id in calls {
+                frame(
+                    "tool.call.completed",
+                    "\"call_id\":\"\(id)\",\"name\":\"web.search\",\"result_item\":{\"content\":[{\"type\":\"text\",\"text\":\"\(result)\"}],\"is_error\":false,\"trust\":\"external_untrusted\"}"
+                )
+            }
+        }
+        frame("model.response.completed", "\"conversation_items\":[]")
+        sequence = answerSequence(day: day) - 1
+        let content = briefingContentJSON(day: day)
+        frame("assistant.message.completed", "\"message\":{\"kind\":\"assistant\",\"content\":\(content)}")
+        frame("run.completed", "\"final_message\":{\"kind\":\"assistant\",\"content\":\(content)}")
+        return frames
+    }
     private static var reportSessionJSON: String {
         """
             {"id":"\(ConversationNavigationUITestFixture.reportSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Weekday briefing","metadata":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)"},"created_at":"2026-10-07T16:00:00Z","updated_at":"2026-10-07T16:01:46Z","active_run_id":null,"last_run_id":"\(reportRunID)"}
@@ -1533,6 +1746,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let synthesisOperationJSON = #"{"id":"00000000-0000-0000-0000-000000003201","kind":"summary","state":"committed","revision":1,"reason":"summarized","policy":"reconsolidation@1","model_identity":"extractive@1","created_at":"2026-10-06T01:00:00Z","committed_at":"2026-10-06T01:00:00Z","content":{"memory_id":"00000000-0000-0000-0000-000000003202","subject":"the user","statement":"The user prefers dark mode.","clauses":[{"text":"The user prefers dark mode.","source_ids":["00000000-0000-0000-0000-000000000321"]}]},"sources":[{"belief_id":"00000000-0000-0000-0000-000000000321","content_revision":1,"subject":"the user","statement":"The user prefers dark mode.","session_id":"00000000-0000-0000-0000-000000000123","event_ids":[10,11],"omitted":false},{"belief_id":"00000000-0000-0000-0000-000000003203","content_revision":1,"subject":"the user","statement":"The user prefers quiet mornings.","session_id":"00000000-0000-0000-0000-000000000124","event_ids":[10,11],"omitted":true}]}"#
     private static let synthesisSummaryJSON = #"{"id":"00000000-0000-0000-0000-000000003202","record_kind":"summary","operation_id":"00000000-0000-0000-0000-000000003201","revision":1,"status":"active","flagged_for_review":true,"created_at":"2026-10-06T01:00:00Z","updated_at":"2026-10-06T01:00:00Z","content":{"subject":"the user","statement":"The user prefers dark mode.","clauses":[{"text":"The user prefers dark mode.","source_ids":["00000000-0000-0000-0000-000000000321"]}],"belief_types":["preference"],"scope":"user","portability":"portable","sensitivity":"restricted","authority":"user","confidence":0.8,"last_evidence_at":"2026-09-01T00:00:00Z","valid_from":"2026-09-01T00:00:00Z","expires_at":null},"sources":[{"belief_id":"00000000-0000-0000-0000-000000000321","content_revision":1,"subject":"the user","statement":"The user prefers dark mode.","session_id":"00000000-0000-0000-0000-000000000123","event_ids":[10,11],"omitted":false},{"belief_id":"00000000-0000-0000-0000-000000003203","content_revision":1,"subject":"the user","statement":"The user prefers quiet mornings.","session_id":"00000000-0000-0000-0000-000000000124","event_ids":[10,11],"omitted":true}]}"#
 
+    private static let correctedMemoryID = "00000000-0000-0000-0000-000000000329"
+
+    /// The belief a `changed` review formed: a new identifier and the owner's words.
+    private static func correctedMemoryJSON(_ wording: String) -> String {
+        let escaped = (try? JSONEncoder().encode(wording)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        return memoryJSON
+            .replacingOccurrences(of: ConversationNavigationUITestFixture.memoryID, with: correctedMemoryID)
+            .replacingOccurrences(of: "\"The user prefers dark mode.\"", with: escaped)
+            .replacingOccurrences(of: "\"updated_at\":\"2026-08-20T00:00:00Z\"", with: "\"updated_at\":\"2026-10-20T15:00:00Z\"")
+    }
+
     private static let memoryJSON = """
         {"id":"\(ConversationNavigationUITestFixture.memoryID)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
         """
@@ -1547,6 +1771,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let scheduleDetailJSON = """
         {"schedule":{"id":"\(ConversationNavigationUITestFixture.scheduleID)","tenant_id":"local","principal_id":"principal","state":"ACTIVE","pause_reason":null,"current_revision":1,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)","revision":1,"title":"Daily review","instruction":"Full instruction from the schedule point read.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}
+        """
+    private static let pausedScheduleDetailJSON = """
+        {"schedule":{"id":"\(ConversationNavigationUITestFixture.scheduleID)","tenant_id":"local","principal_id":"principal","state":"PAUSED","pause_reason":"user","current_revision":2,"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\(ConversationNavigationUITestFixture.scheduleID)","revision":2,"title":"Daily review","instruction":"Full instruction from the schedule point read.","agent_id":"00000000-0000-0000-0000-000000000655","agent_version":"1","policy_profile":"default","requested_scopes":[],"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1,"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}
         """
 
     private static let scheduleWebsiteProfileID = "00000000-0000-0000-0000-0000000007aa"

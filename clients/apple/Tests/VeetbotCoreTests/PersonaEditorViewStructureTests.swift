@@ -19,12 +19,28 @@ import Testing
             "persona.nomination.decline",
             "persona.conflict.resolve",
             "persona.conflict.use-server",
+            // ADR-0226.
+            "persona.voice",
+            "persona.sample",
+            "persona.entry.enabled",
         ] {
             #expect(
                 source.contains(".accessibilityIdentifier(\"\(identifier)\")"),
                 "\(identifier) anchors the UI tests and must not be renamed silently"
             )
         }
+    }
+
+    /// ADR-0226: the tone sections appear only for a server that has them,
+    /// and Boundaries lists only what the server says is enforced.
+    @Test
+    func testToneAndBoundariesFollowTheServer() throws {
+        let source = try personaEditorViewSource()
+
+        #expect(source.contains("if model.toneSupported {\n                        voiceSection"))
+        #expect(source.contains(".accessibilityIdentifier(\"persona.trait.\\(trait)\")"))
+        #expect(source.contains("if !model.boundaries.isEmpty"))
+        #expect(source.contains("Turn one off to stop Veetbot treating it as a standing instruction."))
     }
 
     @Test

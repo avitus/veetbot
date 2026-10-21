@@ -1039,6 +1039,29 @@ class PostgresMemoryStore:
         )
         return [_memory(row) for row in rows]
 
+    async def browse_counts(
+        self, tenant_id: str, principal_id: str, ceiling: Sensitivity
+    ) -> dict[tuple[MemoryStatus, BeliefType, bool], int]:
+        rows = await self._session.execute(
+            select(
+                MemoryRow.status,
+                MemoryRow.belief_type,
+                MemoryRow.flagged_for_review,
+                func.count(),
+            )
+            .where(
+                MemoryRow.tenant_id == tenant_id,
+                MemoryRow.principal_id == principal_id,
+                ~MemoryRow.erasure_pending,
+                MemoryRow.sensitivity.in_(_allowed_sensitivities(ceiling)),
+            )
+            .group_by(MemoryRow.status, MemoryRow.belief_type, MemoryRow.flagged_for_review)
+        )
+        return {
+            (MemoryStatus(status), BeliefType(belief_type), bool(flagged)): int(count)
+            for status, belief_type, flagged, count in rows.all()
+        }
+
     async def list_idle(
         self,
         principal: Principal,

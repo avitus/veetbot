@@ -509,6 +509,109 @@ import Testing
     }
 
     @Test
+    func testChoosingASidebarGroupSetsTheQueryWithOneRequest() async throws {
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let model = try makeModel { request in
+            lock.withLock { requests.append(request) }
+            return try self.response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+        }
+        await model.reload()
+
+        func query(after count: Int) async throws -> [URLQueryItem] {
+            for _ in 0 ..< 600 where lock.withLock({ requests.count }) < count {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            try #require(lock.withLock { requests.count } == count)
+            let request = try #require(lock.withLock { requests.last })
+            return URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        }
+
+        model.selectGroup(.review)
+        var items = try await query(after: 2)
+        #expect(model.group == .review)
+        #expect(items.contains(URLQueryItem(name: "flagged", value: "true")))
+        #expect(!items.contains { $0.name == "belief_type" })
+
+        model.selectGroup(.type(.preference))
+        items = try await query(after: 3)
+        #expect(model.group == .type(.preference))
+        #expect(items.contains(URLQueryItem(name: "belief_type", value: "preference")))
+        #expect(!items.contains { $0.name == "flagged" })
+
+        model.selectGroup(.all)
+        items = try await query(after: 4)
+        #expect(model.group == .all)
+        #expect(!items.contains { $0.name == "flagged" || $0.name == "belief_type" })
+        #expect(MemoryBrowseGroup.browseTypes.map(\.title) == [
+            "Preferences", "Facts", "Relationships", "About you", "Procedures",
+        ])
+    }
+
+    @Test
+    func testEachReviewOutcomeAndDeletionConfirmsWithAToast() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000531"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000532"))
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            switch request.httpMethod {
+            case "DELETE": return try self.response(for: request, statusCode: 204, body: "")
+            case "POST":
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: false)
+                )
+            default:
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                        """
+                )
+            }
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        let expected: [(MemoryReviewOutcome, String)] = [
+            (.dismiss, "Marked as reviewed."),
+            (.untrue, "Marked not true. Veetbot will not form it again from the same evidence."),
+            (.notHere, "Marked not relevant here."),
+        ]
+        for (outcome, text) in expected {
+            _ = await model.review(memory, outcome: outcome)
+            #expect(toasts.current?.text == text)
+        }
+        _ = await model.delete(memory)
+        #expect(toasts.current?.text == "Deleted. The same statement will not form again.")
+    }
+
+    @Test
+    func testAFailedReviewKeepsItsErrorInlineAndRaisesNoToast() async throws {
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000541"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000542"))
+        let model = try makeModel(toasts: toasts) { request in
+            if request.httpMethod == "POST" {
+                return try self.response(for: request, statusCode: 500, body: #"{"error":{"code":"internal","message":"x"}}"#)
+            }
+            return try self.response(
+                for: request, statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        _ = await model.review(memory, outcome: .dismiss)
+
+        #expect(model.errorMessage != nil)
+        #expect(toasts.current == nil)
+    }
+
+    @Test
     func testDeleteSendsTheGovernedWriteAndRemovesTheRow() async throws {
         let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000511"))
         let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000512"))
@@ -635,7 +738,190 @@ import Testing
         #expect(model.errorMessage == "This server does not support memory changes yet.")
     }
 
+    // MARK: ADR-0224
+
+    @Test
+    func testCorrectingTheWordingSupersedesTheRowWithTheReplacement() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000561"))
+        let replacementID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000562"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000563"))
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let lock = NSLock()
+        var bodies: [[String: Any]] = []
+        let model = try makeModel(toasts: toasts) { request in
+            if request.httpMethod == "POST" {
+                let body = try JSONSerialization.jsonObject(with: self.bodyData(request)) as? [String: Any]
+                lock.withLock { bodies.append(body ?? [:]) }
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: self.memoryJSON(id: replacementID, sessionID: sessionID)
+                        .replacingOccurrences(of: "The user prefers dark mode.", with: "The user prefers light mode.")
+                )
+            }
+            if request.url?.path == "/v1/memories/counts" {
+                return try self.response(for: request, statusCode: 404, body: "")
+            }
+            return try self.response(
+                for: request, statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID, flagged: true))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        let replacement = await model.correct(memory, wording: "  The user prefers light mode. ")
+
+        #expect(replacement?.id == replacementID)
+        #expect(model.items.map(\.id) == [replacementID])
+        #expect(toasts.current?.text == MemoryViewModel.correctedConfirmation)
+        let body = try #require(lock.withLock { bodies.last })
+        #expect(body["outcome"] as? String == "changed")
+        #expect(body["replacement_statement"] as? String == "The user prefers light mode.")
+        // Milliseconds, the precision the server compares at (PR #179 review).
+        #expect(body["expected_updated_at"] as? String == "2026-08-20T00:00:00.000Z")
+    }
+
+    @Test
+    func testAWordingTheServerRefusesStaysInlineAndAStaleOneRefreshes() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000571"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000572"))
+        let lock = NSLock()
+        var status = 400
+        var listings = 0
+        let model = try makeModel { request in
+            if request.httpMethod == "POST" {
+                let code = lock.withLock { status }
+                let errorCode = code == 400 ? "malformed_request" : "conflict"
+                return try self.response(
+                    for: request, statusCode: code,
+                    body: #"{"error":{"code":"\#(errorCode)","message":"x","details":{},"request_id":"r"}}"#
+                )
+            }
+            if request.url?.path == "/v1/memories" { lock.withLock { listings += 1 } }
+            return try self.response(
+                for: request, statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        #expect(await model.correct(memory, wording: "password: hunter2") == nil)
+        #expect(model.errorMessage == MemoryViewModel.refusedWordingMessage)
+        #expect(model.items.map(\.id) == [memoryID])
+
+        lock.withLock { status = 409 }
+        let before = lock.withLock { listings }
+        #expect(await model.correct(memory, wording: "Another wording.") == nil)
+        #expect(lock.withLock { listings } == before + 1)
+    }
+
+    @Test
+    func testCountsArriveWithTheListAndAnOlderServerLeavesThemBlank() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000581"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000582"))
+        let lock = NSLock()
+        var countsAvailable = true
+        var countRequests: [URLRequest] = []
+        let model = try makeModel { request in
+            if request.url?.path == "/v1/memories/counts" {
+                lock.withLock { countRequests.append(request) }
+                guard lock.withLock({ countsAvailable }) else {
+                    // An older server parses "counts" as an identifier.
+                    return try self.response(
+                        for: request, statusCode: 400,
+                        body: #"{"error":{"code":"malformed_request","message":"The request body or parameters are malformed: path.memory_id.","details":{},"request_id":"r"}}"#
+                    )
+                }
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: #"{"live":12,"flagged":3,"by_status":{"active":10,"provisional":2,"superseded":4,"retired":1,"expired":0,"candidate":0},"by_type":{"fact":5,"preference":4,"relationship":2,"user_model_attr":1,"procedure_pointer":0},"synthesis":null,"counted_at":"2026-10-20T15:00:00Z"}"#
+                )
+            }
+            return try self.response(
+                for: request, statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        #expect(model.count(for: .all) == nil, "the list alone never asks for counts")
+        await model.loadCounts()
+        #expect(model.count(for: .review) == 3)
+        #expect(model.count(for: .all) == 12)
+        #expect(model.count(for: .type(.fact)) == 5)
+        #expect(model.count(for: .type(.procedurePointer)) == 0)
+        let request = try #require(lock.withLock { countRequests.first })
+        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(query.contains(URLQueryItem(name: "ceiling", value: "restricted")))
+
+        lock.withLock { countsAvailable = false }
+        await model.reload()
+        await model.loadCounts()
+        #expect(model.count(for: .all) == nil)
+        #expect(model.errorMessage == nil)
+        #expect(model.items.count == 1)
+    }
+
+    @Test
+    func testEvidenceDecodesTheOwnersQuoteAndWithheldSources() async throws {
+        let memoryID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000591"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000592"))
+        let lock = NSLock()
+        var paths: [String] = []
+        let model = try makeModel { request in
+            lock.withLock { paths.append(request.url?.path ?? "") }
+            if request.url?.path.hasSuffix("/evidence") == true {
+                return try self.response(
+                    for: request, statusCode: 200,
+                    body: """
+                        {"items":[{"source_kind":"owner","session_id":"\(sessionID.uuidString)","event_sequence":11,"evidence_at":"2026-08-15T00:00:00Z","excerpt":"I like dark mode.","withheld":null},{"source_kind":"email","session_id":"\(sessionID.uuidString)","event_sequence":10,"evidence_at":"2026-08-14T00:00:00Z","excerpt":null,"withheld":"not_owner_text"},{"source_kind":"unknown","session_id":"\(sessionID.uuidString)","event_sequence":9,"evidence_at":null,"excerpt":null,"withheld":"erased"}]}
+                        """
+                )
+            }
+            return try self.response(
+                for: request, statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: memoryID, sessionID: sessionID))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        let memory = try #require(model.items.first)
+        let evidence = try #require(await model.evidence(for: memory))
+
+        #expect(evidence.map(\.eventSequence) == [11, 10, 9])
+        #expect(evidence[0].excerpt == "I like dark mode.")
+        #expect(evidence[0].sourceLine == "You said")
+        #expect(evidence[1].sourceLine == "From an email")
+        #expect(evidence[2].sourceLine == "Source removed")
+        #expect(lock.withLock { paths.contains("/v1/memories/\(memoryID.uuidString)/evidence") })
+    }
+
+    private func bodyData(_ request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
+
     private func makeModel(
+        toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> MemoryViewModel {
         let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
@@ -652,7 +938,10 @@ import Testing
             session: session
         )
         let client = VeetbotAPIClient(transport: transport)
-        return MemoryViewModel(makeAPIClient: { client })
+        return MemoryViewModel(
+            makeAPIClient: { client },
+            toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        )
     }
 
     private func response(

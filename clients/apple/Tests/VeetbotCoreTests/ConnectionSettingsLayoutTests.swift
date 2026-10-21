@@ -10,8 +10,9 @@ import Testing
                 .connection,
                 .models,
                 .websiteAccess,
-                .smsIntegration,
+                .notifications,
                 .appearance,
+                .smsIntegration,
                 .dataAndPrivacy,
             ]
         )
@@ -29,6 +30,7 @@ import Testing
                 .connection,
                 .models,
                 .websiteAccess,
+                .notifications,
                 .appearance,
                 .dataAndPrivacy,
             ]

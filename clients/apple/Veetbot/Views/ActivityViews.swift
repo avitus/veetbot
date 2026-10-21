@@ -33,11 +33,11 @@ struct WorkStrip: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .veetIcon(.small, weight: .semibold)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .frame(width: 12)
                     Text(sentence)
-                        .appFont(.callout)
+                        .veetType(.ui)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -128,16 +128,16 @@ struct ToolLedgerRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("\(index). \(activity.name)")
-                            .appCodeFont(.caption)
+                            .veetMono()
                             .foregroundColor(AppTheme.ink)
                         Spacer(minLength: 8)
                         if let risk = activity.risk, risk == .high || risk == .critical {
                             Text(risk.rawValue.uppercased())
-                                .appFont(.caption2, weight: .semibold)
+                                .veetType(.meta, weight: .semibold)
                                 .foregroundColor(taxonomy.color)
                         }
                         Text(statusText)
-                            .appFont(.caption)
+                            .veetType(.meta)
                             .foregroundColor(
                                 activity.presentationStatus == .failed
                                     || activity.presentationStatus == .denied
@@ -146,18 +146,18 @@ struct ToolLedgerRow: View {
                     }
                     if let detail = Self.detail(for: activity) {
                         Text(detail)
-                            .appCodeFont(.caption)
+                            .veetMono()
                             .foregroundColor(AppTheme.inkSoft)
                             .lineLimit(1)
                     }
                     if activity.allowedByTaskGrant {
                         Text("Allowed by task permission")
-                            .appFont(.caption)
+                            .veetType(.meta)
                             .foregroundColor(AppTheme.inkFaint)
                     }
                     if let approval {
                         Text(approval.settledTitle)
-                            .appFont(.caption)
+                            .veetType(.meta)
                             .foregroundColor(AppTheme.inkFaint)
                     }
                 }
@@ -236,15 +236,15 @@ struct ApprovalCardView: View {
                         Image(systemName: approval.settledSymbol)
                             .foregroundColor(approval.settledColor)
                         Text(approval.settledTitle)
-                            .appFont(.callout, weight: .medium)
+                            .veetType(.ui, weight: .medium)
                             .foregroundColor(AppTheme.inkSoft)
                         Text(verbatim: "· " + approval.actionSummary)
-                            .appFont(.callout)
+                            .veetType(.ui)
                             .foregroundColor(AppTheme.inkFaint)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
+                            .veetIcon(.small, weight: .semibold)
                             .foregroundColor(AppTheme.inkFaint)
                             .rotationEffect(.degrees(expanded ? 90 : 0))
                     }
@@ -343,7 +343,7 @@ struct AttentionCardLabel: View {
         } icon: {
             Image(systemName: "flag")
         }
-        .appFont(.caption, weight: .semibold)
+        .veetType(.meta, weight: .semibold)
         .foregroundColor(AppTheme.amberText)
     }
 }
@@ -358,18 +358,18 @@ struct ApprovalCard: View {
         VStack(alignment: .leading, spacing: 8) {
             AttentionCardLabel(title: "Approval checkpoint")
             Text(approval.actionSummary)
-                .appFont(.body, weight: .semibold)
+                .veetType(.ui, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 6) {
                 if let toolName = approval.toolName {
-                    Text(toolName).appCodeFont(.caption)
+                    Text(toolName).veetMono()
                     Text("·")
                 }
                 Text("\(approval.risk.capitalized) risk")
                 Text("·")
                 Text(approval.expiresAt.map { "Expires \($0.formatted())" } ?? "No expiry")
             }
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             if !approval.arguments.isEmpty {
                 DetailBlock(
@@ -398,7 +398,7 @@ struct ApprovalCard: View {
                 .disabled(inFlight != nil)
             } else {
                 Text("Resolved: \(approval.decision?.rawValue ?? approval.status.displayName)")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
@@ -413,7 +413,7 @@ struct DenialReasonField: View {
     var body: some View {
         TextField("Reason for denial (optional)", text: $text)
             .textFieldStyle(.plain)
-            .appFont(.callout)
+            .veetType(.ui)
             .padding(.vertical, 6)
             .overlay(alignment: .bottom) {
                 Rectangle().fill(AppTheme.hairline).frame(height: 1)
@@ -450,11 +450,11 @@ struct ClarifyingQuestionCard: View {
         VStack(alignment: .leading, spacing: 8) {
             AttentionCardLabel(title: "Clarifying question")
             Text(prompt.question)
-                .appFont(.body, weight: .semibold)
+                .veetType(.ui, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("Your answer", text: $answer)
                 .textFieldStyle(.plain)
-                .appFont(.body)
+                .veetType(.ui)
                 .padding(.vertical, 6)
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(AppTheme.hairline).frame(height: 1)
@@ -496,11 +496,11 @@ struct WorkingStatePanel: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .veetIcon(.small, weight: .semibold)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .frame(width: 12)
                     Text(summary)
-                        .appFont(.callout)
+                        .veetType(.ui)
                         .lineLimit(expanded ? nil : 1)
                 }
                 .foregroundColor(AppTheme.inkSoft)
@@ -518,21 +518,21 @@ struct WorkingStatePanel: View {
                     if !state.tasks.isEmpty {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Tasks")
-                                .appFont(.caption, weight: .semibold)
+                                .veetType(.meta, weight: .semibold)
                                 .foregroundColor(AppTheme.inkSoft)
                             ForEach(state.tasks) { task in
                                 Label(task.description, systemImage: icon(for: task.status))
-                                    .appFont(.callout)
+                                    .veetType(.ui)
                             }
                         }
                     }
                     if !state.establishedFacts.isEmpty {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Facts")
-                                .appFont(.caption, weight: .semibold)
+                                .veetType(.meta, weight: .semibold)
                                 .foregroundColor(AppTheme.inkSoft)
                             ForEach(state.establishedFacts) { fact in
-                                Text("• \(fact.statement)").appFont(.callout)
+                                Text("• \(fact.statement)").veetType(.ui)
                             }
                         }
                     }
@@ -569,12 +569,12 @@ private struct ToolResultContent: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Result")
-                    .appFont(.caption, weight: .semibold)
+                    .veetType(.meta, weight: .semibold)
                     .foregroundColor(AppTheme.inkSoft)
                 Spacer()
                 if let trust = result.trust {
                     Text(trust.rawValue.replacingOccurrences(of: "_", with: " ").uppercased())
-                        .appFont(.caption2, weight: .semibold)
+                        .veetType(.meta, weight: .semibold)
                         .foregroundColor(trust == .externalUntrusted ? AppTheme.amberText : AppTheme.inkFaint)
                 }
             }
@@ -588,7 +588,7 @@ private struct ToolResultContent: View {
                 ForEach(Array(result.content.enumerated()), id: \.offset) { _, block in
                     switch block {
                     case .text(let text):
-                        Text(text).appFont(.callout).textSelection(.enabled)
+                        Text(text).veetType(.ui).textSelection(.enabled)
                     case .image(let artifactID, let mediaType, _):
                         artifactButton("Image · \(mediaType)", id: artifactID)
                     case .file(let artifactID, _, let filename):
@@ -628,7 +628,7 @@ private struct ToolResultContent: View {
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
-        .appCodeFont()
+        .veetMono()
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppTheme.field)
@@ -641,7 +641,7 @@ private struct ToolResultContent: View {
             result.structured?["content"]?.stringValue
             ?? result.content.compactMap(\.text).joined(separator: "\n")
         return Text(text)
-            .appCodeFont()
+            .veetMono()
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppTheme.field)
@@ -657,10 +657,10 @@ struct DetailBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .appFont(.caption, weight: .semibold)
+                .veetType(.meta, weight: .semibold)
                 .foregroundColor(AppTheme.inkSoft)
             Text(text)
-                .appCodeFont()
+                .veetMono()
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

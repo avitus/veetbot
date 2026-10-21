@@ -57,10 +57,10 @@ public struct ArtifactViewerView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Image(systemName: "doc")
-                    .font(.title2)
+                    .veetType(.title)
                     .foregroundColor(.secondary)
                 Text(artifact?.metadata.name ?? "Artifact")
-                    .appFont(.headline)
+                    .veetType(.ui, weight: .semibold)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
@@ -130,11 +130,11 @@ public struct ArtifactViewerView: View {
     ) -> some View {
         VStack(spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 40))
+                .veetIcon(.emptyState)
                 .foregroundColor(.secondary)
-            Text(title).appFont(.headline)
+            Text(title).veetType(.ui, weight: .semibold)
             Text(message)
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -156,7 +156,7 @@ public struct ArtifactViewerView: View {
                         countStyle: .file
                     ))
             }
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(.secondary)
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -166,14 +166,14 @@ public struct ArtifactViewerView: View {
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(preview.text)
-                            .appCodeFont(.body)
+                            .veetMono()
                             .textSelection(.enabled)
                         if preview.isTruncated {
                             Label(
                                 "Preview truncated. Download the artifact for the full content.",
                                 systemImage: "scissors"
                             )
-                            .appFont(.caption)
+                            .veetType(.meta)
                             .foregroundColor(.secondary)
                         }
                     }

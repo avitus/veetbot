@@ -63,13 +63,13 @@ import Testing
         #expect(value.alpha == 0.5)
     }
 
-    /// Titles use the serif display face; body text follows the owner's font
-    /// style preference and the monospace ledger follows the text size.
+    /// Titles use the serif display role (type revision 2); the palette
+    /// keeps no transitional names.
     @Test
-    func testDisplayFontUsesTheSerifDesignAndTheTextSizePreference() throws {
+    func testDisplayRoleUsesTheSerifDesign() throws {
+        let type = try source(at: "Veetbot/Views/VeetType.swift")
+        #expect(type.contains("case .display: return .serif"))
         let source = try source(at: "Veetbot/Views/AppTheme.swift")
-        #expect(source.contains("func appDisplayFont("))
-        #expect(source.contains("design: .serif"))
         #expect(!source.contains("static let turquoise"))
         #expect(!source.contains("static let orange"))
     }

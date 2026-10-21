@@ -131,6 +131,8 @@ class Settings:
     memory_provider_extraction_evidence: Path | None = None
     memory_formation_policy_pin: MemoryFormationPolicyPin | None = None
     schedule_api_enabled: bool = False
+    # ADR-0225 part B: on with the schedule API; AGENT_SCHEDULE_DRAFTS_ENABLED=0 removes it.
+    schedule_drafts_enabled: bool = True
     schedule_worker_enabled: bool = False
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
@@ -1701,6 +1703,7 @@ def _load_settings(
         else None
     )
     schedule_api_enabled = _parse_flag(values, "AGENT_SCHEDULE_API_ENABLED")
+    schedule_drafts_enabled = _parse_flag(values, "AGENT_SCHEDULE_DRAFTS_ENABLED", default=True)
     schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
@@ -2000,6 +2003,7 @@ def _load_settings(
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
         memory_formation_policy_pin=memory_formation_policy_pin,
         schedule_api_enabled=schedule_api_enabled,
+        schedule_drafts_enabled=schedule_drafts_enabled,
         schedule_worker_enabled=schedule_worker_enabled,
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,

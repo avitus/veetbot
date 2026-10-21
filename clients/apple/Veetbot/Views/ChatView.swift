@@ -21,6 +21,82 @@ enum ConversationScrollTarget: Equatable {
     }
 }
 
+/// Where the transcript goes when its content grows, as an answer does while
+/// it streams. The composer floats over the end of the transcript, so while
+/// the owner reads at the end the view follows it and the newest line stays
+/// above the composer; once the growing answer is taller than the view, it
+/// stops with the answer's beginning at the top so the beginning stays readable.
+enum TranscriptFollow: Equatable {
+    case stay
+    case end
+    case latestTop
+
+    /// - Parameters:
+    ///   - latestMessageHeight: The height of the newest row when it is a message.
+    ///   - endClearance: The space kept free below the last row for the dock.
+    static func step(
+        following: Bool, contentGrew: Bool, latestMessageHeight: CGFloat?,
+        visibleHeight: CGFloat, endClearance: CGFloat
+    ) -> TranscriptFollow {
+        guard following, contentGrew else { return .stay }
+        return end(latestMessageHeight: latestMessageHeight, visibleHeight: visibleHeight, endClearance: endClearance)
+    }
+
+    /// Where the end of the transcript is: its last row, unless that row is
+    /// a message taller than the view, whose beginning is then the end to
+    /// show. Opening a conversation and new rows go there as growth does.
+    /// A view not yet laid out has no height to compare with.
+    static func end(
+        latestMessageHeight: CGFloat?, visibleHeight: CGFloat, endClearance: CGFloat
+    ) -> TranscriptFollow {
+        guard visibleHeight > 0, let latestMessageHeight,
+            latestMessageHeight + endClearance > visibleHeight
+        else {
+            return .end
+        }
+        return .latestTop
+    }
+
+    /// Whether the view shows the end of its content, give or take a few points.
+    static func isAtEnd(
+        contentHeight: CGFloat, offset: CGFloat, containerHeight: CGFloat, bottomInset: CGFloat
+    ) -> Bool {
+        offset + containerHeight >= contentHeight + bottomInset - 4
+    }
+}
+
+/// A message row's laid-out height, with the row it was measured on.
+private struct MeasuredMessage: Equatable {
+    var id: String
+    var height: CGFloat
+}
+
+/// The parts of the transcript's scroll geometry that following its end reads.
+private struct TranscriptScrollMetrics: Equatable {
+    var contentHeight: CGFloat
+    var offset: CGFloat
+    var containerHeight: CGFloat
+    var topInset: CGFloat
+    var bottomInset: CGFloat
+
+    init(_ geometry: ScrollGeometry) {
+        contentHeight = geometry.contentSize.height
+        offset = geometry.contentOffset.y
+        containerHeight = geometry.containerSize.height
+        topInset = geometry.contentInsets.top
+        bottomInset = geometry.contentInsets.bottom
+    }
+
+    var visibleHeight: CGFloat { containerHeight - topInset - bottomInset }
+
+    var isAtEnd: Bool {
+        TranscriptFollow.isAtEnd(
+            contentHeight: contentHeight, offset: offset,
+            containerHeight: containerHeight, bottomInset: bottomInset
+        )
+    }
+}
+
 private struct ChatListOverlayPresentedKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -54,14 +130,26 @@ public struct ChatView: View {
     @State private var composerContentHeight: CGFloat = 0
     /// The dock's laid-out height, kept free at the end of the transcript.
     @State private var dockHeight: CGFloat = 0
+    /// Whether growth keeps the end in view: true after the view scrolls to
+    /// the end, false once the owner scrolls away from it.
+    @State private var followsTranscriptEnd = true
+    /// The answer whose beginning the view stopped at: it stays at the top
+    /// while rows above it change height, until the owner scrolls.
+    @State private var heldAnswerTop: String?
+    /// The newest message's laid-out height, with the row it was measured
+    /// on: a row just added has none until it is laid out.
+    @State private var latestMessage: MeasuredMessage?
+    /// The transcript's height between its insets.
+    @State private var visibleHeight: CGFloat = 0
+    /// The display title's height and whether it has scrolled out of view;
+    /// only then does the toolbar carry the title.
+    @State private var headingHeight: CGFloat = 0
+    @State private var headingScrolledAway = false
+    /// The conversation and row count the last scroll saw: a conversation
+    /// opens at its latest turn without animating there.
+    @State private var lastScroll: (session: UUID?, rows: Int) = (nil, 0)
     #if os(iOS)
     @State private var showingPhotoPicker = false
-    #endif
-
-    #if os(macOS)
-    private static let transcriptHorizontalPadding: CGFloat = 36
-    #else
-    private static let transcriptHorizontalPadding: CGFloat = 16
     #endif
 
     public init(model: ChatViewModel) {
@@ -98,11 +186,11 @@ public struct ChatView: View {
                 ZStack(alignment: .bottom) {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            #if os(macOS)
                             header
-                            #endif
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headingHeight = $0 }
                             transcript
-                                .padding(.top, 8)
+                                .transcriptBody()
+                                .padding(.top, VeetSpace.s2)
                                 .background(
                                     GeometryReader { geometry in
                                         Color.clear
@@ -111,12 +199,17 @@ public struct ChatView: View {
                                     }
                                 )
                         }
-                        .padding(.horizontal, Self.transcriptHorizontalPadding)
+                        .padding(.horizontal, A2Metrics.transcriptSidePadding)
                         .frame(maxWidth: A2Metrics.transcriptMaxWidth)
                         .frame(maxWidth: .infinity)
                         Color.clear
-                            .frame(height: max(dockHeight + 8, 1))
+                            .frame(height: max(dockHeight + VeetSpace.s2, 1))
                             .id(Self.bottomAnchorID)
+                    }
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        geometry.contentOffset.y + geometry.contentInsets.top > max(headingHeight, VeetSpace.s6)
+                    } action: { _, away in
+                        headingScrolledAway = away
                     }
                     .background(
                         GeometryReader { geometry in
@@ -125,25 +218,49 @@ public struct ChatView: View {
                                 .onChange(of: geometry.size.height) { _, height in transcriptProbe.viewportHeight = height }
                         }
                     )
+                    .onScrollGeometryChange(for: TranscriptScrollMetrics.self) { geometry in
+                        TranscriptScrollMetrics(geometry)
+                    } action: { old, new in
+                        visibleHeight = new.visibleHeight
+                        followGrowth(from: old, to: new, proxy)
+                    }
+                    .onScrollPhaseChange { _, phase in
+                        if phase == .interacting {
+                            followsTranscriptEnd = false
+                            heldAnswerTop = nil
+                        }
+                    }
+                    // Read directly: a preference with a last-value reducer
+                    // arrived as zero and left the composer over the end.
                     bottomDock(maxCardHeight: pane.size.height * 0.55)
-                        .background(
-                            GeometryReader { geometry in
-                                Color.clear.preference(key: DockHeightKey.self, value: geometry.size.height)
-                            }
-                        )
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            dockHeight = height
+                        }
                 }
             }
-            .onPreferenceChange(DockHeightKey.self) { dockHeight = $0 }
             .onChange(of: scrollChangeToken) {
                 scroll(proxy)
             }
             // A dock that just grew would otherwise cover the end of the
             // transcript; the clearance below the anchor has to be laid out first.
-            .onChange(of: dockHeight) {
+            // One that shrank, as it does when a run ends, uncovers it already.
+            .onChange(of: dockHeight) { old, new in
+                guard new > old, followsTranscriptEnd else { return }
                 DispatchQueue.main.async { scroll(proxy) }
             }
             .onChange(of: model.notificationFocus) {
                 scroll(proxy)
+            }
+            // A message that arrives whole is measured after the scroll that
+            // followed it in; once it proves taller than the view, its
+            // beginning is the end to show.
+            .onChange(of: latestMessage) {
+                guard followsTranscriptEnd, endOfTranscript == .latestTop, let id = latestMessage?.id else { return }
+                holdAnswerTop(id, proxy)
+            }
+            .onChange(of: model.selectedSessionID) {
+                headingScrolledAway = false
+                DispatchQueue.main.async { scroll(proxy) }
             }
             .onAppear {
                 scroll(proxy)
@@ -205,14 +322,19 @@ public struct ChatView: View {
             }
         }
         #endif
-        .navigationTitle(activeMode == .chat ? model.selectedConversationTitle : "Email")
         #if os(macOS)
-        // The window's one toolbar owner places People and Stop (RootView).
-        .navigationSubtitle(activeMode == .chat ? statusLabel ?? "" : "")
+        // The window's title is the toolbar's: empty while the display title
+        // is on screen, the conversation's once it has scrolled away (the
+        // system draws it in the ui role at 600). The window's one toolbar
+        // owner places People and Stop (RootView).
+        .navigationTitle(
+            activeMode == .chat ? (headingScrolledAway ? model.selectedConversationTitle : "") : "Email"
+        )
         #else
+        .navigationTitle(activeMode == .chat ? model.selectedConversationTitle : "Email")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) { titleBlock }
+            ToolbarItem(placement: .principal) { toolbarTitle }
             ToolbarItemGroup(placement: .primaryAction) {
                 websiteAccessButton
                 ChatToolbarActions(model: model)
@@ -249,33 +371,36 @@ public struct ChatView: View {
 
     // MARK: - Header
 
-    #if os(macOS)
-    /// The conversation's title in the display face, with what the run needs
+    /// The conversation's title in the display role, with what the run needs
     /// from the owner beneath it, or else where the conversation is filed and
-    /// when it last moved.
+    /// when it last moved. It scrolls with the transcript.
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .top, spacing: VeetSpace.s3) {
+            VStack(alignment: .leading, spacing: VeetSpace.s1) {
                 Text(model.selectedConversationTitle)
-                    .appDisplayFont(.title2)
-                    .lineLimit(1)
+                    .veetType(.display)
+                    .foregroundColor(AppTheme.ink)
+                    .lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("chat.heading")
                 if let statusLabel {
                     Text(statusLabel)
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.amberText)
                         .accessibilityIdentifier("chat.status")
                 } else if let entry = selectedEntry {
                     ConversationMetaLine(prefix: metaPrefix(for: entry), updatedAt: entry.updatedAt)
-                        .appFont(.caption)
-                        .foregroundColor(AppTheme.inkSoft)
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.inkFaint)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: VeetSpace.s2)
+            #if os(macOS)
             websiteAccessButton
+            #endif
         }
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.top, VeetSpace.s5)
+        .padding(.bottom, VeetSpace.s4)
     }
 
     private var selectedEntry: SessionHistoryEntry? {
@@ -290,23 +415,18 @@ public struct ChatView: View {
         }
         return "Chat"
     }
-    #endif
 
     #if os(iOS)
-    /// The conversation's title and, beneath it, only what the run needs from the owner.
-    private var titleBlock: some View {
-        VStack(spacing: 1) {
-            Text(model.selectedConversationTitle)
-                .appDisplayFont(.headline)
-                .lineLimit(1)
-                .accessibilityIdentifier("chat.heading")
-            if let statusLabel {
-                Text(statusLabel)
-                    .appFont(.caption)
-                    .foregroundColor(AppTheme.amberText)
-                    .accessibilityIdentifier("chat.status")
-            }
-        }
+    /// The navigation bar's title: the ui role at 600, only once the display
+    /// title has scrolled away.
+    private var toolbarTitle: some View {
+        Text(model.selectedConversationTitle)
+            .veetType(.ui, weight: .semibold)
+            .foregroundColor(AppTheme.ink)
+            .lineLimit(1)
+            .opacity(headingScrolledAway ? 1 : 0)
+            .accessibilityHidden(!headingScrolledAway)
+            .accessibilityIdentifier("chat.toolbar-title")
     }
     #endif
 
@@ -326,15 +446,25 @@ public struct ChatView: View {
 
     // MARK: - Transcript
 
+    /// Laid out eagerly. A lazy stack, opened on a report after another
+    /// conversation, could settle at an estimated height of a few hundred
+    /// points with both of its rows held and draw neither, leaving a blank
+    /// pane too short to scroll. A conversation is tens of rows, so measuring
+    /// each one is cheap and the transcript always draws what it holds.
     private var transcript: some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             if let workingState = state.workingState {
                 WorkingStatePanel(state: workingState)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, VeetSpace.s4)
             }
             ForEach(Array(state.activityTimeline.enumerated()), id: \.element.id) { index, item in
                 row(for: item)
                     .padding(.top, index == 0 ? 0 : spacingBefore(item))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if case .message = item, item.id == state.activityTimeline.last?.id {
+                            latestMessage = MeasuredMessage(id: item.id, height: height)
+                        }
+                    }
             }
             ForEach(detachedApprovals) { approval in
                 Group {
@@ -344,17 +474,17 @@ public struct ChatView: View {
                         ApprovalCardView(approval: approval) { _, _, _ in }
                     }
                 }
-                .padding(.top, 12)
+                .padding(.top, VeetSpace.s3)
                 .id(NotificationFocus.approval(approval.id).scrollID)
             }
             if let prompt = state.clarifyingQuestion {
                 WaitingLine(text: "Waiting for your answer. See below.")
-                    .padding(.top, 12)
+                    .padding(.top, VeetSpace.s3)
                     .id(NotificationFocus.question(prompt.questionID).scrollID)
             }
             if let failure = state.failure {
                 RunFailureCard(failure: failure)
-                    .padding(.top, 16)
+                    .padding(.top, VeetSpace.s4)
             }
         }
     }
@@ -368,8 +498,8 @@ public struct ChatView: View {
 
     private func spacingBefore(_ item: ConversationActivity) -> CGFloat {
         switch item {
-        case .message: return 24
-        case .tool, .toolBundle: return 12
+        case .message: return VeetSpace.s5
+        case .tool, .toolBundle: return VeetSpace.s3
         }
     }
 
@@ -384,8 +514,9 @@ public struct ChatView: View {
                 },
                 selectText: { textSelection = $0 }
             )
+            .id(item.id)
         case .tool(let activity):
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: VeetSpace.s3) {
                 WorkStrip(
                     content: .single(activity),
                     approvals: state.approvals,
@@ -421,18 +552,18 @@ public struct ChatView: View {
     /// What sits over the end of the transcript: the card the run waits on,
     /// the activity line, the task permission, and the composer.
     private func bottomDock(maxCardHeight: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: VeetSpace.s2) {
             AttentionDock(model: model, state: state, maxHeight: maxCardHeight)
             if let activityLabel {
-                HStack(spacing: 8) {
+                HStack(spacing: VeetSpace.s2) {
                     ProgressView().controlSize(.small)
                     Text(activityLabel)
-                        .appFont(.callout)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .lineLimit(1)
                     Spacer()
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, VeetSpace.s2)
                 .accessibilityIdentifier("chat.activity")
             }
             if model.activeTaskGrant != nil {
@@ -442,9 +573,9 @@ public struct ChatView: View {
             }
             composer
         }
-        .padding(.horizontal, Self.transcriptHorizontalPadding)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
+        .padding(.horizontal, A2Metrics.transcriptSidePadding)
+        .padding(.top, VeetSpace.s3)
+        .padding(.bottom, VeetSpace.s3)
         .frame(maxWidth: A2Metrics.transcriptMaxWidth)
         .frame(maxWidth: .infinity)
         .background(
@@ -456,31 +587,31 @@ public struct ChatView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .padding(.top, -24)
+            .padding(.top, -VeetSpace.s5)
             .allowsHitTesting(false)
         )
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: VeetSpace.s1) {
             if !model.attachments.isEmpty {
                 AttachmentChipsView(
                     attachments: model.attachments,
                     remove: { model.removeAttachment($0) },
                     retry: { model.retryAttachment($0) }
                 )
-                .padding(.horizontal, 6)
-                .padding(.top, 4)
+                .padding(.horizontal, VeetSpace.s2)
+                .padding(.top, VeetSpace.s1)
             }
-            HStack(alignment: .bottom, spacing: 4) {
+            HStack(alignment: .bottom, spacing: VeetSpace.s1) {
                 attachButton
                 messageField
                 sendButton
-                    .padding(.bottom, 4)
+                    .padding(.bottom, VeetSpace.s1)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, VeetSpace.s2)
+        .padding(.vertical, VeetSpace.s1)
         .background(
             .regularMaterial,
             in: RoundedRectangle(cornerRadius: A2Metrics.composerRadius, style: .continuous)
@@ -508,12 +639,12 @@ public struct ChatView: View {
             }
         } label: {
             Image(systemName: "paperclip")
-                .font(.system(size: 17))
+                .veetIcon(.regular)
                 .frame(width: 36, height: 36)
                 .foregroundColor(AppTheme.inkSoft)
                 .contentShape(Rectangle())
         }
-        .padding(.bottom, 3)
+        .padding(.bottom, VeetSpace.s1)
         .disabled(!model.isConfigured)
         .accessibilityLabel("Attach files")
         .accessibilityIdentifier("chat.attach")
@@ -522,10 +653,10 @@ public struct ChatView: View {
             showingFileImporter = true
         } label: {
             Image(systemName: "paperclip")
-                .font(.system(size: 15))
+                .veetIcon(.regular)
         }
         .buttonStyle(QuietIconButtonStyle())
-        .padding(.bottom, 4)
+        .padding(.bottom, VeetSpace.s1)
         .disabled(!model.isConfigured)
         .help("Attach files")
         .accessibilityLabel("Attach files")
@@ -572,7 +703,7 @@ public struct ChatView: View {
     private var sendButton: some View {
         Button(action: submitDraft) {
             Image(systemName: "arrow.up")
-                .font(.system(size: 14, weight: .semibold))
+                .veetIcon(.regular, weight: .semibold)
                 .foregroundColor(canSendDraft ? AppTheme.onTeal : AppTheme.inkFaint)
                 .frame(width: A2Metrics.controlHeight, height: A2Metrics.controlHeight)
                 .background(Circle().fill(canSendDraft ? AppTheme.tealFill : AppTheme.field))
@@ -620,16 +751,94 @@ public struct ChatView: View {
         return NotificationFocus.approval(approvalID).scrollID
     }
 
+    /// Follows the conversation to its latest turn, or to a notification's
+    /// row. A conversation that has just opened (or just loaded its rows)
+    /// lands there at once; only new activity in a conversation already on
+    /// screen animates.
     private func scroll(_ proxy: ScrollViewProxy) {
-        withAnimation {
-            let target = ConversationScrollTarget.resolve(model.notificationFocus)
+        let rows = state.activityTimeline.count
+        let animated = lastScroll.session == model.selectedSessionID && lastScroll.rows > 0
+        lastScroll = (model.selectedSessionID, rows)
+        let target = ConversationScrollTarget.resolve(model.notificationFocus)
+        let answerTop = target == .bottom && endOfTranscript == .latestTop ? latestMessage?.id : nil
+        followsTranscriptEnd = target == .bottom && answerTop == nil
+        heldAnswerTop = answerTop
+        let move = {
             switch target {
             case .notification:
                 proxy.scrollTo(target.scrollID, anchor: .center)
             case .bottom:
-                proxy.scrollTo(target.scrollID, anchor: .bottom)
+                if let answerTop {
+                    proxy.scrollTo(answerTop, anchor: .top)
+                } else {
+                    proxy.scrollTo(target.scrollID, anchor: .bottom)
+                }
             }
         }
+        // An answer's beginning is held in place, not animated to: rows above
+        // it can change height again before an animation would end.
+        if animated && answerTop == nil { withAnimation { move() } } else { move() }
+    }
+
+    /// The newest row's height when it is a message already laid out.
+    private var measuredLatestMessageHeight: CGFloat? {
+        guard case .message = state.activityTimeline.last,
+            let latestMessage, latestMessage.id == state.activityTimeline.last?.id
+        else { return nil }
+        return latestMessage.height
+    }
+
+    private var endOfTranscript: TranscriptFollow {
+        TranscriptFollow.end(
+            latestMessageHeight: measuredLatestMessageHeight,
+            visibleHeight: visibleHeight,
+            endClearance: max(dockHeight + VeetSpace.s2, 1)
+        )
+    }
+
+    /// Keeps a growing answer's newest line above the composer while the
+    /// owner reads at the end; an owner who scrolls back to the end resumes it.
+    private func followGrowth(
+        from old: TranscriptScrollMetrics, to new: TranscriptScrollMetrics, _ proxy: ScrollViewProxy
+    ) {
+        if let held = heldAnswerTop, abs(new.contentHeight - old.contentHeight) > 0.5 {
+            // Rows above the answer changed height, as the header's status
+            // line does when the run ends; keep the answer's beginning in place.
+            if held == state.activityTimeline.last?.id {
+                DispatchQueue.main.async { proxy.scrollTo(held, anchor: .top) }
+                return
+            }
+            heldAnswerTop = nil
+        }
+        let contentGrew = new.contentHeight > old.contentHeight + 0.5
+        guard contentGrew else {
+            if new.isAtEnd { followsTranscriptEnd = true }
+            return
+        }
+        let latest = state.activityTimeline.last
+        switch TranscriptFollow.step(
+            following: followsTranscriptEnd,
+            contentGrew: contentGrew,
+            latestMessageHeight: measuredLatestMessageHeight,
+            visibleHeight: new.visibleHeight,
+            endClearance: max(dockHeight + VeetSpace.s2, 1)
+        ) {
+        case .stay:
+            break
+        case .end:
+            // As for a grown dock, the new end has to be laid out first.
+            DispatchQueue.main.async { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+        case .latestTop:
+            if let latest { holdAnswerTop(latest.id, proxy) }
+        }
+    }
+
+    /// Stops following the end at an answer taller than the view, with its
+    /// beginning at the top; the new row has to be laid out first.
+    private func holdAnswerTop(_ id: String, _ proxy: ScrollViewProxy) {
+        followsTranscriptEnd = false
+        heldAnswerTop = id
+        DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
     }
 
     private func submitDraft() {
@@ -653,11 +862,6 @@ public struct ChatView: View {
     }
 }
 
-private struct DockHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 /// The card the run waits on, docked above the composer until the owner
 /// answers it: every pending approval in order, or else the clarifying
 /// question. Nothing shows while nothing is waiting.
@@ -677,7 +881,7 @@ private struct AttentionDock: View {
             // cards report their height; a fixed-size scroll view would keep
             // its full content height past the cap and overlap the composer.
             ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: VeetSpace.s2) {
                 ForEach(pending) { approval in
                     ApprovalCardView(
                         approval: approval, activeTaskGrant: model.activeTaskGrant,
@@ -750,23 +954,23 @@ private struct TaskGrantBanner: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             if let text = model.taskGrantBannerText(now: context.date) {
-                HStack(spacing: 10) {
+                HStack(spacing: VeetSpace.s2) {
                     Image(systemName: "checkmark.shield")
                         .foregroundColor(AppTheme.teal)
                     Text(text)
-                        .appFont(.caption, weight: .medium)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                         .lineLimit(2)
                         .accessibilityIdentifier("task-grant.banner.text")
-                    Spacer(minLength: 8)
+                    Spacer(minLength: VeetSpace.s2)
                     Button("Stop", role: .destructive, action: stop)
                         .buttonStyle(QuietCapsuleButtonStyle())
                         .accessibilityIdentifier("task-grant.banner.stop")
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, VeetSpace.s3)
+                .padding(.vertical, VeetSpace.s1)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.tealWash)
+                    RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous).fill(AppTheme.tealWash)
                 )
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("task-grant.banner")
@@ -783,19 +987,19 @@ private struct RunFailureCard: View {
     let failure: RunFailureView
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: VeetSpace.s2) {
             Label("Conversation failed", systemImage: "exclamationmark.triangle")
-                .appFont(.caption, weight: .semibold)
+                .veetType(.label)
                 .foregroundColor(AppTheme.red)
             Text(failure.userFacingMessage)
-                .appFont(.body)
+                .veetType(.body)
                 .textSelection(.enabled)
             Text(failure.diagnosticSummary)
                 .textSelection(.enabled)
-                .appCodeFont()
+                .veetMono()
                 .foregroundColor(AppTheme.inkSoft)
         }
-        .padding(.leading, 14)
+        .padding(.leading, VeetSpace.s3)
         .overlay(alignment: .leading) {
             Rectangle().fill(AppTheme.red).frame(width: 2)
         }
@@ -806,20 +1010,67 @@ private struct RunFailureCard: View {
 }
 
 /// One message: the owner's in a teal-wash capsule at the trailing edge, the
-/// assistant's on bare paper behind a small teal mark.
+/// assistant's on bare paper behind a small teal mark. Copy and Select Text
+/// appear on hover on the Mac and iPad (a tap shows them on an iPad without a
+/// pointer); the iPhone keeps them visible, since a long-press menu would take
+/// the gesture text selection uses (ADR-0122).
 private struct TimelineBubble: View {
     let item: TimelineItem
     let openArtifact: (UUID) -> Void
     let selectText: (MessageTextSelection) -> Void
+    @Environment(\.appTextSize) private var textSize
+    @State private var hovering = false
+    @State private var hoverEnd: Task<Void, Never>?
+    @State private var revealed = false
 
     var body: some View {
+        bubble
+            .onHover { inside in
+                hoverEnd?.cancel()
+                guard !inside else {
+                    hovering = true
+                    return
+                }
+                // The bar lingers a moment after the pointer leaves. On macOS
+                // 26 a bar that changed while its Select Text click presented
+                // the sheet (which takes the pointer) left the window undrawn,
+                // so it changes only once the presentation has settled.
+                hoverEnd = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    if !Task.isCancelled { hovering = false }
+                }
+            }
+            #if os(iOS)
+            .simultaneousGesture(
+                TapGesture().onEnded { if VeetType.Platform.current == .iPad { revealed.toggle() } }
+            )
+            #endif
+            .accessibilityActions {
+                if item.offersMessageActions {
+                    Button("Copy message") {
+                        SystemClipboard.copy(MarkdownRendition(markdown: item.copyableMarkdown, textSize: textSize))
+                    }
+                    Button("Select text") {
+                        selectText(
+                            MessageTextSelection(
+                                id: item.id,
+                                rendition: MarkdownRendition(markdown: item.copyableMarkdown, textSize: textSize)
+                            )
+                        )
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var bubble: some View {
         if item.role == .user {
             HStack(alignment: .bottom, spacing: 0) {
-                Spacer(minLength: 48)
-                VStack(alignment: .trailing, spacing: 4) {
+                Spacer(minLength: VeetSpace.s7)
+                VStack(alignment: .trailing, spacing: VeetSpace.s1) {
                     content
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, VeetSpace.s4)
+                        .padding(.vertical, VeetSpace.s2)
                         .background(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .fill(AppTheme.tealWash)
@@ -830,10 +1081,10 @@ private struct TimelineBubble: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: VeetSpace.s3) {
                 AssistantMark()
-                    .padding(.top, 8)
-                VStack(alignment: .leading, spacing: 6) {
+                    .padding(.top, VeetSpace.s2)
+                VStack(alignment: .leading, spacing: VeetSpace.s2) {
                     content
                     actions
                 }
@@ -843,20 +1094,32 @@ private struct TimelineBubble: View {
         }
     }
 
+    private var showsMessageActions: Bool {
+        switch VeetType.Platform.current {
+        case .mac: return hovering
+        case .iPad: return hovering || revealed
+        case .iPhone: return true
+        }
+    }
+
     @ViewBuilder
     private var actions: some View {
         if item.offersMessageActions {
+            // The bar keeps its place, so showing it never moves the
+            // transcript; hidden, it takes no clicks or taps.
             MessageActionBar(
                 messageID: item.id,
                 role: item.role,
                 markdown: item.copyableMarkdown,
                 selectText: selectText
             )
+            .opacity(showsMessageActions ? 1 : 0)
+            .allowsHitTesting(showsMessageActions)
         }
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: VeetSpace.s3) {
             ForEach(Array(item.content.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .text(let text):

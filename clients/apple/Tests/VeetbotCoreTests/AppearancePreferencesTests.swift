@@ -5,12 +5,12 @@ import Testing
 
 @Suite struct AppearancePreferencesTests {
     @Test
-    func testDefaultsUseSystemSizingAndRoundedTypography() throws {
+    func testDefaultsUseSystemSizingAndTheSystemFace() throws {
         let defaults = try isolatedDefaults()
         let preferences = AppearancePreferences(defaults: defaults)
 
         #expect(preferences.textSize == .system)
-        #expect(preferences.fontStyle == .rounded)
+        #expect(preferences.fontStyle == .system)
     }
 
     @Test
@@ -24,6 +24,21 @@ import Testing
 
         #expect(reloaded.textSize == .large)
         #expect(reloaded.fontStyle == .serif)
+    }
+
+    @Test
+    func testThemeDefaultsToSystemAndPersists() throws {
+        let defaults = try isolatedDefaults()
+        let preferences = AppearancePreferences(defaults: defaults)
+        #expect(preferences.theme == .system)
+        #expect(preferences.theme.colorScheme == nil)
+
+        preferences.theme = .dark
+        let reloaded = AppearancePreferences(defaults: defaults)
+
+        #expect(reloaded.theme == .dark)
+        #expect(reloaded.theme.colorScheme == .dark)
+        #expect(AppThemePreference.allCases.map(\.label) == ["System", "Light", "Dark"])
     }
 
     @Test

@@ -6,13 +6,20 @@ extension Notification.Name { static let peopleConnectionChanged = Notification.
 public enum PeopleAvailability: Equatable, Sendable { case available, disabled, denied, changed, failed }
 
 public enum PeopleCollection: String, CaseIterable, Identifiable, Sendable {
-    case people = "People", pinned = "Pinned", review = "Needs review", all = "All identities"
+    case review = "Needs you", recent = "Recent", people = "Everyone", pinned = "Pinned"
+    case duplicates = "Possible duplicates", all = "All identities"
     public var id: String { rawValue }
-    /// People holds everyone the owner knows or writes to, confirmed or not;
-    /// Needs review is the server's own filter (ADR-0121).
-    var states: [String] { self == .people || self == .pinned ? ["active", "provisional"] : [] }
+    /// Possible duplicates and every identity, merged ones included, are
+    /// upkeep rather than the directory (MagicPath keen-earth-6102).
+    var isMaintenance: Bool { self == .duplicates || self == .all }
+    /// Everyone holds everyone the owner knows or writes to, confirmed or not;
+    /// Needs you is the server's review filter (ADR-0121): people known only
+    /// by a name or a role, waiting for the owner to say who they are.
+    var states: [String] { [.people, .pinned, .recent].contains(self) ? ["active", "provisional"] : [] }
     var review: Bool { self == .review }
     var pinnedOnly: Bool? { self == .pinned ? true : nil }
+    /// Recent is the server's newest-interaction order (`sort=recent`).
+    var sort: String { self == .recent ? "recent" : "id" }
 }
 
 public enum PeopleRelationshipFilter: String, CaseIterable, Identifiable, Sendable {
@@ -41,13 +48,17 @@ public final class PeopleViewModel: ObservableObject {
     @Published public private(set) var availability: PeopleAvailability = .available
     @Published public private(set) var searchText = ""
     @Published public private(set) var collection: PeopleCollection
-    @Published public private(set) var recentFirst = false
     @Published public private(set) var relationship: PeopleRelationshipFilter = .all
-    /// Possible duplicates shown with Needs review (ADR-0125).
+    /// The open possible duplicates, on their own page (ADR-0125).
     @Published public private(set) var suggestions: [PeopleMergeSuggestionView] = []
+    /// The sidebar's numbers (ADR-0227); nil while unknown or on an older server.
+    @Published public private(set) var counts: PeopleCountsView?
+    /// The person whose owed thread is being corrected from its row.
+    @Published public private(set) var resolvingThreadOf: UUID?
     private var isConnectionValid = true
     private var connectionObserver: AnyCancellable?
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
+    private let toasts: ToastCenter
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var failedPage = false
@@ -56,7 +67,8 @@ public final class PeopleViewModel: ObservableObject {
     private var suggestionSessionID: UUID?
     private let asOf: Date?
 
-    public init(searchText: String = "", asOf: Date? = nil, notifications: NotificationCenter = .default, makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = { await MemoryViewModel.makeDefaultAPIClient() }) {
+    public init(searchText: String = "", asOf: Date? = nil, notifications: NotificationCenter = .default, makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = { await MemoryViewModel.makeDefaultAPIClient() }, toasts: ToastCenter? = nil) {
+        self.toasts = toasts ?? .shared
         self.searchText = searchText
         self.collection = searchText.isEmpty ? .people : .all
         self.asOf = asOf
@@ -67,7 +79,7 @@ public final class PeopleViewModel: ObservableObject {
     }
     private func invalidateConnection() {
         isConnectionValid = false; listRequest = UUID(); searchTask?.cancel(); searchTask = nil
-        items = []; suggestions = []; suggestionSessionID = nil; searchText = ""; nextCursor = nil; seenCursors = []
+        items = []; suggestions = []; suggestionSessionID = nil; searchText = ""; nextCursor = nil; seenCursors = []; counts = nil
         isLoading = false; isLoadingMore = false; errorMessage = nil
     }
     deinit { searchTask?.cancel() }
@@ -98,6 +110,8 @@ public final class PeopleViewModel: ObservableObject {
             ], key: UUID().uuidString)
             guard isConnectionValid else { return }
             suggestions.removeAll { $0.id == suggestion.id }
+            // ADR-0125: an answered pair stays answered.
+            toasts.show(decision == "merge" ? "Merged." : "Kept separate. Veetbot will not suggest this pair again.")
             errorMessage = nil
             await reload()
         } catch {
@@ -111,14 +125,6 @@ public final class PeopleViewModel: ObservableObject {
         guard isConnectionValid else { return }
         guard value != relationship else { return }
         relationship = value
-        items = []; nextCursor = nil
-        await reload()
-    }
-
-    public func setRecentFirst(_ value: Bool) async {
-        guard isConnectionValid else { return }
-        guard value != recentFirst else { return }
-        recentFirst = value
         items = []; nextCursor = nil
         await reload()
     }
@@ -151,15 +157,32 @@ public final class PeopleViewModel: ObservableObject {
         do {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             guard isConnectionValid else { return }
-            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
-            // A server without duplicate handling answers with an error; Needs review
-            // then simply shows no duplicate questions.
-            let duplicates = collection.review ? ((try? await api.listMergeSuggestions())?.items ?? []) : []
+            if collection == .duplicates {
+                // A server without duplicate handling answers with an error;
+                // the page then simply shows no pairs.
+                let duplicates = (try? await api.listMergeSuggestions())?.items ?? []
+                guard isConnectionValid, listRequest == request else { return }
+                suggestions = duplicates
+                items = []
+                nextCursor = nil
+                errorMessage = nil
+                availability = .available
+                return
+            }
+            let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            // ADR-0227: Needs you leads with the replies the owner owes soon. The
+            // filter stands alone, so it applies only to the unfiltered list; a
+            // row without a thread (an older server ignoring the filter) is dropped.
+            var owed: [PersonView] = []
+            if collection == .review, text.isEmpty, relationship == .all {
+                owed = ((try? await api.listPeople(asOf: nil, openThreads: true))?.items ?? []).filter { $0.nextThread != nil }
+            }
+            let page = try await api.listPeople(text: text, asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: collection.sort, relationship: relationship.queryValue)
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
-            suggestions = duplicates
+            suggestions = []
             var seen: Set<UUID> = []
-            items = page.items.filter { seen.insert($0.id).inserted }
+            items = (owed + page.items).filter { seen.insert($0.id).inserted }
             seenCursors = []
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             errorMessage = nil
@@ -181,7 +204,7 @@ public final class PeopleViewModel: ObservableObject {
         do {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             guard isConnectionValid else { return }
-            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), cursor: cursor, asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: recentFirst ? "recent" : "id", relationship: relationship.queryValue)
+            let page = try await api.listPeople(text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), cursor: cursor, asOf: asOf, states: collection.states, review: collection.review, pinned: collection.pinnedOnly, sort: collection.sort, relationship: relationship.queryValue)
             guard isConnectionValid else { return }
             guard listRequest == request else { return }
             var seen = Set(items.map(\.id))
@@ -200,6 +223,100 @@ public final class PeopleViewModel: ObservableObject {
     public func retry() async {
         guard isConnectionValid else { return }
         if !failedPage || items.isEmpty || availability == .changed { await reload() } else { await loadMore() }
+    }
+
+    // MARK: ADR-0227
+
+    /// Fetches the sidebar's numbers. They label the lists and never block
+    /// them: any failure, an older server included, leaves them unknown.
+    public func loadCounts() async {
+        guard isConnectionValid, let api = await makeAPIClient() else { return }
+        let loaded = try? await api.peopleCounts()
+        guard isConnectionValid else { return }
+        counts = loaded
+    }
+
+    /// A collection's name with its number, when the server reported one.
+    public func collectionLabel(_ collection: PeopleCollection) -> String {
+        count(for: collection).map { "\(collection.rawValue) · \($0)" } ?? collection.rawValue
+    }
+
+    /// The number a sidebar row shows, when the server reported one.
+    public func count(for collection: PeopleCollection) -> Int? {
+        guard let counts else { return nil }
+        switch collection {
+        case .review: return counts.needsYou
+        case .people: return counts.everyone
+        case .duplicates: return counts.possibleDuplicates
+        case .recent, .pinned, .all: return nil
+        }
+    }
+
+    /// Why a person is under Needs you: a reply owed soon, or a name with no
+    /// confirmed address that waits for the owner to say who it is.
+    public func attentionLine(for person: PersonView, now: Date = Date()) -> String? {
+        guard collection == .review else { return nil }
+        if let thread = person.nextThread, let due = thread.dueAt {
+            return "Needs you · \(thread.description) · \(Self.dueText(due, now: now))"
+        }
+        return "Needs you · Who is this?"
+    }
+
+    /// When an owed thread is due, in words.
+    static func dueText(_ due: Date, now: Date, calendar: Calendar = .current) -> String {
+        let today = calendar.startOfDay(for: now)
+        let days = calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: due)).day ?? 0
+        switch days {
+        case ..<0: return "overdue"
+        case 0: return "due today"
+        case 1: return "due tomorrow"
+        case 2...6: return "due " + due.formatted(.dateTime.weekday(.wide))
+        default: return "due " + due.formatted(.dateTime.month(.abbreviated).day())
+        }
+    }
+
+    /// When the owner last had contact with someone, in words (Recent rows).
+    static func lastContactText(_ at: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let days = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: at), to: calendar.startOfDay(for: now)
+        ).day ?? 0
+        switch days {
+        case ...0: return "Last contact today"
+        case 1: return "Last contact yesterday"
+        case 2...30: return "Last contact \(days) days ago"
+        default: return "Last contact " + at.formatted(.dateTime.month(.abbreviated).day())
+        }
+    }
+
+    /// Marks the owed thread on a Needs you row completed or cancelled through
+    /// the person's existing commitment correction (ADR-0227 part C).
+    public func resolveThread(of person: PersonView, state: String) async {
+        guard isConnectionValid, resolvingThreadOf == nil, let thread = person.nextThread,
+              let beliefID = thread.beliefID else { return }
+        resolvingThreadOf = person.id
+        defer { resolvingThreadOf = nil }
+        let detail = PeopleDetailViewModel(personID: person.id, makeAPIClient: makeAPIClient)
+        await detail.reload()
+        guard isConnectionValid else { return }
+        guard let fact = detail.profile?.facts.first(where: { $0.id == beliefID }) else {
+            errorMessage = "Refresh People before changing this thread."
+            return
+        }
+        await detail.correct(fact, operation: "changed", statement: thread.description, sessionID: nil, commitmentState: state)
+        guard isConnectionValid else { return }
+        if let failure = detail.errorMessage {
+            errorMessage = failure
+            return
+        }
+        errorMessage = nil
+        toasts.show(state == "completed" ? "Marked done." : "Marked not needed.")
+        await reload()
+        await refreshCounts()
+    }
+
+    private func refreshCounts() async {
+        guard counts != nil else { return }
+        await loadCounts()
     }
 
     private func report(_ error: Error) {

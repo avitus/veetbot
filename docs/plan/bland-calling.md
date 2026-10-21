@@ -85,8 +85,11 @@ then neither clipped at connection nor spoken over a voicemail greeting or a
 call-screening prompt. The provider documents no silence timeout, so a person
 who answers and stays silent hears nothing until they speak, within the call's
 duration limit. The provider may not mark a reached voicemail as such: it
-reported one screened call as `answered_by: "unknown"`. The transcript and
-summary show what happened.
+reported one screened call as `answered_by: "unknown"`. A call its own
+voicemail detection ends also reports `answered_by: "unknown"` and
+`status: "completed"`, but its last transcript entry is the platform's
+assistant line `<Call ended due to voicemail detection>`. Veetbot records that
+call as `voicemail`. Otherwise the transcript and summary show what happened.
 
 ## Repository fit and the required plan change
 
@@ -131,6 +134,16 @@ means that the call was accepted, not that the recipient answered or the task
 succeeded. Save the identifier, owner, approved invocation, agent revision, and
 outbound correlation identifier durably. Final states distinguish no answer,
 busy, voicemail, completed conversation, failure, and an uncertain dispatch.
+The provider's `status` is its latest word: `busy`, `no-answer`, `failed` and
+`canceled` map to busy, no answer and failure, and `answered_by: "no-answer"`
+on a finished call means no answer. Until `status` reads `completed`, the
+`queue_status` error stages before and during a call also mean failure, but
+`complete_error`, a fault after the call ended, does not. These values come
+from the provider's reference; no real busy, unanswered or failed call has
+been observed yet.
+Until reconciliation records an accepted call, reading its identifier returns
+a content-free pending view, not "call not found". The view gives the outbound
+direction, status `accepted` and `result_pending: true`.
 
 Use the executor's existing effect watermark and uncertain-outcome handling.
 
@@ -168,7 +181,31 @@ instruction is one the owner gave. Its definition requests exactly the two
 calling scopes, so the occurrence can call and read the outcome. Creation fails
 with `schedule.calling_unavailable` when calling is not composed, rather than
 at firing; the scheduler role mirrors `AGENT_CALL_ENABLED` to vouch for the
-scopes.
+scopes. Those scopes are all the occurrence holds, and it runs once, so it
+cannot arrange a retry or a follow-up; the creation result says so, so Chat
+does not confirm one. A call placed after the occurrence reads any call record,
+even an empty list, keeps the card.
+
+### Call plans (ADR-0221)
+
+"Call at 9:30; if she doesn't answer, call every 2 minutes until 9:40; if she
+answers, call again 5 minutes later" is one `schedule.create` 1.4.0 with
+`place_call=true`, a one-time `at` and a `call_plan`: `retry_every_minutes`
+(1–30) with `retry_until`, and/or `follow_up_after_answer_minutes` (1–60). A
+plan places at most ten calls within an hour of `at`, then at most one
+follow-up. The owner authorizes the whole plan once, and it cannot change after
+its first call.
+
+A plan's revision requests only `mcp.bland_call.use`, so no call run can read a
+call record and each call keeps the owner-request authority above. The
+maintenance sweep reads each call's closed dispatch status, never its content,
+and chooses the next step: a retry at the next interval while calls and time
+remain, one follow-up after an answered call ends, or the end of the plan. A
+call still in flight holds the plan; after 20 minutes without a result, or
+when a run placed no call, the plan ends without redialing. An ended plan runs
+one occurrence with no scopes, which tells the owner the outcome and cannot
+call. Its scheduled-run alert is the plan's only alert. The scheduling design
+gives the materialization contract.
 
 The server's stderr is not a private channel: the API or worker process that
 spawns the child passes on its own stderr, so anything the child logs lands in
@@ -266,6 +303,9 @@ redacts subsequent generated content and tool arguments in affected sessions,
 since later turns may paraphrase the source without retaining its identifier;
 original owner messages remain intact. Active runs defer erasure. Expired
 content is hidden immediately and physical artifact cleanup uses maintenance.
+Each pass expires calls before it reads receipts. A failed expiry logs the
+fixed `calling.retention_failed` and moves on, so erasure faults never hold
+back new results, and the next pass retries the erasure.
 
 `agent call-ingress` uses a separate Linux user, receipt-only database role,
 loopback port 8003 and a 256-KiB raw-body limit. The main owner API exposes

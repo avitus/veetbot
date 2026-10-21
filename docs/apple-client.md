@@ -32,8 +32,11 @@ in-process fixture to verify that historical rows open and switch conversations,
 new-conversation rows open the chat surface, and selected transcripts render.
 Email journeys cover mode switching, feedback, editing, learning controls and
 compact-trait navigation on both simulator families.
-`make test-apple-ui` runs `make test-apple-ui-macos`, then
-`make test-apple-ui-ios`. CircleCI runs `make test-apple` and the Mac cases in
+`make test-apple-ui` runs the Mac cases inside a local Tart macOS VM with
+`make test-apple-ui-macos-vm`, so they never take over your desktop, then
+runs `make test-apple-ui-ios`. Set the VM up once with
+`tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:27 veetbot-macos-ui`.
+CircleCI runs `make test-apple` and the Mac cases in
 the required `apple` job, and the simulator cases in the required `apple-ios`
 job at the same time.
 
@@ -81,14 +84,34 @@ server's site scope, limits and exceptions beside that choice. An active task pe
 above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 
-Settings are an A2 page: "Settings" in the serif face under a small brand
-mark, then a scrolling body on paper. Connection, Models, Website
-Access, Appearance, and Data & Privacy cards group controls by user intent, and
-iOS adds SMS Integration; each card is a surface with hairline rows, fields in
-the `a2Field` well, the one primary action as a filled capsule and the rest as
-hairline or quiet capsules. First-run setup shows the same body under "Connect
-this Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token
-is kept. The Models card (ADR-0119) reads and saves
+Settings are A2 pages, one per group: Connection, Models, Website access,
+Notifications, Appearance, iOS's SMS integration, and Data & privacy. On the
+Mac and iPad a sidebar on deep paper lists the groups under "Settings" in the
+serif face, the chosen row in the selected tint and Website access marked with
+an amber dot while a login needs the owner; the iPhone lists the groups with a
+short value beside each and pushes the chosen one. Each group is a card on
+paper with hairline rows, fields in the `a2Field` well, the one primary action
+as a filled capsule and the rest as
+hairline or quiet capsules. Connection opens with the server, the token
+("Saved in Keychain · verified 2 min ago", from the last authenticated session
+list) and the status, and the token field has a show/hide control.
+Notifications says whether this device may show them (with Allow
+notifications or Open System Settings), then lists the devices the server
+notifies from `GET /v1/devices`, this one first, each with Send test (a
+content-free test notification) and, for other devices, Remove after a
+confirmation, which revokes it; both need `device.write`, and a server without
+the routes says so. Muting kinds per device has no update route and is not
+offered. Appearance adds a System, Light or Dark theme, applied to every window.
+Data & privacy adds Clear local cache, which asks first and then empties this
+device's cached chat list and artifacts and reloads them from the server; chats
+stay on the server. Website rows offer "Use for new chats".
+
+First-run setup is Connect: step 1 is the Connection group under "Connect this
+Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token is
+kept. Once the server accepts the token, step 2 explains notifications and
+asks Allow notifications or Not now (connecting raises no system prompt before
+this choice; Not now leaves it to Settings), and step 3, "Ready.", summarises
+the server, the token, notifications and websites before Open Chat. The Models card (ADR-0119) reads and saves
 `/v1/settings/models` under `settings.read` and `settings.write`: a chat model
 and reasoning effort, which apply to new chats and to the next message, and a
 memory model and effort limited to the evaluated combinations the server
@@ -99,14 +122,13 @@ open settings in a separate window that resizes horizontally and vertically and
 restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
 position are restored without interfering with the settings window. Appearance
-preferences include app-wide text sizing and system, rounded,
-serif, or monospaced typography. They are stored in device preferences and apply
-immediately. System sizing preserves the platform's accessibility setting, while
-the three explicit sizes use deterministic scales on both platforms. The
-body face still defaults to the rounded face, because the system face runs
-about two points wider per toolbar label and folds the iPhone Subscriptions
-toolbar into an overflow menu; the system, serif and monospaced choices apply
-everywhere.
+preferences choose a text size and a system, rounded, serif, or monospaced face.
+They are stored in device preferences, apply immediately, and reach transcript
+body text only (and the composer that writes it): sidebars, tables, toolbars,
+docks and controls keep the system face at their role sizes. System sizing
+preserves the platform's accessibility setting, while the three explicit sizes
+scale the body role deterministically on both platforms. The face defaults to
+System.
 
 ### Design tokens
 
@@ -127,11 +149,57 @@ chooses a colour by mode. The tokens are:
 | `amber`, `amberText`, `amberLine`, `amberWash` | what needs the owner: a dot, a line of text, a card border, a wash | `#e0a23a`, `#7a4a0e`, `rgba(201,128,26,.55)`, `rgba(242,169,59,.12)` | `#f2a93b`, `#f2a93b`, `#f2a93b` at 50 %, `#f2a93b` at 10 % |
 | `red` | failure | `#b4452e` | `#e07a62` |
 | `hairline`, `hairlineStrong`, `selected` | dividers, borders, the chosen row | ink at 14 %, 28 %, 9 % | ink at 10 %, 22 %, 12 % |
+| `toastBackground`, `toastText`, `toastAction` | a toast: ink ground, paper text, its Undo | `#102923`, `#fcfaf6`, `#5ee3c9` | `#ece6d8`, `#0c211d`, `#086657` |
 
-Titles use the serif display face through `appDisplayFont`; body text follows
-the owner's font-style preference through `appFont`, and tool detail uses the
-monospaced face through `appCodeFont`. Capsule buttons come in three weights
-(filled teal, hairline, quiet) in `A2Controls.swift`.
+Type follows design-system type revision 2 (`VeetType.swift`). A view names
+one of seven roles with `.veetType(_:weight:)`, never a point size or a raw
+text style, and only the 400, 500 and 600 weights exist; `VeetTypeTests` fails
+on any view under `Views/` that sets a literal size, a raw text style or bold.
+
+| Role | Use | Mac | iPad | iPhone |
+| --- | --- | --- | --- | --- |
+| `display` | conversation and page titles, serif | 24 | 26 (scales as Title) | Title |
+| `title` | headings inside content and sheets, 600 | 17 | Title 3 | Title 3 |
+| `body` | transcript prose and the composer | 15 | Body | Body |
+| `ui` | sidebar rows, buttons, fields, segments | 13 | Subheadline | Body |
+| `dense` | tables, header at 600 | 13 | Subheadline | Subheadline |
+| `meta` | counts, times, tool lines, help text | 12 | Footnote | Footnote |
+| `label` | section labels, 600 | 11 | Caption | Footnote |
+
+The Mac sizes are fixed; the iPhone and iPad roles scale with Dynamic Type.
+`.veetMono()` sets the work ledger and code in SF Mono at the meta size, and
+`.veetIcon(_:)` sizes symbols to the row icon (15, 18 or 20 points).
+`.transcriptBody()` marks the transcript, where the body role follows the
+owner's face and size. Gaps come from one scale, `VeetSpace` (4, 8, 12, 16, 24,
+32, 48), and row, control and gutter sizes from `A2Metrics`.
+
+Every sidebar row uses `SidebarRow`: a fixed icon column, the title in the ui
+role, and a trailing slot in the meta role, so chats, folders, schedules,
+History and Needs you titles start at one x. Section labels align with the icon
+column; New folder is a + beside the Folders label, and New chat a teal compose
+button beside the sidebar's search, which filters rows by title. A
+conversation's move and delete actions replace the trailing slot on hover and
+sit in its context menu, where nothing hovers. Copy and Select Text show on
+hover on the Mac and iPad (a tap shows them on an iPad without a pointer); the
+iPhone keeps them visible, since a long-press menu would take the gesture text
+selection uses (ADR-0122). A conversation opens at its latest turn, and its
+title reaches the toolbar only once the display title has scrolled away.
+
+Capsule buttons come in three weights (filled teal, hairline, quiet) in
+`A2Controls.swift`.
+
+A change the server has confirmed is announced with a toast
+(`ToastCenter`, drawn by `A2Toast.swift`): one short sentence in an ink
+capsule at the bottom centre of the window or sheet, read out by VoiceOver.
+A confirmation leaves after 2.2 seconds. Where the server can reverse the
+change, the toast offers Undo, stays six seconds, holds while the pointer or
+keyboard focus rests on it, and on success says what was restored; Undo is
+also a VoiceOver action on the toast. Only one toast shows at a time, in the
+topmost window or sheet, and a newer one replaces it. A failure never toasts:
+its error stays beside the control that failed. Toasts confirm memory review
+and deletion, Email's Handled (with Undo, through the reversible attention
+command), a merge or keep-separate answer to a possible duplicate, persona
+saves, and accepted or declined persona suggestions.
 
 Chat is the first surface drawn with these tokens: the sidebar on `paperDeep`
 with a "Needs you" group ahead of Recent, folders and Scheduled; answers on bare
@@ -144,7 +212,14 @@ list slides over the conversation from the leading edge. Email follows (see
 People" below), and Persona, Settings and Connect complete the set: the
 persona's entries as a card of hairline rows of fields, a server conflict and
 each nomination from memory in an amber-edged card with Affirm as the filled
-capsule and Decline as a quiet one. `HairlineDivider`,
+capsule and Decline as a quiet one. With a server that has them (ADR-0226),
+Persona leads with Voice, the Lean towards chips (Brief, Warm, Direct, Formal,
+Playful; up to three, Formal and Playful replacing each other) and How that
+sounds, an example reply the server generates from the unsaved voice and labels
+"Example — generated, not saved" (or a labelled illustration of the chips when
+it cannot); each entry under What Veetbot assumes has an on/off switch and says
+when the memory it came from has changed; and Boundaries lists the active
+rules the server reports, each enforced by a named policy rule or setting. `HairlineDivider`,
 `FilterPillButtonStyle`, the `a2Field`, `a2List` and `a2Card` modifiers, and
 the reading-page pieces `A2SectionHeading`, `A2KindLabel`, `A2RecordGroup`,
 `A2Quote`, `A2EmptyState` and `A2SheetHeader` join the shared controls for the
@@ -232,7 +307,15 @@ connection retries. If the server reports `active_run_exists`, the UI attaches
 to the named run and does not queue a second message. A waiting user's answer is
 routed to run input with the displayed question identifier. Stop requests use
 the run-cancel route. The native composer uses padded multiline input; Return
-sends its contents, while Command-Return inserts a newline.
+sends its contents, while Command-Return inserts a newline. The composer floats
+over the end of the transcript, which keeps the composer's measured height free
+below its last row. While the owner reads at the end, a growing answer is
+followed so its newest line stays above the composer; an answer taller than the
+view stops with its beginning at the top, and scrolling away while it streams
+leaves the view alone until the owner returns to the end. The same holds when
+a conversation opens on such an answer or one arrives whole, as a scheduled
+report does: the view shows its beginning below the toolbar, and keeps it there
+while rows above it change height, until the owner scrolls.
 
 Files can be attached to a message (ADR-0120): dropped on the conversation or
 the message field on Mac and iPad, or chosen with the paperclip from Files on
@@ -421,7 +504,10 @@ counts only, never conversation content. When a conversation opens blank, read
 them on that Mac with
 `/usr/bin/log show --last 1h --predicate 'subsystem == "com.veetbot.apple" AND category == "conversation"'`;
 a settled line with rows but no content height means the transcript failed to
-draw state it holds.
+draw state it holds. That is how the blank weekday briefing was found: on
+2026-10-19 it settled at two rows and 208 points of content in a 991-point
+window, about a fifth of its real height, and drew nothing. The transcript is
+therefore laid out eagerly rather than in a lazy stack.
 
 ## Agent activity and artifacts
 
@@ -496,20 +582,44 @@ Memory opens from the toolbar (on iOS, from the More menu) with two
 collections; the server mounts its routes when `AGENT_MEMORY_API_ENABLED=1`.
 **Memories** lists the principal's governed beliefs with status and
 type filters and a flag toggle that shows only memories needing review; every
-email-derived memory arrives flagged. A memory's Review menu offers Mark
-reviewed, Not true, Not relevant here, and Delete memory, and a row can be
-swiped to delete after a confirmation (ADR-0117, under `memory.write`). A
-deleted statement does not form again; its original messages stay at their
-source.
+email-derived memory arrives flagged. On the Mac the sheet has three columns:
+a group sidebar on deep paper (Review: Needs review; Browse: All memories, each
+belief type and the People directory; Maintenance: Synthesis), the list, and
+the detail; it replaces the collection picker and the review and type
+filters, and each memory group shows its number from the counts route
+(ADR-0224); an older server leaves the numbers off. A flagged memory asks "Is
+this right?" in an amber-edged card with Looks right (the `dismiss` outcome) as
+the filled capsule and Fix the wording, Not true and Not relevant here as quiet
+ones; the Review menu offers the same with Edit wording for any live memory and
+Delete memory, and a row can be swiped to delete after a confirmation (ADR-0117,
+under `memory.write`). Fix the wording and Edit wording open one sheet: saving
+supersedes the memory with the owner's words through the `changed` review
+outcome, the detail then shows the new memory, and the earlier wording stays on
+the server as history and does not form again (ADR-0224). Under "Where this came
+from" the detail lists up to five cited sources: the owner's own words as a
+quote, and an email, text, call, schedule or tool source by where it came from,
+never its text. A deleted statement does not form again; its original messages
+stay at their source.
 
 **People** (Milestone 28, under `people.read` and `people.write`) lists the
-people the owner knows or writes to (ADR-0121), with Pinned and Needs review
-collections. Needs review holds people known only by a name or role and each
-possible duplicate, answered with Merge or Not the same (ADR-0125). A person's
-profile shows names and contact details, relationships, a history timeline
-that includes email summaries (ADR-0126), open threads, and facts with Inspect
-evidence and correction actions; Manage person holds Repair identity and
-Forget person. Import history analyses selected chats or mail accounts under a
+people the owner knows or writes to (ADR-0121) in the A2 sections: Needs you
+(the server's review filter: people known only by a name or role), Recent (the
+server's newest-interaction order), Everyone and Pinned, then Possible
+duplicates (each pair answered with Merge or Keep separate, ADR-0125) and All
+identities. The collection picker shows each number from `GET /v1/people/counts`
+(ADR-0227); an older server leaves them off. Needs you also lists the replies
+the owner owes someone that are overdue or due within fourteen days, earliest
+first: such a row reads "Needs you · Reply about the lease · due Friday" with
+Done and Not needed beneath it, which send the existing commitment correction;
+a person waiting to be identified reads "Needs you · Who is this?". Recent rows
+say when the last contact was. A person's profile leads with Ask Veetbot about the
+person, then Email and Call when a current address or number is known: each
+opens Chat with a request naming the person, so sending keeps its confirmation
+and a call its card (a number from People never counts as the owner's own,
+ADR-0213). It shows names and contact details, relationships, a history
+timeline that includes email summaries (ADR-0126), open threads, and facts
+with Inspect evidence and correction actions; Manage person holds Merge with
+another entry (a previewed merge), Repair identity and Forget person. Import history analyses selected chats or mail accounts under a
 date range, record limit and spending cap; see
 [People operations](people-operations.md).
 
@@ -526,10 +636,23 @@ surface cards, the schedule's instruction on a deep-paper block, and a flagged
 memory's reason in an amber-edged card. On the Mac the Schedules sheet keeps
 its index beside the detail column, as the Memory sheet does. The synthesis journal keeps its list
 with teal text for its actions. A person's profile keeps its sections and
-actions: Prepare for a conversation is the filled capsule, Pin and Repair
-identity hairline capsules, Rename and Forget person quiet ones. The Review
-menu, swipe-to-delete, the Mac collection picker and every People journey keep
-their controls; only the drawing changed.
+actions: Ask Veetbot is the filled capsule, Email, Call and Pin hairline
+capsules, Rename quiet; Manage person holds Merge with another entry, Repair
+identity and Forget person. The Review
+menu, swipe-to-delete and every People journey keep their controls.
+
+Schedules (ADR-0225) can be created and run from the app. New schedule opens a
+sheet where the owner describes the work in plain words; once typing pauses,
+the server reads it (`POST /v1/schedules/drafts`) and the sheet shows "Veetbot
+understood: <cadence> · first run <time>" before anything is saved, and Create
+posts the server's own definition with an idempotency key. A schedule's page
+offers Run now (a one-off run that leaves the cadence alone, under
+`schedule.run`), Pause or Resume (Pause's toast offers Undo), and Stop behind an
+inline confirmation, which cancels future runs and keeps the record in Recent
+History for thirty days; it is never called Delete. A Delivery group holds
+"Only notify when something needs you" and the per-run spending limit, and
+Recent runs lists the latest occurrences with their outcome and Open report in
+Chat, which closes the sheet and opens that conversation.
 
 ## Milestone 26 client modes
 
@@ -566,8 +689,11 @@ The inbox keeps search, Important / Other mail and account filtering in a compac
 header above the thread list, without a repeated title or introductory copy.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560
 points while retaining at least 360 points for reading. Its width and selected
-thread survive Chat / Email switching. Compact iPhone navigation and regular
-iPad navigation retain their platform layouts.
+thread survive Chat / Email switching. The width the owner drags the divider to
+is kept on this Mac (`veetbot.email.inboxWidth`) and restored at the next
+launch; a window too narrow for it squeezes the inbox without replacing the
+remembered width. Compact iPhone navigation and regular iPad navigation retain
+their platform layouts.
 Rows follow the A2 Email reference: a Handled circle leads each row (empty
 while the conversation is in the Inbox, a filled teal check once Gmail has
 archived it, the same reversible label change under the same Archive in Gmail
@@ -585,14 +711,24 @@ default text size. Larger accessibility text can expand rows naturally.
 
 Thread detail opens with the subject in the display face and "sender · date"
 under it, with the Archive in Gmail capsule and the thread menu on the line
-above. Veetbot's gist sits behind a two-point teal rule with the state line and
+above. On a compact iPhone, where the thread is pushed, Archive (as an icon)
+and the thread menu join the back button in a paper navigation bar instead,
+so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
 its reason; the messages follow as prose, each under its sender's line and
 parted by hairlines, with View in People and Message details kept beside the
 sender. A "Teach Veetbot" card on `paperDeep` opens into the same scoped
 feedback (thread, person, kind of content; Important / Less important; reply
-need) and reports what was applied with Undo. The reply is "Your reply, drafted
-by Veetbot": the envelope and body share one surface box behind a strong
-hairline, Review & Send is the filled capsule and Draft options the quiet one.
+need) and reports what was applied with Undo. The reply opens with "Your reply"
+in the display face and its save state at the trailing edge. From, To and the
+folded Cc, Bcc and subject are hairline-parted rows above the body in one
+surface well behind a strong hairline, whose shapes take no clicks. Anything
+the draft waits on (new mail in the thread, an unknown send status, a pending
+approval, an edit from another device) is one amber-ruled card that names the
+decision with its action beside it; a save refused because another device
+edited the draft shows only that card, never the refusal as a second error.
+Review & Send is the filled capsule; Draft
+options is a quiet icon menu at the trailing edge, and Refine with Veetbot
+folds its field and button into one row.
 The bottom bar keeps Discuss in Chat and the reply shortcut on the material
 edge. The Email learning, Draft history, Review & Send and unsubscribe sheets
 share `EmailSheetHeader` (a display-face title and a quiet way out); the
@@ -629,9 +765,9 @@ and initially open when copy recipients are present. Draft options collect save,
 history, writing-example endorsement and discard. Review & Send remains the
 primary composer action and opens a separate, scrollable exact-message review.
 Native interaction coverage checks the five-row inbox, divider dragging and
-width preservation across mode changes, the reply shortcut, optional feedback,
-recipient-field discovery and separation of Chat and Email toolbar actions in
-light and dark appearance. Email draws on the A2 tokens: paper behind the
+width preservation across mode changes and relaunch, the reply shortcut,
+optional feedback, recipient-field discovery and separation of Chat and Email
+toolbar actions in light and dark appearance. Email draws on the A2 tokens: paper behind the
 list and the reading column, teal for the gist rule and draft states, amber
 for attention, and filled capsules that keep contrasting text.
 
@@ -680,8 +816,13 @@ also exercises compact navigation through a DEBUG-only launch-time size-class
 override; ordinary launches retain the system's size class. Shared-state and
 foreground checks also execute the backend's shared-profile/context and bounded
 refresh-admission regressions. These checks need full Xcode and both simulator
-families, but no database or live mailbox. An unavailable Apple lane is skipped
-by pytest and remains an unpassed active gate in the gate report.
+families, but no database or live mailbox. The Mac journeys run inside the
+local Tart VM described under Build and connect, through
+`tests/native_mac_vm.py`, so they never take over the desktop; setting
+`VEETBOT_NATIVE_MAC_ON_HOST=1` runs them on the host instead. Without the VM the
+check still runs the simulator journeys and then skips. An unavailable Apple
+lane is skipped by pytest and remains an unpassed active gate in the gate
+report.
 
 ## Subscriptions
 
@@ -743,7 +884,9 @@ executable native unsubscribe gate check. This integration-marked bridge runs
 the real `EmailSubscriptionModelTests`, `EmailSubscriptionsViewModelTests` and
 `EmailSubscriptionViewStructureTests` Swift suites, plus the named spam cases
 in `EmailArchiveModelTests` and `EmailViewModelTests`, and verifies each case
-reported passing. It needs full Xcode but no simulator, database or live
+reported passing. It also runs the Subscriptions and spam journeys on Mac,
+iPhone and iPad, the Mac ones inside the local Tart VM as for the Email checks
+above. It needs full Xcode and both simulator families but no database or live
 mailbox, and an unavailable Apple lane is skipped by pytest and remains an
 unpassed active gate in the gate report.
 

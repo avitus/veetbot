@@ -155,6 +155,36 @@ async def test_budget_capped() -> None:
     assert classes["persona"] == {"region": "A", "max_items": 30, "max_tokens": 2000}
 
 
+async def test_the_item_cap_counts_entries_not_tone_lines() -> None:
+    """ADR-0226: the framing, voice and trait lines are not entries.
+
+    Thirty short entries with a voice and three traits fit the thirty-item cap;
+    the token cap still covers every rendered byte.
+    """
+
+    from agent_core.domain.persona import PersonaTrait
+
+    planner, factory = await _harness()
+    async with factory() as uow:
+        await uow.personas.append_version(
+            _document(
+                tuple(
+                    PersonaEntry(text=f"Truth {index}.", source=PersonaEntrySource.USER_EDIT)
+                    for index in range(30)
+                ),
+                version=1,
+            ).model_copy(
+                update={
+                    "voice": "Plain and calm.",
+                    "traits": (PersonaTrait.BRIEF, PersonaTrait.WARM, PersonaTrait.DIRECT),
+                }
+            ),
+            expected_version=0,
+        )
+    plan = await planner.plan(session(), agent(), principal(), _MODEL)
+    assert plan.persona_version == 1
+
+
 async def test_trust_labeled() -> None:
     """The persona row renders at trusted configuration and a
     nominated-but-unaffirmed statement never renders in it."""

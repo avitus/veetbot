@@ -105,17 +105,18 @@ class RejectionKind(StrEnum):
 
 
 class MemoryReviewOutcome(StrEnum):
-    """What the owner decided about a belief flagged for review (ADR-0117).
+    """What the owner decided about a belief (ADR-0117, ADR-0224).
 
     ``dismiss`` clears the flag and changes nothing else; ``untrue`` and
-    ``not_here`` are the existing rejection kinds of the same name. A belief
-    that was true but changed needs replacement text and is not a review
-    outcome.
+    ``not_here`` are the existing rejection kinds of the same name. ``changed``
+    carries the owner's replacement text and supersedes the belief with a new
+    one; it never edits a statement in place.
     """
 
     DISMISS = "dismiss"
     UNTRUE = "untrue"
     NOT_HERE = "not_here"
+    CHANGED = "changed"
 
 
 class RecallProfile(StrEnum):

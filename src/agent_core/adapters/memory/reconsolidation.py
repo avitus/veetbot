@@ -1258,6 +1258,26 @@ class InMemoryReconsolidationStore:
                 excluded=sum(not ok for _, ok in checks),
             )
 
+    async def selectable_sources(
+        self, principal: Principal, sources: tuple[SourceVersion, ...], now: datetime
+    ) -> tuple[SourceVersion, ...]:
+        if len(sources) > 32:
+            raise ValueError("At most 32 source candidates may be checked")
+        if self._evidence is None:
+            return ()
+        async with (
+            self._transaction.owner((principal.tenant_id, principal.principal_id)),
+            self._evidence.people.lock(principal),
+        ):
+            originals = tuple(
+                [
+                    (self._memories._records[source.belief_id], source)
+                    for source in sources
+                    if await self._valid(principal, source, now)
+                ]
+            )
+            return await self._evidence.selectable_sources(principal, originals, now)
+
     async def neighbors(
         self, principal: Principal, source: SourceVersion, now: datetime
     ) -> tuple[SourceVersion, ...]:

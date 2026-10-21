@@ -31,6 +31,10 @@ class PersonView(EntityView):
     state: Literal["provisional", "active", "merged"]
     pinned: bool
     merged_into: UUID | None
+    # ADR-0227. Required without a default: a response built from a person the
+    # directory did not enrich fails loudly instead of reporting "never".
+    last_interaction_at: AwareDatetime | None
+    next_thread: "CommitmentView | None"
 
 
 class IdentifierView(EntityView):
@@ -84,6 +88,15 @@ class CommitmentView(EntityView):
     due_precision: Literal["instant", "day", "month", "year", "unknown"] = "unknown"
     source_timezone: SourceTimezone = None
     unresolved: bool
+
+
+class PeopleCountsView(Projection):
+    everyone: int
+    needs_review: int
+    possible_duplicates: int
+    open_threads: int | None
+    needs_you: int
+    counted_at: AwareDatetime
 
 
 class MergeSuggestionView(Projection):

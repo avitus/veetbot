@@ -315,7 +315,57 @@ import Testing
     }
     /// People lists everyone known or written to; Needs review is the server's
     /// own filter rather than every provisional person (ADR-0121).
-    @Test(arguments: PeopleCollection.allCases) func eachCollectionSendsItsDirectoryQuery(collection: PeopleCollection) async throws {
+    /// The A2 directory (MagicPath keen-earth-6102): Needs you, Recent and
+    /// Everyone, then Pinned; Possible duplicates and All identities are
+    /// maintenance. Needs you is the server's review filter (ADR-0121).
+    @Test func theSectionsFollowTheDesign() {
+        #expect(PeopleCollection.allCases.map(\.rawValue) == [
+            "Needs you", "Recent", "Everyone", "Pinned", "Possible duplicates", "All identities",
+        ])
+        #expect(PeopleCollection.allCases.filter(\.isMaintenance) == [.duplicates, .all])
+    }
+
+    /// Recent is the server's own interaction order over everyone.
+    @Test func recentAsksForTheInteractionOrder() async throws {
+        let lock = NSLock()
+        var queries: [[URLQueryItem]] = []
+        let client = try makePeopleClient { request in
+            if request.url?.path == "/v1/people" {
+                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                lock.withLock { queries.append(query) }
+            }
+            return (200, #"{"items":[],"next_cursor":null}"#)
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        await model.selectCollection(.recent)
+        let sent = try #require(lock.withLock { queries.last })
+        #expect(sent.contains(URLQueryItem(name: "sort", value: "recent")))
+        #expect(sent.filter { $0.name == "state" }.compactMap(\.value) == ["active", "provisional"])
+        await model.selectCollection(.people)
+        let everyone = try #require(lock.withLock { queries.last })
+        #expect(everyone.contains(URLQueryItem(name: "sort", value: "id")))
+    }
+
+    /// Possible duplicates is its own page: it reads the suggestions and no directory page.
+    @Test func possibleDuplicatesReadOnlyTheSuggestions() async throws {
+        let sourceID = UUID(), targetID = UUID(), suggestionID = UUID()
+        let lock = NSLock()
+        var paths: [String] = []
+        let client = try makePeopleClient { request in
+            lock.withLock { paths.append(request.url?.path ?? "") }
+            if request.url?.path == "/v1/people/merge-suggestions" {
+                return (200, "{\"items\":[\(suggestionJSON(suggestionID, source: sourceID, target: targetID))],\"next_cursor\":null}")
+            }
+            return (200, #"{"items":[],"next_cursor":null}"#)
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        await model.selectCollection(.duplicates)
+        #expect(model.suggestions.map(\.id) == [suggestionID])
+        #expect(model.items.isEmpty)
+        #expect(lock.withLock { paths } == ["/v1/people/merge-suggestions"])
+    }
+
+    @Test(arguments: PeopleCollection.allCases.filter { $0 != .duplicates }) func eachCollectionSendsItsDirectoryQuery(collection: PeopleCollection) async throws {
         let lock = NSLock()
         var queries: [[URLQueryItem]] = []
         let client = try makePeopleClient { request in
@@ -330,7 +380,7 @@ import Testing
         if collection == .people { await model.reload() } else { await model.selectCollection(collection) }
         let sent = try #require(lock.withLock { queries.last })
         let states = sent.filter { $0.name == "state" }.compactMap(\.value)
-        #expect(states == (collection == .people || collection == .pinned ? ["active", "provisional"] : []))
+        #expect(states == ([.people, .pinned, .recent].contains(collection) ? ["active", "provisional"] : []))
         #expect(sent.contains(URLQueryItem(name: "review", value: "true")) == (collection == .review))
         #expect(sent.contains(URLQueryItem(name: "pinned", value: "true")) == (collection == .pinned))
     }
@@ -493,7 +543,7 @@ import Testing
         #expect(lock.withLock { Set(writes).count } == 1)
     }
 
-    /// Needs review asks about possible duplicates; an answer sends the exact revision.
+    /// Possible duplicates asks about each pair; an answer sends the exact revision.
     @Test func needsReviewListsMergeSuggestionsAndAnswersThem() async throws {
         let sourceID = UUID(), targetID = UUID(), suggestionID = UUID(), sessionID = UUID()
         let lock = NSLock()
@@ -513,13 +563,15 @@ import Testing
                 return (200, #"{"items":[],"next_cursor":null}"#)
             }
         }
-        let model = PeopleViewModel(makeAPIClient: { client })
-        await model.selectCollection(.review)
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = PeopleViewModel(makeAPIClient: { client }, toasts: toasts)
+        await model.selectCollection(.duplicates)
         #expect(model.suggestions.map(\.id) == [suggestionID])
         #expect(model.suggestions.first?.explanation == "Same first name and your family name")
         let suggestion = try #require(model.suggestions.first)
         await model.resolveSuggestion(suggestion, decision: "merge")
         #expect(model.suggestions.isEmpty)
+        #expect(toasts.current?.text == "Merged.")
         let body = lock.withLock { answered }
         #expect(body["decision"] as? String == "merge")
         #expect(body["expected_revision"] as? Int == 1)
@@ -582,6 +634,143 @@ import Testing
         #expect(lock.withLock { writes } == 1)
         #expect(model.errorMessage == nil)
     }
+}
+
+// MARK: ADR-0227
+
+@Suite(.serialized) @MainActor struct PeopleDirectoryAttentionTests {
+    /// Needs you is the owed replies due soon, earliest first, then the people
+    /// waiting to be identified; each row says why it is there.
+    @Test func needsYouListsOwedThreadsBeforeTheReviewSet() async throws {
+        let owed = UUID(), unknown = UUID(), stale = UUID()
+        let lock = NSLock()
+        var queries: [[URLQueryItem]] = []
+        let now = Date()
+        let client = try makePeopleClient { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            if request.url?.path == "/v1/people" { lock.withLock { queries.append(query) } }
+            if query.contains(URLQueryItem(name: "open_threads", value: "true")) {
+                // A server without the filter would ignore it; a row without a
+                // thread is never shown as owed.
+                return (200, "{\"items\":[\(threadPersonJSON(owed, due: now.addingTimeInterval(-86_400))),\(personJSON(stale))],\"next_cursor\":null}")
+            }
+            return (200, "{\"items\":[\(personJSON(unknown))],\"next_cursor\":null}")
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        await model.selectCollection(.review)
+
+        #expect(model.items.map(\.id) == [owed, unknown])
+        let threads = try #require(lock.withLock { queries.first })
+        #expect(threads.contains(URLQueryItem(name: "open_threads", value: "true")))
+        #expect(threads.contains(URLQueryItem(name: "sort", value: "id")))
+        #expect(!threads.contains { $0.name == "review" || $0.name == "state" })
+        #expect(model.attentionLine(for: model.items[0], now: now) == "Needs you · Reply about the lease · overdue")
+        #expect(model.attentionLine(for: model.items[1], now: now) == "Needs you · Who is this?")
+    }
+
+    @Test func aThreadSaysWhenItIsDue() throws {
+        let calendar = Calendar.current
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 9)))
+        func line(_ days: Int) throws -> String? {
+            let due = try #require(calendar.date(byAdding: .day, value: days, to: now))
+            return PeopleViewModel.dueText(due, now: now, calendar: calendar)
+        }
+        #expect(try line(-2) == "overdue")
+        #expect(try line(0) == "due today")
+        #expect(try line(1) == "due tomorrow")
+        #expect(try line(3) == "due Friday")
+        #expect(try line(10) == "due Oct 30")
+    }
+
+    @Test func recentRowsSayWhenTheLastContactWas() throws {
+        let calendar = Calendar.current
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 9)))
+        func line(_ days: Int) throws -> String {
+            let at = try #require(calendar.date(byAdding: .day, value: -days, to: now))
+            return PeopleViewModel.lastContactText(at, now: now, calendar: calendar)
+        }
+        #expect(try line(0) == "Last contact today")
+        #expect(try line(1) == "Last contact yesterday")
+        #expect(try line(3) == "Last contact 3 days ago")
+        #expect(try line(40) == "Last contact Sep 10")
+    }
+
+    @Test func countsFillTheSidebarAndAnOlderServerLeavesThemBlank() async throws {
+        let lock = NSLock()
+        var available = true
+        let client = try makePeopleClient { request in
+            if request.url?.path == "/v1/people/counts" {
+                guard lock.withLock({ available }) else {
+                    return (400, #"{"error":{"code":"malformed_request","message":"The request body or parameters are malformed: path.person_id.","details":{},"request_id":"r"}}"#)
+                }
+                return (200, #"{"everyone":42,"needs_review":3,"possible_duplicates":2,"open_threads":1,"needs_you":4,"counted_at":"2026-10-20T15:00:00Z"}"#)
+            }
+            return (200, #"{"items":[],"next_cursor":null}"#)
+        }
+        let model = PeopleViewModel(makeAPIClient: { client })
+        await model.loadCounts()
+        #expect(model.count(for: .review) == 4)
+        #expect(model.count(for: .people) == 42)
+        #expect(model.count(for: .duplicates) == 2)
+        #expect(model.count(for: .recent) == nil)
+        lock.withLock { available = false }
+        await model.loadCounts()
+        #expect(model.count(for: .people) == nil)
+        #expect(model.errorMessage == nil)
+    }
+
+    /// Done on a Needs you thread is the existing commitment correction.
+    @Test func markingAThreadDoneCorrectsTheCommitment() async throws {
+        let personID = UUID(), factID = UUID(), edgeID = UUID(), sessionID = UUID()
+        let lock = NSLock()
+        var corrections: [[String: Any]] = []
+        let fact = """
+        {"id":"\(factID)","subject":"Maya","statement":"I promised to reply about the lease","belief_type":"fact","claim_kind":"project_fact","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"general","portability":"contextual","authority":"user","sensitivity":"sensitive","confidence":1,"corroboration_count":1,"flagged_for_review":false,"conflicts_with":[],"source_session_id":"\(sessionID)","source_event_ids":[1],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@11","origin_scopes":[],"valid_from":"2026-08-01T00:00:00Z","last_evidence_at":"2026-08-01T00:00:00Z","last_reinforced_at":"2026-08-01T00:00:00Z","created_at":"2026-08-01T00:00:00Z","updated_at":"2026-08-01T00:00:00Z"}
+        """
+        let thread = commitmentJSON(edgeID, belief: factID, person: personID, due: Date())
+        let client = try makePeopleClient { request in
+            switch request.url?.path {
+            case "/v1/sessions":
+                return (200, "{\"id\":\"\(sessionID)\",\"status\":\"ACTIVE\",\"agent_id\":\"test\",\"agent_version\":\"1\",\"metadata\":{},\"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\"}")
+            case "/v1/people/\(personID)/corrections":
+                let body = try JSONSerialization.jsonObject(with: request.peopleBodyData!) as! [String: Any]
+                lock.withLock { corrections.append(body) }
+                return (200, #"{"person_revision":2,"belief":null,"removed":false}"#)
+            case "/v1/people/\(personID)":
+                return (200, """
+                {"person":\(personJSON(personID)),"aliases":[],"relationships":[],"history":[],"commitments":[\(thread)],"facts":[\(fact)],"fact_revisions":{"\(factID.uuidString.lowercased())":7},"truncated":false,"coverage":"Recorded evidence only"}
+                """)
+            default:
+                return (200, #"{"items":[],"next_cursor":null}"#)
+            }
+        }
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = PeopleViewModel(makeAPIClient: { client }, toasts: toasts)
+        let person = try JSONDecoder.server.decode(
+            PersonView.self, from: Data(threadPersonJSON(personID, due: Date(), commitment: edgeID, belief: factID).utf8)
+        )
+        await model.resolveThread(of: person, state: "completed")
+
+        let body = try #require(lock.withLock { corrections.first })
+        #expect(body["operation"] as? String == "changed")
+        #expect(body["belief_id"] as? String == factID.uuidString)
+        #expect(body["expected_position"] as? Int == 7)
+        let projection = try #require(body["projection"] as? [String: Any])
+        #expect(projection["kind"] as? String == "commitment")
+        #expect(projection["state"] as? String == "completed")
+        #expect(projection["id"] as? String == edgeID.uuidString)
+        #expect(toasts.current?.text == "Marked done.")
+        #expect(model.errorMessage == nil)
+    }
+}
+
+private func commitmentJSON(_ id: UUID, belief: UUID, person: UUID, due: Date) -> String {
+    let stamp = ISO8601DateFormatter().string(from: due)
+    return "{\"id\":\"\(id)\",\"revision\":1,\"belief_id\":\"\(belief)\",\"debtor\":{\"kind\":\"owner\"},\"beneficiary\":{\"kind\":\"person\",\"id\":\"\(person)\"},\"description\":\"Reply about the lease\",\"state\":\"open\",\"due_at\":\"\(stamp)\",\"due_precision\":\"day\",\"support_ids\":[]}"
+}
+
+private func threadPersonJSON(_ id: UUID, due: Date, commitment: UUID = UUID(), belief: UUID = UUID()) -> String {
+    "{\"id\":\"\(id)\",\"revision\":1,\"display_name\":\"Maya\",\"state\":\"active\",\"pinned\":false,\"sensitivity\":\"sensitive\",\"support_ids\":[],\"last_interaction_at\":null,\"next_thread\":\(commitmentJSON(commitment, belief: belief, person: id, due: due))}"
 }
 
 private func suggestionJSON(_ id: UUID, source: UUID, target: UUID, state: String = "open") -> String {

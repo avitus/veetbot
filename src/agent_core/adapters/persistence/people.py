@@ -353,6 +353,48 @@ class InMemoryPeopleStore:
     async def watermark(self, principal: Principal) -> int:
         return self._positions.get((principal.tenant_id, principal.principal_id), 0)
 
+    async def _recent_times(
+        self,
+        owner: Principal,
+        ceiling: Sensitivity,
+        known_at: datetime | None,
+        as_of: datetime | None,
+    ) -> dict[UUID, datetime]:
+        """The newest visible dated interaction per referenced person: the recent sort key."""
+        recent: dict[UUID, datetime] = {}
+        for key in self._records:
+            if key[:2] != (owner.tenant_id, owner.principal_id):
+                continue
+            interaction = await self.get(owner, key[2], ceiling=ceiling, known_at=known_at)
+            if (
+                not isinstance(interaction, PeopleInteraction)
+                or interaction.occurred_at is None
+                or interaction.superseded_by is not None
+            ):
+                continue
+            if as_of and interaction.occurred_at > as_of:
+                continue
+            for person_id in referenced_people(interaction):
+                recent[person_id] = max(
+                    recent.get(person_id, interaction.occurred_at), interaction.occurred_at
+                )
+        return recent
+
+    async def last_interactions(
+        self,
+        owner: Principal,
+        person_ids: Sequence[UUID],
+        *,
+        ceiling: Sensitivity,
+        known_at: datetime | None = None,
+        as_of: datetime | None = None,
+    ) -> dict[UUID, datetime]:
+        wanted = set(person_ids)
+        if not wanted:
+            return {}
+        recent = await self._recent_times(owner, ceiling, known_at, as_of)
+        return {person_id: at for person_id, at in recent.items() if person_id in wanted}
+
     async def query(self, query: PeopleQuery) -> list[PeopleRecord]:
         query = PeopleQuery.model_validate(query.model_dump())
         owner = Principal(
@@ -447,24 +489,9 @@ class InMemoryPeopleStore:
         distinct_seen: set[tuple[object, ...]] = set()
         recent: dict[UUID, datetime] = {}
         if query.sort == "recent":
-            for key in self._records:
-                if key[:2] != (owner.tenant_id, owner.principal_id):
-                    continue
-                interaction = await self.get(
-                    owner, key[2], ceiling=query.sensitivity_ceiling, known_at=query.known_at
-                )
-                if (
-                    not isinstance(interaction, PeopleInteraction)
-                    or interaction.occurred_at is None
-                    or interaction.superseded_by is not None
-                ):
-                    continue
-                if query.as_of and interaction.occurred_at > query.as_of:
-                    continue
-                for person_id in referenced_people(interaction):
-                    recent[person_id] = max(
-                        recent.get(person_id, interaction.occurred_at), interaction.occurred_at
-                    )
+            recent = await self._recent_times(
+                owner, query.sensitivity_ceiling, query.known_at, query.as_of
+            )
         for tenant, principal, record_id in sorted(self._records, key=lambda key: key[2]):
             if tenant != owner.tenant_id or principal != owner.principal_id:
                 continue
@@ -1378,6 +1405,54 @@ class PostgresPeopleStore:
         )
         return int(value or 0)
 
+    def _recent_times(
+        self,
+        owner: Principal,
+        ceiling: Sensitivity,
+        known_at: datetime | None,
+        as_of: datetime | None,
+    ) -> Select[tuple[UUID, datetime]]:
+        """The newest visible dated interaction per referenced person: the recent sort key."""
+        interactions = self._query(owner, ceiling, known_at).where(
+            PeopleRevisionRow.kind == "interaction",
+            PeopleRevisionRow.payload["occurred_at"].astext.is_not(None),
+            PeopleRevisionRow.payload["superseded_by"].astext.is_(None),
+        )
+        if as_of is not None:
+            interactions = interactions.where(PeopleRevisionRow.event_at <= as_of)
+        visible = interactions.subquery("visible_interactions")
+        return (
+            select(PeopleLinkRow.target_id, func.max(visible.c.event_at).label("recent_at"))
+            .join(
+                visible,
+                (PeopleLinkRow.entity_id == visible.c.entity_id)
+                & (PeopleLinkRow.revision == visible.c.revision)
+                & (PeopleLinkRow.tenant_id == visible.c.tenant_id)
+                & (PeopleLinkRow.principal_id == visible.c.principal_id),
+            )
+            .where(PeopleLinkRow.role == "person")
+            .group_by(PeopleLinkRow.target_id)
+        )
+
+    async def last_interactions(
+        self,
+        owner: Principal,
+        person_ids: Sequence[UUID],
+        *,
+        ceiling: Sensitivity,
+        known_at: datetime | None = None,
+        as_of: datetime | None = None,
+    ) -> dict[UUID, datetime]:
+        wanted = sorted(set(person_ids))
+        if not wanted:
+            return {}
+        await self._prepare_read()
+        recent = self._recent_times(owner, ceiling, known_at, as_of).subquery("recent_people")
+        rows = await self._session.execute(
+            select(recent.c.target_id, recent.c.recent_at).where(recent.c.target_id.in_(wanted))
+        )
+        return {target: at for target, at in rows.all() if at is not None}
+
     async def query(self, query: PeopleQuery) -> list[PeopleRecord]:
         await self._prepare_read()
         query = PeopleQuery.model_validate(query.model_dump())
@@ -1710,27 +1785,9 @@ class PostgresPeopleStore:
             else [PeopleRevisionRow.entity_id]
         )
         if query.sort == "recent":
-            interactions = self._query(owner, query.sensitivity_ceiling, query.known_at).where(
-                PeopleRevisionRow.kind == "interaction",
-                PeopleRevisionRow.payload["occurred_at"].astext.is_not(None),
-                PeopleRevisionRow.payload["superseded_by"].astext.is_(None),
-            )
-            if query.as_of is not None:
-                interactions = interactions.where(PeopleRevisionRow.event_at <= query.as_of)
-            visible = interactions.subquery("visible_interactions")
-            recent = (
-                select(PeopleLinkRow.target_id, func.max(visible.c.event_at).label("recent_at"))
-                .join(
-                    visible,
-                    (PeopleLinkRow.entity_id == visible.c.entity_id)
-                    & (PeopleLinkRow.revision == visible.c.revision)
-                    & (PeopleLinkRow.tenant_id == visible.c.tenant_id)
-                    & (PeopleLinkRow.principal_id == visible.c.principal_id),
-                )
-                .where(PeopleLinkRow.role == "person")
-                .group_by(PeopleLinkRow.target_id)
-                .cte("recent_people")
-            )
+            recent = self._recent_times(
+                owner, query.sensitivity_ceiling, query.known_at, query.as_of
+            ).cte("recent_people")
             statement = statement.outerjoin(
                 recent, recent.c.target_id == PeopleRevisionRow.entity_id
             )

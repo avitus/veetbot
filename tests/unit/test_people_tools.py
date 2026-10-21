@@ -176,3 +176,58 @@ def test_provider_schema_compacts_empty_defaults_without_changing_validation() -
             jsonschema.Draft202012Validator(spec.input_schema).is_valid(instance)
         )
     assert spec.model_dump(mode="json") == original
+
+
+async def test_people_tools_report_a_non_person_id_as_a_tool_failure() -> None:
+    """A recalled interaction or relationship ref passed as a person id must not
+    end the run: production run 986ae19f died with NotFoundError this way."""
+    from agent_core.application.people_context import PeopleContextService
+    from agent_core.domain.tools import ToolFailureKind
+    from agent_core.memory.retrieval import HybridMemoryRetriever
+    from agent_core.tools.messages import message_for
+    from tests.contract.support import ids
+
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    person = Person(id=uuid4(), display_name="Cheryl", **common)
+    interaction = PeopleInteraction(
+        id=uuid4(),
+        channel="chat",
+        interaction_kind="meeting",
+        attribution="owner_reported",
+        direction="reported",
+        summary="Hair appointment",
+        participants=[InteractionParticipant(person_id=person.id, role="participant")],
+        **common,
+    )
+    async with factory() as uow:
+        await uow.runs.create(run())
+        await uow.people.put(person, expected_revision=0)
+        await uow.people.put(interaction, expected_revision=0)
+    context = replace(tool_context(), principal=owner)
+    context_tool = PeopleContextTool(
+        PeopleContextService(factory, HybridMemoryRetriever(factory, clock, ids(), owner))
+    )
+    history_tool = PeopleHistoryTool(PublicPeopleService(factory, clock))
+    for result in (
+        await context_tool.execute(
+            {
+                "text": "Cheryl",
+                "scope": "user",
+                "person_ids": [str(person.id), str(interaction.id)],
+            },
+            context,
+        ),
+        await history_tool.execute({"person_id": str(interaction.id)}, context),
+    ):
+        assert not result.ok
+        assert result.failure is not None
+        assert result.failure.kind is ToolFailureKind.NOT_FOUND
+        assert result.failure.reason_code == "people.not_found"
+    assert "people.search" in message_for("people.not_found")

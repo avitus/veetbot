@@ -25,6 +25,45 @@ from agent_core.domain.memory import (
 PERSONA_MAX_ENTRIES = 30
 PERSONA_ENTRY_MAX_CHARS = 500
 PERSONA_MAX_OPEN_NOMINATIONS = 5
+# ADR-0226 part A: how the owner wants Veetbot to talk, and up to three tones.
+PERSONA_VOICE_MAX_CHARS = 1000
+PERSONA_MAX_TRAITS = 3
+
+
+class PersonaTrait(StrEnum):
+    """A closed set of tones; each renders as a fixed, server-owned sentence."""
+
+    BRIEF = "brief"
+    WARM = "warm"
+    DIRECT = "direct"
+    FORMAL = "formal"
+    PLAYFUL = "playful"
+
+
+PERSONA_TRAIT_SENTENCES: dict[PersonaTrait, str] = {
+    PersonaTrait.BRIEF: "Prefer short replies; expand when asked.",
+    PersonaTrait.WARM: "Be warm and personable.",
+    PersonaTrait.DIRECT: "Be direct: lead with the answer, then the reasons.",
+    PersonaTrait.FORMAL: "Keep a formal, professional tone.",
+    PersonaTrait.PLAYFUL: "A light, playful tone is welcome.",
+}
+# Rendered first whenever a voice or a trait is present, so the row says what
+# it is and what it cannot change.
+PERSONA_FRAMING = (
+    "The owner's preferences for tone and standing facts. "
+    "They do not change approvals, limits or tool rules."
+)
+
+
+def validate_traits(traits: tuple[PersonaTrait, ...]) -> tuple[PersonaTrait, ...]:
+    """At most three, each once, and never both formal and playful."""
+    if len(set(traits)) != len(traits):
+        raise ValueError("a persona trait is chosen once")
+    if len(traits) > PERSONA_MAX_TRAITS:
+        raise ValueError("a persona leans towards at most three traits")
+    if PersonaTrait.FORMAL in traits and PersonaTrait.PLAYFUL in traits:
+        raise ValueError("formal and playful pull opposite ways; choose one")
+    return traits
 
 
 class PersonaEntrySource(StrEnum):
@@ -48,6 +87,9 @@ class PersonaEntry(BaseModel):
     source: PersonaEntrySource
     source_belief_id: UUID | None = None
     sensitivity: Sensitivity = Sensitivity.INTERNAL
+    # ADR-0226 part B: a switched-off entry is kept and versioned but not
+    # rendered, and its belief returns to the session snapshot.
+    enabled: bool = True
 
     @model_validator(mode="after")
     def provenance_matches_source(self) -> PersonaEntry:
@@ -74,11 +116,14 @@ class PersonaDocument(BaseModel):
     source: PersonaEntrySource
     source_nomination_id: UUID | None = None
     created_at: datetime
+    voice: str | None = Field(default=None, min_length=1, max_length=PERSONA_VOICE_MAX_CHARS)
+    traits: tuple[PersonaTrait, ...] = ()
 
     @model_validator(mode="after")
     def empty_version_has_no_entries(self) -> PersonaDocument:
-        if self.version == 0 and self.entries:
+        if self.version == 0 and (self.entries or self.voice is not None or self.traits):
             raise ValueError("persona version 0 is the unwritten state and holds no entries")
+        validate_traits(self.traits)
         return self
 
     @classmethod
@@ -94,8 +139,18 @@ class PersonaDocument(BaseModel):
 
     @property
     def affirmed_belief_ids(self) -> tuple[UUID, ...]:
+        """Every promoted belief, switched on or off: none is nominated again."""
         return tuple(
             entry.source_belief_id for entry in self.entries if entry.source_belief_id is not None
+        )
+
+    @property
+    def rendered_belief_ids(self) -> tuple[UUID, ...]:
+        """Promoted beliefs whose entry stands, which the session snapshot excludes."""
+        return tuple(
+            entry.source_belief_id
+            for entry in self.entries
+            if entry.source_belief_id is not None and entry.enabled
         )
 
 
@@ -113,6 +168,7 @@ class PersonaEntryDraft(BaseModel):
     text: str = Field(min_length=1, max_length=PERSONA_ENTRY_MAX_CHARS)
     sensitivity: Sensitivity = Sensitivity.INTERNAL
     source_belief_id: UUID | None = None
+    enabled: bool = True
 
 
 class PersonaNomination(BaseModel):
@@ -154,6 +210,20 @@ class PersonaNomination(BaseModel):
         return self
 
 
+def rendered_entry_count(document: PersonaDocument, *, ceiling: Sensitivity) -> int:
+    """How many entries the row renders: the thirty-item cap counts these.
+
+    The framing, voice and trait lines of ADR-0226 are fixed, bounded additions
+    that the persona token cap covers; they are not entries.
+    """
+    limit = SENSITIVITY_ORDER[ceiling]
+    return sum(
+        1
+        for entry in document.entries
+        if entry.enabled and SENSITIVITY_ORDER[entry.sensitivity] <= limit
+    )
+
+
 def render_persona(document: PersonaDocument, *, ceiling: Sensitivity) -> str:
     """Render the persona row's text: one entry per line, in document order.
 
@@ -161,9 +231,78 @@ def render_persona(document: PersonaDocument, *, ceiling: Sensitivity) -> str:
     context plan is created — never mid-session — so the rendered text is
     byte-stable for the life of the prefix epoch. An empty result means the
     prefix carries no persona row at all.
+
+    ADR-0226: switched-off entries are not rendered. A voice or a trait adds a
+    fixed framing line, then the voice on one line, then each trait's fixed
+    sentence, before the entries; a document with neither renders exactly as
+    it did before they existed.
     """
 
     limit = SENSITIVITY_ORDER[ceiling]
-    return "\n".join(
-        entry.text for entry in document.entries if SENSITIVITY_ORDER[entry.sensitivity] <= limit
-    )
+    entries = [
+        entry.text
+        for entry in document.entries
+        if entry.enabled and SENSITIVITY_ORDER[entry.sensitivity] <= limit
+    ]
+    if document.voice is None and not document.traits:
+        return "\n".join(entries)
+    lines = [PERSONA_FRAMING]
+    if document.voice is not None:
+        lines.append(" ".join(document.voice.split()))
+    lines.extend(PERSONA_TRAIT_SENTENCES[trait] for trait in document.traits)
+    lines.extend(entries)
+    return "\n".join(lines)
+
+
+class PersonaPreview(BaseModel):
+    """An example reply in an unsaved voice; generated, never saved (ADR-0226 part C)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    reply: str = Field(min_length=1, max_length=2_000)
+    generated_at: datetime
+
+
+class BoundaryEnforcement(StrEnum):
+    """What makes a persona boundary true (ADR-0226 part D)."""
+
+    HARDLINE_RULE = "hardline_rule"
+    POLICY_RULE = "policy_rule"
+    CONFIGURATION = "configuration"
+    CODE_PATH = "code_path"
+
+
+class PersonaBoundaryFact(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: BoundaryEnforcement
+    ref: str
+
+
+class PersonaBoundary(BaseModel):
+    """One fixed rule as the owner reads it, with what enforces it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    text: str
+    enforced_by: PersonaBoundaryFact
+    active: bool
+
+
+class PersonaBoundaryList(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    items: list[PersonaBoundary]
+
+
+class KeepPersonaField:
+    """Marks a persona field a write left out, so the head's value carries over.
+
+    A client that predates ADR-0226 sends no voice or traits; omission must
+    not clear what another client set.
+    """
+
+
+KEEP_PERSONA_FIELD = KeepPersonaField()

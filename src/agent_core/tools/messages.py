@@ -168,6 +168,10 @@ TOOL_MESSAGES: dict[str, str] = {
         "Not performed. The run's tool-call budget is exhausted; "
         "answer from the evidence already gathered."
     ),
+    "people.not_found": (
+        "No visible person or source has that id. Use a person id returned by "
+        "people.search and a source_id from a people.history item."
+    ),
 }
 
 

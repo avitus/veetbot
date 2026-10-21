@@ -355,6 +355,17 @@ That matching cannot be by belief id, because re-derivation mints new ids. A
 matching is by content similarity on the same comparison the resolver already uses for
 duplicates. A belief that a user has rejected does not come back with a new id.
 
+**"Was true, has changed" is one transaction, and the replacement cites the owner.**
+The CLI, the People correction route and, since ADR-0224, the memory browser's
+`changed` review outcome reach the same write. One unit of work appends a
+`memory.owner_correction` event carrying the replacement text, applies the
+`CHANGED` rejection, forms the replacement at user authority citing that event
+rather than the superseded belief's evidence (which never said the new words), and
+links `superseded_by` and the rejection's `replacement_id`. A failure anywhere leaves
+the original belief live and no rejection recorded. The HTTP door also refuses, before
+any write, text that is unchanged, secret- or injection-shaped, or the hash of a
+statement the owner already deleted or rejected, so an edit cannot resurrect it.
+
 **Rejecting is not deleting.** "This is wrong" is a correction and keeps its content
 for audit and replay. "Delete this" is a data-removal request: the belief record is
 removed and the tombstone retains a **content hash** rather than the statement, so

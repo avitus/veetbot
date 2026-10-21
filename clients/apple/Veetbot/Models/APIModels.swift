@@ -776,11 +776,14 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
     public let timezone: String?
     public let misfireGraceSeconds: Int
     public let maxConsecutiveFailures: Int
+    /// `every_report` or `attention_only` (ADR-0225 part D); absent on servers
+    /// that predate the preference, which hides the switch.
+    public let notify: String?
     public let createdByPrincipalID: String
     public let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case revision, title, instruction, limits, cadence, timezone
+        case revision, title, instruction, limits, cadence, timezone, notify
         case scheduleID = "schedule_id"
         case agentID = "agent_id"
         case agentVersion = "agent_version"
@@ -798,6 +801,58 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
 public struct ScheduleRecordView: Codable, Equatable, Sendable {
     public let schedule: ScheduleIdentityView
     public let revision: ScheduleRevisionView
+}
+
+/// A schedule read from plain words (`POST /v1/schedules/drafts`, ADR-0225
+/// part B). The definition is kept as the server's JSON so creation posts it
+/// back unchanged; the title and cadence are read out of it for display.
+public struct ScheduleDraftView: Decodable, Equatable, Sendable {
+    public let status: String
+    public let reason: String?
+    public let definition: JSONValue?
+    public let nextFireAt: [Date]
+
+    enum CodingKeys: String, CodingKey {
+        case status, reason, definition
+        case nextFireAt = "next_fire_at"
+    }
+
+    public var title: String? { definition?.objectValue?["title"]?.stringValue }
+
+    public var cadence: ScheduleCadenceView? {
+        guard let cadence = definition?.objectValue?["cadence"],
+              let data = try? JSONEncoder.server.encode(cadence)
+        else { return nil }
+        return try? JSONDecoder.server.decode(ScheduleCadenceView.self, from: data)
+    }
+}
+
+/// One entry of a schedule's occurrence ledger (`/v1/schedules/{id}/occurrences`).
+/// Only a materialized occurrence links a session and run, and erasure clears
+/// both links.
+public struct ScheduleOccurrenceView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let scheduleID: UUID
+    public let nominalFireAt: Date
+    public let disposition: String
+    public let sessionID: UUID?
+    public let runID: UUID?
+    public let reasonCode: String?
+    public let materializedAt: Date?
+    public let linksErasedAt: Date?
+    /// `SCHEDULED` or `MANUAL` (Run now, ADR-0225 part C); absent on older servers.
+    public let trigger: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, disposition, trigger
+        case scheduleID = "schedule_id"
+        case nominalFireAt = "nominal_fire_at"
+        case sessionID = "session_id"
+        case runID = "run_id"
+        case reasonCode = "reason_code"
+        case materializedAt = "materialized_at"
+        case linksErasedAt = "links_erased_at"
+    }
 }
 
 public enum MemoryStatusKind: String, Codable, CaseIterable, Sendable {
@@ -851,6 +906,63 @@ public enum MemoryReviewOutcome: String, Codable, CaseIterable, Sendable {
     case dismiss
     case untrue
     case notHere = "not_here"
+}
+
+/// One source a belief cites (ADR-0224 part B). Only the owner's own words
+/// carry an `excerpt`; every other source is a reference, and one that is gone
+/// says so through `withheld`.
+public struct MemoryEvidenceItem: Codable, Equatable, Identifiable, Sendable {
+    public let sourceKind: String
+    public let sessionID: UUID
+    public let eventSequence: Int
+    public let evidenceAt: Date?
+    public let excerpt: String?
+    public let withheld: String?
+
+    public var id: Int { eventSequence }
+
+    enum CodingKeys: String, CodingKey {
+        case sourceKind = "source_kind"
+        case sessionID = "session_id"
+        case eventSequence = "event_sequence"
+        case evidenceAt = "evidence_at"
+        case excerpt, withheld
+    }
+
+    /// Where the evidence came from, in the owner's words.
+    public var sourceLine: String {
+        if withheld == "erased" { return "Source removed" }
+        switch sourceKind {
+        case "owner": return "You said"
+        case "email": return "From an email"
+        case "sms": return "From a text message"
+        case "call": return "From a call"
+        case "scheduler": return "From a schedule"
+        case "tool": return "From a tool result"
+        default: return "From a conversation"
+        }
+    }
+}
+
+struct MemoryEvidencePage: Codable, Sendable {
+    let items: [MemoryEvidenceItem]
+}
+
+/// The memory browser's sidebar numbers (ADR-0224 part C).
+public struct MemoryCountsView: Codable, Equatable, Sendable {
+    public let live: Int
+    public let flagged: Int
+    public let byStatus: [String: Int]
+    public let byType: [String: Int]
+    public let synthesis: Int?
+    public let countedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case live, flagged, synthesis
+        case byStatus = "by_status"
+        case byType = "by_type"
+        case countedAt = "counted_at"
+    }
 }
 
 public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
@@ -1036,17 +1148,36 @@ public struct PersonaEntryView: Codable, Equatable, Sendable {
     public let source: String
     public let sourceBeliefID: UUID?
     public let sensitivity: String
+    /// ADR-0226: a switched-off entry is kept but not used; absent on older servers.
+    public let enabled: Bool
+    /// The affirmed entry's source belief is no longer live.
+    public let stale: Bool
 
     enum CodingKeys: String, CodingKey {
-        case text, source, sensitivity
+        case text, source, sensitivity, enabled, stale
         case sourceBeliefID = "source_belief_id"
     }
 
-    public init(text: String, source: String, sourceBeliefID: UUID?, sensitivity: String) {
+    public init(
+        text: String, source: String, sourceBeliefID: UUID?, sensitivity: String,
+        enabled: Bool = true, stale: Bool = false
+    ) {
         self.text = text
         self.source = source
         self.sourceBeliefID = sourceBeliefID
         self.sensitivity = sensitivity
+        self.enabled = enabled
+        self.stale = stale
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        source = try container.decode(String.self, forKey: .source)
+        sourceBeliefID = try container.decodeIfPresent(UUID.self, forKey: .sourceBeliefID)
+        sensitivity = try container.decode(String.self, forKey: .sensitivity)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        stale = try container.decodeIfPresent(Bool.self, forKey: .stale) ?? false
     }
 }
 
@@ -1057,18 +1188,61 @@ public struct PersonaView: Codable, Equatable, Sendable {
     public let entries: [PersonaEntryView]
     public let source: String
     public let createdAt: Date
+    /// ADR-0226. Both are absent on a server that predates them; `traits` is
+    /// always present on one that has them, which is how support is told.
+    public let voice: String?
+    public let traits: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case version, entries, source
+        case version, entries, source, voice, traits
         case createdAt = "created_at"
     }
 
-    public init(version: Int, entries: [PersonaEntryView], source: String, createdAt: Date) {
+    public init(
+        version: Int, entries: [PersonaEntryView], source: String, createdAt: Date,
+        voice: String? = nil, traits: [String]? = nil
+    ) {
         self.version = version
         self.entries = entries
         self.source = source
         self.createdAt = createdAt
+        self.voice = voice
+        self.traits = traits
     }
+}
+
+/// An example reply in an unsaved voice (ADR-0226 part C).
+public struct PersonaPreviewView: Codable, Equatable, Sendable {
+    public let prompt: String
+    public let reply: String
+    public let generatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case prompt, reply
+        case generatedAt = "generated_at"
+    }
+}
+
+/// One fixed rule the persona cannot change, and what enforces it (ADR-0226 part D).
+public struct PersonaBoundaryView: Codable, Equatable, Identifiable, Sendable {
+    public struct Fact: Codable, Equatable, Sendable {
+        public let kind: String
+        public let ref: String
+    }
+
+    public let id: String
+    public let text: String
+    public let enforcedBy: Fact
+    public let active: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, text, active
+        case enforcedBy = "enforced_by"
+    }
+}
+
+struct PersonaBoundaryPage: Codable, Sendable {
+    let items: [PersonaBoundaryView]
 }
 
 /// A consolidation-raised persona candidate awaiting the owner's verdict.
@@ -1102,32 +1276,88 @@ public struct UpdatePersonaEntryBody: Codable, Equatable, Sendable {
     public let text: String
     public let sensitivity: String
     public let sourceBeliefID: UUID?
+    /// Sent only when false, so an older server, which refuses the field,
+    /// still accepts every entry that is on (ADR-0226).
+    public let enabled: Bool
 
     enum CodingKeys: String, CodingKey {
-        case text, sensitivity
+        case text, sensitivity, enabled
         case sourceBeliefID = "source_belief_id"
     }
 
-    public init(text: String, sensitivity: String = "internal", sourceBeliefID: UUID? = nil) {
+    public init(
+        text: String, sensitivity: String = "internal", sourceBeliefID: UUID? = nil,
+        enabled: Bool = true
+    ) {
         self.text = text
         self.sensitivity = sensitivity
         self.sourceBeliefID = sourceBeliefID
+        self.enabled = enabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        sensitivity = try container.decode(String.self, forKey: .sensitivity)
+        sourceBeliefID = try container.decodeIfPresent(UUID.self, forKey: .sourceBeliefID)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(sensitivity, forKey: .sensitivity)
+        try container.encode(sourceBeliefID, forKey: .sourceBeliefID)
+        if !enabled { try container.encode(false, forKey: .enabled) }
     }
 }
 
-/// The guarded persona replacement request body.
+/// The guarded persona replacement request body. `tone` is sent only to a
+/// server that reported voice and traits; an omitted field keeps its value.
 public struct UpdatePersonaBody: Codable, Equatable, Sendable {
+    public struct Tone: Codable, Equatable, Sendable {
+        public let voice: String?
+        public let traits: [String]
+        public init(voice: String?, traits: [String]) {
+            self.voice = voice
+            self.traits = traits
+        }
+    }
+
     public let expectedVersion: Int
     public let entries: [UpdatePersonaEntryBody]
+    public let tone: Tone?
 
     enum CodingKeys: String, CodingKey {
         case expectedVersion = "expected_version"
-        case entries
+        case entries, voice, traits
     }
 
-    public init(expectedVersion: Int, entries: [UpdatePersonaEntryBody]) {
+    public init(expectedVersion: Int, entries: [UpdatePersonaEntryBody], tone: Tone? = nil) {
         self.expectedVersion = expectedVersion
         self.entries = entries
+        self.tone = tone
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        expectedVersion = try container.decode(Int.self, forKey: .expectedVersion)
+        entries = try container.decode([UpdatePersonaEntryBody].self, forKey: .entries)
+        if let traits = try container.decodeIfPresent([String].self, forKey: .traits) {
+            tone = Tone(voice: try container.decodeIfPresent(String.self, forKey: .voice), traits: traits)
+        } else {
+            tone = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(expectedVersion, forKey: .expectedVersion)
+        try container.encode(entries, forKey: .entries)
+        if let tone {
+            try container.encode(tone.voice, forKey: .voice)
+            try container.encode(tone.traits, forKey: .traits)
+        }
     }
 }
 

@@ -31,6 +31,10 @@ _DISPATCH_KEYS = frozenset(
     }
 )
 _VOICEMAIL_MESSAGE_CHARACTERS = 1000
+# complete_error is a post-call fault such as a failed webhook, not a failed call.
+_FAILED_STAGES = frozenset(
+    {"failed", "error", "canceled", "cancelled", "pre_queue_error", "queue_error", "call_error"}
+)
 
 
 class BlandError(Exception):
@@ -68,6 +72,18 @@ def _instant(value: object) -> str:
         return parsed.astimezone(UTC).isoformat()
     except ValueError as exc:
         raise BlandError("bland.provider_output_invalid") from exc
+
+
+def _ended_by_voicemail_detection(transcripts: object) -> bool:
+    """Bland leaves answered_by "unknown" and names the voicemail only in this closing entry."""
+    if not isinstance(transcripts, list) or not transcripts:
+        return False
+    last = transcripts[-1]
+    return (
+        isinstance(last, dict)
+        and last.get("user") == "assistant"
+        and last.get("text") == "<Call ended due to voicemail detection>"
+    )
 
 
 def _approved_voicemail(value: object) -> bool:
@@ -207,17 +223,23 @@ class BlandClient:
             transcript, transcript_complete = _text(
                 value.get("concatenated_transcript"), 16_384, credential=self._key
             )
-            raw_status = value.get("queue_status")
+            # Bland's `status` is its latest word; queue stages count only until it says completed.
+            latest = value.get("status")
+            stages = {latest} if latest == "completed" else {latest, value.get("queue_status")}
             answered = value.get("answered_by")
             status = (
                 "busy"
-                if raw_status == "busy"
+                if "busy" in stages
                 else "no_answer"
-                if raw_status in {"no-answer", "no_answer"}
+                if stages & {"no-answer", "no_answer"} or (completed and answered == "no-answer")
                 else "failed"
-                if raw_status in {"failed", "error", "canceled", "cancelled"}
+                if stages & _FAILED_STAGES
                 else "voicemail"
-                if completed and answered in {"voicemail", "machine"}
+                if completed
+                and (
+                    answered in {"voicemail", "machine"}
+                    or _ended_by_voicemail_detection(value.get("transcripts"))
+                )
                 else "completed"
                 if completed
                 else "active"

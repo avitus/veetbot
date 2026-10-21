@@ -198,7 +198,8 @@ async def test_schedule_routes_cover_lifecycle_idempotency_pagination_and_scopes
             for route in all_routes
             if isinstance(route, APIRoute) and route.path.startswith("/v1/schedules")
         ]
-        assert len(schedule_routes) == 8
+        # Eight Milestone 11 routes, the plain-words draft and Run now (ADR-0225).
+        assert len(schedule_routes) == 10
         assert {
             (method, (route.openapi_extra or {})["required_scope"])
             for route in schedule_routes
@@ -207,6 +208,7 @@ async def test_schedule_routes_cover_lifecycle_idempotency_pagination_and_scopes
             ("POST", "schedule.write"),
             ("GET", "schedule.read"),
             ("DELETE", "schedule.cancel"),
+            ("POST", "schedule.run"),
         }
 
 

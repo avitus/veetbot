@@ -66,6 +66,7 @@ public final class EmailViewModel: ObservableObject {
     @Published private var draftActionError: String?
     @Published private var threadReadError: String?
     @Published public private(set) var feedbackMessage: String?
+    private let toasts: ToastCenter
     @Published public private(set) var styleExampleMessage: String?
     @Published public private(set) var feedbackID: UUID?
     @Published public private(set) var hasMore = false
@@ -135,8 +136,10 @@ public final class EmailViewModel: ObservableObject {
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
         refreshNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init,
-        statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
+        statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+        toasts: ToastCenter? = nil
     ) {
+        self.toasts = toasts ?? .shared
         self.makeAPIClient = makeAPIClient
         self.refreshNanoseconds = refreshNanoseconds
         self.now = now
@@ -181,6 +184,8 @@ public final class EmailViewModel: ObservableObject {
     public var draftActionMessage: String? { draftActionError }
     /// A failed mail read, reported with the conversation it could not refresh.
     public var threadReadMessage: String? { threadReadError }
+    /// Says where held edits are while a stale draft waits for the owner's review of the new mail.
+    static let staleEditMessage = "Your edits are kept on this device until you confirm you've reviewed the updated thread."
     public var canReview: Bool {
         guard let draft else { return false }
         return draft.canEdit && !draft.stale && conflict == nil && !isSaving && !isPerformingAction
@@ -698,6 +703,12 @@ public final class EmailViewModel: ObservableObject {
         guard let id = id ?? draft?.id, let edit = edits[id], let api = makeAPIClient() else { return false }
         guard edit.isDirty else { return true }
         guard !isSaving, !(conflict?.id == id) else { return false }
+        // The server refuses edits to a stale draft until the owner confirms the
+        // updated thread, so hold them here instead of sending a save it must refuse.
+        if draft?.id == id, draft?.stale == true, edit.reviewedSourceRevision == nil {
+            draftActionError = Self.staleEditMessage
+            return false
+        }
         isSaving = true
         draftActionError = nil
         let connection = generation
@@ -727,8 +738,25 @@ public final class EmailViewModel: ObservableObject {
         } catch {
             guard generation == connection else { return false }
             if case HTTPTransportError.api(let failure) = error, failure.statusCode == 409,
-                let server = try? await api.emailDraft(id), generation == connection {
-                if draft?.id == id { conflict = server; draft = server }
+                let server = try? await api.emailDraft(id), generation == connection, draft?.id == id {
+                draft = server
+                // Only a newer revision is another device's edit. New mail marks the
+                // draft stale at its own revision; calling that a conflict disabled the
+                // very confirmation the server is waiting for.
+                if server.revision != edit.base.revision { conflict = server }
+                if server.stale {
+                    // The confirmation records the thread revision on screen, so show
+                    // the mail that made the draft stale before asking for it.
+                    if selectedThreadID == server.threadID { await openThread(server.threadID, refreshOnly: true) }
+                    guard generation == connection else { return false }
+                    if conflict == nil {
+                        draftActionError = Self.staleEditMessage
+                        return false
+                    }
+                }
+                // The conflict already says another device changed the draft; the
+                // refused save's own text would only repeat it as a second error.
+                if conflict?.id == id { return false }
             }
             report(error, draft: true)
             return false
@@ -951,21 +979,33 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Applies confirmed attention state while retaining open message content and unsaved draft text.
-    public func setThreadHandled(_ thread: EmailThreadView, handled: Bool) async {
-        guard let api = makeAPIClient(), !isPerformingAction else { return }
+    /// Marking a thread handled confirms with a toast whose Undo sends the
+    /// same reversible command back; the undo itself raises only its own line.
+    @discardableResult
+    public func setThreadHandled(_ thread: EmailThreadView, handled: Bool, confirms: Bool = true) async -> Bool {
+        guard let api = makeAPIClient(), !isPerformingAction else { return false }
         isPerformingAction = true
         let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
         do {
             let result = try await api.dismissEmailThread(thread, dismissed: handled, idempotencyKey: UUID().uuidString)
-            guard generation == connection else { return }
+            guard generation == connection else { return false }
             // The command returns a summary. Preserve the open messages and
             // unsaved draft, updating only server-confirmed attention state.
             if self.thread?.id == result.id, self.thread?.revision == result.revision {
                 self.thread?.dismissedRevision = result.dismissedRevision
             }
             await reload(preserveOrder: true)
-        } catch { if generation == connection { report(error, draft: selectedThreadID == thread.id) } }
+            if confirms && handled {
+                toasts.show("Marked handled.", restored: "Marked not handled.") { [weak self] in
+                    await self?.setThreadHandled(result, handled: false, confirms: false) ?? false
+                }
+            }
+            return true
+        } catch {
+            if generation == connection { report(error, draft: selectedThreadID == thread.id) }
+            return false
+        }
     }
 
     /// Requires explicit support from this thread's account and known mailbox state.

@@ -108,6 +108,11 @@ async def test_derived_boundary_validation_isolation_and_replay(
                 ({"outcome": "dismiss", "statement": "fabrication"}, {"Idempotency-Key": "x"}),
                 ({"outcome": "dismiss"}, {}),
                 ({"outcome": "dismiss"}, {"Idempotency-Key": "x" * 201}),
+                # ADR-0224: a summary's corrections belong to reconsolidation.
+                (
+                    {"outcome": "changed", "replacement_statement": "A different summary."},
+                    {"Idempotency-Key": "reword"},
+                ),
             ):
                 response = await client.post(
                     path + "/review", params={"ceiling": "internal"}, json=body, headers=headers
@@ -298,3 +303,30 @@ async def test_unavailable_summary_does_not_hide_other_browse_rows(
             assert {row["id"] for row in response.json()["items"]} == {
                 str(key) for key in operation.plan.member_ids
             }
+
+
+@pytest.mark.parametrize("kind", ["summary", "hypothesis"])
+async def test_counts_report_the_synthesis_number_only_when_asked(kind: str) -> None:
+    """ADR-0224 part C: `synthesis` counts what the derived browse would list."""
+    settings = replace(
+        memory_settings(), memory_api_enabled=True, memory_reconsolidation_api_enabled=True
+    )
+    async with build(
+        settings=settings, storage="memory", principal=owner(), clock=FixedClock(NOW)
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+        await derived_operation(cast(Factory, app.uow_factory), kind, omitted=True)
+        async with _client(app) as client:
+            listed = await client.get(
+                "/v1/memories",
+                params={"ceiling": "internal", "include_derived": True, "limit": 200},
+            )
+            derived = [row for row in listed.json()["items"] if "record_kind" in row]
+            counted = await client.get(
+                "/v1/memories/counts", params={"ceiling": "internal", "include_derived": True}
+            )
+            assert counted.status_code == 200, counted.text
+            assert counted.json()["synthesis"] == len(derived) == 1
+            plain = await client.get("/v1/memories/counts", params={"ceiling": "internal"})
+            assert plain.json()["synthesis"] is None

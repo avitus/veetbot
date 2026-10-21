@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, Field
 
@@ -26,6 +26,7 @@ from agent_core.memory.general_recall_evidence import (
     _stage,
     _unique_object,
 )
+from agent_core.memory.production_recall_trial import ProductionRecallTrial, validate_trial_window
 from agent_core.memory.recall_release_binding import (
     InputFile,
     RecallInputManifest,
@@ -34,9 +35,14 @@ from agent_core.memory.recall_release_binding import (
 )
 from agent_core.ports.determinism import Clock
 
+# ADR-0222 approves exactly this retained comparison and immutable scope, not a
+# general caller-selected sampling policy. These hashes confer no human authorship.
+APPROVED_SCOPE_SHA256 = "1202aab4a598d84ca9f049793fa14c83cdf088b713bd4efbcc0fe87aaed66bcb"
+APPROVED_OBSERVATIONS_SHA256 = "0c52e63f4d130e6a8181fa02db54ad066ddcee89185e58b7c37837acd2fe750e"
+APPROVED_ITEMS_SHA256 = "e825ed4f8fa584bc148d0001e560610b3a5db0441ae6af526a432d2533646df9"
 
-class BoundedHumanReview(ReleaseValue):
-    version: Literal["recall-owner-review-submission@1"]
+
+class _HumanReviewIdentity(ReleaseValue):
     reviewer: str = Field(min_length=2, max_length=256)
     reviewer_kind: Literal["human"]
     independent_of_implementation: Literal[True]
@@ -46,7 +52,26 @@ class BoundedHumanReview(ReleaseValue):
     observations_sha256: Digest
     review_items_sha256: Digest
     reviewed_scenarios: tuple[Identifier, ...] = Field(min_length=1, max_length=400)
+
+
+class BoundedHumanReview(_HumanReviewIdentity):
+    version: Literal["recall-owner-review-submission@1"]
     reviewed_items: tuple[Digest, ...] = Field(max_length=20000)
+
+
+class ScopedFinding(ReleaseValue):
+    verdict: Literal["acceptable", "concern", "unacceptable"]
+    notes: str = Field(max_length=10000)
+
+
+class ScopedHumanReview(_HumanReviewIdentity):
+    version: Literal["recall-owner-review-submission@2"]
+    scope_proposal_sha256: Digest
+    omitted_scenarios: tuple[Identifier, ...] = Field(max_length=400)
+    scenario_findings: dict[Identifier, ScopedFinding] = Field(min_length=1, max_length=400)
+    summary_findings: dict[str, ScopedFinding] = Field(min_length=1, max_length=5)
+    reviewed_item_groups: dict[str, tuple[Digest, ...]] = Field(min_length=4, max_length=4)
+    residual_risk_findings: str = Field(min_length=20, max_length=10000)
 
 
 class CompatibilityCheck(ReleaseValue):
@@ -79,11 +104,17 @@ class CompatibilityAssessment(ReleaseValue):
 
 
 class BoundedRecallEvidence(ReleaseValue):
-    version: Literal["recall-bounded-evidence@1"]
+    version: Literal[
+        "recall-bounded-evidence@1", "recall-bounded-evidence@2", "recall-bounded-evidence@3"
+    ]
     bundle: CheckpointReleaseBundle
     operational_gate_report: str | None = Field(default=None, max_length=2 * 1024 * 1024)
     review_items: tuple[dict[str, Any], ...] = Field(max_length=20000)
-    human_review: BoundedHumanReview
+    human_review: Annotated[
+        BoundedHumanReview | ScopedHumanReview | None, Field(discriminator="version")
+    ] = None
+    production_trial: ProductionRecallTrial | None = None
+    scope_proposal: str | None = Field(default=None, max_length=2 * 1024 * 1024)
     owner_authorization_sha256: Digest
     provenance_verification_sha256: Digest
     retained_archives: tuple[Digest, ...] = Field(min_length=1, max_length=100)
@@ -92,7 +123,9 @@ class BoundedRecallEvidence(ReleaseValue):
 
 
 class BoundedRecallManifest(ReleaseValue):
-    version: Literal["recall-bounded-admission@1"]
+    version: Literal[
+        "recall-bounded-admission@1", "recall-bounded-admission@2", "recall-bounded-admission@3"
+    ]
     deployment_build_ref: str = Field(pattern=r"^[a-f0-9]{40}$")
     evidence_sha256: Digest
     target_inputs: RecallInputManifest
@@ -121,6 +154,50 @@ def _encoded(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
+def _validate_scoped_review(
+    evidence: BoundedRecallEvidence,
+    review: ScopedHumanReview,
+    scenarios: set[str],
+    item_hashes: set[str],
+) -> None:
+    raw = evidence.scope_proposal
+    _require(
+        evidence.version == "recall-bounded-evidence@2"
+        and raw is not None
+        and _digest(raw.encode()) == APPROVED_SCOPE_SHA256
+        and review.scope_proposal_sha256 == APPROVED_SCOPE_SHA256
+        and review.observations_sha256 == APPROVED_OBSERVATIONS_SHA256
+        and review.review_items_sha256 == APPROVED_ITEMS_SHA256,
+        "scoped review does not bind the owner-approved comparison and scope",
+    )
+    assert raw is not None
+    scope = json.loads(raw, object_pairs_hook=_unique_object)
+    selected = set(scope["proposed_individual_scenarios"])
+    omitted = set(scope["omitted_required_scenarios"])
+    groups = scope["interruption_summary_groups"]
+    supplied_groups = {k: list(v) for k, v in review.reviewed_item_groups.items()}
+    flattened = [digest for group in supplied_groups.values() for digest in group]
+    findings = (*review.scenario_findings.values(), *review.summary_findings.values())
+    _require(
+        set(review.reviewed_scenarios) == selected
+        and set(review.omitted_scenarios) == omitted
+        and len(review.omitted_scenarios) == len(omitted)
+        and selected.isdisjoint(omitted)
+        and selected | omitted <= scenarios
+        and set(review.scenario_findings) == selected
+        and set(review.summary_findings) == {"cost", *groups}
+        and supplied_groups == groups
+        and set(flattened) == item_hashes
+        and len(flattened) == len(item_hashes)
+        and len(review.residual_risk_findings.strip()) >= 20
+        and all(
+            f.verdict != "unacceptable" and (f.verdict == "acceptable" or len(f.notes.strip()) >= 3)
+            for f in findings
+        ),
+        "scoped human findings omit approved cases, summaries or residual risk",
+    )
+
+
 def validate_bounded_evidence(
     evidence: BoundedRecallEvidence,
     target: RecallInputManifest,
@@ -128,7 +205,7 @@ def validate_bounded_evidence(
 ) -> dict[str, Any]:
     """Recompute benefit and require explicit findings and complete dispositions."""
     evidence = BoundedRecallEvidence.model_validate(evidence.model_dump())
-    bundle, review, compatibility = evidence.bundle, evidence.human_review, evidence.compatibility
+    bundle, compatibility = evidence.bundle, evidence.compatibility
     report = assess_bounded_comparison(
         bundle, operational_gate_report=evidence.operational_gate_report
     )
@@ -138,6 +215,38 @@ def validate_bounded_evidence(
         "original measured inputs changed",
     )
     observed = b"".join(r.model_dump_json().encode() + b"\n" for r in bundle.observations)
+    if evidence.version == "recall-bounded-evidence@3":
+        trial = evidence.production_trial
+        _require(
+            trial is not None and evidence.human_review is None and evidence.scope_proposal is None,
+            "production trial cannot substitute or invent a synthetic human review",
+        )
+        assert trial is not None
+        _require(
+            trial.authorization_sha256 == evidence.owner_authorization_sha256
+            and len(trial.instruction.strip()) >= 20
+            and trial.observations_sha256 == _digest(observed) == APPROVED_OBSERVATIONS_SHA256
+            and trial.review_items_sha256
+            == _digest(_encoded(evidence.review_items) + b"\n")
+            == APPROVED_ITEMS_SHA256
+            and max(r.observed_at for r in bundle.observations)
+            <= trial.authorized_at
+            <= clock.now(),
+            "production trial omits original failed evidence or actual owner authorization",
+        )
+    else:
+        _require(evidence.production_trial is None, "legacy admission cannot accept a trial")
+        _validate_human_findings(evidence, observed, report, clock)
+    _validate_compatibility(evidence, target, compatibility)
+    return report
+
+
+def _validate_human_findings(
+    evidence: BoundedRecallEvidence, observed: bytes, report: dict[str, Any], clock: Clock
+) -> None:
+    bundle, review = evidence.bundle, evidence.human_review
+    _require(review is not None, "human findings are required for legacy admission")
+    assert review is not None
     scenarios = {s.id: s for s in bundle.scenarios}
     difficult = {
         r.scenario_id
@@ -161,13 +270,28 @@ def validate_bounded_evidence(
         and len(review.findings.strip()) >= 20
         and review.observations_sha256 == _digest(observed)
         and review.review_items_sha256 == _digest(_encoded(evidence.review_items) + b"\n")
-        and set(review.reviewed_items) == item_hashes
-        and len(review.reviewed_items) == len(item_hashes)
         and len(set(review.reviewed_scenarios)) == len(review.reviewed_scenarios)
-        and difficult <= set(review.reviewed_scenarios) <= set(scenarios)
         and max(r.observed_at for r in bundle.observations) <= review.reviewed_at <= clock.now(),
         "human findings omit failed evidence, interruptions or uncertain charges",
     )
+    if isinstance(review, ScopedHumanReview):
+        _validate_scoped_review(evidence, review, set(scenarios), item_hashes)
+    else:
+        _require(
+            evidence.version == "recall-bounded-evidence@1"
+            and evidence.scope_proposal is None
+            and set(review.reviewed_items) == item_hashes
+            and len(review.reviewed_items) == len(item_hashes)
+            and difficult <= set(review.reviewed_scenarios) <= set(scenarios),
+            "human findings omit failed evidence, interruptions or uncertain charges",
+        )
+
+
+def _validate_compatibility(
+    evidence: BoundedRecallEvidence,
+    target: RecallInputManifest,
+    compatibility: CompatibilityAssessment,
+) -> None:
     checks = {c.id: c for c in compatibility.checks}
     _require(
         len(checks) == len(compatibility.checks)
@@ -204,7 +328,6 @@ def validate_bounded_evidence(
             and set(dependency.checks) <= checks.keys(),
             "dependency disposition or verification mismatch",
         )
-    return report
 
 
 def bind_bounded_recall(
@@ -224,6 +347,10 @@ def bind_bounded_recall(
     )
     facts = BoundedRecallEvidence.model_validate(
         json.loads(raw_evidence, object_pairs_hook=_unique_object)
+    )
+    _require(
+        binding.version.rsplit("@", 1)[1] == facts.version.rsplit("@", 1)[1],
+        "bounded admission and evidence versions differ",
     )
     required = {
         "configuration_sha256",
@@ -251,7 +378,15 @@ def bind_bounded_recall(
         "bounded target input mismatch",
     )
     validate_bounded_evidence(facts, binding.target_inputs, clock)
-    _require(facts.human_review.reviewed_at <= binding.activated_at, "activation predates review")
+    if facts.production_trial is not None:
+        validate_trial_window(
+            facts.production_trial, binding.activated_at, binding.expires_at, principal, clock
+        )
+    else:
+        assert facts.human_review is not None
+        _require(
+            facts.human_review.reviewed_at <= binding.activated_at, "activation predates review"
+        )
     revoked = False
 
     def admitted() -> bool:

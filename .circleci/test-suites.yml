@@ -1,0 +1,34 @@
+# CircleCI Smarter Testing suites (ADR-0228). Each suite is one CI job's pytest
+# partition and goes through that job's own Make target to discover and to run,
+# so the marker selection lives only in the Makefile. A test atom is a file.
+# Only the free features are configured: no run selects fewer tests than its
+# partition (docs/plan/development-toolchain.md).
+name: static
+discover: >-
+  make -s test-static PYTEST_ARGS="--collect-only -q"
+  | sed -nE 's#^(tests/[^:[:space:]]+\.py)::.*#\1#p' | sort -u
+run: >-
+  make test-static
+  PYTEST_ARGS="-o junit_family=xunit1 --junitxml=<< outputs.junit >> << test.atoms >>"
+outputs:
+  junit: test-results/static/results.xml
+---
+name: contract
+discover: >-
+  make -s test-contract PYTEST_ARGS="--collect-only -q"
+  | sed -nE 's#^(tests/[^:[:space:]]+\.py)::.*#\1#p' | sort -u
+run: >-
+  make test-contract
+  PYTEST_ARGS="-o junit_family=xunit1 --junitxml=<< outputs.junit >> << test.atoms >>"
+outputs:
+  junit: test-results/contract/results.xml
+---
+name: integration
+discover: >-
+  make -s test-integration PYTEST_ARGS="--collect-only -q"
+  | sed -nE 's#^(tests/[^:[:space:]]+\.py)::.*#\1#p' | sort -u
+run: >-
+  make test-integration
+  PYTEST_ARGS="-o junit_family=xunit1 --junitxml=<< outputs.junit >> << test.atoms >>"
+outputs:
+  junit: test-results/integration/results.xml

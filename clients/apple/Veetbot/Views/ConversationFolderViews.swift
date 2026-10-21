@@ -1,20 +1,16 @@
 import SwiftUI
 
-/// Shortcuts stay reachable even while every folder is closed.
+/// The Recent section's label, which opens and closes the shortcuts; they
+/// stay reachable even while every folder is closed.
 struct RecentChatsHeaderRow: View {
-    let count: Int
     let isExpanded: Bool
     let onToggle: () -> Void
 
     var body: some View {
-        Button(action: onToggle) {
-            SidebarDisclosureHeader(title: "Recent", count: count, isExpanded: isExpanded)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Recent chats")
-        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-        .accessibilityHint(isExpanded ? "Collapses recent chats" : "Expands recent chats")
-        .accessibilityIdentifier("sidebar.recent-chats")
+        SidebarSectionLabel(
+            title: "Recent", isExpanded: isExpanded, onToggle: onToggle,
+            toggleLabel: "Recent chats", toggleIdentifier: "sidebar.recent-chats"
+        )
     }
 }
 
@@ -38,7 +34,8 @@ enum FolderEditorRequest: Identifiable {
     }
 }
 
-/// A folder's row in the sidebar: name, count, and a chevron. Clicking or
+/// A folder's row in the sidebar: a chevron in the icon column, the name, and
+/// the count in the trailing slot. Clicking or
 /// tapping it expands or collapses the folder, and its conversations follow as
 /// ordinary rows in the same section, so folders sit as close together as
 /// conversations do. Expansion is the device's remembered state, never a list
@@ -57,7 +54,13 @@ struct FolderHeaderRow: View {
 
     var body: some View {
         Button(action: onToggle) {
-            SidebarDisclosureHeader(title: folder.name, count: count, isExpanded: isExpanded)
+            SidebarRow {
+                SidebarChevron(isExpanded: isExpanded)
+            } title: {
+                Text(folder.name)
+            } trailing: { _ in
+                Text("\(count)")
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(folder.name)
@@ -76,9 +79,10 @@ struct FolderHeaderRow: View {
     }
 }
 
-/// A schedule's row in the sidebar's Scheduled section: its most recent
-/// session's title, a count, and a chevron. It toggles like a folder row but
-/// has no context menu; the group is the scheduler's, not the owner's.
+/// A schedule's row in the sidebar's Scheduled section: a chevron, its most
+/// recent session's title, and its count beside any New report dot. It
+/// toggles like a folder row but has no context menu; the group is the
+/// scheduler's, not the owner's.
 struct ScheduleGroupHeaderRow: View {
     let group: ScheduledConversationGroup
     let isExpanded: Bool
@@ -87,10 +91,16 @@ struct ScheduleGroupHeaderRow: View {
 
     var body: some View {
         Button(action: onToggle) {
-            SidebarDisclosureHeader(
-                title: group.title, count: group.entries.count, isExpanded: isExpanded,
-                hasUnreadReport: hasUnreadReport
-            )
+            SidebarRow {
+                SidebarChevron(isExpanded: isExpanded)
+            } title: {
+                Text(group.title)
+            } trailing: { _ in
+                HStack(spacing: VeetSpace.s2) {
+                    if hasUnreadReport { NewReportIndicator() }
+                    Text("\(group.entries.count)")
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(group.title), \(group.entries.count) scheduled conversations\(hasUnreadReport ? ", New report" : "")")
@@ -107,35 +117,43 @@ struct SuggestedFolderRow: View {
     @ObservedObject var model: ChatViewModel
     let onRename: () -> Void
 
+    @ViewBuilder
+    private var answers: some View {
+        Button("Accept") {
+            Task { await model.acceptFolderProposal(proposal.id) }
+        }
+        .buttonStyle(PrimaryCapsuleButtonStyle())
+        .fixedSize()
+        .accessibilityIdentifier("sidebar.proposal.accept.\(proposal.id.uuidString)")
+        if proposal.kind == .newFolder {
+            Button("Rename…", action: onRename)
+                .buttonStyle(SecondaryCapsuleButtonStyle())
+                .fixedSize()
+                .accessibilityHint("Accepts the folder under a name you choose")
+                .accessibilityIdentifier("sidebar.proposal.rename.\(proposal.id.uuidString)")
+        }
+        Button("Decline") {
+            Task { await model.declineFolderProposal(proposal.id) }
+        }
+        .buttonStyle(QuietCapsuleButtonStyle())
+        .fixedSize()
+        .accessibilityIdentifier("sidebar.proposal.decline.\(proposal.id.uuidString)")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: VeetSpace.s2) {
             Text(proposal.headline)
-                .appFont(.headline)
+                .veetType(.ui, weight: .medium)
                 .fixedSize(horizontal: false, vertical: true)
             FolderProposalMembers(proposal: proposal)
-            HStack(spacing: 8) {
-                Button("Accept") {
-                    Task { await model.acceptFolderProposal(proposal.id) }
-                }
-                .buttonStyle(PrimaryCapsuleButtonStyle())
-                .accessibilityIdentifier("sidebar.proposal.accept.\(proposal.id.uuidString)")
-                if proposal.kind == .newFolder {
-                    Button("Rename…", action: onRename)
-                        .buttonStyle(SecondaryCapsuleButtonStyle())
-                        .accessibilityHint("Accepts the folder under a name you choose")
-                        .accessibilityIdentifier("sidebar.proposal.rename.\(proposal.id.uuidString)")
-                }
-                Button("Decline") {
-                    Task { await model.declineFolderProposal(proposal.id) }
-                }
-                .buttonStyle(QuietCapsuleButtonStyle())
-                .accessibilityIdentifier("sidebar.proposal.decline.\(proposal.id.uuidString)")
+            // The three answers share a line where the sidebar is wide enough
+            // and stack where it is not, so no label is cut short.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: VeetSpace.s2) { answers }
+                VStack(alignment: .leading, spacing: VeetSpace.s1) { answers }
             }
-            #if os(macOS)
-            .controlSize(.small)
-            #endif
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, VeetSpace.s1)
         .disabled(model.pendingFolderProposalIDs.contains(proposal.id))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sidebar.proposal.\(proposal.id.uuidString)")
@@ -149,9 +167,9 @@ struct FolderProposalMembers: View {
 
     var body: some View {
         if !proposal.memberTitles.isEmpty || proposal.unresolvedMemberCount > 0 {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: VeetSpace.s1) {
                 ForEach(Array(proposal.memberTitles.enumerated()), id: \.offset) { _, title in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
                         Image(systemName: "bubble.left")
                             .foregroundColor(AppTheme.inkSoft)
                             .accessibilityHidden(true)
@@ -159,7 +177,7 @@ struct FolderProposalMembers: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .appFont(.subheadline)
+                    .veetType(.meta)
                 }
                 if proposal.unresolvedMemberCount > 0 {
                     Text(
@@ -167,7 +185,7 @@ struct FolderProposalMembers: View {
                             ? "1 more conversation"
                             : "\(proposal.unresolvedMemberCount) more conversations"
                     )
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                 }
             }
@@ -198,9 +216,9 @@ struct FolderNameSheet: View {
 
     #if os(macOS)
     private var content: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: VeetSpace.s3) {
             Text(title)
-                .appFont(.headline)
+                .veetType(.title)
             TextField("Folder name", text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if canSave { save() } }
@@ -210,7 +228,7 @@ struct FolderNameSheet: View {
             }
             if let proposal = acceptedProposal {
                 Text("Files these conversations:")
-                    .appFont(.subheadline)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                 FolderProposalMembers(proposal: proposal)
             }
@@ -224,9 +242,9 @@ struct FolderNameSheet: View {
                     .disabled(!canSave)
                     .accessibilityIdentifier("folder.save")
             }
-            .padding(.top, 4)
+            .padding(.top, VeetSpace.s1)
         }
-        .padding(20)
+        .padding(VeetSpace.s5)
         .sheetFrame(minWidth: 320, macMinWidth: 380, idealWidth: 420, minHeight: 0)
     }
     #else
@@ -265,7 +283,7 @@ struct FolderNameSheet: View {
 
     private func errorText(_ error: String) -> some View {
         Text(error)
-            .foregroundColor(.red)
+            .foregroundColor(AppTheme.red)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("folder.error")
     }
@@ -341,35 +359,5 @@ struct NewReportIndicator: View {
             .fill(AppTheme.teal)
             .frame(width: 7, height: 7)
             .accessibilityLabel("New report")
-    }
-}
-
-/// A sidebar group's header: a small chevron, the name in the section voice,
-/// and the count in faint ink. Tapping the row opens or closes the group.
-struct SidebarDisclosureHeader: View {
-    let title: String
-    let count: Int
-    let isExpanded: Bool
-    var hasUnreadReport = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(AppTheme.inkSoft)
-                .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .frame(width: 12)
-            Text(title)
-                .appFont(.caption, weight: .semibold)
-                .foregroundColor(AppTheme.inkSoft)
-                .lineLimit(1)
-            if hasUnreadReport { NewReportIndicator() }
-            Spacer()
-            Text("\(count)")
-                .appFont(.caption)
-                .foregroundColor(AppTheme.inkFaint)
-        }
-        .frame(minHeight: 24)
-        .contentShape(Rectangle())
     }
 }

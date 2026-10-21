@@ -382,16 +382,27 @@ if [[ -n "$WEBSITE_ARCHIVE" ]]; then
   WEBSITE_PROMOTED=1
 fi
 
-sudo install -m 0644 "$CANDIDATE_CONFIG" "$AVAILABLE"
-sudo ln -sfn "$AVAILABLE" "$ENABLED"
-
-if ! sudo nginx -t; then
-  fail "nginx -t rejected the candidate; the previous configuration was restored"
+# Nginx on this host also serves other applications, and a reload restarts
+# them. Reload only when the enabled site would change; documentation and
+# website releases are served through their symlinks and need no reload.
+CONFIG_CHANGED=1
+if [[ "$ENABLED_TARGET" == "$AVAILABLE" ]] \
+  && cmp -s -- "$CANDIDATE_CONFIG" "$AVAILABLE"; then
+  CONFIG_CHANGED=0
 fi
 
-RELOAD_ATTEMPTED=1
-if ! sudo systemctl reload "$NGINX_SERVICE"; then
-  fail "Nginx reload failed; the previous configuration was restored"
+if (( CONFIG_CHANGED == 1 )); then
+  sudo install -m 0644 "$CANDIDATE_CONFIG" "$AVAILABLE"
+  sudo ln -sfn "$AVAILABLE" "$ENABLED"
+
+  if ! sudo nginx -t; then
+    fail "nginx -t rejected the candidate; the previous configuration was restored"
+  fi
+
+  RELOAD_ATTEMPTED=1
+  if ! sudo systemctl reload "$NGINX_SERVICE"; then
+    fail "Nginx reload failed; the previous configuration was restored"
+  fi
 fi
 ROLLBACK_PENDING=0
 trap - EXIT
@@ -427,7 +438,11 @@ if [[ -n "$WEBSITE_ARCHIVE" ]]; then
   done < <(find "$WEBSITE_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -print | sort -r)
 fi
 
-printf 'Nginx configuration installed, validated, and reloaded.\n'
+if (( CONFIG_CHANGED == 1 )); then
+  printf 'Nginx configuration installed, validated, and reloaded.\n'
+else
+  printf 'Nginx configuration unchanged; reload skipped.\n'
+fi
 if [[ -n "$DOCS_ARCHIVE" ]]; then
   printf 'Documentation release published: %s\n' "$DOCS_RELEASE"
   if (( pruned > 0 )); then

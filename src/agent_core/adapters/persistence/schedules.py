@@ -32,6 +32,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.schedules import (
     OccurrenceCursor,
     OccurrenceDisposition,
+    OccurrenceTrigger,
     Schedule,
     ScheduleCursor,
     ScheduledRunLink,
@@ -243,8 +244,18 @@ class InMemoryScheduleRepository:
             raise NotFoundError("schedule not found")
         if (occurrence.schedule_id, occurrence.schedule_revision) not in self._revisions:
             raise NotFoundError("schedule revision not found")
+        if occurrence.manual_request_key is not None:
+            for existing in self._occurrences.values():
+                if (
+                    existing.schedule_id == occurrence.schedule_id
+                    and existing.manual_request_key == occurrence.manual_request_key
+                ):
+                    if existing == occurrence:
+                        return existing
+                    raise ConflictError("manual occurrence key already used")
         key = (occurrence.schedule_id, occurrence.nominal_fire_at)
-        existing_id = self._occurrence_keys.get(key)
+        scheduled = occurrence.trigger is OccurrenceTrigger.SCHEDULED
+        existing_id = self._occurrence_keys.get(key) if scheduled else None
         if existing_id is not None:
             existing = self._occurrences[existing_id]
             if existing == occurrence:
@@ -253,7 +264,8 @@ class InMemoryScheduleRepository:
         if occurrence.id in self._occurrences:
             raise ConflictError("schedule occurrence identifier already exists")
         self._occurrences[occurrence.id] = occurrence
-        self._occurrence_keys[key] = occurrence.id
+        if scheduled:
+            self._occurrence_keys[key] = occurrence.id
         return occurrence
 
     async def get_occurrence_by_nominal(
@@ -271,7 +283,9 @@ class InMemoryScheduleRepository:
         values = [
             occurrence
             for occurrence in self._occurrences.values()
-            if occurrence.schedule_id == schedule_id and occurrence.nominal_fire_at <= boundary
+            if occurrence.schedule_id == schedule_id
+            and occurrence.trigger is OccurrenceTrigger.SCHEDULED
+            and occurrence.nominal_fire_at <= boundary
         ]
         if not values:
             return None
@@ -290,6 +304,22 @@ class InMemoryScheduleRepository:
             return None
         return max(values, key=lambda value: (value.nominal_fire_at, value.id)).model_copy(
             deep=True
+        )
+
+    async def manual_occurrence(self, schedule_id: UUID, key: str) -> ScheduleOccurrence | None:
+        for occurrence in self._occurrences.values():
+            if occurrence.schedule_id == schedule_id and occurrence.manual_request_key == key:
+                return occurrence.model_copy(deep=True)
+        return None
+
+    async def count_manual_since(self, schedule_id: UUID, since: datetime) -> int:
+        boundary = _aware_utc(since)
+        return sum(
+            1
+            for occurrence in self._occurrences.values()
+            if occurrence.schedule_id == schedule_id
+            and occurrence.trigger is OccurrenceTrigger.MANUAL
+            and occurrence.created_at >= boundary
         )
 
     async def occurrence_by_run(self, run_id: UUID) -> ScheduledRunLink | None:
@@ -368,6 +398,12 @@ class InMemoryScheduleOccurrenceRepository:
 
     async def latest_materialized(self, schedule_id: UUID) -> ScheduleOccurrence | None:
         return await self._schedules.latest_materialized_occurrence(schedule_id)
+
+    async def get_manual(self, schedule_id: UUID, key: str) -> ScheduleOccurrence | None:
+        return await self._schedules.manual_occurrence(schedule_id, key)
+
+    async def count_manual_since(self, schedule_id: UUID, since: datetime) -> int:
+        return await self._schedules.count_manual_since(schedule_id, since)
 
     async def get_by_run(self, run_id: UUID) -> ScheduledRunLink | None:
         return await self._schedules.occurrence_by_run(run_id)
@@ -701,7 +737,14 @@ class PostgresScheduleRepository:
             await self._session.scalars(
                 select(ScheduleOccurrenceRow).where(
                     ScheduleOccurrenceRow.schedule_id == occurrence.schedule_id,
-                    ScheduleOccurrenceRow.nominal_fire_at == occurrence.nominal_fire_at,
+                    (
+                        ScheduleOccurrenceRow.manual_request_key == occurrence.manual_request_key
+                        if occurrence.manual_request_key is not None
+                        else (
+                            (ScheduleOccurrenceRow.trigger == occurrence.trigger.value)
+                            & (ScheduleOccurrenceRow.nominal_fire_at == occurrence.nominal_fire_at)
+                        )
+                    ),
                 )
             )
         ).one_or_none()
@@ -718,6 +761,7 @@ class PostgresScheduleRepository:
             await self._session.scalars(
                 select(ScheduleOccurrenceRow).where(
                     ScheduleOccurrenceRow.schedule_id == schedule_id,
+                    ScheduleOccurrenceRow.trigger == OccurrenceTrigger.SCHEDULED.value,
                     ScheduleOccurrenceRow.nominal_fire_at == _aware_utc(nominal_fire_at),
                 )
             )
@@ -732,6 +776,7 @@ class PostgresScheduleRepository:
                 select(ScheduleOccurrenceRow)
                 .where(
                     ScheduleOccurrenceRow.schedule_id == schedule_id,
+                    ScheduleOccurrenceRow.trigger == OccurrenceTrigger.SCHEDULED.value,
                     ScheduleOccurrenceRow.nominal_fire_at <= _aware_utc(instant),
                 )
                 .order_by(
@@ -759,6 +804,29 @@ class PostgresScheduleRepository:
             )
         ).one_or_none()
         return None if row is None else schedule_occurrence_to_domain(row)
+
+    async def manual_occurrence(self, schedule_id: UUID, key: str) -> ScheduleOccurrence | None:
+        row = (
+            await self._session.scalars(
+                select(ScheduleOccurrenceRow).where(
+                    ScheduleOccurrenceRow.schedule_id == schedule_id,
+                    ScheduleOccurrenceRow.manual_request_key == key,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else schedule_occurrence_to_domain(row)
+
+    async def count_manual_since(self, schedule_id: UUID, since: datetime) -> int:
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(ScheduleOccurrenceRow)
+            .where(
+                ScheduleOccurrenceRow.schedule_id == schedule_id,
+                ScheduleOccurrenceRow.trigger == OccurrenceTrigger.MANUAL.value,
+                ScheduleOccurrenceRow.created_at >= _aware_utc(since),
+            )
+        )
+        return int(count or 0)
 
     async def occurrence_by_run(self, run_id: UUID) -> ScheduledRunLink | None:
         rows = (
@@ -862,6 +930,12 @@ class PostgresScheduleOccurrenceRepository:
 
     async def latest_materialized(self, schedule_id: UUID) -> ScheduleOccurrence | None:
         return await self._schedules.latest_materialized_occurrence(schedule_id)
+
+    async def get_manual(self, schedule_id: UUID, key: str) -> ScheduleOccurrence | None:
+        return await self._schedules.manual_occurrence(schedule_id, key)
+
+    async def count_manual_since(self, schedule_id: UUID, since: datetime) -> int:
+        return await self._schedules.count_manual_since(schedule_id, since)
 
     async def get_by_run(self, run_id: UUID) -> ScheduledRunLink | None:
         return await self._schedules.occurrence_by_run(run_id)

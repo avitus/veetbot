@@ -29,13 +29,13 @@ enum PeopleMetrics {
     static let sectionSpacing: CGFloat = 22
     static let avatar: CGFloat = 56
     static let rowAvatar: CGFloat = 32
-    static let meta: Font.TextStyle = .subheadline
+    static let meta: VeetType.Role = .meta
     #else
     static let pagePadding: CGFloat = 16
     static let sectionSpacing: CGFloat = 20
     static let avatar: CGFloat = 64
     static let rowAvatar: CGFloat = 40
-    static let meta: Font.TextStyle = .footnote
+    static let meta: VeetType.Role = .meta
     #endif
     /// A readable measure for statements and summaries at any window width.
     static let readableWidth: CGFloat = 680
@@ -137,7 +137,7 @@ struct PeopleBadge: View {
         Group {
             if let systemImage { Label(text, systemImage: systemImage) } else { Text(text) }
         }
-        .appFont(PeopleMetrics.meta, weight: .medium)
+        .veetType(PeopleMetrics.meta, weight: .medium)
         .foregroundColor(tint)
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
@@ -158,13 +158,13 @@ struct PeopleCallout<Actions: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: systemImage)
-                .appFont(.title3)
+                .veetType(.title)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).appFont(.headline).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                Text(title).veetType(.ui, weight: .semibold).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
                 if let message {
-                    Text(message).appFont(.callout).foregroundColor(PeopleSurface.muted)
+                    Text(message).veetType(.ui).foregroundColor(PeopleSurface.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 PeopleActionRow { actions() }.padding(.top, 2)
@@ -208,7 +208,7 @@ struct PeopleTimelineRow<Content: View>: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 4) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .semibold))
+                    .veetIcon(.small, weight: .semibold)
                     .foregroundColor(PeopleSurface.accent)
                     .frame(width: 28, height: 28)
                     .background(Circle().fill(AppTheme.tealWash))
@@ -250,7 +250,7 @@ struct PeopleMeta: View {
 
     var body: some View {
         Text(text)
-            .appFont(PeopleMetrics.meta)
+            .veetType(PeopleMetrics.meta)
             .foregroundColor(PeopleSurface.muted)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -292,7 +292,7 @@ private struct PeopleInlineButtonLabel: View {
 
     var body: some View {
         configuration.label
-            .appFont(PeopleMetrics.meta, weight: .medium)
+            .veetType(PeopleMetrics.meta, weight: .medium)
             .foregroundColor(isEnabled ? PeopleSurface.accent : PeopleSurface.muted)
             .opacity(configuration.isPressed ? 0.55 : 1)
             .peopleTapTarget()

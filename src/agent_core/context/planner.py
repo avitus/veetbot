@@ -34,7 +34,7 @@ from agent_core.domain.messages import (
     ConversationItem,
     ResolvedModel,
 )
-from agent_core.domain.persona import render_persona
+from agent_core.domain.persona import render_persona, rendered_entry_count
 from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunKind
 from agent_core.domain.sessions import (
@@ -460,15 +460,20 @@ class EventContextPlanner:
                     if contains_injection_pattern(entry.text)
                     else entry
                     for entry in document.entries
-                )
+                ),
+                "voice": "[BLOCKED]"
+                if document.voice is not None and contains_injection_pattern(document.voice)
+                else document.voice,
             }
         )
         rendered = render_persona(screened, ceiling=Sensitivity.RESTRICTED)
         return (
             rendered,
             document.version,
-            document.affirmed_belief_ids,
-            len(rendered.splitlines()) if rendered else 0,
+            # A switched-off entry is not a standing instruction (ADR-0226), so
+            # its belief takes its place in the snapshot again.
+            document.rendered_belief_ids,
+            rendered_entry_count(screened, ceiling=Sensitivity.RESTRICTED),
         )
 
     async def _create(

@@ -53,7 +53,7 @@ import Testing
     private static func textHeight(_ text: String, width: CGFloat, lineLimit: Int?) -> CGFloat {
         NSHostingView(
             rootView: Text(verbatim: "“\(text)”")
-                .appFont(.body)
+                .veetType(.ui)
                 .lineLimit(lineLimit)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: width, alignment: .leading)

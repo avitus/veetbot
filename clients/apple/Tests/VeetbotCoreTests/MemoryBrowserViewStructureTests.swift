@@ -15,6 +15,46 @@ import AppKit
 /// misplaced identifier or a full-screen state that clobbers a populated
 /// list.
 @Suite struct MemoryBrowserViewStructureTests {
+    /// The A2 Mac design (MagicPath coolly-breeze-5701): a sidebar with
+    /// Review, Browse and Maintenance groups beside the list and the detail,
+    /// each memory group with its number from the counts route (ADR-0224).
+    @Test
+    func testTheMacSheetGroupsMemoryInASidebar() throws {
+        let source = try memoryBrowserViewSource()
+
+        #expect(source.contains("private var groupSidebar: some View"))
+        #expect(source.contains("groupHeading(\"Review\")"))
+        #expect(source.contains("groupHeading(\"Browse\")"))
+        #expect(source.contains("groupHeading(\"Maintenance\")"))
+        #expect(source.contains(".accessibilityIdentifier(\"memory.group.\\(group.id)\")"))
+        #expect(source.contains("NavigationSplitView {\n            groupSidebar"))
+        #expect(source.contains(".task { await model.loadCounts() }"))
+        #expect(source.contains(".accessibilityIdentifier(\"memory.group.\\(group.id).count\")"))
+    }
+
+    @Test
+    func testAFlaggedMemoryAsksIsThisRightWithLooksRightFirst() throws {
+        let detail = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Veetbot/Views/MemoryDetailView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(detail.contains("Label(\"Is this right?\", systemImage: \"flag\")"))
+        #expect(detail.contains(".accessibilityIdentifier(\"memory.review.looks-right\")"))
+        #expect(detail.contains("Button(\"Looks right\")"))
+        #expect(!detail.contains("Mark reviewed"))
+        // ADR-0224: the wording is corrected by supersession, from the card
+        // and, for any live memory, from the Review menu.
+        #expect(detail.contains("Button(\"Fix the wording\") { editingWording = true }"))
+        #expect(detail.contains(".accessibilityIdentifier(\"memory.review.fix-wording\")"))
+        #expect(detail.contains(".accessibilityIdentifier(\"memory.detail.edit\")"))
+        #expect(detail.contains("MemoryWordingSheet(memory: memory, model: model) { memory = $0 }"))
+        #expect(detail.contains(".accessibilityIdentifier(\"memory.detail.evidence\")"))
+        #expect(detail.contains(".task(id: memory.id)"))
+    }
+
     @Test
     func testTheBrowserRootCarriesTheIdentifierRatherThanTheHoistedSearchField() throws {
         let source = try memoryBrowserViewSource()
@@ -40,7 +80,7 @@ import AppKit
 
         #expect(
             normalizedSource.contains(
-                "#if os(macOS) // The ideal height sizes the fitted sheet before a saved size exists; // without it a column whose content wants all the height it is offered // (an empty or unavailable state) lays out at the screen's height and // is cut off above the sheet. .frame( minWidth: 560, maxWidth: .infinity, minHeight: 520, idealHeight: 600, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
+                "#if os(macOS) // The ideal height sizes the fitted sheet before a saved size exists; // without it a column whose content wants all the height it is offered // (an empty or unavailable state) lays out at the screen's height and // is cut off above the sheet. .frame( minWidth: 860, maxWidth: .infinity, minHeight: 520, idealHeight: 600, maxHeight: .infinity ) .background(MemoryBrowserWindowResizeView()) .memoryBrowserPresentationSizing() #endif"
             )
         )
         #expect(source.contains(".background(MemoryBrowserWindowResizeView())"))

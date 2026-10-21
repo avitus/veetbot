@@ -7,6 +7,8 @@ import SwiftUI
 public struct ScheduleDetailView: View {
     @ObservedObject var model: ScheduleViewModel
     let summary: ScheduleListItemView
+    @Environment(\.openScheduleReport) private var openScheduleReport
+    @State private var confirmingStop = false
 
     public init(model: ScheduleViewModel, summary: ScheduleListItemView) {
         self.model = model
@@ -35,6 +37,7 @@ public struct ScheduleDetailView: View {
         .accessibilityIdentifier("schedule.detail")
         .task {
             await model.loadDetail(summary.id)
+            await model.loadRecentRuns(summary.id)
             await model.loadWebsiteAccessProfiles()
         }
     }
@@ -43,7 +46,10 @@ public struct ScheduleDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 heading(record)
+                lifecycleControls(record)
                 instruction(record)
+                delivery(record)
+                recentRuns
                 A2RecordGroup(title: "Schedule", rows: scheduleRows(record))
                 A2Group(title: "Website access") { websiteAccess(record) }
                 A2RecordGroup(title: "Execution", rows: executionRows(record))
@@ -60,15 +66,151 @@ public struct ScheduleDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             #if os(macOS)
             Text(summary.title)
-                .appDisplayFont(.title)
+                .veetType(.display)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             #endif
             HStack(spacing: 10) {
                 ScheduleStateBadge(state: record.schedule.state, kind: record.schedule.stateKind)
                 Text(scheduleTiming(record.revision.cadence, nextFireAt: record.schedule.nextFireAt))
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
+            }
+        }
+    }
+
+    /// Pause or Resume, and Stop behind an inline confirmation, on a
+    /// schedule that can still run (ADR-0225 part A). Stop is a cancel: the
+    /// record is kept, so it never says Delete.
+    @ViewBuilder
+    private func lifecycleControls(_ record: ScheduleRecordView) -> some View {
+        let id = record.schedule.id
+        let state = record.schedule.stateKind
+        if state == .active || state == .paused {
+            VStack(alignment: .leading, spacing: 8) {
+                if confirmingStop {
+                    Text("Stop this schedule? Future runs stop; a run in progress finishes. It stays in Recent History for 30 days.")
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button("Stop schedule") {
+                            confirmingStop = false
+                            Task { await model.stop(id) }
+                        }
+                        .buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red))
+                        .accessibilityIdentifier("schedule.stop.confirm")
+                        Button("Keep") { confirmingStop = false }
+                            .buttonStyle(QuietCapsuleButtonStyle())
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        // A one-time schedule runs only at its time (ADR-0225 C).
+                        if record.revision.cadence.kind != "ONCE" {
+                            Button { Task { await model.runNow(id) } } label: { Label("Run now", systemImage: "play.fill") }
+                                .primaryCapsule()
+                                .accessibilityIdentifier("schedule.run-now")
+                        }
+                        if state == .active {
+                            Button { Task { await model.pause(id) } } label: { Label("Pause", systemImage: "pause") }
+                                .buttonStyle(SecondaryCapsuleButtonStyle())
+                                .accessibilityIdentifier("schedule.pause")
+                        } else {
+                            Button { Task { await model.resume(id) } } label: { Label("Resume", systemImage: "play") }
+                                .buttonStyle(SecondaryCapsuleButtonStyle())
+                                .accessibilityIdentifier("schedule.resume")
+                        }
+                        Button { confirmingStop = true } label: { Label("Stop", systemImage: "stop") }
+                            .buttonStyle(QuietCapsuleButtonStyle())
+                            .accessibilityIdentifier("schedule.stop")
+                    }
+                    .disabled(model.isChangingLifecycle(id))
+                }
+                if let message = model.lifecycleError(for: id) {
+                    Text(message)
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.red)
+                        .accessibilityIdentifier("schedule.lifecycle.error")
+                }
+            }
+        }
+    }
+
+    /// Delivery (MagicPath quiet-home-5746): the per-schedule notification
+    /// preference (ADR-0225 part D) and the spending limit each run carries.
+    /// A server without the preference shows only the limit.
+    @ViewBuilder
+    private func delivery(_ record: ScheduleRecordView) -> some View {
+        let id = record.schedule.id
+        A2Group(title: "Delivery") {
+            if let notify = record.revision.notify {
+                Toggle(isOn: Binding(
+                    get: { notify == "attention_only" },
+                    set: { value in Task { await model.setNotifyOnlyWhenNeeded(id, value) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Only notify when something needs you").veetType(.ui).foregroundColor(AppTheme.ink)
+                        Text("A finished report stays quiet. Failures, approvals and questions still notify.")
+                            .veetType(.meta)
+                            .foregroundColor(AppTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(AppTheme.tealFill)
+                .disabled(
+                    model.isChangingLifecycle(id)
+                        || !scheduleAllowsWebsiteAccessChange(record.schedule.stateKind)
+                )
+                .accessibilityIdentifier("schedule.notify.attention-only")
+                .padding(14)
+                HairlineDivider()
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Spending limit").veetType(.ui).foregroundColor(AppTheme.ink)
+                Spacer(minLength: 8)
+                Text(record.revision.limits.maxCost.map { "Up to $\($0) a run" } ?? "None")
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+            }
+            .padding(14)
+        }
+    }
+
+    /// The newest occurrences: what happened, when, and the report's
+    /// conversation where it still exists (MagicPath quiet-home-5746).
+    @ViewBuilder
+    private var recentRuns: some View {
+        let runs = model.recentRuns(for: summary.id)
+        VStack(alignment: .leading, spacing: 8) {
+            A2SectionHeading(title: "Recent runs")
+            if runs.isEmpty {
+                Text(model.recentRunsError(for: summary.id) ?? "No runs yet.")
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
+                        if index > 0 { HairlineDivider() }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(run.title).veetType(.ui).foregroundColor(AppTheme.ink)
+                                Text(run.occurrence.nominalFireAt.formatted(date: .abbreviated, time: .shortened))
+                                    .veetType(.meta)
+                                    .foregroundColor(AppTheme.inkFaint)
+                            }
+                            Spacer(minLength: 8)
+                            if let sessionID = run.reportSessionID, let openScheduleReport {
+                                Button("Open report in Chat") { openScheduleReport(sessionID) }
+                                    .buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.tealText))
+                                    .accessibilityIdentifier("schedule.run.open.\(run.id.uuidString)")
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
+                }
+                .a2Card()
             }
         }
     }
@@ -77,7 +219,7 @@ public struct ScheduleDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             A2SectionHeading(title: "Instruction")
             Text(record.revision.instruction)
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -144,7 +286,7 @@ public struct ScheduleDetailView: View {
             if let profiles = model.websiteAccessProfiles {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("Signed-in site")
-                        .appFont(.caption)
+                        .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                     Spacer(minLength: 0)
                     Picker(
@@ -173,7 +315,7 @@ public struct ScheduleDetailView: View {
                 }
             } else if let message = model.websiteAccessProfilesError {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(message).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     Spacer()
                     Button("Retry") {
                         Task { await model.loadWebsiteAccessProfiles() }
@@ -188,14 +330,14 @@ public struct ScheduleDetailView: View {
             }
             if let message = model.websiteAccessError(for: scheduleID) {
                 Text(message)
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.red)
                     .accessibilityIdentifier("schedule.websiteAccess.error")
             }
             Text(
                 "Scheduled runs can read signed-in pages on the chosen site. Posting or scrolling still asks you first."
             )
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -209,5 +351,17 @@ public struct ScheduleDetailView: View {
             }
             .buttonStyle(SecondaryCapsuleButtonStyle())
         }
+    }
+}
+
+private struct OpenScheduleReportKey: EnvironmentKey {
+    static let defaultValue: ((UUID) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    /// Closes the schedule browser and opens a report's conversation in Chat.
+    var openScheduleReport: ((UUID) -> Void)? {
+        get { self[OpenScheduleReportKey.self] }
+        set { self[OpenScheduleReportKey.self] = newValue }
     }
 }

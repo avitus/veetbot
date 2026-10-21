@@ -720,6 +720,32 @@ scenarios and every interruption/uncertain-cost item, with nonempty findings.
 Operator attribution and verification of the reviewer's real authorship remain
 mandatory; synthetic test reviews are never release evidence.
 
+[ADR-0222](../adr/0222-owner-approved-recall-review-scope.md) records the owner's
+2026-10-20 approval of a narrower human coverage requirement for this exact retained
+comparison. Version-two review, evidence and admission formats bind the immutable
+approved scope: 37 individual cases, one summary of all 40 cost-exception rows,
+and four summaries retaining all 18 history items. The 270 omitted difficult cases
+receive no individual attestation. Each selected case and summary requires an
+explicit assessment; concerns require notes, and unacceptable findings cannot
+accompany rollout acceptance. A separate overall finding and residual-risk
+decision remain required. The legacy full-review rule and all other safety,
+compatibility and release requirements remain unchanged. The offline packet
+generator preserves original evidence, starts with empty controls, saves drafts
+and exports only actual scoped findings; it never creates admission evidence.
+
+[ADR-0223](../adr/0223-owner-production-recall-trial.md) records the owner's later
+request to learn from real production use. Version-three evidence carries a
+separate genuine owner trial authorization, not synthetic-case findings. Its
+admission expires after 24 hours unless renewed by a timely actual owner check-in
+covering up to five recent eligible production runs. Each check-in binds its
+selection/provenance receipt, period, owner and trial; negative decisions, missing
+coverage, a serious incident or a missed deadline refuse continuation. Renewed
+evidence requires re-composition and cannot move the original seven-day end.
+The original comparison, compatibility and other admission requirements remain.
+The [trial guide](../recall-production-trial.md) describes the conversational
+review and privacy-preserving operator workflow. Neither approval of the trial
+nor these mechanics establishes actual production quality.
+
 ## Hard gates
 
 1. **M33.** **Corpus independence** — at least 400 independent scenarios span eight families,

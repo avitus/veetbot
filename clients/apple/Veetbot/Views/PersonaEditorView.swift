@@ -43,6 +43,7 @@ public struct PersonaEditorView: View {
         }
         .tint(AppTheme.tealFill)
         .accessibilityIdentifier("persona.editor")
+        .toastHost()
         .task { await model.load() }
         #if os(macOS)
         .sheetFrame(
@@ -87,12 +88,18 @@ public struct PersonaEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     heading
+                    if model.toneSupported {
+                        voiceSection
+                        traitSection
+                        sampleSection
+                    }
                     entries
                     conflict
                     nominations
+                    boundarySection
                     if let message = model.errorMessage {
                         Text(message)
-                            .appFont(.callout)
+                            .veetType(.ui)
                             .foregroundColor(AppTheme.red)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -109,18 +116,123 @@ public struct PersonaEditorView: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: 4) {
             #if os(macOS)
-            Text("Persona").appDisplayFont(.title)
+            Text("Persona").veetType(.display)
             #endif
             Text("How Veetbot sounds, and what it may assume about you.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
+        }
+    }
+
+    // MARK: Tone (ADR-0226)
+
+    private var voiceSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            A2SectionHeading(title: "Voice")
+            TextField(
+                "Describe how you want Veetbot to talk to you.",
+                text: $model.voice,
+                axis: .vertical
+            )
+            .lineLimit(2...6)
+            .textFieldStyle(.plain)
+            .a2Field(radius: 12)
+            .accessibilityIdentifier("persona.voice")
+            Text("Veetbot reads this before every reply.")
+                .veetType(.meta)
+                .foregroundColor(AppTheme.inkSoft)
+        }
+    }
+
+    private var traitSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            A2SectionHeading(title: "Lean towards")
+            HStack(spacing: 8) {
+                ForEach(PersonaViewModel.traitChoices, id: \.self) { trait in
+                    let chosen = model.traits.contains(trait)
+                    Button {
+                        model.toggleTrait(trait)
+                    } label: {
+                        Text(trait.capitalized)
+                            .veetType(.ui, weight: chosen ? .semibold : .regular)
+                            .foregroundColor(chosen ? AppTheme.tealText : AppTheme.ink)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(chosen ? AppTheme.selected : AppTheme.surface)
+                            )
+                            .overlay(
+                                Capsule().stroke(chosen ? AppTheme.tealText : AppTheme.hairlineStrong)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(chosen ? .isSelected : [])
+                    .accessibilityIdentifier("persona.trait.\(trait)")
+                }
+            }
+            Text("Up to three. Formal and Playful replace each other.")
+                .veetType(.meta)
+                .foregroundColor(AppTheme.inkSoft)
+        }
+    }
+
+    private var sampleSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            A2SectionHeading(title: "How that sounds")
+            if let sample = model.sample {
+                A2Quote(cite: sample.label) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("You: \(sample.prompt)")
+                            .veetType(.meta)
+                            .foregroundColor(AppTheme.inkSoft)
+                        Text(sample.reply)
+                            .veetType(.body)
+                            .foregroundColor(AppTheme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("persona.sample.reply")
+                    }
+                }
+            }
+            Button(model.sample == nil ? "Hear it" : "Try again") {
+                Task { await model.loadSample() }
+            }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
+            .disabled(model.isLoadingSample)
+            .accessibilityIdentifier("persona.sample")
+        }
+    }
+
+    /// The fixed rules from the server, each enforced by something real.
+    @ViewBuilder
+    private var boundarySection: some View {
+        if !model.boundaries.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                A2SectionHeading(title: "Boundaries")
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(model.boundaries.enumerated()), id: \.element.id) { index, boundary in
+                        if index > 0 { HairlineDivider().padding(.leading, 14) }
+                        Label(boundary.text, systemImage: "lock")
+                            .veetType(.ui)
+                            .foregroundColor(AppTheme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .accessibilityIdentifier("persona.boundary.\(boundary.id)")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .a2Card()
+                Text("Your voice and entries cannot change these.")
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+            }
         }
     }
 
     /// The editable standing truths: one field per entry, parted by hairlines.
     private var entries: some View {
         VStack(alignment: .leading, spacing: 8) {
-            A2SectionHeading(title: "Version \(model.version)")
+            A2SectionHeading(title: model.toneSupported ? "What Veetbot assumes · version \(model.version)" : "Version \(model.version)")
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array($model.drafts.enumerated()), id: \.element.id) { index, $draft in
                     if index > 0 { HairlineDivider().padding(.leading, 14) }
@@ -130,10 +242,26 @@ public struct PersonaEditorView: View {
                                 .foregroundColor(AppTheme.tealText)
                                 .accessibilityLabel("Affirmed from memory")
                         }
-                        TextField("A standing truth", text: $draft.text)
-                            .textFieldStyle(.plain)
-                            .a2Field(radius: 10)
-                            .accessibilityIdentifier("persona.entry")
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextField("A standing truth", text: $draft.text)
+                                .textFieldStyle(.plain)
+                                .a2Field(radius: 10)
+                                .opacity(draft.enabled ? 1 : 0.55)
+                                .accessibilityIdentifier("persona.entry")
+                            if draft.stale {
+                                Text("The memory this came from has changed. Update or remove it.")
+                                    .veetType(.meta)
+                                    .foregroundColor(AppTheme.amberText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        if model.toneSupported {
+                            Toggle("Use", isOn: $draft.enabled)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .accessibilityLabel("Use this entry")
+                                .accessibilityIdentifier("persona.entry.enabled")
+                        }
                         Button {
                             model.removeDraft(draft.id)
                         } label: {
@@ -158,11 +286,15 @@ public struct PersonaEditorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .a2Card()
             Text(
-                "Every entry is read as trusted instruction text on "
-                    + "every request. Entries marked with a seal were "
-                    + "affirmed from the agent's memory."
+                model.toneSupported
+                    ? "Turn one off to stop Veetbot treating it as a standing instruction. "
+                        + "Memory keeps what it learned; review it in Memory to change that. "
+                        + "Entries marked with a seal were affirmed from memory."
+                    : "Every entry is read as trusted instruction text on "
+                        + "every request. Entries marked with a seal were "
+                        + "affirmed from the agent's memory."
             )
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -179,7 +311,7 @@ public struct PersonaEditorView: View {
                     id: \.offset
                 ) { _, entry in
                     Text(entry.text)
-                        .appFont(.body)
+                        .veetType(.ui)
                         .foregroundColor(AppTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -188,7 +320,7 @@ public struct PersonaEditorView: View {
                         + "drafts above. Save stays disabled until you "
                         + "choose how to resolve the merge."
                 )
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
@@ -214,7 +346,7 @@ public struct PersonaEditorView: View {
                     "Load the current server version before saving "
                         + "these local drafts."
                 )
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 Button("Load server version") {
@@ -250,17 +382,17 @@ private struct PersonaNominationCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Veetbot suggests", systemImage: "sparkles")
-                .appFont(.caption, weight: .semibold)
+                .veetType(.meta, weight: .semibold)
                 .foregroundColor(AppTheme.amberText)
             Text(nomination.statement)
-                .appFont(.body)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text(
                 "\(nomination.beliefType) · seen "
                     + "\(nomination.corroborationCount) times"
             )
-            .appFont(.caption)
+            .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
                 Button("Affirm") {

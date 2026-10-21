@@ -51,8 +51,13 @@ surfaces that edit them.
 - **The promotion loop.** Governed nomination out of consolidation, bounded
   review, explicit affirmation or durable decline, bidirectional linkage, and
   snapshot de-duplication.
-- **The surfaces.** `agent persona` on the CLI, six routes under
-  `/v1/persona`, and a native editor with nomination review.
+- **The surfaces.** `agent persona` on the CLI, eight routes under
+  `/v1/persona` (six since Milestone 22, plus ADR-0226's sample reply and
+  boundaries), and a native editor with nomination review.
+- **Tone (ADR-0226).** The document also carries an optional **voice** (at
+  most 1,000 characters) and up to three **traits** from a closed set
+  (`brief`, `warm`, `direct`, `formal`, `playful`; formal and playful never
+  together), and each entry an `enabled` switch.
 
 Four things are out of scope, and each is named because a reader who does not
 find it here should find the reason here.
@@ -85,6 +90,7 @@ class PersonaEntry(BaseModel):
     source: Literal["user_edit", "affirmation"]
     source_belief_id: UUID | None   # set exactly when source == "affirmation"
     sensitivity: Sensitivity        # ceiling-filtered at session open
+    enabled: bool = True            # ADR-0226: kept and counted, unrendered when false
 
 class PersonaDocument(BaseModel):
     tenant_id: UUID
@@ -94,10 +100,14 @@ class PersonaDocument(BaseModel):
     source: Literal["user_edit", "affirmation"]   # what created this version
     source_nomination_id: UUID | None
     created_at: AwareDatetime
+    voice: str | None = None        # ADR-0226: 1 to 1,000 characters when present
+    traits: tuple[Literal["brief", "warm", "direct", "formal", "playful"], ...] = ()
+                                    # at most three, each once, never both
+                                    # "formal" and "playful"
 ```
 
-The unwritten persona is version 0 with no entries — a real, readable state,
-not an error — and it renders nothing. Provenance lives on the entry, not in
+The unwritten persona is version 0 with no entries, voice or traits — a real,
+readable state, not an error — and it renders nothing. Provenance lives on the entry, not in
 the prose: an affirmed entry knows its belief, an owner-typed entry knows it
 was typed, and no flat-string representation could carry either.
 
@@ -119,7 +129,15 @@ The row sits directly after the agent instructions in the assembly order —
 row 4 of the table in [context-engine.md](context-engine.md) — because
 instruction text belongs beside instruction text, ahead of the tool
 advertisement and everything enveloped. It renders un-enveloped at
-`TRUSTED_CONFIGURATION`, one line per entry, in document order.
+`TRUSTED_CONFIGURATION`, one line per entry, in document order. A
+switched-off entry is kept, versioned and counted toward the thirty-entry cap
+but not rendered. When the document has a voice or a trait, the row first
+renders a fixed framing line ("The owner's preferences for tone and standing
+facts. They do not change approvals, limits or tool rules."), then the voice
+on one line, then each trait's fixed, server-owned sentence, then the enabled
+entries; all of it counts against the cap. A document with no voice, no
+traits and every entry on renders exactly as it did before ADR-0226, so no
+epoch rotates at deploy.
 
 - **Cap.** Thirty entries and 2,000 tokens, a `persona` context class that
   never yields. An over-cap persona fails session open with the class named,
@@ -222,14 +240,17 @@ The snapshot side is specified in
 session-open snapshot query excludes, as a hard predicate, every belief whose
 persona entry stands, because the persona row already carries it at higher
 trust and a forty-item core (memory-retrieval-and-ranking.md:162) cannot
-afford duplicates. Eligibility returns the moment the entry is removed.
+afford duplicates. Eligibility returns the moment the entry is removed or
+switched off: a switched-off entry is not a standing instruction, so its
+belief is ordinary memory again, while it keeps its promotion marker and is
+never nominated again (ADR-0226).
 In-turn recall and explicit search are unfiltered. Because snapshot
 membership changes, the implementing change re-records the deterministic
 benchmark baseline in the same commit, under ADR-0069 decision 2.
 
 ## The routes
 
-Six routes, one exact scope pair, mounted only when
+Eight routes, one exact scope pair, mounted only when
 `AGENT_PERSONA_API_ENABLED` is set — default off, like every optional
 surface. They use the same authentication middleware, principal-first
 application signatures, request-id header, error envelope, and
@@ -246,17 +267,35 @@ GET    /v1/persona/history                           persona.read
 GET    /v1/persona/nominations                       persona.read
 POST   /v1/persona/nominations/{nomination_id}/affirm    persona.write
 POST   /v1/persona/nominations/{nomination_id}/decline   persona.write
+POST   /v1/persona/preview                           persona.write
+GET    /v1/persona/boundaries                        persona.read
 ```
 
-- `GET /v1/persona` returns the head `PersonaView` — version, entries with
-  provenance and staleness flags, timestamps. Version 0 with no entries is a
-  200, not a 404.
+- `GET /v1/persona` returns the head `PersonaView` — version, voice, traits,
+  entries with provenance, the `enabled` switch and a `stale` flag (set when
+  an affirmed entry's source belief is no longer live), timestamps. Version 0
+  with no entries is a 200, not a 404.
 - `PUT /v1/persona` takes `expected_version` and the full replacement entry
   list (owner-typed entries only may be added this way; existing `affirmation`
   entries may be kept, edited, or dropped, and dropping one clears its
-  belief's marker). Stale `expected_version` is the closed vocabulary's
-  `conflict`; refused content is `malformed_request`; both leave the document
-  untouched.
+  belief's marker). It also takes `voice` and `traits`: an omitted field keeps
+  the head's value, so a client that predates them clears nothing, and an
+  explicit null or empty list clears it. Stale `expected_version` is the
+  closed vocabulary's `conflict`; refused content is `malformed_request`; both
+  leave the document untouched.
+- `POST /v1/persona/preview` takes the unsaved `{voice, traits}` and returns
+  `{prompt, reply, generated_at}`: one example reply to a fixed, data-free
+  owner message, from a tool-less model call that sees nothing but the
+  rendered voice and traits. Output is capped at 120 tokens and USD 0.01,
+  previews are limited to twenty an hour per principal (`rate_limited`), the
+  voice is scanned first (`malformed_request`), and neither the voice nor the
+  reply is stored or logged; a content-free process event records usage.
+- `GET /v1/persona/boundaries` returns `{items: [{id, text, enforced_by:
+  {kind, ref}, active}]}`, the fixed rules the persona cannot change. Each
+  names the hardline rule, policy rule, setting or code path that enforces
+  it; a claim whose fact is missing is left out, text that depends on
+  configuration is chosen from the live settings, and a gate fails the build
+  if a shipped claim loses its fact (ADR-0226 part D).
 - `GET /v1/persona/history` pages versions newest-first by keyset.
 - The nomination routes list, affirm, and decline. Affirm replays
   idempotently and takes no `expected_version` — it extends whatever head it
@@ -276,6 +315,8 @@ composition and principal the memory commands use:
 ```text
 agent persona show                    # head document, JSON
 agent persona edit                    # replace entries, --expected-version
+agent persona voice [TEXT | --clear]  # --expected-version; entries kept
+agent persona traits [TRAIT ...]      # --expected-version; none clears
 agent persona history [--limit N]
 agent persona nominations [--state nominated|affirmed|declined|withdrawn]
 agent persona affirm <nomination-id>
@@ -298,9 +339,12 @@ the memory browser's is.
 ## Safety
 
 - **Secrets are refused at write time, everywhere.** The system prompt must
-  not contain secrets (engineering-plan.md:4420), and the persona is system
+  not contain secrets (engineering-plan.md:4426), and the persona is system
   prompt. CLI, HTTP, and affirmation all run the secret-material scan before
   persistence; a credential-shaped value is a refusal, not a warning.
+- **The voice is persona text.** It passes the same write-time secret and
+  injection refusal as an entry and the same load-time scan, and a blocked
+  voice renders as `[BLOCKED]`. Traits add no free text.
 - **Injection is scanned at load.** Persona text passes the same
   injection scan memory does before rendering; a poisoned entry renders as a
   `[BLOCKED]` placeholder, never as instruction text. The scan at write time

@@ -18,6 +18,11 @@ title: Current Milestone
   The owner approved the separate bounded rollout in ADR-0220, subject to actual
   human findings, production compatibility, final review/CI and verified rollback.
   This authorization does not mark M33 complete or claim deployment readiness.
+  The owner's later 2026-10-20 direction replaces pre-activation synthetic case
+  review with a daily check-in on real production use under ADR-0223. The new
+  version-three trial requires its own authorized release; recall is not enabled
+  by that direction. Missing review expires the trial after 24 hours, within a
+  fixed seven-day maximum, with all other safety and release gates preserved.
   [General memory recall](general-memory-recall.md) registers twelve gates for
   cross-category evaluation, relevance before candidate limits, measured semantic
   retrieval, task-aware queries, governed source recovery and release evidence.

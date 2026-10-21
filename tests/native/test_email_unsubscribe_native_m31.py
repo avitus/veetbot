@@ -17,6 +17,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.native_mac_vm import macos_journeys_unavailable, run_macos_journeys
+from tests.native_simulators import newest_simulator
+
 ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.integration
 
@@ -136,50 +139,51 @@ def test_unsubscribe_native_journeys(apple_environment: dict[str, str], tmp_path
     )
     devices: dict[str, str] = {}
     for family in ("iPhone", "iPad"):
-        candidates = [
-            (tuple(int(part) for part in runtime.rsplit("iOS-", 1)[1].split("-")), device["udid"])
-            for runtime, values in inventory["devices"].items()
-            if "iOS-" in runtime
-            for device in values
-            if device["name"].startswith(family) and device["isAvailable"]
-        ]
-        if not candidates:
+        udid = newest_simulator(inventory, family)
+        if udid is None:
             pytest.skip(f"No {family} simulator is available; the journeys are unverified.")
-        devices[family] = max(candidates)[1]
+        devices[family] = udid
 
+    # The macOS journeys run in the Tart VM; the simulators stay on the host.
+    mac_unavailable = macos_journeys_unavailable(apple_environment)
     for platform, destination in (
-        ("macos", "platform=macOS"),
+        ("macos", None),
         ("iphone", f"platform=iOS Simulator,id={devices['iPhone']}"),
         ("ipad", f"platform=iOS Simulator,id={devices['iPad']}"),
     ):
         bundle = tmp_path / f"{platform}.xcresult"
-        native_command(
-            [
-                "xcodebuild",
-                "test",
-                "-quiet",
-                "-project",
-                "clients/apple/Veetbot.xcodeproj",
-                "-scheme",
-                "Veetbot",
-                "-destination",
-                destination,
-                "-resultBundlePath",
-                str(bundle),
-                *[
-                    f"-only-testing:VeetbotUITests/ConversationNavigationUITests/{case}"
-                    for case in JOURNEYS
+        if destination is None:
+            if mac_unavailable:
+                continue
+            run_macos_journeys(list(JOURNEYS), bundle, apple_environment)
+        else:
+            native_command(
+                [
+                    "xcodebuild",
+                    "test",
+                    "-quiet",
+                    "-project",
+                    "clients/apple/Veetbot.xcodeproj",
+                    "-scheme",
+                    "Veetbot",
+                    "-destination",
+                    destination,
+                    "-resultBundlePath",
+                    str(bundle),
+                    *[
+                        f"-only-testing:VeetbotUITests/ConversationNavigationUITests/{case}"
+                        for case in JOURNEYS
+                    ],
+                    "CODE_SIGN_STYLE=Manual",
+                    "CODE_SIGN_IDENTITY=-",
+                    "CODE_SIGNING_REQUIRED=NO",
+                    "CODE_SIGN_ENTITLEMENTS=",
+                    "PROVISIONING_PROFILE_SPECIFIER=",
+                    "DEVELOPMENT_TEAM=",
                 ],
-                "CODE_SIGN_STYLE=Manual",
-                "CODE_SIGN_IDENTITY=-",
-                "CODE_SIGNING_REQUIRED=NO",
-                "CODE_SIGN_ENTITLEMENTS=",
-                "PROVISIONING_PROFILE_SPECIFIER=",
-                "DEVELOPMENT_TEAM=",
-            ],
-            apple_environment,
-            timeout=1200,
-        )
+                apple_environment,
+                timeout=1200,
+            )
         summary = json.loads(
             native_command(
                 ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(bundle)],
@@ -189,3 +193,5 @@ def test_unsubscribe_native_journeys(apple_environment: dict[str, str], tmp_path
         assert summary["passedTests"] == len(JOURNEYS), summary
         assert summary["failedTests"] == 0 and summary["skippedTests"] == 0, summary
         assert summary["expectedFailures"] == 0, summary
+    if mac_unavailable:
+        pytest.skip(mac_unavailable)

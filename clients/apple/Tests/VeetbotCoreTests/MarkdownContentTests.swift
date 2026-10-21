@@ -138,8 +138,8 @@ import Testing
     }
 
     @Test
-    func testLevelSixHeadingKeepsCaptionDefaultWeight() {
-        #expect(markdownHeadingWeight(6) == nil)
+    func testEveryHeadingLevelIsSemiboldNeverBold() {
+        #expect((1...6).allSatisfy { markdownHeadingWeight($0) == .semibold })
     }
 
     @Test

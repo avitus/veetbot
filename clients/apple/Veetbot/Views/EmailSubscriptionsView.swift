@@ -41,8 +41,8 @@ struct EmailSubscriptionsScreen: View {
                 } else if let error = model.errorMessage, model.items.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Senders couldn’t be loaded", systemImage: "exclamationmark.circle")
-                            .appFont(.headline)
-                        Text(error).appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                            .veetType(.ui, weight: .semibold)
+                        Text(error).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                         Button("Try again") { Task { await model.reload() } }
                             .buttonStyle(SecondaryCapsuleButtonStyle())
                     }.padding(.vertical, 16)
@@ -96,23 +96,39 @@ struct EmailSubscriptionsScreen: View {
             #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
                 // A macOS sheet renders one primary item; keep every batch action inside it.
-                HStack(spacing: 8) { selectionActions }
+                HStack(spacing: 8) {
+                    if model.isSelecting {
+                        selectAllButton
+                        unsubscribeSelectedButton
+                    }
+                    selectButton
+                }
             }
             #else
-            ToolbarItemGroup(placement: .primaryAction) { selectionActions }
+            ToolbarItem(placement: .primaryAction) { selectButton }
+            // An iPhone navigation bar folds a third item into its overflow menu,
+            // hiding Unsubscribe N, so the batch actions take the bottom bar, as in Mail.
+            if model.isSelecting {
+                ToolbarItem(placement: .bottomBar) { selectAllButton }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) { unsubscribeSelectedButton }
+            }
             #endif
         }
     }
 
-    @ViewBuilder
-    private var selectionActions: some View {
-        if model.isSelecting {
-            Button("Select all") { model.selectAll() }
-                .accessibilityIdentifier("email.subscriptions.select-all")
-            Button("Unsubscribe \(model.selection.count)") { model.beginUnsubscribe() }
-                .disabled(model.selection.isEmpty)
-                .accessibilityIdentifier("email.subscriptions.unsubscribe-selected")
-        }
+    private var selectAllButton: some View {
+        Button("Select all") { model.selectAll() }
+            .accessibilityIdentifier("email.subscriptions.select-all")
+    }
+
+    private var unsubscribeSelectedButton: some View {
+        Button("Unsubscribe \(model.selection.count)") { model.beginUnsubscribe() }
+            .disabled(model.selection.isEmpty)
+            .accessibilityIdentifier("email.subscriptions.unsubscribe-selected")
+    }
+
+    private var selectButton: some View {
         Button(model.isSelecting ? "Done" : "Select") { model.setSelecting(!model.isSelecting) }
             .accessibilityIdentifier("email.subscriptions.select")
     }
@@ -145,7 +161,7 @@ struct EmailSubscriptionsScreen: View {
             .accessibilityIdentifier("email.subscriptions.state")
             Spacer(minLength: 4)
             Text("\(model.items.count) \(model.items.count == 1 ? "sender" : "senders")")
-                .appFont(.caption).foregroundColor(AppTheme.inkSoft).fixedSize()
+                .veetType(.meta).foregroundColor(AppTheme.inkSoft).fixedSize()
         }.padding(12)
     }
 }
@@ -159,26 +175,26 @@ private struct EmailSubscriptionRowLabel: View {
         VStack(alignment: .leading, spacing: EmailType.rowSpacing) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(row.displayName.isEmpty ? row.address : row.displayName)
-                    .appFont(EmailType.sender, weight: .semibold).lineLimit(1)
+                    .veetType(EmailType.sender, weight: .semibold).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(row.lastReceivedAt, format: .dateTime.month(.abbreviated).day())
-                    .appFont(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
+                    .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
             }
-            Text(row.address).appFont(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+            Text(row.address).veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(1)
             HStack(spacing: 6) {
                 Text(row.volumeDescription)
                 Text("·")
                 Text(row.mechanismSentence).lineLimit(1)
-            }.appFont(EmailType.gist).foregroundColor(AppTheme.inkSoft)
+            }.veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 6) {
-                Text(row.stateDescription).appFont(EmailType.note, weight: .medium).foregroundColor(AppTheme.tealText)
+                Text(row.stateDescription).veetType(EmailType.note, weight: .medium).foregroundColor(AppTheme.tealText)
                 if row.protected {
-                    Label("Protected", systemImage: "hand.raised").appFont(EmailType.note)
+                    Label("Protected", systemImage: "hand.raised").veetType(EmailType.note)
                         .foregroundColor(AppTheme.inkSoft)
                 }
             }
             if let status = model.status(for: row) {
-                Text(status).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                Text(status).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("email.subscription.status.\(row.id)")
             }
@@ -200,11 +216,11 @@ struct EmailSubscriptionDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(current.displayName.isEmpty ? current.address : current.displayName)
-                        .appDisplayFont(.title2).fixedSize(horizontal: false, vertical: true)
-                    Text(current.address).appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                        .veetType(.display).fixedSize(horizontal: false, vertical: true)
+                    Text(current.address).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                         .textSelection(.enabled)
                     if !current.listID.isEmpty {
-                        Text(current.listID).appFont(.caption).foregroundColor(AppTheme.inkFaint)
+                        Text(current.listID).veetType(.meta).foregroundColor(AppTheme.inkFaint)
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -221,11 +237,11 @@ struct EmailSubscriptionDetailView: View {
                             systemImage: "hand.raised")
                     }
                 }
-                .appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                .veetType(.ui).foregroundColor(AppTheme.inkSoft)
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.paperDeep))
                 if let status = model.status(for: current) {
-                    Text(status).appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                    Text(status).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("email.subscription.detail.status")
                 }
@@ -263,19 +279,19 @@ struct EmailUnsubscribeConfirmationSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(title).appDisplayFont(.title2)
-            Text(EmailUnsubscribeConfirmation.warning).appFont(.callout).foregroundColor(AppTheme.inkSoft)
+            Text(title).veetType(.display)
+            Text(EmailUnsubscribeConfirmation.warning).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(model.confirmation?.targets ?? []) { target in
                         VStack(alignment: .leading, spacing: 3) {
                             Text(target.displayName.isEmpty ? target.address : target.displayName)
-                                .appFont(.callout, weight: .semibold)
+                                .veetType(.ui, weight: .semibold)
                             if !target.address.isEmpty, target.address != target.displayName {
-                                Text(target.address).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                                Text(target.address).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                             }
-                            Text(target.sentence).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                            Text(target.sentence).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                                 .fixedSize(horizontal: false, vertical: true)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }

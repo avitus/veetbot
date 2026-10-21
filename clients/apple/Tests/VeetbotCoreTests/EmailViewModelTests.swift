@@ -26,7 +26,13 @@ import SwiftUI
             return (200, "{\"items\":[\(rows)],\"next_cursor\":null}")
         }
         await model.reload()
-        let host = NSHostingView(rootView: EmailModeView(model: model, viewportHeight: 800, discussInChat: {}))
+        // A divider drag is remembered; keep this one out of the owner's defaults.
+        let suiteName = "veetbot.tests.email-inbox-layout.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = EmailInboxWidthStore(defaults: defaults)
+        let host = NSHostingView(rootView: EmailModeView(
+            model: model, viewportHeight: 800, inboxWidth: store, discussInChat: {}))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
@@ -69,7 +75,7 @@ import SwiftUI
         #expect(scroll.frame.width <= 560)
         try snapshot("email-sidebar-wide")
         window.setContentSize(NSSize(width: 780, height: 500))
-        host.rootView = EmailModeView(model: model, viewportHeight: 500, discussInChat: {})
+        host.rootView = EmailModeView(model: model, viewportHeight: 500, inboxWidth: store, discussInChat: {})
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 200_000_000)
         host.layoutSubtreeIfNeeded()
@@ -78,6 +84,79 @@ import SwiftUI
                 "Resizing the window must preserve room to read the selected email")
         #expect(host.bounds.contains(host.convert(scroll.bounds, from: scroll)))
         try snapshot("email-sidebar-small-window")
+    }
+
+    /// The inbox reopens at the width its divider was dragged to, as after quitting the app;
+    /// a window too narrow for that width squeezes the column without replacing the choice.
+    @Test func testEmailInboxReopensAtTheWidthItsDividerWasDraggedTo() async throws {
+        let suiteName = "veetbot.tests.email-inbox-width.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var handling: NSEvent?
+        let store = EmailInboxWidthStore(defaults: defaults, currentEvent: { handling })
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            return (200, "{\"items\":[\(self.threadJSON())],\"next_cursor\":null}")
+        }
+        await model.reload()
+        defer { model.resetConnection() }
+        /// Find the first matching AppKit descendant in the rendered email hierarchy.
+        func descendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+            if let match = view as? T { return match }
+            return view.subviews.lazy.compactMap { descendant(type, in: $0) }.first
+        }
+        /// Settle SwiftUI's asynchronous AppKit updates before measuring the columns.
+        func settle(_ window: NSWindow) async throws {
+            window.contentView?.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
+        /// Opens the inbox in a new window, as a launch does, and returns its divider.
+        func open() async throws -> (NSWindow, NSSplitView) {
+            let host = NSHostingView(rootView: EmailModeView(
+                model: model, viewportHeight: 800, inboxWidth: store, discussInChat: {}))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            host.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+            try await settle(window)
+            return (window, try #require(descendant(NSSplitView.self, in: host)))
+        }
+        func inboxWidth(_ split: NSSplitView) -> CGFloat { split.subviews.first?.frame.width ?? 0 }
+        /// After a divider move the split takes a few layout passes to settle; lay out
+        /// as display cycles would, for up to two seconds, until the inbox is `width` wide.
+        func inbox(of split: NSSplitView, in window: NSWindow, settlesAt width: CGFloat) async throws -> Bool {
+            for _ in 0..<10 where abs(inboxWidth(split) - width) > 2 { try await settle(window) }
+            return abs(inboxWidth(split) - width) <= 2
+        }
+        /// A pointer event in `window`, as AppKit hands it to the split view.
+        func pointer(_ type: NSEvent.EventType, at x: CGFloat, in window: NSWindow) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: NSPoint(x: x, y: 400), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        }
+
+        let (first, split) = try await open()
+        #expect(store.width == nil)
+        #expect(inboxWidth(split) < 400, "Before any drag the inbox opens at its own width, not \(inboxWidth(split))")
+        // AppKit moves the divider while it handles the owner's pointer drag.
+        handling = pointer(.leftMouseDragged, at: 480, in: first)
+        split.setPosition(480, ofDividerAt: 0)
+        handling = pointer(.leftMouseUp, at: 480, in: first)
+        #expect(try await inbox(of: split, in: first, settlesAt: 480),
+                "The divider moved the inbox to \(inboxWidth(split))")
+        #expect(store.width.map { abs($0 - 480) <= 2 } == true)
+        first.setContentSize(NSSize(width: 780, height: 800))
+        try await settle(first)
+        #expect(inboxWidth(split) <= 420, "A narrow window keeps room to read, not \(inboxWidth(split))")
+        first.contentView = nil
+
+        let (second, reopened) = try await open()
+        defer { second.contentView = nil }
+        #expect(try await inbox(of: reopened, in: second, settlesAt: 480),
+                "The inbox must reopen at the width the owner dragged it to, not \(inboxWidth(reopened))")
     }
 
     /// A sent reply is a record: its rendered body accepts no typing and holds no insertion point,
@@ -1063,6 +1142,46 @@ import SwiftUI
         #expect(try decoder.decode(EmailThreadView.self, from: Data(changed.utf8)).isHandled == false)
     }
 
+    /// Handled confirms with a toast whose Undo sends the reversible command back.
+    @Test func testHandledConfirmsWithAToastWhoseUndoReopensTheThread() async throws {
+        let requests = EmailRequestRecorder()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        let row = try #require(model.items.first)
+
+        await model.setThreadHandled(row, handled: true)
+        #expect(toasts.current?.text == "Marked handled.")
+        #expect(toasts.current?.undo?.label == "Undo")
+
+        await toasts.performUndo()
+        let commands = requests.snapshot.filter { $0.url!.path.hasSuffix("dismiss") }
+        #expect(commands.count == 2)
+        let body = try Self.archiveRequestBody(try #require(commands.last))
+        #expect(body["dismissed"] as? Bool == false)
+        #expect(toasts.current?.text == "Marked not handled.")
+    }
+
+    /// A rejected Handled raises no toast; the inline error stays.
+    @Test func testFailedHandledRaisesNoToast() async throws {
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            if request.url!.path.hasSuffix("dismiss") { return (409, Self.error("invalid_state", "New mail arrived. Refresh this thread.")) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        await model.setThreadHandled(try #require(model.items.first), handled: true)
+        #expect(toasts.current == nil)
+        #expect(model.errorMessage != nil)
+    }
+
     /// A rejected inbox checkbox leaves the row unchanged and exposes a recoverable error.
     @Test func testFailedHandledActionKeepsThreadAndReportsError() async throws {
         let model = try makeModel { request in
@@ -1389,6 +1508,84 @@ import SwiftUI
         model.useServerDraft()
         #expect(model.currentEdit?.body == "Other device edit")
         #expect(model.conflict == nil)
+    }
+
+    /// The conflict itself tells the owner another device changed the draft; the
+    /// refused save must not repeat the server's 409 text as a second, red error,
+    /// including when saving the local version meets a still newer edit.
+    @Test func testConflictingSaveShowsOnlyTheConflictNotTheRefusedSaveError() async throws {
+        let serverRevision = EmailRequestRecorder()
+        let model = try makeModel { request in
+            serverRevision.append(request)
+            if request.httpMethod == "PUT" { return (409, Self.error("invalid_state", "Draft changed on another device.")) }
+            if request.url!.path.contains("/drafts/") {
+                let fetches = serverRevision.snapshot.filter { $0.httpMethod == "GET" && $0.url!.path.contains("/drafts/") }
+                return (200, self.draftJSON(revision: 1 + fetches.count, body: "Other device edit \(fetches.count)"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My unfinished edit")
+        #expect(await model.saveDraft() == false)
+        #expect(model.conflict?.body == "Other device edit 1")
+        #expect(model.draftActionMessage == nil)
+
+        await model.keepLocalDraft()
+        #expect(model.conflict?.body == "Other device edit 2")
+        #expect(model.currentEdit?.body == "My unfinished edit")
+        #expect(model.draftActionMessage == nil)
+    }
+
+    /// New mail marks a draft stale at its current revision, and the server refuses edits until the
+    /// owner confirms the updated thread. That refusal is not another device's edit: reporting it as a
+    /// conflict disabled the confirmation, leaving Review & Send unreachable.
+    @Test func testStaleDraftRefusalIsNotAConflictAndReviewConfirmationSavesTheEdit() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.httpMethod == "PUT" { return try self.staleDraftSave(request, revision: 2) }
+            if request.url!.path.contains("/drafts/") { return (200, self.staleDraftJSON()) }
+            return (200, self.newMailThreadJSON(draft: self.staleDraftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My reply")
+        #expect(await model.saveDraft() == false)
+        #expect(model.conflict == nil)
+        #expect(model.currentEdit?.body == "My reply")
+        await model.confirmCurrentSourceReviewed()
+        #expect(model.conflict == nil)
+        #expect(model.draft?.stale == false)
+        #expect(model.currentEdit?.isDirty == false)
+        #expect(model.canReview)
+    }
+
+    /// The owner's reported path: a real edit conflict on a stale draft. Keeping the local version
+    /// must leave the review confirmation usable instead of reopening the same conflict.
+    @Test func testSavingMyVersionOfAStaleConflictLeavesReviewConfirmationUsable() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.httpMethod == "PUT" { return try self.staleDraftSave(request, revision: 3) }
+            let other = self.staleDraftJSON(revision: 2, body: "Other device edit")
+            if request.url!.path.contains("/drafts/") { return (200, other) }
+            let threadReads = requests.snapshot.filter { $0.url!.path.hasSuffix(self.threadID.uuidString) }.count
+            return (200, threadReads > 1 ? self.newMailThreadJSON(draft: other) : self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My reply")
+        #expect(await model.saveDraft() == false)
+        #expect(model.conflict?.body == "Other device edit")
+        await model.keepLocalDraft()
+        #expect(model.conflict == nil)
+        #expect(model.currentEdit?.body == "My reply")
+        await model.confirmCurrentSourceReviewed()
+        #expect(model.conflict == nil)
+        #expect(model.draft?.revision == 3)
+        #expect(model.canReview)
+        let save = try #require(requests.snapshot.last { $0.httpMethod == "PUT" })
+        let body = try Self.archiveRequestBody(save)
+        #expect(body["expected_revision"] as? Double == 2)
+        #expect(body["source_revision"] as? Double == 2)
     }
 
     @Test func testNoRefreshAdmissionAfterEmailLeavesForeground() async throws {
@@ -2342,6 +2539,7 @@ import SwiftUI
         refreshNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init,
         statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+        toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
         let id = EmailTestURLProtocol.register(handler)
@@ -2353,7 +2551,8 @@ import SwiftUI
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
         return EmailViewModel(
-            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff
+            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff,
+            toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
         )
     }
 
@@ -2387,6 +2586,22 @@ import SwiftUI
         """
         {"id":"\(draftID)","thread_id":"\(threadID)","account_id":"personal","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)","status":"\(status)","stale":false,"run_id":"\(runID)","approval_id":"\(approvalID)","session_id":"\(threadID)","updated_at":"2026-09-11T00:00:00Z"}
         """
+    }
+    /// The thread after new mail arrived: its revision advanced past the draft's source revision.
+    private func newMailThreadJSON(draft: String) -> String {
+        threadJSON(draft: draft).replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"revision\":2,\"summary\"")
+    }
+    private func staleDraftJSON(revision: Int = 1, body: String = "Thanks, I will review the agenda.") -> String {
+        draftJSON(revision: revision, body: body).replacingOccurrences(of: "\"stale\":false", with: "\"stale\":true")
+    }
+    /// Mirrors the server: a stale draft accepts an edit only with the reviewed thread revision.
+    private func staleDraftSave(_ request: URLRequest, revision: Int) throws -> (Int, String) {
+        let body = try Self.archiveRequestBody(request)
+        guard body["source_revision"] as? Double == 2 else {
+            return (409, Self.error("invalid_state", "review the changed thread before updating this draft"))
+        }
+        let saved = draftJSON(revision: revision, body: body["body"] as? String ?? "")
+        return (200, saved.replacingOccurrences(of: "\"source_revision\":1", with: "\"source_revision\":2"))
     }
     private func approvalJSON(body: String, digests: String = "{}") -> String {
         """

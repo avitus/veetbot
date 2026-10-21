@@ -41,6 +41,10 @@ class ReconsolidationInventoryPass:
             async with self._uow_factory() as uow:
                 await uow.reconsolidation.renew(self._principal, token, self._clock.now())
 
+    async def _neighbors(self, source: SourceVersion) -> tuple[SourceVersion, ...]:
+        async with self._uow_factory() as uow:
+            return await uow.reconsolidation.neighbors(self._principal, source, self._clock.now())
+
     async def _inventory(self, lease: ReconsolidationJob) -> int:
         async with self._uow_factory() as uow:
             page = await uow.reconsolidation.inventory(
@@ -55,12 +59,12 @@ class ReconsolidationInventoryPass:
         for source in anchors:
             if not self._admitted():
                 return 0
-            async with self._uow_factory() as uow:
-                sources = await uow.reconsolidation.neighbors(
-                    self._principal, source, self._clock.now()
-                )
+            sources = await self._neighbors(source)
             digest = group_digest(sources)
-            if len(sources) > 1 and digest not in seen:
+            # A group keeps its inspected anchor. Without it every source may
+            # lie outside this page, checkpoint refuses the batch, and the
+            # owner's inventory never advances past this cursor.
+            if len(sources) > 1 and source in sources and digest not in seen:
                 seen.add(digest)
                 groups.append(sources)
             if len(groups) == 4:

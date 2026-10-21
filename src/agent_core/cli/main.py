@@ -63,7 +63,13 @@ from agent_core.domain.events import EventEnvelope
 from agent_core.domain.failures import failure_fields
 from agent_core.domain.memory import MemoryEdit, MemoryReviewOutcome, Portability, Sensitivity
 from agent_core.domain.messages import AssistantMessage, ReasoningEffort, TextPart
-from agent_core.domain.persona import PersonaEntryDraft, PersonaNominationState
+from agent_core.domain.persona import (
+    KEEP_PERSONA_FIELD,
+    KeepPersonaField,
+    PersonaEntryDraft,
+    PersonaNominationState,
+    PersonaTrait,
+)
 from agent_core.domain.reconsolidation_views import OperationKind, OperationState, OperationView
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import (
@@ -1215,9 +1221,11 @@ def memory_edit(
     typer.echo(row.model_dump_json())
 
 
-async def _memory_review(belief_id: UUID, outcome: str) -> Any:
+async def _memory_review(belief_id: UUID, outcome: str, replacement: str | None) -> Any:
     async with build(storage="postgres") as composition:
-        return await composition.memory.review(belief_id, MemoryReviewOutcome(outcome))
+        return await composition.memory.review(
+            belief_id, MemoryReviewOutcome(outcome), replacement_statement=replacement
+        )
 
 
 @memory_app.command("review")
@@ -1226,14 +1234,27 @@ def memory_review(
     outcome: Annotated[
         MemoryReviewOutcome,
         typer.Option(
-            "--outcome", help="dismiss clears the flag; untrue retires; not_here localizes."
+            "--outcome",
+            help=(
+                "dismiss clears the flag; untrue retires; not_here localizes; "
+                "changed supersedes with --replacement."
+            ),
         ),
     ],
+    replacement: Annotated[
+        str | None,
+        typer.Option("--replacement", help="The corrected wording; only with changed."),
+    ] = None,
 ) -> None:
-    """Apply one review outcome to a flagged belief (ADR-0117)."""
+    """Apply one review outcome to a belief (ADR-0117, ADR-0224)."""
 
+    if (outcome is MemoryReviewOutcome.CHANGED) != (replacement is not None):
+        raise typer.BadParameter(
+            "--replacement goes with --outcome changed, and changed needs it",
+            param_hint="--replacement",
+        )
     try:
-        row = asyncio.run(_memory_review(belief_id, outcome.value))
+        row = asyncio.run(_memory_review(belief_id, outcome.value, replacement))
     except (ConfigurationError, NotFoundError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
@@ -2229,6 +2250,7 @@ async def _persona_edit(expected_version: int, entries: list[str], keep_affirmed
                     text=entry.text,
                     sensitivity=entry.sensitivity,
                     source_belief_id=entry.source_belief_id,
+                    enabled=entry.enabled,
                 )
                 for entry in head.entries
                 if entry.source_belief_id is not None
@@ -2272,6 +2294,83 @@ def persona_edit(
         typer.echo(f"version conflict: {exc}", err=True)
         raise typer.Exit(3) from exc
     typer.echo(view.model_dump_json())
+
+
+async def _persona_tone(
+    expected_version: int,
+    voice: str | KeepPersonaField | None,
+    traits: list[PersonaTrait] | KeepPersonaField,
+) -> Any:
+    """Change the voice or the traits and keep every entry exactly as it is."""
+    async with build(storage="postgres") as composition:
+        head = await composition.services.persona.get(composition.principal)
+        drafts = [
+            PersonaEntryDraft(
+                text=entry.text,
+                sensitivity=entry.sensitivity,
+                source_belief_id=entry.source_belief_id,
+                enabled=entry.enabled,
+            )
+            for entry in head.entries
+        ]
+        return await composition.services.persona.update(
+            composition.principal,
+            expected_version=expected_version,
+            entries=drafts,
+            voice=voice,
+            traits=traits,
+        )
+
+
+def _persona_tone_command(
+    expected_version: int,
+    voice: str | KeepPersonaField | None,
+    traits: list[PersonaTrait] | KeepPersonaField,
+) -> None:
+    try:
+        view = asyncio.run(_persona_tone(expected_version, voice, traits))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except PersonaContentError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    except ConflictError as exc:
+        typer.echo(f"version conflict: {exc}", err=True)
+        raise typer.Exit(3) from exc
+    typer.echo(view.model_dump_json())
+
+
+@persona_app.command("voice")
+def persona_voice(
+    expected_version: Annotated[
+        int, typer.Option("--expected-version", min=0, help="The current head version.")
+    ],
+    text: Annotated[
+        str | None, typer.Argument(help="How Veetbot should talk to you; omit with --clear.")
+    ] = None,
+    clear: Annotated[bool, typer.Option("--clear", help="Remove the voice.")] = False,
+) -> None:
+    """Set or clear the persona voice (ADR-0226); entries and traits are kept."""
+
+    if clear == (text is not None):
+        raise typer.BadParameter("give the voice text, or --clear, not both")
+    _persona_tone_command(expected_version, None if clear else text, KEEP_PERSONA_FIELD)
+
+
+@persona_app.command("traits")
+def persona_traits(
+    expected_version: Annotated[
+        int, typer.Option("--expected-version", min=0, help="The current head version.")
+    ],
+    trait: Annotated[
+        list[PersonaTrait] | None,
+        typer.Argument(help="Up to three of brief, warm, direct, formal, playful."),
+    ] = None,
+) -> None:
+    """Set the tones the persona leans towards (ADR-0226); none clears them."""
+
+    _persona_tone_command(expected_version, KEEP_PERSONA_FIELD, list(trait or []))
 
 
 async def _persona_history(limit: int) -> Any:

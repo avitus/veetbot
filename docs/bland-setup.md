@@ -149,7 +149,7 @@ normal migration as the migration operator, then provision these privileges:
 | Role | Required access |
 | --- | --- |
 | `veetbot_call_ingress` | Schema usage; `SELECT` on `alembic_version`; `SELECT, INSERT, UPDATE` on `call_records`, restricted to receipt rows below |
-| `veetbot_call` | Schema usage; `SELECT` on `alembic_version`, `sessions`, `memories`; `SELECT, INSERT, UPDATE` on `call_records`; `SELECT, UPDATE` on `events`, `tool_invocations`, `runs`, `session_history_items`, `recall_traces`, `artifacts`; `SELECT, DELETE` on `checkpoints`, `integrated_episodes`, `knowledge_documents`; `SELECT, INSERT` on `notification_outbox` when call notifications are enabled |
+| `veetbot_call` | Schema usage; `SELECT` on `alembic_version`, `memories`; `SELECT, INSERT, UPDATE` on `call_records`; `SELECT, UPDATE` on `sessions`, `events`, `tool_invocations`, `runs`, `session_history_items`, `recall_traces`, `artifacts`; `SELECT, DELETE` on `checkpoints`, `integrated_episodes`, `knowledge_documents`, `memory_revisions`; `SELECT, INSERT` on `notification_outbox` when call notifications are enabled |
 
 The migration forces tenant RLS on call records. In addition, the migration
 operator must restrict the ingress role to content-free receipts:
@@ -163,6 +163,21 @@ CREATE POLICY call_ingress_receipts_only ON call_records
 Verify that the ingress role cannot read call rows, sessions, transcripts or
 other tables, and that it cannot insert a non-receipt row. Verify the worker can
 commit a call and notification atomically and can erase a call's derived copies.
+Erasure locks the owner's conversations while it rewrites them, and PostgreSQL
+allows that lock only with `UPDATE`, so the worker needs it on `sessions`.
+`tests/integration/test_call_role_privileges_m27.py` runs the worker under
+exactly these grants.
+
+Grants issued before 2026-10-20 lacked `UPDATE` on `sessions` and both
+privileges on `memory_revisions`. Reconciliation on such a host fails once the
+first call passes thirty days, and the call service journal repeats
+`calling.reconciliation_failed`. Postgres logs `permission denied for table
+sessions` at the same time. Add the missing grants as the migration operator:
+
+```sql
+GRANT UPDATE ON sessions TO veetbot_call;
+GRANT SELECT, DELETE ON memory_revisions TO veetbot_call;
+```
 No sequence privileges are needed for the UUID/key-addressed calling writes.
 Existing general maintenance removes expired artifact bytes; call erasure first
 expires their records and removes knowledge derived from those artifacts.

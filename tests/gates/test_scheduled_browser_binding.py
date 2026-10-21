@@ -273,7 +273,11 @@ def test_legacy_unbound_schedule_request_hash_is_unchanged() -> None:
     from agent_core.domain.schedules import ScheduleDefinition
 
     definition = ScheduleDefinition.model_validate(_definition())
-    legacy = definition.model_dump(mode="json", exclude={"browser_profile_id"})
+    # A legacy request had neither the website binding (ADR-0150), a call plan
+    # (ADR-0221) nor the notify preference (ADR-0225).
+    legacy = definition.model_dump(
+        mode="json", exclude={"browser_profile_id", "call_plan", "notify"}
+    )
     previous_hash = hashlib.sha256(
         json.dumps(legacy, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()

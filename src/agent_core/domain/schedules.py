@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
@@ -164,6 +164,52 @@ class YearlyCadence(BaseModel):
 type Cadence = OnceCadence | DailyCadence | WeeklyCadence | MonthlyCadence | YearlyCadence
 
 
+# ADR-0221 bounds: a plan places at most ten calls before any follow-up, all
+# within an hour of its first call, never closer together than a minute.
+MAX_CALL_PLAN_CALLS = 10
+MAX_CALL_PLAN_SPAN = timedelta(minutes=60)
+
+
+class CallPlan(BaseModel):
+    """ADR-0221: retries and a follow-up the platform places for a call schedule."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    retry_every_minutes: int | None = Field(default=None, ge=1, le=30)
+    retry_until: datetime | None = None
+    follow_up_after_answer_minutes: int | None = Field(default=None, ge=1, le=60)
+
+    @field_validator("retry_until")
+    @classmethod
+    def retry_until_is_aware_utc(cls, value: datetime | None) -> datetime | None:
+        return _optional_aware_utc(value)
+
+    @model_validator(mode="after")
+    def plan_is_complete(self) -> CallPlan:
+        if (self.retry_every_minutes is None) != (self.retry_until is None):
+            raise ValueError("call plan retries need both an interval and an end")
+        if self.retry_until is None and self.follow_up_after_answer_minutes is None:
+            raise ValueError("call plan needs retries, a follow-up, or both")
+        return self
+
+    def max_calls(self, first_at: datetime) -> int:
+        """Calls before any follow-up: the first, then one per interval in the window."""
+        if self.retry_every_minutes is None or self.retry_until is None:
+            return 1
+        window = self.retry_until - first_at
+        return 1 + int(window // timedelta(minutes=self.retry_every_minutes))
+
+    def validate_for(self, first_at: datetime) -> None:
+        if self.retry_until is None:
+            return
+        if self.retry_until <= first_at:
+            raise ValueError("call plan retries must end after the first call")
+        if self.retry_until - first_at > MAX_CALL_PLAN_SPAN:
+            raise ValueError("call plan retries must end within an hour of the first call")
+        if self.max_calls(first_at) > MAX_CALL_PLAN_CALLS:
+            raise ValueError("call plan places at most ten calls before a follow-up")
+
+
 class ScheduleState(StrEnum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
@@ -174,6 +220,26 @@ class ScheduleState(StrEnum):
 class SchedulePauseReason(StrEnum):
     USER = "user"
     FAILURE_LIMIT = "failure_limit"
+
+
+class ScheduleNotify(StrEnum):
+    """When a schedule's finished runs notify the owner (ADR-0225 part D).
+
+    ``every_report`` is the behaviour before the preference existed;
+    ``attention_only`` withholds the report notification for a run that
+    completed. Approvals, questions, failures and skipped occurrences always
+    notify, because each needs the owner.
+    """
+
+    EVERY_REPORT = "every_report"
+    ATTENTION_ONLY = "attention_only"
+
+
+class OccurrenceTrigger(StrEnum):
+    """Why an occurrence exists: its cadence fired, or the owner asked (ADR-0225 C)."""
+
+    SCHEDULED = "SCHEDULED"
+    MANUAL = "MANUAL"
 
 
 class OccurrenceDisposition(StrEnum):
@@ -285,8 +351,10 @@ class ScheduleRevision(BaseModel):
     timezone: str | None
     misfire_grace_seconds: int = Field(gt=0)
     max_consecutive_failures: int = Field(gt=0)
+    notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT
     created_by_principal_id: str = Field(min_length=1)
     created_at: datetime
+    call_plan: CallPlan | None = None
 
     @field_validator("created_at")
     @classmethod
@@ -312,6 +380,7 @@ class ScheduleRevision(BaseModel):
                 raise ValueError("one-time cadence has no timezone")
         elif self.timezone != self.cadence.timezone:
             raise ValueError("cadence timezone must match revision timezone")
+        check_call_plan(self.call_plan, self.cadence)
         return self
 
 
@@ -332,6 +401,8 @@ class ScheduleDefinition(BaseModel):
     cadence: Cadence
     misfire_grace_seconds: int = Field(gt=0)
     max_consecutive_failures: int = Field(gt=0)
+    call_plan: CallPlan | None = None
+    notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT
 
     @model_validator(mode="after")
     def execution_is_finite(self) -> ScheduleDefinition:
@@ -347,6 +418,7 @@ class ScheduleDefinition(BaseModel):
             raise ValueError("scheduled run limits must all be finite positive values")
         if limits.deadline_at is not None:
             raise ValueError("scheduled definition deadline is derived at materialization")
+        check_call_plan(self.call_plan, self.cadence)
         return self
 
     @property
@@ -395,11 +467,25 @@ class ScheduleOccurrence(BaseModel):
     materialized_at: datetime | None = None
     links_erased_at: datetime | None = None
     created_at: datetime
+    # ADR-0225 part C: a manual occurrence's nominal instant is the request
+    # time, and its idempotency key is unique per schedule.
+    trigger: OccurrenceTrigger = OccurrenceTrigger.SCHEDULED
+    manual_request_key: str | None = Field(default=None, min_length=1, max_length=255)
 
     @field_validator("nominal_fire_at", "materialized_at", "links_erased_at", "created_at")
     @classmethod
     def occurrence_instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
         return _optional_aware_utc(value)
+
+    @model_validator(mode="after")
+    def manual_key_matches_trigger(self) -> ScheduleOccurrence:
+        if (self.trigger is OccurrenceTrigger.MANUAL) != (self.manual_request_key is not None):
+            raise ValueError("only a manual occurrence carries a request key, and it must")
+        if self.trigger is OccurrenceTrigger.MANUAL and (
+            self.disposition is not OccurrenceDisposition.MATERIALIZED
+        ):
+            raise ValueError("a manual occurrence is recorded only once it starts a run")
+        return self
 
     @model_validator(mode="after")
     def disposition_is_consistent(self) -> ScheduleOccurrence:
@@ -488,6 +574,18 @@ class OccurrenceCursor(BaseModel):
         return _aware_utc(value)
 
 
+def check_call_plan(plan: CallPlan | None, cadence: Cadence) -> None:
+    """A call plan follows one first call, so only a one-time schedule carries one.
+
+    Raises ValueError so model validation and the schedule service share it.
+    """
+    if plan is None:
+        return
+    if not isinstance(cadence, OnceCadence):
+        raise ValueError("a call plan requires a one-time cadence")
+    plan.validate_for(cadence.at)
+
+
 def _validate_local_time(value: time) -> time:
     if value.tzinfo is not None:
         raise ValueError("local_time must not carry a UTC offset")
@@ -514,3 +612,26 @@ def _aware_utc(value: datetime) -> datetime:
 
 def _optional_aware_utc(value: datetime | None) -> datetime | None:
     return None if value is None else _aware_utc(value)
+
+
+class ScheduleDraftStatus(StrEnum):
+    """What a plain-words draft came to (ADR-0225 part B)."""
+
+    READY = "ready"
+    NEEDS_CLARIFICATION = "needs_clarification"
+    FAILED = "failed"
+
+
+class ScheduleDraft(BaseModel):
+    """A schedule read from the owner's words, never persisted.
+
+    `definition` is complete when `status` is ready: the owner's sentence as
+    the instruction, the parsed cadence, and every pin the chat tool derives.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: ScheduleDraftStatus
+    reason: str | None = None
+    definition: ScheduleDefinition | None = None
+    next_fire_at: list[datetime] = Field(default_factory=list)

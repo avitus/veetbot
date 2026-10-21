@@ -80,8 +80,10 @@ from agent_core.domain.policies import (
 from agent_core.domain.runs import Run, RunFailure, RunKind, RunLimits, RunStatus, RunUsage
 from agent_core.domain.schedules import (
     OccurrenceDisposition,
+    OccurrenceTrigger,
     Schedule,
     ScheduleIdempotencyRecord,
+    ScheduleNotify,
     ScheduleOccurrence,
     SchedulePauseReason,
     ScheduleRevision,
@@ -393,6 +395,14 @@ def schedule_revision_values(revision: ScheduleRevision) -> dict[str, Any]:
         exclude={"schedule_id", "revision", "created_by_principal_id", "created_at"},
     )
     definition["requested_scopes"] = sorted(revision.requested_scopes)
+    # Only call-plan revisions carry the key (ADR-0221), so a release that
+    # predates call plans still reads every other revision.
+    if revision.call_plan is None:
+        definition.pop("call_plan")
+    # Likewise only a chosen notify preference is stored (ADR-0225 part D); an
+    # absent key reads back as the default.
+    if revision.notify is ScheduleNotify.EVERY_REPORT:
+        definition.pop("notify")
     return {
         "schedule_id": revision.schedule_id,
         "revision": revision.revision,
@@ -416,12 +426,15 @@ def schedule_occurrence_to_domain(row: ScheduleOccurrenceRow) -> ScheduleOccurre
         materialized_at=row.materialized_at,
         links_erased_at=row.links_erased_at,
         created_at=row.created_at,
+        trigger=OccurrenceTrigger(row.trigger),
+        manual_request_key=row.manual_request_key,
     )
 
 
 def schedule_occurrence_values(occurrence: ScheduleOccurrence) -> dict[str, Any]:
     values = occurrence.model_dump(mode="python")
     values["disposition"] = occurrence.disposition.value
+    values["trigger"] = occurrence.trigger.value
     return values
 
 

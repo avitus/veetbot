@@ -41,6 +41,12 @@ class ModelSettingsChoiceError(AgentCoreError):
     """A model-settings save named a model or effort that is not offered."""
 
 
+class MemoryCorrectionError(AgentCoreError):
+    """A memory's replacement wording was refused before any write (ADR-0224):
+    empty, over-length, unchanged, secret- or injection-shaped, or the text of
+    a statement the owner already deleted or rejected."""
+
+
 class FolderNameError(AgentCoreError):
     """A folder name was refused before persistence: empty, over-length,
     control characters, or content failing the secret or injection scans."""
@@ -53,6 +59,14 @@ class AttachmentValidationError(AgentCoreError):
 
 class ScheduleValidationError(AgentCoreError):
     """A schedule definition failed one stable boundary rule."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class RateLimitedError(AgentCoreError):
+    """A bounded owner action ran out of its allowance for now."""
 
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(message)

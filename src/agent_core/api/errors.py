@@ -22,9 +22,11 @@ ERROR_STATUS_MAP: dict[type[BaseException], ErrorMapping] = {
     domain_errors.ConflictError: ErrorMapping("conflict", 409),
     domain_errors.PersonaContentError: ErrorMapping("malformed_request", 400),
     domain_errors.FolderNameError: ErrorMapping("malformed_request", 400),
+    domain_errors.MemoryCorrectionError: ErrorMapping("malformed_request", 400),
     domain_errors.AttachmentValidationError: ErrorMapping("malformed_request", 400),
     domain_errors.ModelSettingsChoiceError: ErrorMapping("malformed_request", 400),
     domain_errors.ScheduleValidationError: ErrorMapping("schedule_validation_error", 422),
+    domain_errors.RateLimitedError: ErrorMapping("rate_limited", 429),
     domain_errors.DeviceValidationError: ErrorMapping("device_validation_error", 422),
     domain_errors.DeviceIngestError: ErrorMapping("device_ingest_error", 422),
     domain_errors.DeviceChannelUnavailable: ErrorMapping("device_channel_unavailable", 503),
@@ -120,6 +122,8 @@ def details_for(exc: BaseException, code: str) -> dict[str, object]:
     if code == "schedule_validation_error" and isinstance(
         exc, domain_errors.ScheduleValidationError
     ):
+        return {"reason": exc.reason}
+    if code == "rate_limited" and isinstance(exc, domain_errors.RateLimitedError):
         return {"reason": exc.reason}
     if code == "device_validation_error" and isinstance(exc, domain_errors.DeviceValidationError):
         return {"reason": exc.reason}

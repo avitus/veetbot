@@ -179,6 +179,23 @@ cmp -s "$SOURCE_CONFIG" "$AVAILABLE"
 grep -Fq 'nginx -t' "$LOG_FILE"
 grep -Fq 'systemctl reload nginx' "$LOG_FILE"
 
+# An unchanged configuration is neither reinstalled nor reloaded: the host's
+# Nginx also serves other applications, and every reload restarts them.
+: >"$LOG_FILE"
+run_deploy >"$TEST_ROOT/unchanged.out"
+if grep -Eq 'install -m 0644|nginx -t|systemctl reload' "$LOG_FILE"; then
+  printf 'unchanged Nginx configuration was reinstalled or reloaded\n' >&2
+  exit 1
+fi
+grep -Fqx 'Nginx configuration unchanged; reload skipped.' "$TEST_ROOT/unchanged.out"
+
+# An identical file that is no longer enabled still needs activation.
+rm -f -- "$ENABLED"
+: >"$LOG_FILE"
+run_deploy >/dev/null
+[[ "$(readlink "$ENABLED")" == "$AVAILABLE" ]]
+grep -Fq 'systemctl reload nginx' "$LOG_FILE"
+
 # Before the first application release there is no release identity: the
 # optional webhook routes are omitted rather than failing the deployment.
 printf '%s\n' \
@@ -222,8 +239,11 @@ printf '%s\n' \
   'VEETBOT_RELEASE_ID=20260810-152233-abcdef0' \
   'AGENT_SURFACE_WHATSAPP_ENABLED=1' \
   >"$DEPLOY_ROOT/releases/20260810-152233-abcdef0/.release.env"
+# The repository file is unchanged, but the rendered route set is not.
+: >"$LOG_FILE"
 VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy "$SURFACE_CONFIG"
 grep -Fq 'location = /webhooks/whatsapp' "$AVAILABLE"
+grep -Fq 'systemctl reload nginx' "$LOG_FILE"
 CALL_CONFIG="$TEST_ROOT/call.conf"
 printf '%s\n' 'server {' '  # VEETBOT_CALL_ROUTE_BEGIN' \
   '  location = /webhooks/bland { proxy_pass http://127.0.0.1:8003; }' \
@@ -579,7 +599,14 @@ rollback_retained_release=20260810-152301-2222222
 current_retained_release=20260810-152302-3333333
 publish_retained_docs_release "$first_retained_release"
 publish_retained_docs_release "$rollback_retained_release"
+# Documentation publishes through its symlink; an unchanged configuration
+# needs no reload for Nginx to serve the new release.
+: >"$LOG_FILE"
 publish_retained_docs_release "$current_retained_release"
+if grep -Fq 'systemctl reload' "$LOG_FILE"; then
+  printf 'documentation publish reloaded an unchanged Nginx configuration\n' >&2
+  exit 1
+fi
 [[ "$(readlink "$DOCS_ROOT/current")" == \
   "$DOCS_ROOT/releases/$current_retained_release" ]]
 [[ -d "$DOCS_ROOT/releases/$current_retained_release" ]]

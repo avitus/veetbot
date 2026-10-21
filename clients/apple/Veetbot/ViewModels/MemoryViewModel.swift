@@ -25,8 +25,12 @@ public final class MemoryViewModel: ObservableObject {
     /// The identifier of the row a write is acting on, so the views can
     /// disable a second action on it until the first settles.
     @Published public private(set) var pendingActionID: UUID?
+    /// The sidebar's numbers (ADR-0224); nil while unknown or when the server
+    /// predates the counts route, so a row then shows no number rather than 0.
+    @Published public private(set) var counts: MemoryCountsView?
 
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
+    private let toasts: ToastCenter
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var reloadRequestID: UUID?
@@ -50,9 +54,11 @@ public final class MemoryViewModel: ObservableObject {
     public init(
         makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = {
             await MemoryViewModel.makeDefaultAPIClient()
-        }
+        },
+        toasts: ToastCenter? = nil
     ) {
         self.makeAPIClient = makeAPIClient
+        self.toasts = toasts ?? .shared
     }
 
     deinit {
@@ -110,6 +116,14 @@ public final class MemoryViewModel: ObservableObject {
         Task { [weak self] in await self?.reload() }
     }
 
+    func applyGroupFilters(flagged: Bool, type: MemoryBeliefTypeKind?) {
+        guard flaggedOnly != flagged || typeFilter != type else { return }
+        flaggedOnly = flagged
+        typeFilter = type
+        searchDebounceTask?.cancel()
+        Task { [weak self] in await self?.reload() }
+    }
+
     public func setFlaggedOnly(_ flagged: Bool) {
         guard flaggedOnly != flagged else { return }
         flaggedOnly = flagged
@@ -133,6 +147,8 @@ public final class MemoryViewModel: ObservableObject {
         do {
             try await api.deleteMemory(memory.id, ceiling: memoryBrowsingCeiling)
             items.removeAll { $0.id == memory.id }
+            toasts.show(Self.deletedConfirmation)
+            await refreshCounts(api)
             return true
         } catch VeetbotAPIClientError.memoryChangesUnavailable {
             changesUnavailable = true
@@ -145,6 +161,97 @@ public final class MemoryViewModel: ObservableObject {
             errorMessage = displayMessage(for: error)
             return false
         }
+    }
+
+    static let deletedConfirmation = "Deleted. The same statement will not form again."
+
+    /// What each review outcome did, said once the server confirms it. None
+    /// can be undone over HTTP, so none offers Undo.
+    static func confirmation(for outcome: MemoryReviewOutcome) -> String {
+        switch outcome {
+        case .dismiss: "Marked as reviewed."
+        case .untrue: "Marked not true. Veetbot will not form it again from the same evidence."
+        case .notHere: "Marked not relevant here."
+        }
+    }
+
+    static let correctedConfirmation = "Updated. The earlier wording is kept as history."
+    static let refusedWordingMessage =
+        "That wording can't be saved. It may match the current one, something you removed, or look like a password."
+
+    /// Supersedes a belief with the owner's wording (ADR-0224). The server
+    /// answers with the replacement, which takes the original's row; the
+    /// original stays on the server as history. Returns the replacement, or
+    /// nil when nothing changed.
+    @discardableResult
+    public func correct(_ memory: MemoryView, wording: String) async -> MemoryView? {
+        let text = wording.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard pendingActionID == nil, !text.isEmpty else { return nil }
+        pendingActionID = memory.id
+        defer { pendingActionID = nil }
+        errorMessage = nil
+        guard let api = await makeAPIClient() else {
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return nil
+        }
+        do {
+            let replacement = try await api.correctMemory(
+                memory.id,
+                wording: text,
+                expectedUpdatedAt: memory.updatedAt,
+                ceiling: memoryBrowsingCeiling
+            )
+            if let index = items.firstIndex(where: { $0.id == memory.id }) {
+                items[index] = replacement
+            }
+            toasts.show(Self.correctedConfirmation)
+            await refreshCounts(api)
+            return replacement
+        } catch VeetbotAPIClientError.memoryChangesUnavailable {
+            changesUnavailable = true
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryChangesUnavailable)
+            return nil
+        } catch HTTPTransportError.api(let apiError) where apiError.statusCode == 400 {
+            errorMessage = Self.refusedWordingMessage
+            return nil
+        } catch HTTPTransportError.api(let apiError) where apiError.statusCode == 409 {
+            errorMessage = "This memory changed on the server. The list has been refreshed."
+            await reload()
+            return nil
+        } catch {
+            errorMessage = displayMessage(for: error)
+            return nil
+        }
+    }
+
+    /// The sources the belief cites, or nil when the server cannot say.
+    public func evidence(for memory: MemoryView) async -> [MemoryEvidenceItem]? {
+        guard let api = await makeAPIClient() else { return nil }
+        return try? await api.memoryEvidence(memory.id, ceiling: memoryBrowsingCeiling)
+    }
+
+    /// The number a sidebar group shows, when the server reported one.
+    public func count(for group: MemoryBrowseGroup) -> Int? {
+        guard let counts else { return nil }
+        switch group {
+        case .review: return counts.flagged
+        case .all: return counts.live
+        case .type(let type): return counts.byType[type.rawValue] ?? 0
+        }
+    }
+
+    /// Fetches the sidebar's numbers. Counts are a label, never a blocker:
+    /// any failure, including a server without the route, leaves them unknown.
+    public func loadCounts() async {
+        guard let api = await makeAPIClient() else { return }
+        counts = try? await api.memoryCounts(ceiling: memoryBrowsingCeiling)
+    }
+
+    /// After a write, numbers already on screen are fetched again; a surface
+    /// that never showed them costs no request.
+    private func refreshCounts(_ api: VeetbotAPIClient) async {
+        guard counts != nil else { return }
+        counts = try? await api.memoryCounts(ceiling: memoryBrowsingCeiling)
     }
 
     /// Applies one review outcome. The row is replaced by the server's view of
@@ -172,6 +279,8 @@ public final class MemoryViewModel: ObservableObject {
             if let index = items.firstIndex(where: { $0.id == memory.id }) {
                 if stillListed { items[index] = reviewed } else { items.remove(at: index) }
             }
+            toasts.show(Self.confirmation(for: outcome))
+            await refreshCounts(api)
             return reviewed
         } catch VeetbotAPIClientError.memoryChangesUnavailable {
             changesUnavailable = true
@@ -322,5 +431,57 @@ public final class MemoryViewModel: ObservableObject {
 
     private func displayMessage(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
+
+/// A group of the Mac sidebar (MagicPath coolly-breeze-5701): the review
+/// queue, everything, or one belief type. Each maps onto the list route's own
+/// `flagged` and `belief_type` filters.
+public enum MemoryBrowseGroup: Hashable, Identifiable, Sendable {
+    case review
+    case all
+    case type(MemoryBeliefTypeKind)
+
+    public var id: String {
+        switch self {
+        case .review: return "review"
+        case .all: return "all"
+        case .type(let type): return "type.\(type.rawValue)"
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .review: return "Needs review"
+        case .all: return "All memories"
+        case .type(.preference): return "Preferences"
+        case .type(.fact): return "Facts"
+        case .type(.relationship): return "Relationships"
+        case .type(.userModelAttr): return "About you"
+        case .type(.procedurePointer): return "Procedures"
+        }
+    }
+
+    public static let browseTypes: [MemoryBrowseGroup] = [
+        .type(.preference), .type(.fact), .type(.relationship), .type(.userModelAttr), .type(.procedurePointer),
+    ]
+}
+
+extension MemoryViewModel {
+    /// The sidebar group the current filters describe.
+    public var group: MemoryBrowseGroup {
+        if flaggedOnly { return .review }
+        if let typeFilter { return .type(typeFilter) }
+        return .all
+    }
+
+    /// Sets the review flag and the type filter together, so a group change
+    /// costs one request.
+    public func selectGroup(_ group: MemoryBrowseGroup) {
+        switch group {
+        case .review: applyGroupFilters(flagged: true, type: nil)
+        case .all: applyGroupFilters(flagged: false, type: nil)
+        case .type(let type): applyGroupFilters(flagged: false, type: type)
+        }
     }
 }

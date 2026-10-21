@@ -13,9 +13,9 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.application.people import PublicPeopleService
 from agent_core.domain.email import EmailMessage, EmailThread
 from agent_core.domain.email_semantics import semantic_source_key, thread_source_key
-from agent_core.domain.errors import AuthorizationError, NotFoundError
+from agent_core.domain.errors import AuthorizationError
 from agent_core.domain.people import Person
-from agent_core.domain.tools import ToolExecutionContext
+from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult
 from agent_core.memory.email_people import EmailPeopleFormationService
 from agent_core.runtime.email_state import save_value
 from agent_core.tools.people import LegacyPeopleHistoryTool, PeopleHistoryTool
@@ -142,11 +142,12 @@ async def test_a_source_read_needs_email_access_and_a_source_of_this_person() ->
         await tool.execute(
             {"person_id": str(alex.id), "source_id": source_id}, _context("people.read")
         )
-    with pytest.raises(NotFoundError):
+    _assert_refused(
         await tool.execute(
             {"person_id": str(alex.id), "source_id": str(uuid4())},
             _context("people.read", "email.read"),
         )
+    )
 
 
 async def test_an_excluded_source_no_longer_returns_its_text() -> None:
@@ -170,8 +171,16 @@ async def test_an_excluded_source_no_longer_returns_its_text() -> None:
             expected_revision=record.revision,
         )
 
-    with pytest.raises(NotFoundError):
+    _assert_refused(
         await tool.execute({"person_id": str(alex.id), "source_id": source_id}, context)
+    )
+
+
+def _assert_refused(result: ToolResult) -> None:
+    # A refusal is a correctable tool failure that returns no text; raising
+    # NotFoundError instead would end the whole run.
+    assert not result.ok and not result.content and result.structured is None
+    assert result.failure is not None and result.failure.kind is ToolFailureKind.NOT_FOUND
 
 
 async def test_chats_pinned_to_the_first_version_keep_its_published_shape() -> None:

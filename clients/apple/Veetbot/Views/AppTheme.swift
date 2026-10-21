@@ -107,6 +107,12 @@ public enum AppPalette {
     public static let selected = AppColorToken(
         light: AppRGBA(hex: 0x102923, alpha: 0.09), dark: AppRGBA(hex: 0xECE6D8, alpha: 0.12)
     )
+    /// The toast inverts the page: an ink ground with paper text, its Undo
+    /// in the opposite mode's teal so it reads on that ground.
+    public static let toastBackground = ink
+    public static let toastText = paper
+    public static let toastAction = AppColorToken(light: AppRGBA(hex: 0x5EE3C9), dark: AppRGBA(hex: 0x086657))
+    public static let toastSoft = AppColorToken(light: AppRGBA(hex: 0xBCCBC5), dark: AppRGBA(hex: 0x2F4640))
 }
 
 /// The semantic colours every screen draws with, as the A2 reference uses
@@ -144,6 +150,10 @@ enum AppTheme {
     static let hairlineStrong = AppPalette.hairlineStrong.color
     /// The selected sidebar row.
     static let selected = AppPalette.selected.color
+    static let toastBackground = AppPalette.toastBackground.color
+    static let toastText = AppPalette.toastText.color
+    static let toastAction = AppPalette.toastAction.color
+    static let toastSoft = AppPalette.toastSoft.color
 
     static let brandGradient = LinearGradient(
         colors: [tealWash, amberWash],
@@ -206,14 +216,66 @@ enum AppFontStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// The owner's light or dark choice; System follows the device.
+enum AppThemePreference: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+/// Applies the theme to every window the app owns, sheets and the Mac
+/// Settings window included; System hands the choice back to the device.
+enum AppThemeApplier {
+    @MainActor
+    static func apply(_ theme: AppThemePreference) {
+        #if os(macOS)
+        switch theme {
+        case .system: NSApp?.appearance = nil
+        case .light: NSApp?.appearance = NSAppearance(named: .aqua)
+        case .dark: NSApp?.appearance = NSAppearance(named: .darkAqua)
+        }
+        #else
+        let style: UIUserInterfaceStyle
+        switch theme {
+        case .system: style = .unspecified
+        case .light: style = .light
+        case .dark: style = .dark
+        }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows { window.overrideUserInterfaceStyle = style }
+        }
+        #endif
+    }
+}
+
 final class AppearancePreferences: ObservableObject {
     private enum Key {
         static let textSize = "veetbot.appearance.textSize"
         static let fontStyle = "veetbot.appearance.fontStyle"
+        static let theme = "veetbot.appearance.theme"
     }
 
     @Published var textSize: AppTextSize {
         didSet { defaults.set(textSize.rawValue, forKey: Key.textSize) }
+    }
+
+    @Published var theme: AppThemePreference {
+        didSet { defaults.set(theme.rawValue, forKey: Key.theme) }
     }
 
     @Published var fontStyle: AppFontStyle {
@@ -225,16 +287,16 @@ final class AppearancePreferences: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         textSize = AppTextSize(rawValue: defaults.string(forKey: Key.textSize) ?? "") ?? .system
-        // The rounded face stays the default: the system face runs about two
-        // points wider per toolbar label, which folds the iPhone Subscriptions
-        // toolbar into an overflow menu. The Email restyle may revisit this.
+        theme = AppThemePreference(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .system
+        // System is the default face (design system revision 2); the choice
+        // reaches transcript body text only.
         fontStyle =
-            AppFontStyle(rawValue: defaults.string(forKey: Key.fontStyle) ?? "") ?? .rounded
+            AppFontStyle(rawValue: defaults.string(forKey: Key.fontStyle) ?? "") ?? .system
     }
 }
 
 private struct AppFontStyleKey: EnvironmentKey {
-    static let defaultValue = AppFontStyle.rounded
+    static let defaultValue = AppFontStyle.system
 }
 
 private struct AppTextSizeKey: EnvironmentKey {
@@ -253,138 +315,30 @@ extension EnvironmentValues {
     }
 }
 
+/// The transcript body's point size under a text-size choice, or nil for
+/// System, which follows the platform: the body role's size scaled.
 func appPointSize(for textStyle: Font.TextStyle, textSize: AppTextSize) -> CGFloat? {
     guard let scale = textSize.fontScale else { return nil }
-    return textStyle.appBasePointSize * scale
+    return VeetType.pointSize(.body, on: .current) * scale
 }
 
-private func resolvedAppFont(
-    _ textStyle: Font.TextStyle,
-    textSize: AppTextSize,
-    design: Font.Design,
-    weight: Font.Weight? = nil
-) -> Font {
-    var font: Font
-    if let pointSize = appPointSize(for: textStyle, textSize: textSize) {
-        font = .system(size: pointSize, design: design)
-    } else {
-        font = .system(textStyle, design: design)
-    }
-    if let weight {
-        font = font.weight(weight)
-    }
-    return font
-}
-
-extension Font.TextStyle {
-    fileprivate var appBasePointSize: CGFloat {
-        #if os(macOS)
-        switch self {
-        case .largeTitle: return 26
-        case .title: return 22
-        case .title2: return 17
-        case .title3: return 15
-        case .headline, .body: return 13
-        case .callout: return 12
-        case .subheadline: return 11
-        case .footnote, .caption, .caption2: return 10
-        @unknown default: return 13
-        }
-        #else
-        switch self {
-        case .largeTitle: return 34
-        case .title: return 28
-        case .title2: return 22
-        case .title3: return 20
-        case .headline, .body: return 17
-        case .callout: return 16
-        case .subheadline: return 15
-        case .footnote: return 13
-        case .caption: return 12
-        case .caption2: return 11
-        @unknown default: return 17
-        }
-        #endif
-    }
-}
-
+/// Hands the owner's face and size to the transcript (`.transcriptBody()`)
+/// and sets everything else in the system face at the ui role: chrome,
+/// sidebars, tables and controls never follow the preference.
 private struct AppTypographyModifier: ViewModifier {
     @ObservedObject var preferences: AppearancePreferences
 
     func body(content: Content) -> some View {
         content
+            .veetType(.ui)
             .environment(\.appFontStyle, preferences.fontStyle)
             .environment(\.appTextSize, preferences.textSize)
-            .font(
-                resolvedAppFont(
-                    .body,
-                    textSize: preferences.textSize,
-                    design: preferences.fontStyle.design
-                )
-            )
-    }
-}
-
-private struct AppFontModifier: ViewModifier {
-    @Environment(\.appFontStyle) private var fontStyle
-    @Environment(\.appTextSize) private var textSize
-    let textStyle: Font.TextStyle
-    let weight: Font.Weight?
-
-    func body(content: Content) -> some View {
-        content.font(
-            resolvedAppFont(
-                textStyle,
-                textSize: textSize,
-                design: fontStyle.design,
-                weight: weight
-            )
-        )
-    }
-}
-
-/// Titles: the serif display face at a medium weight, scaled with the text
-/// size preference but never with the body font style, so a title reads the
-/// same whichever body face the owner chose.
-private struct AppDisplayFontModifier: ViewModifier {
-    @Environment(\.appTextSize) private var textSize
-    let textStyle: Font.TextStyle
-    let weight: Font.Weight
-
-    func body(content: Content) -> some View {
-        content.font(
-            resolvedAppFont(textStyle, textSize: textSize, design: .serif, weight: weight)
-        )
-    }
-}
-
-private struct AppCodeFontModifier: ViewModifier {
-    @Environment(\.appTextSize) private var textSize
-    let textStyle: Font.TextStyle
-
-    func body(content: Content) -> some View {
-        content.font(
-            resolvedAppFont(textStyle, textSize: textSize, design: .monospaced)
-        )
     }
 }
 
 extension View {
     func appTypography(_ preferences: AppearancePreferences) -> some View {
         modifier(AppTypographyModifier(preferences: preferences))
-    }
-
-    func appFont(_ style: Font.TextStyle, weight: Font.Weight? = nil) -> some View {
-        modifier(AppFontModifier(textStyle: style, weight: weight))
-    }
-
-    func appCodeFont(_ style: Font.TextStyle = .caption) -> some View {
-        modifier(AppCodeFontModifier(textStyle: style))
-    }
-
-    /// A display title in the serif face.
-    func appDisplayFont(_ style: Font.TextStyle = .title2, weight: Font.Weight = .medium) -> some View {
-        modifier(AppDisplayFontModifier(textStyle: style, weight: weight))
     }
 
     /// Frames sheet content so a Mac sheet opens at `idealWidth`: macOS
@@ -432,7 +386,7 @@ struct VeetbotBrandMark: View {
             Image(systemName: "chevron.right")
                 .foregroundColor(AppTheme.amber)
         }
-        .font(.system(size: size, weight: .bold, design: .rounded))
+        .font(VeetType.brandMark(size: size))
         .accessibilityHidden(true)
     }
 }

@@ -103,6 +103,71 @@ import UserNotifications
     }
 
     @Test
+    func testAnAuthenticatedSessionListRecordsWhenTheConnectionWasVerified() async throws {
+        let model = try configuredModel { request in
+            try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+        }
+        #expect(model.lastVerifiedAt == nil)
+        let before = Date()
+
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+
+        let verified = try #require(model.lastVerifiedAt)
+        #expect(verified >= before.addingTimeInterval(-1) && verified <= Date().addingTimeInterval(1))
+    }
+
+    @Test
+    func testVerifiedTimeReadsInMinutes() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        #expect(ConnectionVerification.phrase(for: nil, now: now) == nil)
+        #expect(ConnectionVerification.phrase(for: now.addingTimeInterval(-20), now: now) == "verified just now")
+        #expect(ConnectionVerification.phrase(for: now.addingTimeInterval(-60), now: now) == "verified 1 min ago")
+        #expect(ConnectionVerification.phrase(for: now.addingTimeInterval(-7 * 60 - 5), now: now) == "verified 7 min ago")
+        #expect(ConnectionVerification.phrase(for: now.addingTimeInterval(-3 * 3600), now: now) == "verified 3 h ago")
+    }
+
+    @Test
+    func testClearingTheLocalCacheEmptiesTheStoreAndReloadsFromTheServer() async throws {
+        let sessionID = "00000000-0000-0000-0000-00000000c1ea"
+        let store = DeleteRecordingHistoryStore()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let listed = sessionJSON(sessionID, title: "Tahoe weekend", folderID: nil)
+        let model = try configuredModel(historyStore: store, toasts: toasts) { request in
+            try response(for: request, statusCode: 200, body: #"{"items":[\#(listed)],"next_cursor":null}"#)
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        #expect(model.history.map { $0.sessionID.uuidString.lowercased() } == [sessionID])
+
+        #expect(await model.clearLocalCache())
+
+        #expect(await store.deleted.map { $0.uuidString.lowercased() } == [sessionID])
+        #expect(model.history.map { $0.sessionID.uuidString.lowercased() } == [sessionID])
+        #expect(toasts.current?.text == "Cleared. Chats reload from the server.")
+    }
+
+    /// PR #179 review: a failed reload after clearing takes the ordinary
+    /// sign-in-again path rather than leaving only a message.
+    @Test
+    func testClearingTheCacheWithAnExpiredTokenAsksToSignInAgain() async throws {
+        let lock = NSLock()
+        var expired = false
+        let model = try configuredModel { request in
+            if lock.withLock({ expired }) {
+                return try response(
+                    for: request, statusCode: 401,
+                    body: #"{"error":{"code":"authentication_error","message":"expired","details":{},"request_id":"r"}}"#
+                )
+            }
+            return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        lock.withLock { expired = true }
+
+        #expect(await model.clearLocalCache() == false)
+        #expect(model.requiresReauthentication)
+    }
+
+    @Test
     func testDeletingCallClearsDerivedChatPresentation() async throws {
         let callID = UUID()
         let model = try configuredModel { request in
@@ -3360,6 +3425,8 @@ import UserNotifications
     private func configuredModel(
         titleRefreshDelay: TimeInterval = 10,
         concurrentRequests: Bool = false,
+        historyStore: (any SessionHistoryStore)? = nil,
+        toasts: ToastCenter? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
         let session = urlSession(concurrentRequests: concurrentRequests, handler: handler)
@@ -3369,9 +3436,10 @@ import UserNotifications
         return ChatViewModel(
             tokenStore: InMemoryTokenStore(),
             configurationStore: ConnectionConfigurationStore(defaults: defaults),
-            historyStore: VolatileSessionHistoryStore(),
+            historyStore: historyStore ?? VolatileSessionHistoryStore(),
             urlSession: session,
-            titleRefreshDelay: titleRefreshDelay
+            titleRefreshDelay: titleRefreshDelay,
+            toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
         )
     }
 
@@ -3484,6 +3552,19 @@ private enum DeleteFailingHistoryStoreError: Error, LocalizedError {
     case syntheticFailure
 
     var errorDescription: String? { DeleteFailingHistoryStore.message }
+}
+
+/// Keeps entries like the volatile store and records every delete.
+private actor DeleteRecordingHistoryStore: SessionHistoryStore {
+    private var entries: [UUID: SessionHistoryEntry] = [:]
+    private(set) var deleted: [UUID] = []
+
+    func list() async throws -> [SessionHistoryEntry] { entries.values.sortedForHistoryList() }
+    func upsert(_ entry: SessionHistoryEntry) async throws { entries[entry.sessionID] = entry }
+    func delete(sessionID: UUID) async throws {
+        deleted.append(sessionID)
+        entries.removeValue(forKey: sessionID)
+    }
 }
 
 private actor DeleteFailingHistoryStore: SessionHistoryStore {

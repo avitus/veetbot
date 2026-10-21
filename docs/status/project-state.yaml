@@ -17,6 +17,9 @@ project:
   # ADR-0205: independently authorized existing-app reliability repair; no M33
   # source, evaluation, migration or activation changes are included.
   active_milestone: 15
+  # ADR-0221 records the owner's 2026-10-20 acceptance of unattended call plans:
+  # the platform places a one-time call schedule's retries and follow-up from
+  # each call's closed result. No milestone or gate moves; delivery is pending.
   # ADR-0209 records the owner-authorized browser approval, native feedback and
   # deadline repair on 2026-10-16. No milestone or gate moves; delivery is pending.
   # ADR-0178 authorizes parallel Milestone 33 on 2026-10-11: general recall,
@@ -2554,6 +2557,23 @@ milestones:
         unsigned probe was logged as calling.callback_rejected
         reason=signature_missing, which confirms that each delivery's outcome
         reaches the journal.
+    - check: thirty-day expiry and result intake under the production call role
+      outcome: pass
+      detail: >-
+        On 2026-10-20 a scheduled outbound call reached Bland, but its run
+        reported "call not found" and no result was recorded. Every
+        reconciliation pass expires 30-day-old calls before it reads receipts.
+        Call erasure locks the owner's sessions FOR UPDATE and deletes memory
+        revisions, which the documented veetbot_call grants did not allow.
+        From 2026-10-11 19:49Z, when the first call aged out, every pass had
+        failed with "permission denied for table sessions". With the owner's
+        approval, UPDATE on sessions and SELECT, DELETE on memory_revisions
+        were granted at 16:46:55Z. The next passes erased the eight expired
+        calls and, at 16:50:10Z, recorded the morning's call and enqueued its
+        call_finished notification. The journal has shown no failure since.
+        The setup guide's grants are now tested against the real worker
+        composition. A failed expiry no longer blocks intake, and a call read
+        before reconciliation reports a pending result instead of not found.
     - check: hosted CI and review of the implementation to date
       outcome: passed_to_date
       detail: >-
@@ -2667,6 +2687,8 @@ milestones:
       - The repaired collector completed all 1600 required positions on 2026-10-19; all rows and twelve ledgers were retained, totaling USD 194.92785075 including USD 12.21728 uncertain reservations, with no paid work active
       - The completed comparison fails the original recall, invalid-current-fact and per-case cost thresholds; held-out hybrid required-evidence recall is 76.744 percent on both paths and is not a full M33 pass
       - The owner approved a release-specific bounded rollout with revised acceptance criteria and compatibility review (ADRs 0218 and 0220); actual human failure findings, final source verification and production admission remain pending
+      - On 2026-10-20 the owner explicitly approved the exact 37-case scope and stated residual risk (ADR-0222); version-two review requirements and an offline shorter packet are prepared separately, with actual findings and hosted release verification still pending and no activation or new PR authorization
+      - The owner subsequently requested rollout with periodic review of real production use (ADR-0223); a separate version-three trial replaces pre-activation synthetic findings with actual owner authorization and daily check-ins, preserves original failed evidence and release gates, and awaits verification and explicit PR instruction before production delivery
       - The owner authorized the recall release PR and verified production delivery on 2026-10-18; integration proceeds on codex/recall-production-release while the measured branch and the dev push hold remain unchanged
       - Current production differs from the evaluated inputs, including retained recall validation and run-loop time reserves; full deployment equivalence has not been established and no activation is claimed
       - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence

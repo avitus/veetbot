@@ -10,6 +10,7 @@ import AppKit
 /// and the cadence with the next run on one line.
 public struct ScheduleBrowserView: View {
     @ObservedObject var model: ScheduleViewModel
+    @State private var creating = false
     @Environment(\.dismiss) private var dismiss
     @State private var section = ScheduleBrowserSection.current
 
@@ -21,6 +22,7 @@ public struct ScheduleBrowserView: View {
         navigationContainer
         .tint(AppTheme.tealFill)
         .accessibilityIdentifier("schedule.browser")
+        .toastHost()
         .task(id: section) { await model.reload(section) }
         #if os(macOS)
         // The ideal height sizes the fitted sheet before a saved size exists;
@@ -50,7 +52,7 @@ public struct ScheduleBrowserView: View {
             column
         } detail: {
             Text("Select a schedule to read its instruction.")
-                .appFont(.callout)
+                .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .background(AppTheme.paper)
@@ -66,9 +68,9 @@ public struct ScheduleBrowserView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Schedules").appDisplayFont(.title2)
+                Text("Schedules").veetType(.display)
                 Text("Work Veetbot does on its own, on a rhythm you set.")
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,6 +100,13 @@ public struct ScheduleBrowserView: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Close") { dismiss() }
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button { creating = true } label: { Label("New schedule", systemImage: "plus") }
+                    .accessibilityIdentifier("schedule.new")
+            }
+        }
+        .sheet(isPresented: $creating, onDismiss: { model.clearDraft() }) {
+            ScheduleCreateSheet(model: model)
         }
     }
 
@@ -150,7 +159,7 @@ public struct ScheduleBrowserView: View {
     private func loadMoreFailureFooter(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(message, systemImage: "exclamationmark.triangle")
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
             Button("Retry") {
                 Task { await model.retry() }
@@ -183,7 +192,7 @@ public struct ScheduleBrowserView: View {
             title: section == .current
                 ? "No current schedules."
                 : "No completed or cancelled schedules in the last 30 days.",
-            message: section == .current ? "Describe one in plain words in Chat and Veetbot will keep it." : nil
+            message: section == .current ? "Add one with New schedule, in plain words, or ask in Chat." : nil
         )
     }
 }
@@ -203,17 +212,17 @@ struct ScheduleRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(item.title)
-                        .appFont(.body, weight: .semibold)
+                        .veetType(.ui, weight: .semibold)
                         .foregroundColor(AppTheme.ink)
                     Spacer()
                     ScheduleStateBadge(state: item.state, kind: item.stateKind)
                 }
                 Text(item.instructionPreview)
-                    .appFont(.callout)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
                     .lineLimit(3)
                 Text(scheduleTiming(item.cadence, nextFireAt: item.nextFireAt))
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
         }
@@ -234,7 +243,7 @@ struct ScheduleStateBadge: View {
 
     var body: some View {
         Text(scheduleDisplayText(state))
-            .appFont(.caption2, weight: .semibold)
+            .veetType(.meta, weight: .semibold)
             .foregroundColor(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -409,3 +418,117 @@ private final class ScheduleBrowserWindowResizeNSView: NSView {
     }
 }
 #endif
+
+/// New schedule (MagicPath quiet-home-5746, ADR-0225 part B): the owner says
+/// what should happen and when; the server reads it, and the sheet shows how
+/// before anything is saved. Create posts the server's own definition.
+struct ScheduleCreateSheet: View {
+    @ObservedObject var model: ScheduleViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Say what should happen and when, the way you would tell a person.")
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextField(
+                    "Every weekday at 7 am, tell me what needs me today.",
+                    text: $text,
+                    axis: .vertical
+                )
+                .lineLimit(3...6)
+                .textFieldStyle(.plain)
+                .a2Field(radius: 12)
+                .focused($focused)
+                .accessibilityIdentifier("schedule.new.text")
+                understood
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(AppTheme.paper)
+            .navigationTitle("New schedule")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create schedule") {
+                        Task { if await model.createFromDraft() { dismiss() } }
+                    }
+                    .disabled(!isReady)
+                    .accessibilityIdentifier("schedule.new.create")
+                }
+            }
+        }
+        .tint(AppTheme.tealFill)
+        // The confirmation shows here first; as the sheet closes, the
+        // browser's host below takes the same toast over.
+        .toastHost()
+        .onAppear { focused = true }
+        // Read the sentence once typing pauses, so each draft costs one call.
+        .task(id: text) {
+            do { try await Task.sleep(nanoseconds: 1_200_000_000) } catch { return }
+            await model.readDraft(text)
+        }
+        #if os(macOS)
+        .frame(minWidth: 520, idealWidth: 600, minHeight: 320, idealHeight: 360)
+        #endif
+    }
+
+    private var isReady: Bool {
+        if case .ready = model.draftState { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private var understood: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            switch model.draftState {
+            case .idle:
+                Text("Veetbot will show how it understood the timing before anything is saved.")
+                    .foregroundColor(AppTheme.inkSoft)
+            case .reading:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading…").foregroundColor(AppTheme.inkSoft)
+                }
+            case .ready(let draft):
+                Text("Veetbot understood")
+                    .veetType(.label)
+                    .foregroundColor(AppTheme.inkSoft)
+                Text([
+                    draft.cadence.map { scheduleCadenceSummary($0) },
+                    draft.nextFireAt.first.map {
+                        "first run " + $0.formatted(.dateTime.weekday(.wide).month().day().hour().minute())
+                    },
+                ].compactMap { $0 }.joined(separator: " · "))
+                .foregroundColor(AppTheme.ink)
+                .accessibilityIdentifier("schedule.new.understood")
+                if let title = draft.title {
+                    Text("Saved as \u{201C}\(title)\u{201D}. Reports arrive in Chat.")
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.inkSoft)
+                }
+            case .unclear(let message):
+                Text(message).foregroundColor(AppTheme.amberText)
+            case .unavailable:
+                Text("This server can't read schedules from plain words yet. Ask in Chat instead.")
+                    .foregroundColor(AppTheme.inkSoft)
+            case .failed(let message):
+                Text(message).foregroundColor(AppTheme.red)
+            }
+        }
+        .veetType(.ui)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.paperDeep))
+    }
+}

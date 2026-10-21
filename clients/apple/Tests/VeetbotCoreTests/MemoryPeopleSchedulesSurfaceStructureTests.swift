@@ -22,7 +22,7 @@ import Testing
         #expect(browser.contains(".accessibilityIdentifier(\"memory.filter.review\")"))
         #expect(!browser.contains("Color.secondary.opacity"))
 
-        #expect(detail.contains(".appDisplayFont("))
+        #expect(detail.contains(".veetType(.display)"))
         #expect(detail.contains("A2RecordGroup("))
         #expect(detail.contains("Text(memory.subject)"))
         #expect(detail.contains(".accessibilityIdentifier(\"memory.detail.review.not_here\")"))
@@ -58,13 +58,19 @@ import Testing
         #expect(browser.contains("Label(\"Add person\", systemImage: \"person.badge.plus\")"))
         #expect(browser.contains("A2SheetHeader("))
 
-        #expect(detail.contains(".appDisplayFont("))
+        #expect(detail.contains(".veetType(.display)"))
         #expect(detail.contains(".primaryCapsule()"))
         #expect(detail.contains("SecondaryCapsuleButtonStyle"))
         #expect(detail.contains("Button(\"Repair identity…\")"))
         #expect(detail.contains("Button(\"Forget person…\", role: .destructive)"))
         #expect(detail.contains(".accessibilityIdentifier(\"people.detail\")"))
         #expect(!detail.contains(".buttonStyle(.bordered)"))
+        // A short relationship line in the regular 13-point face fails the
+        // contrast audit on CircleCI's 1x Mac display (job 6326, "Your
+        // sibling"); the medium weight passes there.
+        let compactDetail = detail.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        #expect(compactDetail.contains("Text(summary).veetType(.ui, weight: .medium)"))
+        #expect(compactDetail.contains("Text(relationship.phrase(in: profile)) .veetType(.ui, weight: .medium)"))
     }
 
     @Test

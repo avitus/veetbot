@@ -13,10 +13,10 @@ struct MemorySynthesisBrowserView: View {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Ideas, with their evidence", systemImage: "point.3.connected.trianglepath.dotted")
-                        .appFont(.headline)
+                        .veetType(.ui, weight: .semibold)
                         .foregroundColor(AppTheme.ink)
                     Text("Explore summaries, tentative connections, conflicts and duplicate merges. Open a claim to see why it exists; your original memories are kept.")
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
                 .a2ListRow()
                 Picker("Synthesis kind", selection: Binding(get: { model.kind ?? "all" }, set: { value in
@@ -59,7 +59,7 @@ struct MemorySynthesisBrowserView: View {
             } else if model.items.isEmpty {
                 Text("No synthesis in this view yet.").foregroundColor(AppTheme.inkSoft).a2ListRow()
                 Text("Original memories remain in Memories. Browsing this journal does not start dreaming.")
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     .a2ListRow()
             }
             if model.hasMore && !model.isLoading {
@@ -99,24 +99,24 @@ struct MemorySynthesisRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Label(operation.title, systemImage: operation.kind == "merge" ? "square.on.square" : "sparkles")
-                    .appFont(.caption, weight: .semibold)
+                    .veetType(.meta, weight: .semibold)
                     .foregroundColor(AppTheme.inkSoft)
                 Spacer(minLength: 0)
                 Text(memoryDisplayText(operation.state))
-                    .appFont(.caption)
+                    .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
             if let content = operation.content {
                 Text(content.statement)
-                    .appFont(.body)
+                    .veetType(.ui)
                     .foregroundColor(AppTheme.ink)
                     .lineLimit(4)
                 Text("\(operation.sources.count) original memories · \(Set(operation.sources.map(\.sessionID)).count) conversations")
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
             } else {
                 Text("Source details unavailable").foregroundColor(AppTheme.inkSoft)
             }
-            Text(operation.createdAt, style: .date).appFont(.caption2).foregroundColor(AppTheme.inkFaint)
+            Text(operation.createdAt, style: .date).veetType(.meta).foregroundColor(AppTheme.inkFaint)
         }
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -138,22 +138,22 @@ struct MemorySynthesisDetailView: View {
                 Section {
                     if summary.flaggedForReview {
                         Label("Needs review", systemImage: "flag.fill")
-                            .appFont(.caption, weight: .semibold)
+                            .veetType(.meta, weight: .semibold)
                             .foregroundColor(AppTheme.amberText)
                             .a2ListRow()
                     }
                     if let content = summary.content {
                         Text(content.statement)
-                            .appDisplayFont(.title3)
+                            .veetType(.title)
                             .foregroundColor(AppTheme.ink)
                             .a2ListRow()
                         MemorySensitivityBadge(sensitivity: content.sensitivity, kind: MemorySensitivityKind(rawValue: content.sensitivity))
                             .a2ListRow()
                         Text("Evidence last observed \(content.lastEvidenceAt.formatted()). Combining it does not make it new evidence.")
-                            .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                             .a2ListRow()
                         Text("\(memoryDisplayText(content.authority)) authority · \(memoryDisplayText(content.portability))")
-                            .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                             .a2ListRow()
                     } else {
                         Text("Synthesis content is no longer available.").a2ListRow()
@@ -188,7 +188,7 @@ struct MemorySynthesisDetailView: View {
                         .accessibilityIdentifier("memory.synthesis.delete")
                         .a2ListRow()
                     Text("These actions affect this synthesis. Its original memories are kept.")
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                         .a2ListRow()
                 } header: {
                     sectionHeading("Your control")
@@ -197,17 +197,17 @@ struct MemorySynthesisDetailView: View {
                 Section {
                     if let content = operation.content {
                         Text(content.statement)
-                            .appDisplayFont(.title3)
+                            .veetType(.title)
                             .foregroundColor(AppTheme.ink)
                             .a2ListRow()
                     } else {
                         Text("Source details unavailable").a2ListRow()
                         Text("This history entry keeps the outcome, without retaining unavailable memory content.")
-                            .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                             .a2ListRow()
                     }
                     Text(memoryDisplayText(operation.state))
-                        .appFont(.caption, weight: .semibold)
+                        .veetType(.meta, weight: .semibold)
                         .foregroundColor(AppTheme.inkSoft)
                         .a2ListRow()
                 } header: {
@@ -242,7 +242,7 @@ struct MemorySynthesisDetailView: View {
                 } header: {
                     sectionHeading("History")
                 }
-                .appFont(.caption)
+                .veetType(.meta)
                 .foregroundColor(AppTheme.inkSoft)
             }
             if !model.canRetryWrite && !model.isLoading && !model.isSaving {
@@ -272,7 +272,7 @@ struct MemorySynthesisDetailView: View {
     /// A section heading in the A2 voice; the kind line keeps its exact words.
     private func sectionHeading(_ title: String) -> some View {
         Text(title)
-            .appFont(.caption, weight: .semibold)
+            .veetType(.meta, weight: .semibold)
             .foregroundColor(AppTheme.inkSoft)
             .textCase(nil)
     }
@@ -295,7 +295,7 @@ struct MemorySynthesisDetailView: View {
                             .disabled(model.isSaving).accessibilityIdentifier("memory.synthesis.retry.write")
                     }
                 }
-                .appFont(.callout)
+                .veetType(.ui)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
             }
@@ -336,7 +336,7 @@ struct MemorySynthesisDetailView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(source.statement).foregroundColor(AppTheme.ink)
                 Text(source.omitted ? "Original · not included in summary text" : "Original memory")
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
             }
         }
         .accessibilityLabel("\(source.statement) \(source.omitted ? "Original · not included in summary text" : "Original memory")")

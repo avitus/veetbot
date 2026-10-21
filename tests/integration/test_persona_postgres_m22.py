@@ -142,3 +142,36 @@ async def test_persona_store_round_trips_versions_and_nominations(tmp_path: Path
                 principal, state=PersonaNominationState.DECLINED
             )
             assert [row.id for row in declined] == [nomination.id]
+
+
+async def test_persona_voice_traits_and_switches_round_trip(tmp_path: Path) -> None:
+    """ADR-0226: the new fields persist; a version written before them loads as before."""
+    from agent_core.domain.persona import PersonaTrait
+
+    _alembic("upgrade", "head")
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    principal_id = f"persona-{uuid4().hex[:12]}"
+    principal = PRINCIPAL.model_copy(update={"principal_id": principal_id})
+    legacy = _document(principal_id, version=1)
+    toned = _document(principal_id, version=2).model_copy(
+        update={
+            "voice": "Plain and calm.",
+            "traits": (PersonaTrait.BRIEF, PersonaTrait.WARM),
+            "entries": (
+                PersonaEntry(
+                    text="Kept but off.", source=PersonaEntrySource.USER_EDIT, enabled=False
+                ),
+                PersonaEntry(text="On.", source=PersonaEntrySource.USER_EDIT),
+            ),
+        }
+    )
+    async with build(settings=settings, storage="postgres") as composition:
+        async with composition.uow_factory() as uow:
+            await uow.personas.append_version(legacy, expected_version=0)
+            await uow.personas.append_version(toned, expected_version=1)
+        async with composition.uow_factory() as uow:
+            history = await uow.personas.history(principal)
+    assert history[0] == toned
+    assert history[1] == legacy
+    assert history[1].voice is None and history[1].traits == ()
+    assert [entry.enabled for entry in history[0].entries] == [False, True]

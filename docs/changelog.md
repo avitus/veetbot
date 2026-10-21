@@ -4,6 +4,112 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-20 — Persona: voice, tone, a sample reply and boundaries
+
+- Describe how Veetbot should talk to you, and pick up to three tones (Brief,
+  Warm, Direct, Formal or Playful).
+- "Hear it" shows an example reply in that voice before you save it.
+- Each standing fact has an on/off switch: off keeps it but stops Veetbot
+  treating it as an instruction. A fact whose memory changed says so.
+- Boundaries lists the rules your persona cannot change, as the server
+  enforces them.
+
+## 2026-10-20 — People: replies you owe, last contact and counts
+
+- Needs you now also lists replies you promised someone that are overdue or
+  due in the next two weeks, earliest first, with Done and Not needed on each.
+  Nothing is sent and no reminder is scheduled; it is a list you open.
+- Recent shows when you were last in touch with each person.
+- The People sections show how many people each one holds.
+- A person's relationship to you ("Your sibling") reads in a slightly heavier
+  weight, so it stays legible on standard-resolution Mac displays.
+
+## 2026-10-20 — Correct a memory's wording, see where it came from
+
+- Fix the wording (on a memory that asks "Is this right?") and Edit wording
+  (on any memory) save your words as the memory. The earlier wording is kept
+  as history and won't form again.
+- A memory shows where it came from: your own words as a quote, and an email,
+  text or call by where it came from, without its text.
+- On the Mac, the Memory sidebar shows how many memories each group holds.
+
+## 2026-10-20 — Schedules you can create, run, pause and stop from the app
+
+- New schedule: describe it in plain words ("every weekday at 7 am, tell me
+  what needs me today") and Veetbot shows how it understood the timing before
+  anything is saved.
+- A schedule's page has Run now, Pause and Resume, and Stop (the record stays
+  in Recent History for 30 days), plus Recent runs with Open report in Chat.
+- "Only notify when something needs you" keeps a finished report quiet;
+  failures, approvals and questions still notify.
+
+## 2026-10-19 — A long report opens at its beginning
+
+- In Chat on iPhone, iPad and Mac, opening a scheduled report taller than the
+  window, such as the weekday briefing, showed its end or its middle, with the
+  title and introduction hidden under the toolbar or scrolled past. It now
+  opens with its beginning at the top and stays there while the report's
+  earlier steps finish loading above it.
+
+## 2026-10-19 — One type scale and one spacing scale in Chat
+
+- Chat on Mac, iPhone and iPad uses seven type roles and one spacing scale.
+  Every sidebar row shares one layout, so titles line up; New chat is a compose
+  button beside a new search field, and New folder a + beside Folders. Move
+  and delete appear on hover or in the row's menu. The font preference now
+  changes transcript text only and defaults to System. Tables use a compact
+  type and scroll sideways on iPhone; conversations open at the latest turn.
+
+## 2026-10-19 — The composer no longer covers the end of an answer
+
+- In Chat on iPhone, iPad and Mac, the last lines of an answer and its Copy and
+  Select Text row sat under the message field, even when scrolled all the way
+  down: the space kept free for the field never learned its height. The end of
+  the conversation now clears the field, and an answer that streams in keeps
+  its newest line in view while you read at the bottom. An answer taller than
+  the window stops with its beginning at the top, and scrolling away while one
+  streams leaves the view where you put it.
+- On iPhone and iPad, the strip under the message field, where the home
+  indicator sits, is warm paper instead of white.
+
+## 2026-10-19 — People sections, possible duplicates and profile actions
+
+- People lists Needs you, Recent, Everyone and Pinned, with Possible
+  duplicates on a page of its own where each pair is merged or kept separate.
+  A profile now offers Ask Veetbot, Email and Call (each opens Chat with the
+  request ready; nothing is sent or dialled without your confirmation) and
+  Merge with another entry.
+
+## 2026-10-19 — Memory groups on the Mac and "Is this right?"
+
+- On the Mac, Memory lists its groups in a sidebar: Needs review, then all
+  memories and each kind, the People directory, and Synthesis. A memory that
+  needs review asks "Is this right?" with Looks right, Not true and Not
+  relevant here. Correcting a memory's wording, editing it and showing the
+  quotes it came from need a server change and wait for the owner (ADR-0224).
+
+## 2026-10-19 — Settings by group, notifications and devices, theme, and Connect's last steps
+
+- Settings shows one group at a time: a sidebar on Mac and iPad, a list on
+  iPhone. A new Notifications group shows whether this device may notify you
+  and lists every device your Veetbot notifies, with Send test and Remove.
+  Appearance gains a System, Light or Dark theme. Data & privacy can clear the
+  local cache; chats reload from the server. The Connection group says when the
+  token was last verified, and the token field can show what you typed. A ready
+  website login offers "Use for new chats".
+- Connecting a new device continues with two short steps: whether to allow
+  notifications, then a summary before Chat opens.
+
+## 2026-10-19 — Toasts confirm what just happened
+
+- A short line in a dark capsule now appears at the bottom of the window or
+  sheet when the server confirms a change: a memory marked reviewed, not
+  true, not relevant here or deleted; an email marked handled; a possible
+  duplicate merged or kept separate; the persona saved; a persona suggestion
+  accepted or declined. Marking an email handled offers Undo for six seconds,
+  which puts the thread back. Errors still appear beside the control that
+  failed.
+
 ## 2026-10-19 — Persona, Settings and Connect wear the A2 Dock design
 
 - The last three screens take the warm-paper design, so every screen on

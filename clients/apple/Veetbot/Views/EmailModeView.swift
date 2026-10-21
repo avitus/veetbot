@@ -11,28 +11,156 @@ import SwiftUI
 /// Dynamic Type styles so the owner's text size still applies.
 enum EmailType {
     #if os(macOS)
-    static let sender: Font.TextStyle = .body
-    static let subject: Font.TextStyle = .body
-    static let gist: Font.TextStyle = .callout
-    static let note: Font.TextStyle = .subheadline
-    static let meta: Font.TextStyle = .caption
+    static let sender: VeetType.Role = .ui
+    static let subject: VeetType.Role = .ui
+    static let gist: VeetType.Role = .meta
+    static let note: VeetType.Role = .meta
+    static let meta: VeetType.Role = .meta
     static let rowSpacing: CGFloat = 2
     static let handledHit: CGFloat = 28
     #else
-    static let sender: Font.TextStyle = .callout
-    static let subject: Font.TextStyle = .subheadline
-    static let gist: Font.TextStyle = .footnote
-    static let note: Font.TextStyle = .caption
-    static let meta: Font.TextStyle = .caption
+    static let sender: VeetType.Role = .ui
+    static let subject: VeetType.Role = .ui
+    static let gist: VeetType.Role = .meta
+    static let note: VeetType.Role = .meta
+    static let meta: VeetType.Role = .meta
     static let rowSpacing: CGFloat = 3
     static let handledHit: CGFloat = 44
     #endif
     static let handledDiameter: CGFloat = 18
 }
 
+#if os(macOS)
+/// The inbox width the owner chose by dragging the Mac Email divider, kept on
+/// this Mac and never sent to the server. Before any drag, and for an
+/// unreadable value, the split view lays the inbox out as it always has.
+struct EmailInboxWidthStore {
+    static let key = "veetbot.email.inboxWidth"
+    static let bounds: ClosedRange<CGFloat> = 280...560
+    /// This launch's store: the owner's defaults, or a UI journey's own suite.
+    static let app: EmailInboxWidthStore = {
+        #if DEBUG && !SWIFT_PACKAGE
+        if let store = ConversationNavigationUITestFixture.makeEmailInboxWidthIfRequested() { return store }
+        #endif
+        return EmailInboxWidthStore()
+    }()
+    var defaults: UserDefaults = .standard
+    /// The event AppKit is handling, which tells the owner's drag from a layout pass.
+    var currentEvent: () -> NSEvent? = { NSApp?.currentEvent }
+
+    /// The remembered width, held within the column's bounds.
+    var width: CGFloat? {
+        guard let stored = defaults.object(forKey: Self.key) as? Double, stored.isFinite, stored > 0 else {
+            return nil
+        }
+        return Self.clamped(CGFloat(stored))
+    }
+
+    func remember(_ width: CGFloat) {
+        guard width.isFinite, width > 0 else { return }
+        defaults.set(Double(Self.clamped(width)), forKey: Self.key)
+    }
+
+    private static func clamped(_ width: CGFloat) -> CGFloat {
+        min(max(width, bounds.lowerBound), bounds.upperBound)
+    }
+}
+
+/// Sits inside the inbox column of the Mac Email split. `HSplitView` neither
+/// saves its divider nor honours an ideal width, so this view moves the divider
+/// to the remembered width once the split first lays out, and remembers the
+/// width the owner drags it to.
+private struct EmailInboxWidthAutosave: NSViewRepresentable {
+    let store: EmailInboxWidthStore
+
+    func makeNSView(context: Context) -> EmailInboxWidthAutosaveView {
+        let view = EmailInboxWidthAutosaveView()
+        view.store = store
+        return view
+    }
+
+    func updateNSView(_ view: EmailInboxWidthAutosaveView, context: Context) {
+        view.store = store
+    }
+}
+
+private final class EmailInboxWidthAutosaveView: NSView {
+    var store = EmailInboxWidthStore()
+    private weak var split: NSSplitView?
+    private var restoreScheduled = false
+    private var restored = false
+    private var restoring = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        let enclosing = sequence(first: self as NSView, next: \.superview)
+            .lazy.compactMap { $0 as? NSSplitView }.first
+        guard enclosing !== split else { return }
+        let center = NotificationCenter.default
+        if let split { center.removeObserver(self, name: NSSplitView.didResizeSubviewsNotification, object: split) }
+        split = enclosing
+        guard let enclosing else { return }
+        center.addObserver(self, selector: #selector(splitResizedSubviews),
+                           name: NSSplitView.didResizeSubviewsNotification, object: enclosing)
+        scheduleRestore()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        scheduleRestore()
+    }
+
+    /// AppKit reports every divider move, including the ones a layout pass
+    /// makes to keep the reading column at its minimum in a narrow window.
+    /// Only a pointer drag in this window, outside a live resize of the window
+    /// itself, is the owner choosing a width; a squeezed column leaves the
+    /// choice alone. The split view is in live resize during its own divider
+    /// drag, so only the window's state tells the two drags apart.
+    @objc private func splitResizedSubviews() {
+        guard restored, !restoring, let split, let column = inboxColumn,
+              let event = store.currentEvent(), event.type == .leftMouseDragged,
+              let window = split.window, event.windowNumber == window.windowNumber, !window.inLiveResize
+        else { return }
+        store.remember(column.frame.width)
+    }
+
+    /// The split subview that holds the inbox.
+    private var inboxColumn: NSView? {
+        split?.subviews.first { isDescendant(of: $0) }
+    }
+
+    /// Restores after the layout pass in progress, never from inside it.
+    private func scheduleRestore() {
+        guard !restored, !restoreScheduled, split != nil else { return }
+        restoreScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            restoreScheduled = false
+            restoreOnceLaidOut()
+        }
+    }
+
+    private func restoreOnceLaidOut() {
+        guard !restored, let split, split.bounds.width > 0, let column = inboxColumn,
+              let index = split.subviews.firstIndex(of: column), index < split.subviews.count - 1
+        else { return }
+        restored = true
+        guard let width = store.width else { return }
+        // Restoring is not a choice: a window too narrow for the remembered
+        // width holds the column below it, and the remembered width stays.
+        restoring = true
+        split.setPosition(column.frame.minX + width, ofDividerAt: index)
+        restoring = false
+    }
+}
+#endif
+
 public struct EmailModeView: View {
     @ObservedObject var model: EmailViewModel
     var viewportHeight: CGFloat? = nil
+    #if os(macOS)
+    var inboxWidth = EmailInboxWidthStore.app
+    #endif
     let discussInChat: () async -> Void
     @Environment(\.activeClientMode) private var activeMode
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -98,9 +226,14 @@ public struct EmailModeView: View {
         }
     }
 
+    /// On a compact iPhone the thread is pushed, so its actions join the back
+    /// button in the navigation bar, as the A2 iPhone reference draws it.
     private var detail: some View {
-        EmailThreadScreen(model: model, subscriptions: model.subscriptions, discussInChat: discussInChat)
-            .id(model.selectedThreadID)
+        EmailThreadScreen(
+            model: model, subscriptions: model.subscriptions, discussInChat: discussInChat,
+            actionsInNavigationBar: !directSelection
+        )
+        .id(model.selectedThreadID)
     }
 
     #if os(macOS)
@@ -108,8 +241,10 @@ public struct EmailModeView: View {
     private var macSplit: some View {
         HSplitView {
             inbox
-                .frame(minWidth: 280, idealWidth: 340, maxWidth: 560)
+                .frame(minWidth: EmailInboxWidthStore.bounds.lowerBound, idealWidth: 340,
+                       maxWidth: EmailInboxWidthStore.bounds.upperBound)
                 .frame(height: macColumnHeight)
+                .background(EmailInboxWidthAutosave(store: inboxWidth))
             detail
                 .frame(minWidth: 360, maxWidth: .infinity)
                 .frame(height: macColumnHeight)
@@ -146,8 +281,8 @@ public struct EmailModeView: View {
                     .emailHideSeparator()
                 } else if let error = model.errorMessage {
                     VStack(alignment: .leading, spacing: 12) {
-                        Label("Mail couldn’t be updated", systemImage: "exclamationmark.circle").appFont(.headline)
-                        Text(error).appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                        Label("Mail couldn’t be updated", systemImage: "exclamationmark.circle").veetType(.ui, weight: .semibold)
+                        Text(error).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                         Button("Try again") {
                             Task {
                                 await model.reload()
@@ -201,14 +336,14 @@ public struct EmailModeView: View {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Check a conversation to archive it in Gmail.")
-                            .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                         if visibleAccounts.contains(where: { $0.archiveSupported != true }) {
                             Text("Gmail archiving is unavailable for accounts without archive support. Email browsing remains available.")
-                                .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                                .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                         }
                         ForEach(visibleAccounts) { account in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(account.label).appFont(.callout, weight: .semibold)
+                                Text(account.label).veetType(.ui, weight: .semibold)
                                 if let update = account.updateMessage {
                                     Text(update).foregroundColor(account.hasRefreshFailure ? AppTheme.amberText : AppTheme.inkSoft)
                                 } else if let date = account.lastSyncedAt {
@@ -223,7 +358,7 @@ public struct EmailModeView: View {
                                 if let coverage = account.coverageMessage() {
                                     Text(coverage).foregroundColor(AppTheme.inkSoft)
                                 }
-                            }.appFont(.caption)
+                            }.veetType(.meta)
                         }
                     }.padding(.top, 10).frame(maxWidth: .infinity, alignment: .leading)
                 } label: {
@@ -231,7 +366,7 @@ public struct EmailModeView: View {
                         mailboxStatus,
                         systemImage: mailboxNeedsAttention ? "exclamationmark.circle" : "arrow.triangle.2.circlepath"
                     )
-                    .appFont(.caption).foregroundColor(mailboxNeedsAttention ? AppTheme.amberText : AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(mailboxNeedsAttention ? AppTheme.amberText : AppTheme.inkSoft)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .accessibilityIdentifier("email.mailbox-status")
@@ -278,16 +413,16 @@ public struct EmailModeView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
                 Label("Processing paused", systemImage: "pause.circle")
-                    .appFont(.caption, weight: .semibold).foregroundColor(AppTheme.amberText)
+                    .veetType(.meta, weight: .semibold).foregroundColor(AppTheme.amberText)
                 Spacer(minLength: 4)
                 Button("Check again") { Task { await model.refresh() } }
-                    .buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
+                    .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
             }
-            Text(pause).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+            Text(pause).veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(alignment: .firstTextBaseline) {
                 if let retryAt = model.budgetRetryAt {
                     Text("Next check: \(retryAt.formatted(date: .abbreviated, time: .shortened))")
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Button {
@@ -295,7 +430,7 @@ public struct EmailModeView: View {
                 } label: {
                     Label("Details", systemImage: showingBudgetDetails ? "chevron.down" : "chevron.right")
                 }
-                .buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.inkSoft)
+                .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.inkSoft)
                 .accessibilityValue(showingBudgetDetails ? "Expanded" : "Collapsed")
                 .accessibilityIdentifier("email.budget-details")
             }
@@ -304,7 +439,7 @@ public struct EmailModeView: View {
                     ForEach(model.budgetPauseDetails, id: \.self) { Text($0) }
                     Text("Cached mail and editing remain available.")
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
             }
         }
         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
@@ -324,7 +459,7 @@ public struct EmailModeView: View {
                 .accessibilityIdentifier("email.accounts")
                 Spacer(minLength: 8)
                 Text(threadCount)
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft).fixedSize()
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft).fixedSize()
             }
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
@@ -340,7 +475,7 @@ public struct EmailModeView: View {
                     .buttonStyle(.plain).foregroundColor(AppTheme.inkSoft).accessibilityLabel("Clear search")
                 }
             }
-            .appFont(.callout)
+            .veetType(.ui)
             .padding(.horizontal, 10).frame(minHeight: A2Metrics.controlHeight + 4)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.field))
             mailViewControl
@@ -459,31 +594,31 @@ private struct EmailThreadRow: View {
         VStack(alignment: .leading, spacing: EmailType.rowSpacing) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(thread.senders.joined(separator: ", "))
-                    .appFont(EmailType.sender, weight: settled ? .regular : .semibold)
+                    .veetType(EmailType.sender, weight: settled ? .regular : .semibold)
                     .foregroundColor(settled ? AppTheme.inkSoft : AppTheme.ink)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 Text(thread.updatedAt, format: .dateTime.month(.abbreviated).day())
-                    .appFont(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
+                    .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
             }
             Text(thread.subject.isEmpty ? "No subject" : thread.subject)
-                .appFont(EmailType.subject).foregroundColor(settled ? AppTheme.inkSoft : AppTheme.ink).lineLimit(1)
-            Text(thread.summary).appFont(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+                .veetType(EmailType.subject).foregroundColor(settled ? AppTheme.inkSoft : AppTheme.ink).lineLimit(1)
+            Text(thread.summary).veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(1)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 EmailThreadStatus(thread: thread)
                 if model.accounts.count > 1 {
                     Spacer(minLength: 4)
                     Text(model.accounts.first { $0.id == thread.accountID }?.label ?? thread.accountID)
-                        .appFont(EmailType.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
+                        .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
                 }
             }
             if !thread.complete {
                 Label("Partial thread", systemImage: "exclamationmark.circle")
-                    .appFont(EmailType.meta).foregroundColor(AppTheme.amberText)
+                    .veetType(EmailType.meta).foregroundColor(AppTheme.amberText)
             }
             if thread.isSuspectedSpam {
                 Label("Suspected spam", systemImage: "exclamationmark.octagon")
-                    .appFont(EmailType.meta).foregroundColor(AppTheme.amberText)
+                    .veetType(EmailType.meta).foregroundColor(AppTheme.amberText)
                     .accessibilityIdentifier("email.spam.tag.\(thread.id.uuidString)")
             }
         }
@@ -509,7 +644,7 @@ private struct EmailHandledCircle: View {
                 Circle().strokeBorder(thread.isArchived ? AppTheme.tealFill : AppTheme.hairlineStrong, lineWidth: 1.5)
                 if thread.isArchived {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .veetIcon(.small, weight: .semibold)
                         .foregroundColor(AppTheme.onTeal)
                 }
             }
@@ -535,15 +670,24 @@ private struct EmailArchiveButton: View {
     @ObservedObject var model: EmailViewModel
     let thread: EmailThreadView
     let accessibilityID: String
+    /// The icon alone, for a navigation bar, which draws its own glass behind it.
+    var iconOnly = false
 
     var body: some View {
+        if iconOnly {
+            button.labelStyle(.iconOnly)
+        } else {
+            button.buttonStyle(SecondaryCapsuleButtonStyle())
+        }
+    }
+
+    private var button: some View {
         Button {
             Task { await model.setThreadArchived(thread, archived: !thread.isArchived) }
         } label: {
             Label(thread.isArchived ? "Move to Inbox" : "Archive in Gmail",
                   systemImage: thread.isArchived ? "checkmark.circle.fill" : "archivebox")
         }
-        .buttonStyle(SecondaryCapsuleButtonStyle())
         .disabled(!model.canArchive(thread))
         .accessibilityIdentifier(accessibilityID)
         .accessibilityLabel(thread.isArchived ? "Move to Inbox" : "Archive in Gmail")
@@ -561,19 +705,19 @@ private struct EmailArchiveStatus: View {
 
     var body: some View {
         if let message = model.archiveMessage(for: thread) {
-            Text(message).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+            Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("email.archive.status.\(thread.id.uuidString)")
             if thread.archiveOperation != nil {
                 Button(thread.archiveOperation?.status == "uncertain" ? "Check recorded status" : "Check status") {
                     Task { await model.checkArchiveStatus(thread.id) }
                 }
-                .buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
+                .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
                 .labelStyle(.titleOnly)
                 .accessibilityIdentifier("email.archive.check.\(thread.id.uuidString)")
             }
         } else if showsAvailability, let reason = model.archiveUnavailableReason(for: thread) {
-            Text(reason).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+            Text(reason).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -584,7 +728,11 @@ private struct EmailThreadScreen: View {
     @ObservedObject var model: EmailViewModel
     @ObservedObject var subscriptions: EmailSubscriptionsViewModel
     let discussInChat: () async -> Void
+    /// Archive and the thread menu sit in the navigation bar beside the back
+    /// button instead of on a row of their own above the subject.
+    var actionsInNavigationBar = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.activeClientMode) private var activeMode
     @State private var target: EmailFeedbackTarget = .thread
     @State private var explanation = ""
     @State private var targetValue = ""
@@ -701,6 +849,19 @@ private struct EmailThreadScreen: View {
                     Button("Done") { focusedField = nil }.accessibilityIdentifier("email.keyboard-done")
                 }
             }
+            .toolbar {
+                if actionsInNavigationBar, activeMode == .email, let thread = model.thread {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        EmailArchiveButton(
+                            model: model, thread: thread, accessibilityID: "email.handled.detail", iconOnly: true)
+                        threadActionsMenu(thread)
+                    }
+                }
+            }
+            // Paper behind the bar: the glass back button never floats over the subject
+            // or the conversation as they scroll beneath it.
+            .toolbarBackground(AppTheme.paper, for: .navigationBar)
+            .toolbarBackgroundVisibility(actionsInNavigationBar ? .visible : .automatic, for: .navigationBar)
         #endif
     }
 
@@ -710,32 +871,22 @@ private struct EmailThreadScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
                 Label(accountDescription(thread.accountID), systemImage: "envelope")
-                    .appFont(.caption).foregroundColor(AppTheme.inkFaint).lineLimit(1)
-                Spacer(minLength: 8)
-                // The capsule keeps its full name; the account label is what gives way.
-                EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail")
-                    .fixedSize().layoutPriority(1)
-                Menu {
-                    if model.canReportSpam(thread), !thread.isSuspectedSpam {
-                        Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
-                            .accessibilityIdentifier("email.spam.menu.report")
-                    }
-                    Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
-                } label: {
-                    // The system menu button: a styled Menu hit-tests differently on
-                    // macOS 26 and the journeys click what sits beside it.
-                    Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
+                    .veetType(.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
+                if !actionsInNavigationBar {
+                    Spacer(minLength: 8)
+                    // The capsule keeps its full name; the account label is what gives way.
+                    EmailArchiveButton(model: model, thread: thread, accessibilityID: "email.handled.detail")
+                        .fixedSize().layoutPriority(1)
+                    threadActionsMenu(thread)
                 }
-                .accessibilityLabel("Thread actions").help("Thread actions")
-                .disabled(model.isPerformingAction)
             }
             EmailArchiveStatus(model: model, thread: thread, showsAvailability: true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(thread.subject.isEmpty ? "No subject" : thread.subject)
-                    .appDisplayFont(.title2)
+                    .veetType(.display)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 Text("\(thread.senders.joined(separator: ", ")) · \(thread.updatedAt, format: .dateTime.month(.abbreviated).day())")
-                    .appFont(EmailType.gist).foregroundColor(AppTheme.inkSoft)
+                    .veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft)
             }
             // Bulk mail only, on an account that advertises the action, with
             // verified evidence. Everything else offers nothing here.
@@ -743,7 +894,7 @@ private struct EmailThreadScreen: View {
                model.unsubscribeSupported(for: thread.accountID) {
                 HStack(spacing: 8) {
                     Text(thread.senders.first ?? block.destination)
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft).lineLimit(1)
                     Button("Unsubscribe") { subscriptions.beginUnsubscribe(thread: thread) }
                         .buttonStyle(SecondaryCapsuleButtonStyle())
                         .accessibilityLabel("Unsubscribe from \(thread.senders.first ?? block.destination)")
@@ -754,6 +905,23 @@ private struct EmailThreadScreen: View {
         }
     }
 
+    /// Report spam and exclusion from learning, behind one ellipsis.
+    private func threadActionsMenu(_ thread: EmailThreadView) -> some View {
+        Menu {
+            if model.canReportSpam(thread), !thread.isSuspectedSpam {
+                Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
+                    .accessibilityIdentifier("email.spam.menu.report")
+            }
+            Button("Exclude this thread from learning", role: .destructive) { showingExclusion = true }
+        } label: {
+            // The system menu button: a styled Menu hit-tests differently on
+            // macOS 26 and the journeys click what sits beside it.
+            Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
+        }
+        .accessibilityLabel("Thread actions").help("Thread actions")
+        .disabled(model.isPerformingAction)
+    }
+
     /// Each message as prose under its sender's line; a hairline parts them.
     private func conversation(_ thread: EmailThreadView) -> some View {
         let messages = thread.messages ?? []
@@ -761,17 +929,17 @@ private struct EmailThreadScreen: View {
             ForEach(messages) { message in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(message.sender).appFont(EmailType.sender, weight: .semibold).textSelection(.enabled)
+                        Text(message.sender).veetType(EmailType.sender, weight: .semibold).textSelection(.enabled)
                         Spacer(minLength: 4)
                         Text(message.sentAt, format: .dateTime.month(.abbreviated).day().year().hour().minute())
-                            .appFont(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
+                            .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
                     }
                     Button {
                         peopleLookup = .correspondent(message.sender, at: message.sentAt)
                     } label: {
                         Label("View in People", systemImage: "person.crop.circle")
                     }
-                    .buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
+                    .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
                     .accessibilityLabel("View people matching \(message.sender)")
                     .accessibilityIdentifier("email.sender.people")
                     DisclosureGroup {
@@ -782,18 +950,18 @@ private struct EmailThreadScreen: View {
                     } label: {
                         Text("Message details")
                     }
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     EmailReadingView(message: message)
                     if !message.complete {
                         Label(
                             "This message is incomplete. Refresh before relying on its full contents.",
                             systemImage: "exclamationmark.circle"
                         )
-                        .appFont(.callout).foregroundColor(AppTheme.amberText)
+                        .veetType(.ui).foregroundColor(AppTheme.amberText)
                     }
                     ForEach(Array((message.attachments ?? []).enumerated()), id: \.offset) { _, attachment in
                         Label("\(attachment.filename) · attachment not read", systemImage: "paperclip")
-                            .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     }
                 }
                 if message.id != messages.last?.id { HairlineDivider() }
@@ -809,9 +977,9 @@ private struct EmailThreadScreen: View {
                 showingFeedback.toggle()
             } label: {
                 HStack {
-                    Text("Teach Veetbot").appFont(.caption, weight: .semibold)
+                    Text("Teach Veetbot").veetType(.meta, weight: .semibold)
                     Spacer()
-                    Image(systemName: showingFeedback ? "chevron.up" : "chevron.down").appFont(.caption)
+                    Image(systemName: showingFeedback ? "chevron.up" : "chevron.down").veetType(.meta)
                 }.foregroundColor(AppTheme.inkSoft).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -821,16 +989,16 @@ private struct EmailThreadScreen: View {
                 feedback
             } else {
                 Text("Say whether mail like this deserves your attention: this thread, a person, or a kind of content.")
-                    .appFont(.caption).foregroundColor(AppTheme.inkFaint)
+                    .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let message = model.feedbackMessage {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "checkmark").appFont(.caption, weight: .semibold)
-                    Text(message).appFont(.caption)
+                    Image(systemName: "checkmark").veetType(.meta, weight: .semibold)
+                    Text(message).veetType(.meta)
                     if model.feedbackID != nil {
                         Button("Undo") { Task { await model.undoFeedback() } }
-                            .buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
+                            .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
                     }
                 }.foregroundColor(AppTheme.inkSoft)
             }
@@ -864,7 +1032,7 @@ private struct EmailThreadScreen: View {
                 }
                 if topics.isEmpty {
                     Text("No content topics are available yet. You can apply feedback to This thread.")
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
             }
             TextField("Explain what matters (optional)", text: $explanation).focused($focusedField, equals: .feedback)
@@ -889,125 +1057,67 @@ private struct EmailThreadScreen: View {
                 .disabled(target == .person && targetValue.isEmpty)
                 .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
             HairlineDivider()
-            Text("Does this thread need a reply?").appFont(.caption).foregroundColor(AppTheme.inkSoft)
+            Text("Does this thread need a reply?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
                 Button("Needs reply") { Task { await model.giveFeedback(target: .thread, judgment: "needs_reply") } }
                 Button("No reply needed") {
                     Task { await model.giveFeedback(target: .thread, judgment: "no_reply_needed") }
                 }
             }.buttonStyle(QuietCapsuleButtonStyle())
-        }.appFont(.callout).disabled(model.isPerformingAction).padding(.top, 4)
+        }.veetType(.ui).disabled(model.isPerformingAction).padding(.top, 4)
     }
 
+    /// The reply as one quiet column: a serif heading with the save state, any
+    /// decision the draft is waiting on, the envelope and body in a single
+    /// well, then Review & Send with the rarer actions folded into a menu.
     @ViewBuilder private var draftEditor: some View {
         if let draft = model.draft, let edit = model.currentEdit {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Your reply, drafted by Veetbot").appFont(.caption, weight: .semibold)
-                        .foregroundColor(AppTheme.inkSoft)
-                    Spacer()
-                    Text(model.isSaving ? "Saving…" : edit.isDirty ? "Unsaved changes" : "Saved")
-                        .appFont(.caption).foregroundColor(AppTheme.inkFaint)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Your reply").veetType(.title)
+                    Spacer(minLength: 8)
+                    Text(model.isSaving ? "Saving…" : edit.isDirty ? "Unsaved changes" : "Drafted by Veetbot · Saved")
+                        .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                        .multilineTextAlignment(.trailing)
                 }
-                Text("From: \(accountDescription(draft.accountID))").appFont(.caption).foregroundColor(AppTheme.inkFaint)
-                draftNotices(draft)
-                VStack(alignment: .leading, spacing: 10) {
-                    Group {
-                        envelopeField("To", path: \.to, field: .to)
-                        Button {
-                            showingEnvelope.toggle()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text("Cc, Bcc & subject")
-                                Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
-                            }
-                        }.buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
-                            .accessibilityIdentifier("email.draft-envelope")
-                            .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
-                        if showingEnvelope {
-                            envelopeField("Cc", path: \.cc, field: .cc)
-                            envelopeField("Bcc", path: \.bcc, field: .bcc)
-                            envelopeField("Subject", path: \.subject, field: .subject)
-                        }
-                    }.disabled(!draft.canEdit || model.isPerformingAction)
-                    HairlineDivider()
-                    // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
-                    // no longer change (sending, sent, uncertain) renders as text instead of an editor.
-                    // Only the editor is disabled: a disabled ancestor would also block selecting the text.
-                    if draft.canEdit {
-                        TextEditor(text: editBinding(\.body)).appFont(.body).lineSpacing(5)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 180, idealHeight: 220)
-                            .focused($focusedField, equals: .body)
-                            .disabled(model.isPerformingAction)
-                            .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
-                    } else {
-                        // No accessibilityLabel: on a selectable Text, AppKit resolves the label
-                        // through the text itself and recurses until the stack overflows.
-                        Text(edit.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("email.draft-body")
-                    }
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.surface))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.hairlineStrong))
-                HStack(spacing: 10) {
-                    Button("Review & Send") { Task { await model.prepareSend() } }
-                        .primaryCapsule()
-                        .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
-                    Menu {
-                        Button("Save now") { Task { await model.saveDraft() } }
-                            .disabled(!edit.isDirty || model.isSaving || model.conflict != nil)
-                        Button("Draft history") { showingRevisions = true }.accessibilityIdentifier(
-                            "email.draft-history")
-                        Button("Use as writing example") { Task { await model.endorseDraftStyle() } }
-                            .accessibilityIdentifier("email.endorse-style")
-                            .disabled(
-                                model.isPerformingAction || model.isSaving || model.conflict != nil
-                                    || edit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Divider()
-                        Button("Discard draft", role: .destructive) { showingDiscard = true }.disabled(!draft.canEdit)
-                    } label: {
-                        Label("Draft options", systemImage: "ellipsis.circle")
-                    }
-                    .appFont(.callout)
-                    Spacer(minLength: 0)
-                }
+                draftNotices(draft, edit: edit)
+                draftWell(draft, edit: edit)
+                draftActions(draft, edit: edit)
                 // A refused send belongs next to the control that asked for it; above the
                 // conversation it reads as the button having done nothing.
                 if let error = model.draftActionMessage {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
-                        .appFont(.callout).accessibilityIdentifier("email.action-error")
-                }
-                if draft.approvalID != nil && !edit.isDirty && draft.status == "awaiting_approval" {
-                    Button("Open pending approval") { Task { await model.loadReview() } }
-                        .buttonStyle(SecondaryCapsuleButtonStyle()).disabled(draft.stale)
+                        .veetType(.ui).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("email.action-error")
                 }
                 if let message = model.styleExampleMessage {
-                    Text(message).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
-                DisclosureGroup("Refine with Veetbot") {
-                    VStack(alignment: .leading, spacing: 10) {
+                DisclosureGroup {
+                    HStack(alignment: .center, spacing: 8) {
                         TextField("How should the reply change?", text: $refinement).focused(
                             $focusedField, equals: .refinement
                         )
-                        .textFieldStyle(.plain).a2Field()
+                        .textFieldStyle(.plain).veetType(.ui).a2Field()
                         Button("Refine draft") { Task { await model.generateDraft(instruction: refinement) } }
                             .buttonStyle(SecondaryCapsuleButtonStyle())
                             .disabled(
                                 refinement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     || model.isPerformingAction || model.conflict != nil)
-                    }.padding(.top, 10)
-                }.appFont(.callout).foregroundColor(AppTheme.inkSoft)
+                    }.padding(.top, 8)
+                } label: {
+                    Label("Refine with Veetbot", systemImage: "sparkles")
+                        .veetType(.ui, weight: .medium).foregroundColor(AppTheme.inkSoft)
+                }
+                .tint(AppTheme.inkSoft)
             }
             .onAppear { showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
             .onChange(of: draft.id) { showingEnvelope = !edit.cc.isEmpty || !edit.bcc.isEmpty }
             .onChange(of: draft.canEdit) { _, canEdit in if !canEdit { focusedField = nil } }
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Your reply").appFont(.caption, weight: .semibold).foregroundColor(AppTheme.inkSoft)
-                Text("Start with a draft in your own style, then make it yours.").appFont(.callout)
+                Text("Your reply").veetType(.title)
+                Text("Start with a draft in your own style, then make it yours.").veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
                 Button {
                     Task { await model.generateDraft() }
@@ -1017,51 +1127,223 @@ private struct EmailThreadScreen: View {
                     } else {
                         Label("Draft reply", systemImage: "square.and.pencil")
                     }
-                }.primaryCapsule().disabled(model.isPerformingAction)
+                }.primaryCapsule().disabled(model.isPerformingAction).padding(.top, 4)
                 if let error = model.draftActionMessage {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
-                        .appFont(.callout).accessibilityIdentifier("email.action-error")
+                        .veetType(.ui).accessibilityIdentifier("email.action-error")
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
+    /// From, To and the folded Cc, Bcc and subject as hairline-parted rows above
+    /// the body, all in one field well like a native mail composer.
+    private func draftWell(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            envelopeRow("From") {
+                Text(accountDescription(draft.accountID)).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            HairlineDivider()
+            Group {
+                envelopeRow("To") {
+                    TextField("To", text: editBinding(\.to)).textFieldStyle(.plain).veetType(.ui)
+                        .focused($focusedField, equals: .to)
+                        .accessibilityLabel("To").accessibilityIdentifier("email.draft-to")
+                    Button {
+                        showingEnvelope.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Cc, Bcc")
+                            Image(systemName: showingEnvelope ? "chevron.up" : "chevron.down")
+                                .imageScale(.small)
+                        }
+                        .padding(.vertical, 4).contentShape(Rectangle())
+                    }.buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+                        .fixedSize()
+                        .accessibilityLabel("Cc, Bcc & subject")
+                        .accessibilityIdentifier("email.draft-envelope")
+                        .accessibilityValue(showingEnvelope ? "Expanded" : "Collapsed")
+                }
+                if showingEnvelope {
+                    HairlineDivider()
+                    envelopeField("Cc", path: \.cc, field: .cc)
+                    HairlineDivider()
+                    envelopeField("Bcc", path: \.bcc, field: .bcc)
+                    HairlineDivider()
+                    envelopeField("Subject", path: \.subject, field: .subject)
+                }
+            }.disabled(!draft.canEdit || model.isPerformingAction)
+            HairlineDivider()
+            // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
+            // no longer change (sending, sent, uncertain) renders as text instead of an editor.
+            // Only the editor is disabled: a disabled ancestor would also block selecting the text.
+            if draft.canEdit {
+                // The text view insets its own text by about five points; the
+                // smaller padding lines its first character up with the labels.
+                TextEditor(text: editBinding(\.body)).veetType(.ui).lineSpacing(5)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 180, idealHeight: 220)
+                    .focused($focusedField, equals: .body)
+                    .disabled(model.isPerformingAction)
+                    .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
+                    .padding(.horizontal, Self.wellInset - 5).padding(.vertical, 8)
+            } else {
+                // No accessibilityLabel: on a selectable Text, AppKit resolves the label
+                // through the text itself and recurses until the stack overflows.
+                Text(edit.body).veetType(.ui).lineSpacing(5).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("email.draft-body")
+                    .padding(.horizontal, Self.wellInset).padding(.vertical, 12)
+            }
+        }
+        // The well's shapes take no clicks: on a 1x Mac display a stroke over
+        // a text view swallows the click meant for it (see `A2FieldModifier`).
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.surface)
+                .allowsHitTesting(false)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.hairlineStrong)
+                .allowsHitTesting(false)
+        )
+    }
+
+    /// Review & Send leads; saving, history, the style example and discarding
+    /// wait behind one quiet menu at the trailing edge.
+    private func draftActions(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
+        HStack(spacing: 10) {
+            Button("Review & Send") { Task { await model.prepareSend() } }
+                .primaryCapsule()
+                .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
+            Spacer(minLength: 0)
+            Menu {
+                Button("Save now") { Task { await model.saveDraft() } }
+                    .disabled(!edit.isDirty || model.isSaving || model.conflict != nil)
+                Button("Draft history") { showingRevisions = true }.accessibilityIdentifier(
+                    "email.draft-history")
+                Button("Use as writing example") { Task { await model.endorseDraftStyle() } }
+                    .accessibilityIdentifier("email.endorse-style")
+                    .disabled(
+                        model.isPerformingAction || model.isSaving || model.conflict != nil
+                            || edit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Divider()
+                Button("Discard draft", role: .destructive) { showingDiscard = true }.disabled(!draft.canEdit)
+            } label: {
+                Label("Draft options", systemImage: "ellipsis.circle")
+                    .labelStyle(.iconOnly).imageScale(.large)
+                    .frame(minWidth: A2Metrics.controlHeight, minHeight: A2Metrics.controlHeight)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden).fixedSize()
+            .foregroundColor(AppTheme.inkSoft).tint(AppTheme.inkSoft)
+            .help("Draft options")
+        }
+    }
+
     /// Distinguishes draft progress, confirmed sending, uncertainty and recoverable editing conflicts.
-    @ViewBuilder private func draftNotices(_ draft: EmailDraftView) -> some View {
+    /// Each notice that waits on the owner is one amber-ruled card: what happened, then the
+    /// action that answers it beside the sentence.
+    @ViewBuilder private func draftNotices(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         if draft.stale {
-            Text("New mail arrived. Review the updated thread before sending.").foregroundColor(AppTheme.amberText)
-            Button("I've reviewed the updated thread") { Task { await model.confirmCurrentSourceReviewed() } }
-                .buttonStyle(SecondaryCapsuleButtonStyle())
-                .disabled(model.conflict != nil || model.isSaving)
+            draftDecision("New mail arrived", message: "Review the updated thread above before sending.") {
+                Button("I've reviewed the updated thread") { Task { await model.confirmCurrentSourceReviewed() } }
+                    .primaryCapsule()
+                    .disabled(model.conflict != nil || model.isSaving)
+            }
         }
         if draft.status == "uncertain" {
-            Text(
-                "Send status unknown. Check the thread before taking another action. This message will not be resent automatically."
-            ).foregroundColor(AppTheme.amberText)
+            draftDecision(
+                "Send status unknown",
+                message:
+                    "Check the thread before taking another action. This message will not be resent automatically."
+            ) { EmptyView() }
         } else if draft.status == "sent" {
-            Label("Sent", systemImage: "checkmark.circle.fill").foregroundColor(AppTheme.tealText)
+            Label("Sent", systemImage: "checkmark.circle.fill").veetType(.ui, weight: .medium)
+                .foregroundColor(AppTheme.tealText)
         } else if draft.isProcessing {
-            ProgressView(draft.status == "sending" ? "Sending approved message…" : "Preparing your draft…")
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(draft.status == "sending" ? "Sending approved message…" : "Preparing your draft…")
+                    .veetType(.ui).foregroundColor(AppTheme.inkSoft)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        if draft.approvalID != nil && !edit.isDirty && draft.status == "awaiting_approval" {
+            draftDecision("Waiting for your approval", message: "Open the send request to approve or decline it.") {
+                Button("Open pending approval") { Task { await model.loadReview() } }
+                    .buttonStyle(SecondaryCapsuleButtonStyle()).disabled(draft.stale)
+            }
         }
         if let conflict = model.conflict {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("This draft changed on another device. Your edits are preserved.").foregroundColor(AppTheme.amberText)
-                DisclosureGroup("Read the server version") { Text(conflict.body).textSelection(.enabled) }
+            VStack(alignment: .leading, spacing: 10) {
+                AttentionCardLabel(title: "Edited on another device")
+                Text("This draft changed on another device. Your edits are preserved.")
+                    .veetType(.ui).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup {
+                    A2Quote { Text(conflict.body).veetType(.ui).textSelection(.enabled) }.padding(.top, 6)
+                } label: {
+                    Text("Read the server version").veetType(.ui, weight: .medium)
+                        .foregroundColor(AppTheme.inkSoft)
+                }
+                .tint(AppTheme.inkSoft)
                 HStack(spacing: 8) {
-                    Button("Use server version") { model.useServerDraft() }
                     Button("Save my version") { Task { await model.keepLocalDraft() } }
-                }.buttonStyle(SecondaryCapsuleButtonStyle())
-            }.accessibilityIdentifier("email.draft-conflict")
+                        .primaryCapsule()
+                    Button("Use server version") { model.useServerDraft() }
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
+                }
+            }
+            .attentionCard()
+            .accessibilityIdentifier("email.draft-conflict")
         }
+    }
+
+    /// One decision the draft waits on: an amber eyebrow and a sentence, with
+    /// its action beside them when the width allows and beneath them when not.
+    private func draftDecision<Action: View>(
+        _ title: String, message: String, @ViewBuilder action: () -> Action
+    ) -> some View {
+        let action = action()
+        let words = VStack(alignment: .leading, spacing: 4) {
+            AttentionCardLabel(title: title)
+            Text(message).veetType(.ui).foregroundColor(AppTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 16) {
+                words.frame(minWidth: 220, alignment: .leading)
+                Spacer(minLength: 0)
+                action
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                words
+                action
+            }
+        }
+        .attentionCard()
+    }
+
+    /// The leading inset every row of the reply well shares.
+    private static let wellInset: CGFloat = 14
+
+    /// One row of the reply envelope: a faint label in a fixed column, then its value.
+    private func envelopeRow<Value: View>(_ title: String, @ViewBuilder value: () -> Value) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title).veetType(.ui).foregroundColor(AppTheme.inkFaint)
+                .frame(width: 58, alignment: .leading)
+            value()
+        }
+        .padding(.horizontal, Self.wellInset)
+        .frame(minHeight: A2Metrics.rowHeight + 8)
     }
 
     /// Connects an envelope field to the versioned edit buffer and keyboard focus.
     private func envelopeField(_ title: String, path: WritableKeyPath<EmailDraftEdit, String>, field: Field)
         -> some View
     {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title).appFont(.callout).foregroundColor(AppTheme.inkSoft).frame(width: 54, alignment: .leading)
-            TextField(title, text: editBinding(path)).textFieldStyle(.plain).appFont(.callout)
+        envelopeRow(title) {
+            TextField(title, text: editBinding(path)).textFieldStyle(.plain).veetType(.ui)
                 .focused($focusedField, equals: field)
                 .accessibilityLabel(title).accessibilityIdentifier("email.draft-\(title.lowercased())")
         }
@@ -1086,8 +1368,8 @@ private struct EmailGistBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Veetbot").appFont(.caption, weight: .semibold).foregroundColor(AppTheme.tealText)
-            Text(thread.summary).appFont(.body).fixedSize(horizontal: false, vertical: true)
+            Text("Veetbot").veetType(.meta, weight: .semibold).foregroundColor(AppTheme.tealText)
+            Text(thread.summary).veetType(.ui).fixedSize(horizontal: false, vertical: true)
             EmailThreadStatus(thread: thread, draft: draft, showsReason: true)
         }
         .padding(.leading, 12)
@@ -1107,19 +1389,19 @@ private struct EmailReadingView: View {
             if let reader = message.readerBody, !reader.isEmpty {
                 HStack {
                     Text(showingOriginal ? "Original message" : "Reading view")
-                        .appFont(.caption).foregroundColor(AppTheme.inkFaint)
+                        .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                     Spacer()
                     Button(showingOriginal ? "Reading view" : "Show original") {
                         showingOriginal.toggle()
                     }
-                    .buttonStyle(.plain).appFont(.caption, weight: .medium).foregroundColor(AppTheme.tealText)
+                    .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
                     .accessibilityIdentifier("email.reader.original")
                 }
                 if showingOriginal {
                     original
                 } else {
                     MarkdownContentView(text: reader)
-                        .appFont(.body).lineSpacing(5)
+                        .veetType(.ui).lineSpacing(5)
                         .environment(\.openURL, OpenURLAction { url in
                             guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
                                   url.host != nil else { return .discarded }
@@ -1136,7 +1418,7 @@ private struct EmailReadingView: View {
     }
 
     private var original: some View {
-        Text(message.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
+        Text(message.body).veetType(.ui).lineSpacing(5).textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -1157,7 +1439,7 @@ private struct EmailSpamControls: View {
         if thread.isInSpam {
             HStack(spacing: 8) {
                 Text("Reported as spam. Gmail empties Spam after thirty days.")
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.spamSupported(for: thread.accountID) {
                     Button("Not spam") { Task { await model.setThreadSpam(thread, spam: false) } }
@@ -1169,10 +1451,10 @@ private struct EmailSpamControls: View {
         } else if thread.isSuspectedSpam {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Suspected spam", systemImage: "exclamationmark.octagon")
-                    .appFont(.caption, weight: .semibold).foregroundColor(AppTheme.amberText)
+                    .veetType(.meta, weight: .semibold).foregroundColor(AppTheme.amberText)
                     .accessibilityIdentifier("email.spam.tag.detail")
                 Text("Veetbot thinks this may be spam, so it is not in your priority list. Nothing has changed in Gmail.")
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.spamSupported(for: thread.accountID) {
                     HStack(spacing: 8) {
@@ -1186,7 +1468,7 @@ private struct EmailSpamControls: View {
                     }
                 }
                 if let error = model.spamFlagErrors[thread.id] {
-                    Text(error).appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    Text(error).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -1239,13 +1521,13 @@ private struct EmailThreadStatus: View {
         let reason = thread.reason.trimmingCharacters(in: .whitespacesAndNewlines)
         if tone == .attention, !reason.isEmpty {
             Text("\(title) · \(reason)")
-                .appFont(EmailType.note, weight: .medium).foregroundColor(color(for: tone))
+                .veetType(EmailType.note, weight: .medium).foregroundColor(color(for: tone))
                 .lineLimit(showsReason ? nil : 1)
                 .fixedSize(horizontal: false, vertical: showsReason)
         } else {
-            Text(title).appFont(EmailType.note, weight: .medium).foregroundColor(color(for: tone))
+            Text(title).veetType(EmailType.note, weight: .medium).foregroundColor(color(for: tone))
             if showsReason, !reason.isEmpty {
-                Text(reason).appFont(EmailType.note).foregroundColor(AppTheme.inkSoft)
+                Text(reason).veetType(EmailType.note).foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1259,10 +1541,10 @@ struct EmailEmptyState: View {
     /// Explains empty, unavailable or unselected mail states without implying a completed scan.
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundColor(AppTheme.teal)
+            Image(systemName: symbol).veetIcon(.emptyState).foregroundColor(AppTheme.teal)
                 .frame(width: 60, height: 60).background(Circle().fill(AppTheme.tealWash))
-            Text(title).appDisplayFont(.title3).multilineTextAlignment(.center)
-            Text(message).appFont(.callout).foregroundColor(AppTheme.inkSoft).multilineTextAlignment(.center)
+            Text(title).veetType(.title).multilineTextAlignment(.center)
+            Text(message).veetType(.ui).foregroundColor(AppTheme.inkSoft).multilineTextAlignment(.center)
         }.padding(.horizontal, 20).padding(.vertical, 36).frame(maxWidth: .infinity)
     }
 }
@@ -1292,7 +1574,7 @@ struct EmailSheetHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).appDisplayFont(.title2)
+            Text(title).veetType(.display)
             Spacer()
             Button(dismissTitle, action: dismiss).buttonStyle(QuietCapsuleButtonStyle())
         }
@@ -1314,20 +1596,20 @@ struct EmailLearningScreen: View {
                     Text(
                         "Veetbot automatically analyzes received and Sent email from the latest 90 days to learn what matters, your writing style, and useful memories shared with Chat and both accounts. Selected email content is processed by Veetbot's hosted models. This updates your assistant's preferences without fine-tuning a model."
                     )
-                    .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     .accessibilityIdentifier("email.learning-disclosure")
                     if let learning = model.learning {
                         Text(learning.paused ? "Learning is paused." : "Learning continues while Email is active.")
                         Text(
                             "\(learning.historyProcessed) \(learning.historyProcessed == 1 ? "thread" : "threads") retrieved · \(learning.styleExamples) \(learning.styleExamples == 1 ? "style example" : "style examples")"
                         )
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                         Text(
                             learning.historyComplete
                                 ? "The 90-day window has been retrieved; analysis continues as needed."
                                 : "Retrieval of the latest 90 days is incomplete. Older history is paused."
                         )
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                         Button(learning.paused ? "Resume learning" : "Pause learning") {
                             isUpdating = true
                             Task {
@@ -1340,7 +1622,7 @@ struct EmailLearningScreen: View {
                             "You can correct a person or topic in a thread, undo feedback, or exclude that thread's sources."
                         )
                         Text("\(learning.excludedSources) \(learning.excludedSources == 1 ? "source" : "sources") excluded")
-                            .appFont(.caption)
+                            .veetType(.meta)
                         VStack(alignment: .leading, spacing: 4) {
                             Button("Reset importance preferences", role: .destructive) { resetScope = "preferences" }
                             Button("Reset writing style", role: .destructive) { resetScope = "style" }
@@ -1350,15 +1632,15 @@ struct EmailLearningScreen: View {
                             VStack(alignment: .leading, spacing: 16) {
                                 ForEach(model.accounts) { account in
                                     VStack(alignment: .leading, spacing: 5) {
-                                        Text(account.label).appFont(.headline)
+                                        Text(account.label).veetType(.ui, weight: .semibold)
                                         Text("\(account.historyProcessed) \(account.historyProcessed == 1 ? "thread" : "threads") retrieved")
-                                            .appFont(.callout)
+                                            .veetType(.ui)
                                         Text(
                                             account.historyComplete
                                                 ? "The 90-day window has been retrieved; analysis continues as needed."
                                                 : "More of the 90-day window remains. Older history is paused."
                                         )
-                                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+                                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                                     }
                                 }
                             }.padding(.top, 10).frame(maxWidth: .infinity, alignment: .leading)
@@ -1410,7 +1692,7 @@ struct EmailRevisionsScreen: View {
             Text(
                 "Earlier and conflicting versions remain available. Restoring a version fills your editor; Save creates a new revision."
             )
-            .appFont(.caption).foregroundColor(AppTheme.inkSoft)
+            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(model.revisions.enumerated()), id: \.offset) { _, revision in
@@ -1419,7 +1701,7 @@ struct EmailRevisionsScreen: View {
                                 Text("To: \(revision.to.joined(separator: ", "))")
                                 if !revision.cc.isEmpty { Text("Cc: \(revision.cc.joined(separator: ", "))") }
                                 if !revision.bcc.isEmpty { Text("Bcc: \(revision.bcc.joined(separator: ", "))") }
-                                Text(revision.subject).appFont(.headline)
+                                Text(revision.subject).veetType(.ui, weight: .semibold)
                                 Text(revision.body).textSelection(.enabled)
                                 Button("Restore in editor") {
                                     model.useRevision(revision)
@@ -1456,18 +1738,18 @@ struct EmailSendReview: View {
                             Text("To: \(draft.to.joined(separator: ", "))")
                             if !draft.cc.isEmpty { Text("Cc: \(draft.cc.joined(separator: ", "))") }
                             if !draft.bcc.isEmpty { Text("Bcc: \(draft.bcc.joined(separator: ", "))") }
-                        }.appFont(.callout).foregroundColor(AppTheme.inkSoft).textSelection(.enabled)
+                        }.veetType(.ui).foregroundColor(AppTheme.inkSoft).textSelection(.enabled)
                         HairlineDivider()
-                        Text(draft.subject).appFont(.headline)
-                        Text(draft.body).appFont(.body).lineSpacing(5).textSelection(.enabled)
+                        Text(draft.subject).veetType(.ui, weight: .semibold)
+                        Text(draft.body).veetType(.ui).lineSpacing(5).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 HairlineDivider()
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Send approves this exact message once.")
-                        .appFont(.caption).foregroundColor(AppTheme.inkSoft)
-                    if let error = model.draftError { Text(error).appFont(.callout).foregroundColor(AppTheme.red) }
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                    if let error = model.draftError { Text(error).veetType(.ui).foregroundColor(AppTheme.red) }
                     HStack(spacing: 12) {
                         Button("Deny this send", role: .destructive) { Task { await model.resolveSend(.deny) } }
                             .buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red)).disabled(model.isPerformingAction)

@@ -1090,8 +1090,13 @@ without restarting anything, and `deploy-nginx` then ships the documentation,
 website, and proxy configuration that the failure skipped.
 
 The Nginx installer stores the prior Veetbot configuration under
-`/etc/nginx/veetbot-backups`, runs `nginx -t`, and reloads Nginx. Validation or
-reload failure restores the prior file. So does a failure while installing the
+`/etc/nginx/veetbot-backups` on every run. It installs the candidate, runs
+`nginx -t`, and reloads Nginx only when the rendered site file differs from the
+installed one or the site is not enabled. An unchanged configuration is left in
+place and Nginx is not reloaded, because the host's Nginx also serves other applications, and a
+reload restarts their Passenger processes and drops their in-flight requests.
+Documentation and website releases go live through their `current` symlinks
+and need no reload. Validation or reload failure restores the prior file. So does a failure while installing the
 candidate file or activating its symlink. `deploy/app/release.sh` requires the
 local readiness header to identify the staged release and the authenticated
 session-index route to respond successfully; after it returns, CircleCI polls
@@ -1589,8 +1594,19 @@ boundary or replace unknown legacy attribution with empty metadata to unblock wo
 
 ### Owner-reviewed bounded recall rollout (ADR-0220)
 
-The bounded exception uses `recall-bounded-evidence@1` and
-`recall-bounded-admission@1`; legacy passing-evidence admission is unchanged.
+Three versions of the bounded exception exist, each with its own review
+requirement; legacy passing-evidence admission is unchanged.
+
+- `recall-bounded-evidence@1` and `recall-bounded-admission@1` (ADR-0220) need
+  the completed human failure review described below.
+- `@2` (ADR-0222) binds the owner-approved 37-case scope and needs the scoped
+  human findings for exactly those cases, the cost and interruption summaries,
+  and the residual-risk statement.
+- `@3` (ADR-0223) is the supervised production trial. It carries the owner's
+  actual instruction instead of a human review, starts with a 24-hour expiry,
+  and renews only on a timely, explicit continue decision, up to seven days.
+  Follow the [production trial guide](recall-production-trial.md) for its
+  activation and renewal, and do not reuse the version-one assembly helper.
 Do not retag the completed failed comparison as a passing M33 release. The
 owner's approval of rollout scope is not a completed human failure review.
 

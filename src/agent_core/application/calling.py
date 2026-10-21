@@ -392,9 +392,18 @@ class CallService:
         key = call_identifier(call_id)
         async with self.uow_factory() as uow:
             row = await uow.calls.get(principal, "call", key)
-        if row is None:
-            raise NotFoundError("call not found")
-        return self._visible(row)
+            reservations = await uow.calls.list(principal, "dispatch", active=True, limit=1)
+        if row is not None:
+            return self._visible(row)
+        # Until reconciliation records it, a dispatched call is known only by its reservation.
+        if any(r.payload.get("provider_call_id") == key for r in reservations):
+            return {
+                "call_id": key,
+                "direction": "outbound",
+                "status": "accepted",
+                "result_pending": True,
+            }
+        raise NotFoundError("call not found")
 
     async def stop(self, principal: Principal, call_id: str) -> dict[str, Any]:
         self._owner(principal)
@@ -451,6 +460,11 @@ class CallService:
                     await self.delete(self.owner, row.key)
                     count += 1
                 except ConflictError:
+                    continue
+                except Exception:
+                    # Expired content is already hidden; never let erasure stop new results.
+                    # Exceptions can carry call content or SQL, so log only a fixed code.
+                    logger.warning("calling.retention_failed")
                     continue
         async with self.uow_factory() as uow, uow.calls.lock(self.owner):
             await self._put(

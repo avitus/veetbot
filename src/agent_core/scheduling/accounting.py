@@ -5,10 +5,13 @@ from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.call_plans import CALL_PLAN_SESSION_METADATA_KEY, CallPlanStepKind
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.schedules import (
+    OccurrenceTrigger,
     Schedule,
+    ScheduleNotify,
     ScheduleOccurrence,
     SchedulePauseReason,
     ScheduleRevision,
@@ -96,12 +99,19 @@ class ScheduleOutcomeAccountant:
                 schedule.id, occurrence.schedule_revision, owner
             )
             failures = schedule.consecutive_failures
-            if run.status is RunStatus.COMPLETED:
+            # ADR-0225 part C: a Run-now result neither resets nor adds to the
+            # cadence's failure count, so testing a fix cannot pause a schedule
+            # and one manual success cannot hide a failing cadence.
+            manual = occurrence.trigger is OccurrenceTrigger.MANUAL
+            if manual:
+                pass
+            elif run.status is RunStatus.COMPLETED:
                 failures = 0
             elif run.status is RunStatus.FAILED:
                 failures += 1
             auto_paused = (
-                run.status is RunStatus.FAILED
+                not manual
+                and run.status is RunStatus.FAILED
                 and failures >= revision.max_consecutive_failures
                 and schedule.state is ScheduleState.ACTIVE
             )
@@ -141,7 +151,17 @@ class ScheduleOutcomeAccountant:
                 )
             )
             self._write_probe("process_event")
-            if self._notification_producer is not None:
+            # ADR-0225 part D: a completed report may stay quiet; a run that
+            # failed or was cancelled always tells the owner.
+            quiet = (
+                run.status is RunStatus.COMPLETED
+                and revision.notify is ScheduleNotify.ATTENTION_ONLY
+            )
+            if (
+                self._notification_producer is not None
+                and not quiet
+                and not await _quiet_plan_call(uow, revision, run, owner)
+            ):
                 produced = await self._notification_producer.for_schedule_run_accounted(
                     uow,
                     schedule=updated,
@@ -191,3 +211,15 @@ class ScheduleOutcomeAccountant:
                 lease_reclaims=max(0, run.attempts - 1),
             )
             return True
+
+
+async def _quiet_plan_call(
+    uow: ScheduleUnitOfWork, revision: ScheduleRevision, run: Run, owner: Principal
+) -> bool:
+    """A call plan alerts once, with its report; each completed call stays quiet (ADR-0221)."""
+
+    if revision.call_plan is None or run.status is not RunStatus.COMPLETED:
+        return False
+    session = await uow.sessions.get(run.session_id, owner)
+    step = session.metadata.get(CALL_PLAN_SESSION_METADATA_KEY)
+    return isinstance(step, dict) and step.get("kind") != CallPlanStepKind.REPORT.value

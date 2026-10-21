@@ -29,7 +29,7 @@ import Testing
     func testTheThreadDetailOpensWithTheSerifSubjectAndVeetbotsGist() throws {
         let source = try source(at: "Veetbot/Views/EmailModeView.swift")
 
-        #expect(source.contains(".appDisplayFont(.title2)"))
+        #expect(source.contains(".veetType(.display)"))
         #expect(source.contains("struct EmailGistBlock"))
         #expect(source.contains("Text(\"Veetbot\")"))
         #expect(source.contains("Teach Veetbot"))
@@ -41,6 +41,47 @@ import Testing
         #expect(source.contains("PrimaryCapsuleButtonStyle"))
         #expect(!source.contains(".emailCard("))
         #expect(!source.contains("struct EmailAvatar"))
+    }
+
+    /// On a compact iPhone the pushed thread keeps its actions beside the back
+    /// button in a paper navigation bar, so neither the button nor the bar
+    /// covers the subject as the conversation scrolls beneath them.
+    @Test
+    func testThePushedThreadPutsItsActionsInAPaperNavigationBar() throws {
+        let source = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(source.contains("actionsInNavigationBar: !directSelection"))
+        #expect(source.contains("ToolbarItemGroup(placement: .topBarTrailing)"))
+        #expect(source.contains("accessibilityID: \"email.handled.detail\", iconOnly: true)"))
+        #expect(source.contains(".toolbarBackground(AppTheme.paper, for: .navigationBar)"))
+        #expect(source.contains("if !actionsInNavigationBar {"))
+        #expect(source.contains(".accessibilityLabel(\"Thread actions\")"))
+    }
+
+    /// The reply composer: a decision the draft waits on reads as one amber
+    /// card with its action beside it, the envelope and body share one well
+    /// whose shapes never take a click, and the rarer actions sit in a menu.
+    @Test
+    func testTheReplyComposerPutsEachDecisionBesideItsAction() throws {
+        let source = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(source.contains("private func draftDecision<Action: View>("))
+        #expect(source.contains("draftDecision(\"New mail arrived\""))
+        #expect(source.contains("draftDecision(\"Waiting for your approval\""))
+        #expect(source.contains("draftDecision(\n                \"Send status unknown\""))
+        #expect(source.contains(".attentionCard()\n            .accessibilityIdentifier(\"email.draft-conflict\")"))
+        #expect(source.contains("private func draftWell("))
+        #expect(source.contains("envelopeRow(\"From\")"))
+        #expect(!source.contains("Text(\"From: \\(accountDescription("))
+        #expect(source.contains(".stroke(AppTheme.hairlineStrong)\n                .allowsHitTesting(false)"))
+        #expect(source.contains(".menuIndicator(.hidden)"))
+        for identifier in [
+            "email.draft-to", "email.draft-envelope", "email.draft-history", "email.endorse-style",
+            "email.action-error", "email.draft-conflict",
+        ] {
+            #expect(source.contains("\"\(identifier)\")"), "\(identifier)")
+        }
+        #expect(source.contains(".accessibilityIdentifier(\"email.draft-\\(title.lowercased())\")"))
     }
 
     @Test
