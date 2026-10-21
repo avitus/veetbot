@@ -215,7 +215,8 @@ each nomination from memory in an amber-edged card with Affirm as the filled
 capsule and Decline as a quiet one. With a server that has them (ADR-0226),
 Persona uses a section sidebar on Mac and regular-width iPad, and a section
 menu on compact screens: Voice, What Veetbot assumes, Nominations and
-Boundaries. Moving between sections preserves unsaved edits. Voice contains
+Boundaries. Moving between sections preserves unsaved edits. A server without
+tone support opens What Veetbot assumes instead of Voice. Voice contains
 the Lean towards chips (Brief, Warm, Direct, Formal,
 Playful; up to three, Formal and Playful replacing each other) and How that
 sounds, an example reply the server generates from the unsaved voice and labels
@@ -647,6 +648,11 @@ the people list and selected profile, with server counts beside each collection.
 Compact screens push records from the list. People also uses that full-width
 navigation at accessibility text sizes on iPad, so its labels remain readable.
 In that layout, search stays above the list and large-text actions stack vertically.
+The sidebar’s merge guidance uses medium-weight ink for legibility on 1x Mac displays.
+For the three known iOS directory contrast findings, ADR-0235 requires measured
+screenshot contrast of at least 4.5:1 against the expected semantic palette.
+The audit retains the finding and measurement; missing evidence and all other
+findings still fail.
 Schedules groups its index by state,
 keeps New schedule above it, and shows the selected schedule beside it on Mac
 and regular-width iPad. The synthesis journal keeps its list
@@ -685,7 +691,9 @@ transport. Its compact navigation opens a thread from the inbox; regular iPad
 and Mac layouts keep a mailbox sidebar beside the list and thread detail.
 Inbox is the initial collection; Needs you and Handled are distinct server
 collections (ADR-0231). Counts cover the filtered collection before pagination;
-older servers omit them. Account filtering, search, Important / Other mail,
+older servers omit them. Same-query background reads retain the last confirmed
+counts while loading or after a transient failure; a changed query clears them.
+Account filtering, search, Important / Other mail,
 pagination, per-account freshness and historical coverage remain available.
 Rows read newest first by each
 conversation's latest activity; background updates keep the rows on screen,

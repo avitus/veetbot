@@ -84,7 +84,7 @@ test-fast: test-static test-contract
 
 # Hosted browsers are headed. Linux gives each a private Xvfb display; a Mac
 # would open the windows on the owner's desktop, so there both browser targets
-# run on the Linux chunk sidecar instead (ADR-0229). VEETBOT_BROWSER_ON_HOST=1
+# run on the Linux chunk sidecar instead (ADR-0236). VEETBOT_BROWSER_ON_HOST=1
 # runs them on the Mac deliberately. test-browser-cases runs only the named
 # cases, so it writes no gate report.
 ifeq ($(HOST_OS)$(VEETBOT_BROWSER_ON_HOST),Darwin)

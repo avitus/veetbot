@@ -4,6 +4,29 @@ import Testing
 @testable import VeetbotCore
 
 @Suite(.serialized) @MainActor struct PersonaViewModelTests {
+    /// The editor opens a usable section on both current and legacy servers.
+    @Test(arguments: [false, true])
+    func testEditorOpensSupportedSection(toneSupported: Bool) async throws {
+        let model = try makeModel { request in
+            if request.url?.path == "/v1/persona" {
+                var body = self.personaJSON(version: 2)
+                if toneSupported {
+                    body = body.replacingOccurrences(of: "\"version\":2",
+                        with: "\"version\":2,\"voice\":\"Plain answers.\",\"traits\":[]")
+                }
+                return try self.response(for: request, statusCode: 200, body: body)
+            }
+            return try self.response(for: request, statusCode: 200,
+                                     body: #"{"items":[],"next_cursor":null}"#)
+        }
+        await model.load()
+        #expect(model.version == 2)
+        #expect(model.selectedSection == (toneSupported ? .voice : .assumptions))
+        model.selectedSection = .nominations
+        await model.load()
+        #expect(model.selectedSection == .nominations)
+    }
+
     @Test
     func testLoadRendersTheDocumentAndOpenNominations() async throws {
         let beliefID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000501"))

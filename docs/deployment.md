@@ -1045,13 +1045,15 @@ itself; such a branch is verified on the sidecar and, before it is proposed for
 statuses are required checks (`static`, `contract`, `integration`, `sandbox`,
 `apple`, `apple-ios`, `public-site`, and both browser-image instances), so a pull request cannot merge
 until a requested run reports them green on its head commit; the owner retains
-an admin override. A requested `dev` pipeline also
+an admin override. Release packaging additionally requires `browser`, for ten
+verification statuses in total; its absence from branch protection does not
+waive the release gate. A requested `dev` pipeline also
 runs the non-publishing Apple signing smoke described above; the isolated recall
 release uses the exact-revision context admission in ADR-0219. On `main`, a
 verification job other than `public-site` whose source tree already passed it,
 normally in that requested run, reports success without rerunning; a merge
 commit whose tree nothing verified is verified in full (ADR-0114). After all
-seven required verification jobs pass:
+ten release verification statuses pass:
 
 - `public-site` installs the locked Node dependencies, builds, tests, and lints
   the static export, and exposes only that output to downstream packaging;

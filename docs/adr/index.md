@@ -254,8 +254,8 @@ implementation without one.
 - [ADR-0227: People directory attention, last contact and section counts](0227-people-directory-attention-recent-and-counts.md)
 - [ADR-0221: Unattended call plans, with retries and a follow-up](0221-unattended-call-plans.md)
 - [ADR-0228: CircleCI Smarter Testing runs three pytest partitions](0228-smarter-testing-partitions.md)
-- [ADR-0229: Real-browser cases run off the owner's desktop](0229-real-browser-cases-run-off-the-owners-desktop.md)
 - [ADR-0230: The longest verify jobs split across executors](0230-parallel-verify-partitions.md)
+- [ADR-0229: Verified entrypoints and the cost-reserve transition](0229-verified-entrypoints-and-cost-reserve-transition.md)
 
 - [ADR-0212: Checkpointed memory confirmation](0212-checkpointed-memory-confirmation.md)
 - [ADR-0214: Formation deadline repair](0214-formation-deadline-repair.md)
@@ -274,3 +274,6 @@ implementation without one.
 
 - [ADR-0233: Owner-directed source learning](0233-owner-directed-source-learning.md)
 - [ADR-0234: Email list in recency order, named correspondents and refresh in place](0234-email-list-recency-names-and-in-place-refresh.md)
+
+- [ADR-0235: Independently verify known accessibility contrast findings](0235-verified-accessibility-contrast-findings.md)
+- [ADR-0236: Real-browser cases run off the owner's desktop](0236-real-browser-cases-run-off-the-owners-desktop.md)

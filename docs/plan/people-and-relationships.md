@@ -1547,6 +1547,15 @@ scoped audit, and restoring the label passed it. Whole-application accessibility
 and manual VoiceOver/keyboard/editor coverage remain incomplete; the component
 audit does not establish the complete native accessibility gate.
 
+ADR-0235 permits independent screenshot contrast measurement for iOS directory
+findings on the Everyone, Import history, and Add person text controls. Only a
+contrast finding with sufficient rendered semantic ink and background pixels
+and a measured WCAG ratio of at least 4.5:1 may pass. Unknown colors, insufficient
+or missing evidence, other controls, other categories, and profile findings
+remain failures. The original finding, measured ratio, and screenshot remain
+attached to the test result; regression tests exercise rejection as well as
+valid light and dark palettes.
+
 Remaining work includes review of the complete temporal/source-erasure gate
 coverage and worst-case initial-fence latency; complete operational restore,
 manual native accessibility, independently reviewed labels, paid quality/cost

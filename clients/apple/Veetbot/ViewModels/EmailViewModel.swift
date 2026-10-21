@@ -357,7 +357,7 @@ public final class EmailViewModel: ObservableObject {
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         let requestID = UUID()
         listRequest = requestID
-        loadedCollectionCounts = nil
+        if !preserveOrder { loadedCollectionCounts = nil }
         let visibleCount = preserveOrder ? max(5, inboxItems.count) : 5
         isLoading = !preserveOrder
         if !preserveOrder {

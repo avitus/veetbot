@@ -1142,6 +1142,35 @@ import SwiftUI
         #expect(model.collectionCounts == nil)
     }
 
+    /// A same-query refresh retains confirmed totals while waiting and after a transient failure.
+    @Test(arguments: [false, true])
+    func testCollectionCountsDuringFailedReload(preserveOrder: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let reads = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+            if reads > 1 {
+                _ = gate.wait(timeout: .now() + 5)
+                return (502, "Temporary failure")
+            }
+            return (200, self.pageJSON().replacingOccurrences(of: "\"next_cursor\":null",
+                with: "\"next_cursor\":null,\"collection_counts\":{\"inbox\":23,\"needs_you\":9,\"handled\":4}"))
+        }
+        await model.reload()
+        #expect(model.collectionCounts?.count(for: .inbox) == 23)
+        let refresh = Task { await model.reload(preserveOrder: preserveOrder) }
+        try await waitForEmailTestCondition {
+            requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count == 2
+        }
+        #expect(model.collectionCounts?.count(for: .inbox) == (preserveOrder ? 23 : nil))
+        gate.signal()
+        await refresh.value
+        #expect(model.collectionCounts?.count(for: .inbox) == (preserveOrder ? 23 : nil))
+    }
+
     /// Search stays in the selected collection and old servers never imply zero counts.
     @Test func testCollectionSearchAndUnknownCounts() async throws {
         let requests = EmailRequestRecorder()

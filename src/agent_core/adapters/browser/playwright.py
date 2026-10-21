@@ -849,16 +849,25 @@ class PythonPlaywrightRuntime:
                 challenge_visible=challenge_visible,
             )
 
-    async def observe(self) -> BrowserObservation:
+    def _readable_page(self) -> Page:
+        """Require navigation for a blank page while preserving origin checks."""
+
         page = self._current_page()
+        if page.url == "about:blank":
+            raise BrowserProviderError("tool.browser.navigation_required", retryable=False)
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-        return await self._observation(page)
+        return page
+
+    async def observe(self) -> BrowserObservation:
+        """Read the current allowed page, or report that it needs navigation."""
+
+        return await self._observation(self._readable_page())
 
     async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
-        page = self._current_page()
-        if not _origin_allowed(page.url, self._allowed_origins):
-            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+        """Expand a current observation only while its document and handles remain valid."""
+
+        page = self._readable_page()
         if self._observation_document != self._main_frame_navigations:
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.page_changed", retryable=False)
@@ -901,9 +910,9 @@ class PythonPlaywrightRuntime:
         return await self._observation(page, offset=self._continuation[1], root=self._focus_root)
 
     async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
-        page = self._current_page()
-        if not _origin_allowed(page.url, self._allowed_origins):
-            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+        """Extract structured evidence from the requested current page revision."""
+
+        page = self._readable_page()
         if (
             self._revision != request.expected_revision
             or self._observation_document != self._main_frame_navigations

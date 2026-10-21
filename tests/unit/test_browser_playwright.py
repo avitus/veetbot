@@ -281,6 +281,40 @@ async def test_headed_transport_does_not_add_cookies_to_cross_site_post() -> Non
             await runtime.close()
 
 
+async def test_saved_session_reopens_with_navigation_after_its_page_is_released() -> None:
+    """A resumed browser keeps login state but has no page until it navigates."""
+    require_real_browser()
+
+    async def account(request: Request) -> Response:
+        """Expose protected fixture content according to the restored session cookie."""
+
+        text = "Account overview" if request.cookies.get("session") == "synthetic" else "Sign in"
+        return HTMLResponse(f"<title>Account</title><main>{text}</main>")
+
+    async with local_https_site(Starlette(routes=[Route("/account", account)])) as site:
+        original = RealBrowserRuntime()
+        await original.start(site.proxy_url, (site.origin,), headed=True)
+        try:
+            await original._current_page().context.add_cookies(
+                [{"name": "session", "value": "synthetic", "url": site.origin}]
+            )
+            assert "Account overview" in (await original.navigate(site.url("/account"))).text
+            saved = await original.storage_state()
+        finally:
+            await original.close()
+
+        resumed = RealBrowserRuntime()
+        await resumed.start(site.proxy_url, (site.origin,), storage_state=saved, headed=True)
+        try:
+            with pytest.raises(BrowserProviderError) as blank:
+                await resumed.observe()
+            assert blank.value.reason_code == "tool.browser.navigation_required"
+            assert "Account overview" in (await resumed.navigate(site.url("/account"))).text
+            assert "Account overview" in (await resumed.observe()).text
+        finally:
+            await resumed.close()
+
+
 async def test_observation_pipelines_slow_controls_with_bounded_concurrency() -> None:
     """Independent browser replies must not serialize a large login page's startup."""
     active = 0

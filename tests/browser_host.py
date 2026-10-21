@@ -1,4 +1,4 @@
-"""Where the real-browser partition may run (ADR-0229).
+"""Where the real-browser partition may run (ADR-0236).
 
 Hosted browsers are headed (ADR-0145). On Linux each one draws to a private
 Xvfb display; on macOS it draws to the native display, so a browser case run

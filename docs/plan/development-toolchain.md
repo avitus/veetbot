@@ -383,7 +383,7 @@ remains in force; only each synthetic HTTPS harness opens its bounded local
 transport.
 
 Hosted browsers are headed, and only Linux gives each one a private display,
-so the partition never runs on the owner's Mac (ADR-0229). There
+so the partition never runs on the owner's Mac (ADR-0236). There
 `make test-browser`, and `make test-browser-cases CASES=<paths>` for named
 cases, run on the Linux sidecar through `scripts/run_on_sidecar.sh`; a browser
 case collected on a Mac host skips, which this gate counts as unpassed.
@@ -694,8 +694,12 @@ Three workflow-level facts complete the definition:
     selects trusted `dev` or the isolated recall release with its exact-revision
     context admission, and only in a requested pipeline; it does not
     receive publication credentials.
-    Production delivery begins only after all eight required verification jobs,
-    both simulator instances of job 6b, and both browser-image instances pass. On `main`, each verification job
+    Production packaging requires ten verification statuses: `static`, `contract`,
+    `integration`, `sandbox`, `apple`, `apple-ios`, `public-site`, `browser`,
+    `browser-image-x86_64`, and `browser-image-arm64`. The `apple-ios` aggregate
+    requires both simulator-device jobs. Current `main` branch protection
+    requires the same set except `browser`; packaging still enforces that
+    additional release gate. On `main`, each verification job
     except `public-site` halts
     successfully right after checkout when it finds its own record for the
     commit's source tree, and otherwise runs in full (ADR-0114). A job writes

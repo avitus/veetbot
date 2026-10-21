@@ -17,6 +17,7 @@ from agent_core.domain.messages import (
     FakeModelScript,
     ModelRequest,
     ModelTransientError,
+    ModelUsage,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
@@ -29,6 +30,96 @@ from tests.contract.support import NOW
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = ROOT / "src" / "agent_core"
+
+
+@pytest.mark.parametrize(
+    ("max_steps", "reserve_steps", "final_dimension"),
+    [(32, 0, "cost"), (3, 1, "steps")],
+)
+async def test_cost_crossing_refuses_tools_and_owes_a_final_answer(
+    max_steps: int, reserve_steps: int, final_dimension: str
+) -> None:
+    """A cost crossing refuses tools even when the next step enters another reserve."""
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[_calc("1+1", "read")],
+                stop_reason=StopReason.TOOL_USE,
+                usage=ModelUsage(cost=Decimal("2")),
+            ),
+            ScriptedTurn(
+                tool_calls=[_calc("2+2", "unperformed")],
+                stop_reason=StopReason.TOOL_USE,
+                usage=ModelUsage(cost=Decimal("6")),
+            ),
+            ScriptedTurn(
+                text="Found two; the remaining research was not performed.",
+                usage=ModelUsage(cost=Decimal("1")),
+            ),
+        ]
+    )
+    async with build(
+        settings=_settings(),
+        script=script,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+        limits=RunLimits(
+            max_steps=max_steps,
+            synthesis_reserve_steps=reserve_steps,
+            max_cost=Decimal("10"),
+            synthesis_reserve_cost=Decimal("3"),
+        ),
+    ) as composition:
+        run_id = await composition.runs.submit("research then report")
+        run = await composition.runs.wait_terminal(run_id)
+        requests = _requests(composition)
+        events = await composition.runs.events(run_id)
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert run.tool_call_count == 1
+    assert run.model_call_count == 3
+    assert run.usage.cost == Decimal("9")
+    assert requests[1].tool_choice is None
+    assert requests[2].tool_choice == "none"
+    assert any(f"{final_dimension} budget" in text for text in _control_texts(requests[2]))
+    refused = [event for event in events if event.event_type == "tool.call.failed"]
+    assert len(refused) == 1 and refused[0].payload["call_id"] == "unperformed"
+    assert refused[0].payload["reason_code"] == "tool.budget_exhausted"
+    assert any(
+        isinstance(item, ToolResultItem) and item.call_id == "unperformed"
+        for item in requests[2].conversation
+    )
+
+
+async def test_cost_synthesis_violation_still_fails_without_dispatch() -> None:
+    """A model that ignores synthesis-only control cannot execute another tool."""
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[_calc("1+1", "boundary")],
+                stop_reason=StopReason.TOOL_USE,
+                usage=ModelUsage(cost=Decimal("8")),
+            ),
+            _tool_turn(_calc("2+2", "violation")),
+            ScriptedTurn(text="must not receive an extra attempt"),
+        ]
+    )
+    async with build(
+        settings=_settings(),
+        script=script,
+        clock=FixedClock(NOW),
+        limits=RunLimits(max_cost=Decimal("10"), synthesis_reserve_cost=Decimal("3")),
+    ) as composition:
+        run_id = await composition.runs.submit("research then report")
+        run = await composition.runs.wait_terminal(run_id)
+        requests = _requests(composition)
+    assert run.status is RunStatus.FAILED
+    assert run.failure is not None
+    assert run.failure.details == {"synthesis_reserve": "cost"}
+    assert run.tool_call_count == 0
+    assert run.model_call_count == 2
+    assert requests[-1].tool_choice == "none"
 
 
 def _settings() -> Settings:

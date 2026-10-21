@@ -1,7 +1,8 @@
-"""Real Chromium never opens on the owner's Mac desktop (ADR-0229)."""
+"""Real Chromium never opens on the owner's Mac desktop (ADR-0236)."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,9 +55,13 @@ def test_suite_setup_leaves_other_cases_alone_on_a_mac_host(
 
 
 def _dry_run(*arguments: str) -> str:
+    environment = dict(os.environ)
+    for variable in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", HOST_OVERRIDE):
+        environment.pop(variable, None)
     return subprocess.run(
         ["make", "--no-print-directory", "-n", *arguments],
         cwd=ROOT,
+        env=environment,
         text=True,
         capture_output=True,
         check=True,
@@ -70,6 +75,20 @@ def test_a_mac_sends_the_browser_targets_to_the_sidecar(target: str) -> None:
     assert "scripts/run_on_sidecar.sh" in commands
     assert "playwright install" not in commands
     assert "pytest" not in commands.replace("scripts/run_on_sidecar.sh", "")
+
+
+def test_browser_dry_run_is_independent_of_parent_make_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(HOST_OVERRIDE, "1")
+    monkeypatch.setenv("MAKEFLAGS", "-s")
+    monkeypatch.setenv("MFLAGS", "-s")
+    monkeypatch.setenv("MAKELEVEL", "4")
+
+    commands = _dry_run("test-browser", "HOST_OS=Darwin")
+
+    assert "scripts/run_on_sidecar.sh" in commands
+    assert "playwright install" not in commands
 
 
 def test_linux_runs_the_browser_partition_in_place() -> None:

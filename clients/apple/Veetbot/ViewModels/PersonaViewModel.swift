@@ -48,6 +48,20 @@ public final class PersonaViewModel: ObservableObject {
         public let label: String
     }
 
+    enum Section: String, CaseIterable, Identifiable {
+        case voice = "Voice", assumptions = "What Veetbot assumes", nominations = "Nominations", boundaries = "Boundaries"
+        var id: String { rawValue }
+        var symbol: String {
+            switch self {
+            case .voice: "sparkles"
+            case .assumptions: "brain"
+            case .nominations: "circle.fill"
+            case .boundaries: "checkmark"
+            }
+        }
+    }
+    @Published var selectedSection = Section.voice
+
     @Published public private(set) var version = 0
     @Published public var drafts: [DraftEntry] = []
     /// ADR-0226: how Veetbot should talk, and up to three tones.
@@ -300,6 +314,7 @@ public final class PersonaViewModel: ObservableObject {
             )
         }
         toneSupported = document.traits != nil
+        if !toneSupported, selectedSection == .voice { selectedSection = .assumptions }
         voice = document.voice ?? ""
         traits = document.traits ?? []
     }

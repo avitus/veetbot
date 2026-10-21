@@ -361,10 +361,12 @@ nav:
       - ADR-0227 People directory attention and counts: adr/0227-people-directory-attention-recent-and-counts.md
       - ADR-0221 Unattended call plans: adr/0221-unattended-call-plans.md
       - ADR-0228 Smarter Testing partitions: adr/0228-smarter-testing-partitions.md
-      - ADR-0229 Real-browser cases off the desktop: adr/0229-real-browser-cases-run-off-the-owners-desktop.md
       - ADR-0230 Parallel verify partitions: adr/0230-parallel-verify-partitions.md
       - "0231 — Email collections and scoped counts": adr/0231-email-collections-and-counts.md
       - "0232 — Owner-memory incident repairs": adr/0232-owner-memory-incident-repairs.md
       - "0233 — Owner-directed source learning": adr/0233-owner-directed-source-learning.md
       - "0234 — Email list recency, names and refresh in place": adr/0234-email-list-recency-names-and-in-place-refresh.md
+      - ADR-0229 Verified entrypoints and cost-reserve transition: adr/0229-verified-entrypoints-and-cost-reserve-transition.md
+      - "0235 — Verified accessibility contrast findings": adr/0235-verified-accessibility-contrast-findings.md
+      - ADR-0236 Real-browser cases off the desktop: adr/0236-real-browser-cases-run-off-the-owners-desktop.md
   - Changelog: changelog.md

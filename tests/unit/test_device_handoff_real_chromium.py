@@ -41,6 +41,7 @@ from agent_core.browser_control_plane.ports import StaticProfileKeyring
 from agent_core.browser_control_plane.runtime import HostedPlaywrightSessionRuntime
 from agent_core.browser_control_plane.service import HostedProfileLifecycleService
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
+from agent_core.browser_control_plane.verification import BrowserVerificationCatalog
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserAuthenticationMode, BrowserAuthenticationStatus
 from agent_core.domain.credentials import SecretValue
@@ -117,8 +118,14 @@ class ProfileService:
 
 @asynccontextmanager
 async def profile_service(
-    site: LocalHttpsSite, root: Path, *, verification_seconds: float = 30
+    site: LocalHttpsSite,
+    root: Path,
+    *,
+    verification_seconds: float = 30,
+    verification: BrowserVerificationCatalog | None = None,
 ) -> AsyncIterator[ProfileService]:
+    """Run an isolated real-browser profile service with optional site verification."""
+
     store = FilesystemEncryptedProfileStore(
         root,
         StaticProfileKeyring(
@@ -137,6 +144,7 @@ async def profile_service(
         process_secret=b"synthetic-real-browser-process-secret",
         ceremony_base_url="https://browser.service.test",
         verification_seconds=verification_seconds,
+        verification=verification,
     )
     lifecycle = HostedProfileLifecycleService(
         store,

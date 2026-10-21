@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run one command on this checkout's Linux chunk sidecar, so work that would
-# take over the owner's Mac desktop runs off it (ADR-0229). chunk syncs the
+# take over the owner's Mac desktop runs off it (ADR-0236). chunk syncs the
 # checkout, reuses the active sidecar or creates one from the project
 # snapshot, and returns the command's exit status.
 set -euo pipefail

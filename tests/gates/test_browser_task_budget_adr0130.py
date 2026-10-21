@@ -4,8 +4,8 @@ On the production-shaped roster of the ADR-0123 gate, with the hosted browser
 provider: a bound chat defines every browser tool, keeps them defined when
 its plan is read back from PostgreSQL jsonb, and runs under the
 browser-task limits; it exceeds its USD 30 cost limit by at most the one call
-in flight; the call that reaches the cost reserve and asks for a tool ends
-the run; an unbound chat is unchanged.
+in flight; the call that reaches the cost reserve has its tools refused and
+receives a synthesis opportunity (ADR-0229); an unbound chat is unchanged.
 """
 
 from __future__ import annotations
@@ -220,12 +220,12 @@ async def test_a_bound_run_exceeds_its_cost_limit_by_at_most_one_call(tmp_path: 
     assert events.count("model.request.started") == 4
 
 
-async def test_a_bound_run_that_reaches_the_cost_reserve_while_acting_ends_budget_exceeded(
+async def test_a_bound_run_that_reaches_the_cost_reserve_while_acting_still_answers(
     tmp_path: Path,
 ) -> None:
-    """ADR-0078 decision 3 as implemented (0130-design F19)."""
+    """ADR-0229 amends the fatal crossing; no reserved tool call is executed."""
 
-    run, _plan, _events = await _bound_run(
+    run, _plan, events = await _bound_run(
         tmp_path,
         [
             _time_turn("8", "time-1"),
@@ -236,10 +236,10 @@ async def test_a_bound_run_that_reaches_the_cost_reserve_while_acting_ends_budge
         ],
     )
 
-    assert run.status is RunStatus.FAILED
-    assert run.failure is not None
-    assert run.failure.reason is FailureReason.BUDGET_EXCEEDED
-    assert run.failure.details == {"synthesis_reserve": "cost"}
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert run.tool_call_count == 3
+    assert run.model_call_count == 5
+    assert events.count("tool.call.failed") == 1
     assert run.usage.cost == Decimal("28")
 
 

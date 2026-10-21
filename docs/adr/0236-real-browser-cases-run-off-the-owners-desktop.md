@@ -1,4 +1,4 @@
-# ADR-0229: Real-browser cases run off the owner's desktop
+# ADR-0236: Real-browser cases run off the owner's desktop
 
 - Status: Proposed (requested by the repository owner, 2026-10-20)
 - Date: 2026-10-20

@@ -14,20 +14,6 @@ public struct PersonaEditorView: View {
     @ObservedObject var model: PersonaViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var selectedSection = PersonaPage.voice
-
-    private enum PersonaPage: String, CaseIterable, Identifiable {
-        case voice = "Voice", assumptions = "What Veetbot assumes", nominations = "Nominations", boundaries = "Boundaries"
-        var id: String { rawValue }
-        var symbol: String {
-            switch self {
-            case .voice: "sparkles"
-            case .assumptions: "brain"
-            case .nominations: "circle.fill"
-            case .boundaries: "checkmark"
-            }
-        }
-    }
     private var usesColumns: Bool {
         #if os(macOS)
         true
@@ -46,8 +32,8 @@ public struct PersonaEditorView: View {
                 if usesColumns { sectionSidebar.frame(width: 232) }
                 VStack(spacing: 0) {
                     if !usesColumns {
-                        Picker("Persona section", selection: $selectedSection) {
-                            ForEach(PersonaPage.allCases) { Text($0.rawValue).tag($0) }
+                        Picker("Persona section", selection: $model.selectedSection) {
+                            ForEach(PersonaViewModel.Section.allCases) { Text($0.rawValue).tag($0) }
                         }.pickerStyle(.menu).padding(12).accessibilityIdentifier("persona.section-picker")
                     }
                     content
@@ -120,8 +106,8 @@ public struct PersonaEditorView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(selectedSection.rawValue).veetType(.display)
-                    switch selectedSection {
+                    Text(model.selectedSection.rawValue).veetType(.display)
+                    switch model.selectedSection {
                     case .voice:
                         if model.toneSupported {
                             voiceSection
@@ -155,14 +141,14 @@ public struct PersonaEditorView: View {
         VStack(alignment: .leading, spacing: 4) {
             heading.padding(.bottom, 12)
             SidebarSectionLabel(title: "Sections")
-            ForEach(PersonaPage.allCases) { page in
-                Button { selectedSection = page } label: {
+            ForEach(PersonaViewModel.Section.allCases) { page in
+                Button { model.selectedSection = page } label: {
                     SidebarRow { Image(systemName: page.symbol) } title: { Text(page.rawValue) }
                         .padding(.horizontal, 8)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(selectedSection == page ? AppTheme.selected : .clear))
+                        .background(RoundedRectangle(cornerRadius: 7).fill(model.selectedSection == page ? AppTheme.selected : .clear))
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedSection == page ? .isSelected : [])
+                .accessibilityAddTraits(model.selectedSection == page ? .isSelected : [])
                 .accessibilityIdentifier("persona.section.\(page.rawValue)")
             }
             Text("Veetbot nominates new assumptions from your chats. Nothing joins the persona until you accept it.")

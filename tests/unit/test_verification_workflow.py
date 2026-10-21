@@ -55,7 +55,7 @@ def checkout(tmp_path: Path) -> Path:
 
 def run_make(checkout: Path, *goals: str, **settings: str) -> subprocess.CompletedProcess[str]:
     # The in-place graph CI and the sidecar run; a Mac sends its browser lane
-    # to the sidecar instead (ADR-0229, test_browser_host_guard.py).
+    # to the sidecar instead (ADR-0236, test_browser_host_guard.py).
     env = {
         **os.environ,
         "PATH": f"{checkout}{os.pathsep}{os.environ['PATH']}",

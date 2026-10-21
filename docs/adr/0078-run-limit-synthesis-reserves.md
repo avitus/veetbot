@@ -2,7 +2,8 @@
 
 - **Status:** Accepted; amended by ADR-0115 (a tool-call reserve dimension,
   interactive defaults, and an exhausted tool-call budget owing one
-  synthesis-only turn)
+  synthesis-only turn), and ADR-0229 (a newly crossed cost reserve records tool
+  refusals and permits the next budgeted synthesis request)
 - **Date:** 2026-09-01
 - **Related:** Sections 6.5 and 12 of the engineering plan; ADR-0023,
   ADR-0059, ADR-0063

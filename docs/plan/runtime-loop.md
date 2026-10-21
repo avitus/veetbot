@@ -809,7 +809,14 @@ the request-side model-call check includes the call about to be charged. With
 24 calls and a reserve of 2, call 22 receives the synthesis instruction and
 `tool_choice="none"`: its recorded usage will activate the dispatch guard.
 The guard still checks recorded usage after the response, including the cost
-boundary (ADR-0130), and still refuses tools returned inside the reserve.
+boundary. If that charge first reaches the cost reserve, batch fitting records
+`tool.budget_exhausted` refusals without dispatch or tool usage, then the next
+request receives synthesis-only control (ADR-0229, amending ADR-0130). Refusals
+survive checkpoint loss and remain paired with their calls. The response event
+records the requested synthesis dimension, so recovery distinguishes a newly
+crossed boundary from a response that ignored an already tool-free request.
+Legacy responses without that field may receive a synthesis opportunity under
+their existing hard limits. No limit is increased or refunded for this transition.
 A tool call returned while that control is active fails closed with
 `SynthesisReserveViolation` naming the dimension; all-zero reserve fields
 preserve the ordinary loop with two exceptions: an *exhausted* tool-call budget

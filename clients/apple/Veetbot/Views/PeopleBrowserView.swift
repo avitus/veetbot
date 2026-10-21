@@ -700,7 +700,7 @@ struct PeopleDirectorySidebar: View {
                 collection(.duplicates, symbol: "person.2.badge.gearshape")
                 collection(.all, symbol: "person.crop.rectangle.stack")
                 Text("Veetbot never merges people on a name alone. Matches wait here for you.")
-                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                    .veetType(.meta, weight: .medium).foregroundColor(AppTheme.ink)
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 12)
             }.padding(16)
         }.background(AppTheme.paperDeep)

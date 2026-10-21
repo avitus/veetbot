@@ -1821,10 +1821,61 @@ final class ConversationNavigationUITests: XCTestCase {
             }
             return !inSheet
             #else
-            return false
+            return self.verifyPeopleContrast(issue)
             #endif
         }
     }
+
+    #if os(iOS)
+    private func verifyPeopleContrast(_ issue: XCUIAccessibilityAuditIssue) -> Bool {
+        var stage = "Category \(issue.auditType.rawValue), contrast category \(XCUIAccessibilityAuditType.contrast.rawValue), element \(String(describing: issue.element?.elementType))"
+        defer {
+            let diagnostic = XCTAttachment(string: stage)
+            diagnostic.name = "People contrast evidence decision"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
+        guard issue.auditType == .contrast, let element = issue.element,
+              element.elementType == .staticText,
+              ["Everyone", "Import history", "Add person"].contains(element.label) else { return false }
+        stage = "Recognized contrast label \(element.label); verifying directory membership"
+        let browser = app.descendants(matching: .any)["people.browser"]
+        guard browser.exists, browser.descendants(matching: .staticText).allElementsBoundByIndex.contains(where: {
+            $0.frame == element.frame && $0.identifier == element.identifier && $0.label == element.label
+        }) else { return false }
+        stage = "Verified directory membership; decoding screenshot"
+        let screenshot = element.screenshot()
+        guard let image = screenshot.image.cgImage,
+              image.width > 0, image.height > 0, image.width <= 4096, image.height <= 4096,
+              image.width * image.height <= 4_000_000,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return false }
+        var rgba = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let decoded = rgba.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return true
+        }
+        stage = "Decoded \(image.width)x\(image.height) screenshot: \(decoded); measuring palette and contrast"
+        guard decoded, let measurement = PeopleContrastEvidence.measure(
+            label: element.label, isContrast: true, isDirectory: true,
+            width: image.width, height: image.height, rgba: rgba
+        ) else { return false }
+        stage = "Accepted independently measured contrast"
+        let evidence = XCTAttachment(string: "ADR-0235: \(element.label), contrast \(measurement.ratio):1; foreground pixels \(measurement.foregroundPixels), background pixels \(measurement.backgroundPixels).")
+        evidence.name = "Independent People contrast measurement"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        let rendered = XCTAttachment(screenshot: screenshot)
+        rendered.name = "Measured People text"
+        rendered.lifetime = .keepAlways
+        add(rendered)
+        return true
+    }
+    #endif
 
     func testPeopleEvidencePreservesTheOpenConversation() {
         #if os(macOS)
