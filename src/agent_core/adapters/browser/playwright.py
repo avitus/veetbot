@@ -850,6 +850,8 @@ class PythonPlaywrightRuntime:
             )
 
     def _readable_page(self) -> Page:
+        """Require navigation for a blank page while preserving origin checks."""
+
         page = self._current_page()
         if page.url == "about:blank":
             raise BrowserProviderError("tool.browser.navigation_required", retryable=False)
@@ -858,9 +860,13 @@ class PythonPlaywrightRuntime:
         return page
 
     async def observe(self) -> BrowserObservation:
+        """Read the current allowed page, or report that it needs navigation."""
+
         return await self._observation(self._readable_page())
 
     async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+        """Expand a current observation only while its document and handles remain valid."""
+
         page = self._readable_page()
         if self._observation_document != self._main_frame_navigations:
             await self._forget_observation()
@@ -904,6 +910,8 @@ class PythonPlaywrightRuntime:
         return await self._observation(page, offset=self._continuation[1], root=self._focus_root)
 
     async def extract(self, request: BrowserExtractionRequest) -> BrowserObservation:
+        """Extract structured evidence from the requested current page revision."""
+
         page = self._readable_page()
         if (
             self._revision != request.expected_revision

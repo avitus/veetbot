@@ -21,14 +21,19 @@ class WorkerCrash(BaseException):
 
 
 @pytest.mark.parametrize("crash_at", ["model_response", "tool_call", "synthesis_response"])
+@pytest.mark.parametrize(("max_steps", "reserve_steps"), [(32, 0), (3, 1)])
 async def test_cost_reserve_recovery_never_executes_refused_calls(
-    monkeypatch: pytest.MonkeyPatch, crash_at: str
+    monkeypatch: pytest.MonkeyPatch, crash_at: str, max_steps: int, reserve_steps: int
 ) -> None:
+    """Resume refusals without effects, including a concurrent step-reserve boundary."""
+
     original_checkpoint = loop.checkpoint
     original_usage = UnitOfWorkBudgetLedger.record_model_usage
     interrupted: UUID | None = None
 
     async def checkpoint(context: Any, trigger: str) -> None:
+        """Interrupt the selected step before its checkpoint becomes durable."""
+
         nonlocal interrupted
         if context.run.step_count == 2 and trigger == crash_at:
             interrupted = context.run.id
@@ -36,6 +41,8 @@ async def test_cost_reserve_recovery_never_executes_refused_calls(
         await original_checkpoint(context, trigger)
 
     async def record_usage(self: Any, run: Any, *args: Any, **kwargs: Any) -> None:
+        """Crash after synthesis usage is durable but before violation handling."""
+
         nonlocal interrupted
         await original_usage(self, run, *args, **kwargs)
         if crash_at == "synthesis_response" and run.step_count == 3:
@@ -61,7 +68,12 @@ async def test_cost_reserve_recovery_never_executes_refused_calls(
         settings=_settings(),
         script=FakeModelScript(turns=turns),
         clock=FixedClock(NOW),
-        limits=RunLimits(max_cost=Decimal("10"), synthesis_reserve_cost=Decimal("3")),
+        limits=RunLimits(
+            max_steps=max_steps,
+            synthesis_reserve_steps=reserve_steps,
+            max_cost=Decimal("10"),
+            synthesis_reserve_cost=Decimal("3"),
+        ),
     ) as app:
         monkeypatch.setattr(loop, "checkpoint", checkpoint)
         monkeypatch.setattr(UnitOfWorkBudgetLedger, "record_model_usage", record_usage)
@@ -79,7 +91,7 @@ async def test_cost_reserve_recovery_never_executes_refused_calls(
     if crash_at == "synthesis_response":
         assert run.status is RunStatus.FAILED
         assert run.failure is not None
-        assert run.failure.details == {"synthesis_reserve": "cost"}
+        assert run.failure.details == {"synthesis_reserve": "steps" if reserve_steps else "cost"}
     else:
         assert run.status is RunStatus.COMPLETED, run.failure
     assert run.tool_call_count == 1

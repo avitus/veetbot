@@ -26,6 +26,8 @@ HOME = ORIGIN + "/MHO/Home"
 
 
 def verified_catalog() -> BrowserVerificationCatalog:
+    """Bind a synthetic account and protected dashboard to the fixture profile."""
+
     return BrowserVerificationCatalog.model_validate(
         {
             "sites": [
@@ -49,6 +51,8 @@ def verified_catalog() -> BrowserVerificationCatalog:
 
 @pytest.mark.parametrize("requested", [ORIGIN, ORIGIN + "/"])
 async def test_verified_entrypoint_survives_fresh_leases(tmp_path: Path, requested: str) -> None:
+    """Keep bare-origin retries on the verified dashboard across fresh leases."""
+
     observation = BrowserObservation(
         url=HOME,
         revision="verified",
@@ -87,6 +91,8 @@ async def test_verified_entrypoint_survives_fresh_leases(tmp_path: Path, request
     "suffix", ["/records", "/?view=public", "/#public", "/MHO/Authentication/Login"]
 )
 async def test_explicit_navigation_is_not_rewritten(tmp_path: Path, suffix: str) -> None:
+    """Preserve explicit routes while retaining the configured default entrypoint."""
+
     observation = BrowserObservation(
         url=HOME,
         revision="verified",
@@ -116,6 +122,8 @@ async def test_explicit_navigation_is_not_rewritten(tmp_path: Path, suffix: str)
 
 
 async def test_unconfigured_profile_keeps_bare_origin_navigation(tmp_path: Path) -> None:
+    """Leave root navigation unchanged when no verified entrypoint is configured."""
+
     lifecycle, sessions, _, _ = services(tmp_path)
     await provision(lifecycle)
     lease = await sessions.acquire(

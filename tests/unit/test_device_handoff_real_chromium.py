@@ -124,6 +124,8 @@ async def profile_service(
     verification_seconds: float = 30,
     verification: BrowserVerificationCatalog | None = None,
 ) -> AsyncIterator[ProfileService]:
+    """Run an isolated real-browser profile service with optional site verification."""
+
     store = FilesystemEncryptedProfileStore(
         root,
         StaticProfileKeyring(

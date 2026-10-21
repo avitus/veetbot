@@ -1141,7 +1141,9 @@ class RunExecutor:
         """
 
         proposed, _ = _fit_tool_batch(context.run, turn, used=used)
-        fitted, refusals = _fit_tool_batch(context.run, turn, used=used, now=context.clock.now())
+        fitted, refusals = _fit_tool_batch(
+            context.run, turn, used=used, now=context.clock.now(), step_in_progress=True
+        )
         decided = await self._resolved_approval_calls(context)
         refusals = [(call, result) for call, result in refusals if call.call_id not in decided]
         budget_refused = self._budget_refused_calls(context.checkpoint.conversation)

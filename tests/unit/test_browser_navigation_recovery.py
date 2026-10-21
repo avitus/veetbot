@@ -28,6 +28,8 @@ from tests.unit.test_history_cache_window import _checkpoint, _factory
 
 
 async def read(runtime: PythonPlaywrightRuntime, operation: str) -> BrowserObservation:
+    """Exercise each browser read operation against the same page state."""
+
     if operation == "expand":
         return await runtime.expand(BrowserObservationExpansion(after="old-control"))
     if operation == "extract":
@@ -53,6 +55,8 @@ async def read(runtime: PythonPlaywrightRuntime, operation: str) -> BrowserObser
 async def test_read_distinguishes_blank_page_from_unavailable_profile(
     operation: str, url: str | None, reason: str
 ) -> None:
+    """An unopened page needs navigation; absent or foreign pages remain unavailable."""
+
     runtime = PythonPlaywrightRuntime()
     runtime._allowed_origins = ("https://example.org",)
     if url is not None:
@@ -66,12 +70,16 @@ async def test_read_distinguishes_blank_page_from_unavailable_profile(
 
 
 async def test_blank_page_tool_result_tells_model_to_navigate_without_reauthentication() -> None:
+    """Expose an actionable navigation result through the actual tool pipeline."""
+
     runtime = PythonPlaywrightRuntime()
     runtime._allowed_origins = ("https://example.org",)
     runtime._page = Mock(url="about:blank")
 
     class Provider(FakeBrowserProvider):
         async def observe(self) -> BrowserObservation:
+            """Delegate observation to the runtime whose page has not navigated yet."""
+
             return await runtime.observe()
 
     clock, factory = await _factory()

@@ -23,11 +23,15 @@ from tests.unit.test_device_handoff_real_chromium import (
 
 class PatientPortal(MembersSite):
     def __init__(self) -> None:
+        """Expose a protected dashboard and count visits to the logout-prone root."""
+
         super().__init__()
         self.root_visits = 0
         self.app.routes.append(Route("/MHO/Home", self.dashboard))
 
     async def home(self, request: Request) -> Response:
+        """Simulate a bare-origin route that clears the saved session cookie."""
+
         del request
         self.root_visits += 1
         response = RedirectResponse("/log-in?action=logout", status_code=302)
@@ -35,6 +39,8 @@ class PatientPortal(MembersSite):
         return response
 
     async def dashboard(self, request: Request) -> Response:
+        """Serve account evidence only when the synthetic session is authenticated."""
+
         if request.cookies.get("session") != self.token:
             return RedirectResponse("/log-in", status_code=302)
         return HTMLResponse(
@@ -44,6 +50,8 @@ class PatientPortal(MembersSite):
 
 
 async def test_verified_dashboard_avoids_logout_across_fresh_browsers(tmp_path: Path) -> None:
+    """Reuse saved login state without visiting the destructive root route."""
+
     require_real_browser()
     portal = PatientPortal()
     async with local_https_site(portal.app) as site:

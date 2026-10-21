@@ -286,6 +286,8 @@ async def test_saved_session_reopens_with_navigation_after_its_page_is_released(
     require_real_browser()
 
     async def account(request: Request) -> Response:
+        """Expose protected fixture content according to the restored session cookie."""
+
         text = "Account overview" if request.cookies.get("session") == "synthetic" else "Sign in"
         return HTMLResponse(f"<title>Account</title><main>{text}</main>")
 

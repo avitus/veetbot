@@ -32,7 +32,15 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = ROOT / "src" / "agent_core"
 
 
-async def test_cost_crossing_refuses_tools_and_owes_a_final_answer() -> None:
+@pytest.mark.parametrize(
+    ("max_steps", "reserve_steps", "final_dimension"),
+    [(32, 0, "cost"), (3, 1, "steps")],
+)
+async def test_cost_crossing_refuses_tools_and_owes_a_final_answer(
+    max_steps: int, reserve_steps: int, final_dimension: str
+) -> None:
+    """A cost crossing refuses tools even when the next step enters another reserve."""
+
     script = FakeModelScript(
         turns=[
             ScriptedTurn(
@@ -56,7 +64,12 @@ async def test_cost_crossing_refuses_tools_and_owes_a_final_answer() -> None:
         script=script,
         clock=FixedClock(NOW),
         ids=SequenceIdFactory(),
-        limits=RunLimits(max_cost=Decimal("10"), synthesis_reserve_cost=Decimal("3")),
+        limits=RunLimits(
+            max_steps=max_steps,
+            synthesis_reserve_steps=reserve_steps,
+            max_cost=Decimal("10"),
+            synthesis_reserve_cost=Decimal("3"),
+        ),
     ) as composition:
         run_id = await composition.runs.submit("research then report")
         run = await composition.runs.wait_terminal(run_id)
@@ -68,7 +81,7 @@ async def test_cost_crossing_refuses_tools_and_owes_a_final_answer() -> None:
     assert run.usage.cost == Decimal("9")
     assert requests[1].tool_choice is None
     assert requests[2].tool_choice == "none"
-    assert any("cost budget" in text for text in _control_texts(requests[2]))
+    assert any(f"{final_dimension} budget" in text for text in _control_texts(requests[2]))
     refused = [event for event in events if event.event_type == "tool.call.failed"]
     assert len(refused) == 1 and refused[0].payload["call_id"] == "unperformed"
     assert refused[0].payload["reason_code"] == "tool.budget_exhausted"
@@ -79,6 +92,8 @@ async def test_cost_crossing_refuses_tools_and_owes_a_final_answer() -> None:
 
 
 async def test_cost_synthesis_violation_still_fails_without_dispatch() -> None:
+    """A model that ignores synthesis-only control cannot execute another tool."""
+
     script = FakeModelScript(
         turns=[
             ScriptedTurn(

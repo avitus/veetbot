@@ -429,6 +429,8 @@ async def test_cancelled_navigation_does_not_retire_the_hosted_lease() -> None:
 
 
 async def test_navigation_required_keeps_the_ready_profile_lease_for_navigation() -> None:
+    """Navigate after a blank-page read without reacquiring or closing the lease."""
+
     class BlankPageSessions(FakeSessions):
         async def observe(self, lease_ref: str) -> BrowserObservation:
             raise BrowserProviderError("tool.browser.navigation_required", retryable=False)

@@ -122,8 +122,10 @@ without lease renewal, plus the tool fixes a lesson needs.
    - The ADR-0078 and ADR-0115 rules are unchanged: a batch is fitted to the
      remaining budget, a run that runs out of tool calls still gets to
      answer, and the final-answer reserves still apply. A model call that
-     reaches the model-call or cost reserve and asks for a tool ends the run
-     with `budget_exceeded`. In a lesson almost every call asks for an
+     reaches the model-call reserve and asks for a tool ends the run
+     with `budget_exceeded`. The cost reserve follows the ADR-0229 amendment:
+     the crossing call's tools are refused and the next request is synthesis-only.
+     In a lesson almost every call asks for an
      action, so at most 117 calls can act, and a lesson that outlasts its
      budget ends failed rather than with an answer. The owner continues it in
      a new run.

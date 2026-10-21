@@ -622,7 +622,12 @@ def _synthesis_only_request(
 
 
 def _fit_tool_batch(
-    run: Run, calls: list[ToolCallItem], *, used: int | None = None, now: datetime | None = None
+    run: Run,
+    calls: list[ToolCallItem],
+    *,
+    used: int | None = None,
+    now: datetime | None = None,
+    step_in_progress: bool = False,
 ) -> tuple[list[ToolCallItem], list[tuple[ToolCallItem, ToolResultItem]]]:
     """Split a batch into the calls that fit the tool-call budget and refusals.
 
@@ -630,11 +635,16 @@ def _fit_tool_batch(
     unaccounted for; its result tells the model to answer from what it has.
     `used` is the tool-call count the batch was proposed under, for a resumed
     batch whose usage the run's own count may already include.
+    An unfinished model turn uses the same step accounting as its dispatch guard.
     """
 
     count = run.tool_call_count if used is None else used
     remaining = max(0, run.limits.max_tool_calls - count)
-    reserve = _synthesis_reserve_dimension(run, now=now) if now is not None else None
+    reserve = (
+        _synthesis_reserve_dimension(run, now=now, step_in_progress=step_in_progress)
+        if now is not None
+        else None
+    )
     answer_reserved = reserve in {"time", "cost"}
     if answer_reserved:
         remaining = 0
@@ -1405,7 +1415,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
         # only the calls that fit and the model still receives a result for
         # every call.
         fitted_calls, refusals = _fit_tool_batch(
-            context.run, turn.tool_calls, now=context.clock.now()
+            context.run, turn.tool_calls, now=context.clock.now(), step_in_progress=True
         )
         await _record_refusals(context, refusals)
         context.checkpoint.pending_tool_calls = [
