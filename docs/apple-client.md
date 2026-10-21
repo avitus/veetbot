@@ -687,8 +687,10 @@ Inbox is the initial collection; Needs you and Handled are distinct server
 collections (ADR-0231). Counts cover the filtered collection before pagination;
 older servers omit them. Account filtering, search, Important / Other mail,
 pagination, per-account freshness and historical coverage remain available.
-Background updates preserve row
-order and announce newly qualifying mail. Opening Email or returning it to the
+Rows read newest first by each
+conversation's latest activity; background updates keep the rows on screen,
+slide arrivals into place and move a conversation with new mail up (ADR-0234).
+Returning to Email refreshes the loaded rows in place rather than clearing them. Opening Email or returning it to the
 foreground starts refresh; the client admits a new refresh every sixty seconds
 while Email remains visible, and stops admission when hidden or backgrounded.
 Transient operation-status failures retry the same operation with bounded
@@ -711,19 +713,23 @@ appearance toggle. Compact screens put the mailbox collections in horizontal
 filter pills. Important / Other mail remains available under Find other mail.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560
 points while retaining at least 250 points for reading in a small window.
-Its width and selected thread survive Chat / Email switching. The width the
+Its width, selected thread and loaded rows survive Chat / Email switching, and
+the two modes cross-fade. The width the
 owner drags the divider to is kept on this Mac (`veetbot.email.inboxWidth`) and
 restored at the next launch; a window too narrow for it squeezes the inbox
 without replacing the remembered width.
 Rows follow the A2 Email reference: a Handled circle leads each row (empty
 while the conversation is in the Inbox, a filled teal check once Gmail has
 archived it, the same reversible label change under the same Archive in Gmail
-name), then the correspondent in semibold with the date in faint ink, the
-subject, Veetbot's one-line gist, and one line of state: an attention state
-("Needs reply", "For your attention", "Check send status") carries its reason in
-amber, a draft state reads in teal, and a handled, archived or reported
-conversation reads in soft ink. The account label appears only when more than
-one account is connected. On the Mac the selected row takes the `selected`
+name), then the correspondent's name in semibold (the address only when the
+sender gave no name, each person once) with a recency label in faint ink (the
+time today, Yesterday, the weekday within the week, then the date), the
+subject, Veetbot's one-line gist, and a short state chip: an attention state
+("Needs reply", "For your attention", "Check send status") on an amber wash, a
+draft state on teal, and a handled, archived or reported conversation in soft
+ink with no wash. The reason for inclusion is read in the conversation, not the
+row (ADR-0234). The account label appears only when more than one account is
+connected. On the Mac the selected row takes the `selected`
 tint with no border; on touch the rows run full width above hairlines. The
 Important / Other mail control is a segmented control on the Mac and filter
 pills on touch. Full text stays available in the reading column. The five

@@ -374,3 +374,74 @@ public struct EmailThreadPage: Codable, Sendable {
         case collectionCounts = "collection_counts"
     }
 }
+
+/// How a row names the people in a conversation. The server hands senders over
+/// as RFC 5322 mailboxes (`Name <address>`, the name sometimes quoted), so the
+/// name is shown when the mail carried one and the address only otherwise.
+public enum EmailCorrespondent {
+    /// The display name of one mailbox, or its address when it has no name.
+    public static func displayName(_ sender: String) -> String {
+        let mailbox = parts(of: sender)
+        return mailbox.name.isEmpty ? mailbox.address : mailbox.name
+    }
+
+    /// One line naming each distinct correspondent once, in the server's order.
+    public static func line(for senders: [String]) -> String {
+        var addresses = Set<String>()
+        var shown = Set<String>()
+        var names: [String] = []
+        for sender in senders {
+            let mailbox = parts(of: sender)
+            if !mailbox.address.isEmpty, !addresses.insert(mailbox.address.lowercased()).inserted { continue }
+            let name = mailbox.name.isEmpty ? mailbox.address : mailbox.name
+            guard !name.isEmpty, shown.insert(name.lowercased()).inserted else { continue }
+            names.append(name)
+        }
+        return names.joined(separator: ", ")
+    }
+
+    static func parts(of sender: String) -> (name: String, address: String) {
+        var text = sender.trimmingCharacters(in: .whitespacesAndNewlines)
+        var address = ""
+        if let open = text.lastIndex(of: "<"), let close = text[open...].firstIndex(of: ">") {
+            address = text[text.index(after: open)..<close].trimmingCharacters(in: .whitespaces)
+            text.removeSubrange(open...close)
+        } else if text.contains("@"), !text.contains(where: \.isWhitespace) {
+            address = text
+            text = ""
+        }
+        var name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A quoted name, possibly quoted again with escaped quotes inside.
+        while name.count >= 2, name.hasPrefix("\""), name.hasSuffix("\"") {
+            name = String(name.dropFirst().dropLast())
+                .replacingOccurrences(of: "\\\"", with: "\"")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return (name.replacingOccurrences(of: "\\\\", with: "\\"), address)
+    }
+}
+
+extension EmailThreadView {
+    /// The people who wrote, by name where the mail gave one, each once.
+    public var correspondents: String { EmailCorrespondent.line(for: senders) }
+}
+
+/// The recency label on a row: the time today, Yesterday, the weekday within
+/// the week, then the date, with the year once it differs from this one.
+public enum EmailRowDate {
+    public static func label(
+        for date: Date, relativeTo now: Date, calendar: Calendar = .current, locale: Locale = .current
+    ) -> String {
+        let days = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0
+        let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+        switch days {
+        case 0: return date.formatted(style.hour().minute())
+        case 1: return "Yesterday"
+        case 2...6: return date.formatted(style.weekday(.abbreviated))
+        default:
+            let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+            return date.formatted(sameYear ? style.month(.abbreviated).day() : style.month(.abbreviated).day().year())
+        }
+    }
+}

@@ -47,8 +47,9 @@ the draft visible alongside or below its source conversation. Preserve the
 deployment floors ADR-0211 sets and the adaptive layouts.
 
 Switching modes preserves the active Chat run, unsent chat text, selected mail,
-scroll position, and unsent email edits. Memory, Persona, Schedules, and Settings
-remain global. Adding a future mode requires a small mode descriptor and a
+scroll position, unsent email edits, and the loaded mail list: returning to
+Email refreshes the rows in place rather than clearing them (ADR-0234). Memory,
+Persona, Schedules, and Settings remain global. Adding a future mode requires a small mode descriptor and a
 presentation module; this feature does not build a dynamic plugin system.
 
 ### Priority inbox
@@ -61,18 +62,24 @@ assistant's knowledge.
 
 Each row shows the correspondent, subject, a concise statement of what needs
 attention, and a state such as Needs reply, Draft ready, or For your attention.
-An expandable explanation gives the strongest supported reasons for inclusion.
+The correspondent is the sender's display name when the address carries one and
+the address only otherwise, each person once; the state is a short chip. An
+expandable explanation in the conversation gives the strongest supported
+reasons for inclusion; the row does not repeat it (ADR-0234).
 Numeric ranking scores and internal model details stay out of the main flow.
 
 The list is a selection, not a quota. There is no obligation to fill five slots.
 If more threads clear the threshold, a More important action expands the view
 to ten, then provides pagination over the remaining qualifying threads. Find
 mail and Review other mail make false negatives discoverable without cluttering
-the default list. On foreground refresh, new qualifying threads appear automatically
-after surviving visible rows, which retain their relative order. Preserve the open
-conversation and unsent edits; no reveal action or automatic scroll is required.
-Use a subtle insertion animation, disabled when Reduce Motion is enabled. This
-owner-approved behavior (2026-10-03) replaces the new-mail announcement button.
+the default list. Rows are ordered by each conversation's latest activity,
+newest first, whatever ranking selected them; ties keep the server's order
+(owner-requested, 2026-10-21, ADR-0234). On foreground refresh, surviving rows
+stay, new qualifying threads appear automatically in that order, and a
+conversation with new mail moves up. Preserve the open conversation and unsent
+edits; no reveal action or automatic scroll is required. Use a subtle insertion
+and move animation, disabled when Reduce Motion is enabled. This owner-approved
+behavior (2026-10-03) replaces the new-mail announcement button.
 
 Viewing a thread does not automatically mark it read in Gmail. On servers
 advertising archive support, the checkbox on each row and in thread detail

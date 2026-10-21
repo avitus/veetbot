@@ -47,6 +47,8 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var accounts: [EmailAccountView] = []
     @Published private var inboxItems: [EmailThreadView] = []
     @Published private var archiveHiddenThreads: Set<UUID> = []
+    /// Rows the latest refresh added, so the list can show where they landed.
+    @Published public private(set) var arrivedThreadIDs: Set<UUID> = []
     @Published public private(set) var thread: EmailThreadView?
     @Published public private(set) var draft: EmailDraftView?
     @Published public private(set) var edits: [UUID: EmailDraftEdit] = [:]
@@ -183,9 +185,22 @@ public final class EmailViewModel: ObservableObject {
         archiveTasks.values.forEach { $0.cancel() }
     }
 
-    /// Keeps pending rows in their original positions for rollback without presenting them as archived.
+    /// The rows as the list shows them: newest first by each conversation's latest
+    /// activity, ties in the server's order. A pending archive stays in its place for
+    /// rollback without presenting as archived.
     public var items: [EmailThreadView] {
-        inboxItems.filter { !archiveHiddenThreads.contains($0.id) || archiveErrors[$0.id] != nil }
+        inboxItems.enumerated()
+            .filter { !archiveHiddenThreads.contains($0.element.id) || archiveErrors[$0.element.id] != nil }
+            .sorted { lhs, rhs in
+                lhs.element.updatedAt != rhs.element.updatedAt
+                    ? lhs.element.updatedAt > rhs.element.updatedAt : lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
+    /// The row has shown where it landed; a later refresh may mark it again.
+    public func acknowledgeArrival(_ id: UUID) {
+        arrivedThreadIDs.remove(id)
     }
 
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
@@ -219,7 +234,8 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            await self.reload(activation: foreground)
+            // Rows already on screen stay and refresh in place; only an empty list loads from nothing.
+            await self.reload(preserveOrder: !self.inboxItems.isEmpty, activation: foreground)
             while self.acceptsRead(connection: connection, activation: foreground) {
                 await self.refresh(activation: foreground)
                 do { try await Task.sleep(nanoseconds: self.refreshNanoseconds) }
@@ -257,6 +273,7 @@ public final class EmailViewModel: ObservableObject {
         active = false
         accounts = []
         inboxItems = []
+        arrivedThreadIDs = []
         thread = nil
         draft = nil
         edits = [:]
@@ -370,10 +387,12 @@ public final class EmailViewModel: ObservableObject {
                 let oldIDs = Set(inboxItems.map(\.id))
                 let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
                 let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-                // Keep surviving rows in place and reveal arrivals without a second gesture.
+                // Keep surviving rows and add arrivals; `items` places them all by recency.
                 inboxItems = inboxItems.compactMap { current[$0.id] } + additions
+                arrivedThreadIDs = Set(additions.map(\.id))
             } else {
                 inboxItems = loadedThreads
+                arrivedThreadIDs = []
             }
             for value in loadedThreads { observeArchive(value) }
         } catch {

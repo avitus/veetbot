@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-21 — Email: names, newest first, and no reload when you come back
+
+- Each row names the person who wrote, not their address, and shows one short
+  state chip; Veetbot's reason for picking the thread now waits in the
+  conversation.
+- The list reads newest first, with the time for today's mail, Yesterday, the
+  weekday within the week, then the date. A conversation with new mail moves
+  up, and new ones slide in, when the list refreshes.
+- Switching to Chat and back no longer empties the list and reloads it; the
+  rows stay and refresh in place.
+
 ## 2026-10-20 — Persona: voice, tone, a sample reply and boundaries
 
 - Describe how Veetbot should talk to you, and pick up to three tones (Brief,

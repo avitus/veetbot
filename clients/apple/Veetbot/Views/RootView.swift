@@ -59,6 +59,7 @@ public struct RootView: View {
     @StateObject private var globalMemory = MemoryViewModel()
     @StateObject private var globalPersona = PersonaViewModel()
     @StateObject private var globalSchedules = ScheduleViewModel()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var globalPeopleLookup: PeopleLookup?
     @State private var showingGlobalMemory = false
     @State private var showingGlobalPersona = false
@@ -252,6 +253,7 @@ public struct RootView: View {
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
                         .opacity(coordinator.mode == .chat ? 1 : 0)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: coordinator.mode)
                         .allowsHitTesting(coordinator.mode == .chat)
                         .accessibilityHidden(coordinator.mode != .chat)
                     EmailModeView(
@@ -274,6 +276,7 @@ public struct RootView: View {
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
                     .opacity(coordinator.mode == .email ? 1 : 0)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: coordinator.mode)
                     .allowsHitTesting(coordinator.mode == .email)
                     .accessibilityHidden(coordinator.mode != .email)
                 }

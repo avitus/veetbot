@@ -30,6 +30,11 @@ enum EmailType {
     static let handledDiameter: CGFloat = 18
 }
 
+private extension EmailThreadView {
+    /// The people line of a row or heading; a conversation with no sender still reads.
+    var correspondentsOrUnknown: String { correspondents.isEmpty ? "Unknown sender" : correspondents }
+}
+
 #if os(macOS)
 /// The inbox width the owner chose by dragging the Mac Email divider, kept on
 /// this Mac and never sent to the server. Before any drag, and for an
@@ -324,7 +329,10 @@ public struct EmailModeView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .transition(.opacity)
+                    .modifier(EmailArrivalWash(model: model, threadID: thread.id))
+                    // An arrival slides down into its place; a row that leaves fades.
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
                     .modifier(EmailRowChrome(selected: thread.id == model.selectedThreadID))
                 }
                 if model.hasMore {
@@ -336,7 +344,7 @@ public struct EmailModeView: View {
                     .emailHideSeparator()
                 }
             }
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.items.map(\.id))
+            .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15), value: model.items.map(\.id))
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .frame(minHeight: 0, maxHeight: .infinity)
@@ -727,9 +735,9 @@ private struct EmailRowChrome: ViewModifier {
     }
 }
 
-/// One thread as the reference draws it: who and when, the subject, Veetbot's
-/// gist, and what the conversation needs from the owner. A handled or
-/// archived conversation reads in soft ink.
+/// One thread as the reference draws it: who (by name) and when (by recency),
+/// the subject, Veetbot's gist, and what the conversation needs from the owner
+/// as one short chip. A handled or archived conversation reads in soft ink.
 private struct EmailThreadRow: View {
     @ObservedObject var model: EmailViewModel
     let thread: EmailThreadView
@@ -739,25 +747,31 @@ private struct EmailThreadRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: EmailType.rowSpacing) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(thread.senders.joined(separator: ", "))
+                Text(thread.correspondentsOrUnknown)
                     .veetType(EmailType.sender, weight: settled ? .regular : .semibold)
                     .foregroundColor(settled ? AppTheme.inkSoft : AppTheme.ink)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(thread.updatedAt, format: .dateTime.month(.abbreviated).day())
-                    .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
+                // The time today, Yesterday, the weekday within the week, then the date.
+                TimelineView(.everyMinute) { context in
+                    Text(EmailRowDate.label(for: thread.updatedAt, relativeTo: context.date))
+                        .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).monospacedDigit().fixedSize()
+                }
             }
             Text(thread.subject.isEmpty ? "No subject" : thread.subject)
                 .veetType(EmailType.subject).foregroundColor(settled ? AppTheme.inkSoft : AppTheme.ink).lineLimit(1)
-            Text(thread.summary).veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(1)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // The gist is the line that says what the mail needs; give it two lines.
+            Text(thread.summary).veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .center, spacing: 6) {
                 EmailThreadStatus(thread: thread)
                 if model.accounts.count > 1 {
                     Spacer(minLength: 4)
                     Text(model.accounts.first { $0.id == thread.accountID }?.label ?? thread.accountID)
-                        .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
+                        .veetType(.label, weight: .medium).foregroundColor(AppTheme.inkFaint).lineLimit(1)
                 }
             }
+            .padding(.top, 1)
             if !thread.complete {
                 Label("Partial thread", systemImage: "exclamationmark.circle")
                     .veetType(EmailType.meta).foregroundColor(AppTheme.amberText)
@@ -1031,7 +1045,7 @@ private struct EmailThreadScreen: View {
                 Text(thread.subject.isEmpty ? "No subject" : thread.subject)
                     .veetType(.display)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                Text("\(thread.senders.joined(separator: ", ")) · \(thread.updatedAt, format: .dateTime.month(.abbreviated).day())")
+                Text("\(thread.correspondentsOrUnknown) · \(thread.updatedAt, format: .dateTime.month(.abbreviated).day())")
                     .veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft)
             }
             // Bulk mail only, on an account that advertises the action, with
@@ -1645,7 +1659,7 @@ private struct EmailThreadStatus: View {
     var draft: EmailDraftView? = nil
     var showsReason = false
 
-    private enum Tone { case attention, draft, settled }
+    enum Tone { case attention, draft, settled }
 
     private var state: (title: String, tone: Tone) {
         if thread.isInSpam { return ("Reported as spam", .settled) }
@@ -1678,7 +1692,10 @@ private struct EmailThreadStatus: View {
     var body: some View {
         let (title, tone) = state
         let reason = thread.reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        if tone == .attention, !reason.isEmpty {
+        if !showsReason {
+            // In a row the state is a chip; the reason is read in the conversation.
+            EmailStateChip(title: title, tone: tone)
+        } else if tone == .attention, !reason.isEmpty {
             Text("\(title) · \(reason)")
                 .veetType(EmailType.note, weight: .medium).foregroundColor(color(for: tone))
                 .lineLimit(showsReason ? nil : 1)
@@ -1690,6 +1707,66 @@ private struct EmailThreadStatus: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// A conversation's state as one short chip: an amber wash for attention, teal
+/// for a draft, and bare soft ink once the conversation is settled.
+private struct EmailStateChip: View {
+    let title: String
+    let tone: EmailThreadStatus.Tone
+
+    var body: some View {
+        Text(title)
+            .veetType(EmailType.note, weight: .medium)
+            .foregroundColor(foreground)
+            .padding(.horizontal, tone == .settled ? 0 : 7)
+            .padding(.vertical, tone == .settled ? 0 : 2)
+            .background(Capsule().fill(wash))
+    }
+
+    private var foreground: Color {
+        switch tone {
+        case .attention: AppTheme.amberText
+        case .draft: AppTheme.tealText
+        case .settled: AppTheme.inkSoft
+        }
+    }
+
+    private var wash: Color {
+        switch tone {
+        case .attention: AppTheme.amberWash
+        case .draft: AppTheme.tealWash
+        case .settled: .clear
+        }
+    }
+}
+
+/// A teal wash behind a row the last refresh brought in, fading once the eye
+/// has had a moment to find it. Reduce Motion skips the wash.
+private struct EmailArrivalWash: ViewModifier {
+    @ObservedObject var model: EmailViewModel
+    let threadID: UUID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var washed = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(AppTheme.tealWash)
+                    .padding(.horizontal, -8).padding(.vertical, -5)
+                    .opacity(washed ? 1 : 0)
+                    .accessibilityHidden(true)
+            )
+            .task(id: threadID) {
+                guard model.arrivedThreadIDs.contains(threadID) else { return }
+                model.acknowledgeArrival(threadID)
+                guard !reduceMotion else { return }
+                washed = true
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                withAnimation(.easeOut(duration: 1.4)) { washed = false }
+            }
     }
 }
 

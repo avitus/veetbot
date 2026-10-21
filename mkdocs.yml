@@ -366,4 +366,5 @@ nav:
       - "0231 — Email collections and scoped counts": adr/0231-email-collections-and-counts.md
       - "0232 — Owner-memory incident repairs": adr/0232-owner-memory-incident-repairs.md
       - "0233 — Owner-directed source learning": adr/0233-owner-directed-source-learning.md
+      - "0234 — Email list recency, names and refresh in place": adr/0234-email-list-recency-names-and-in-place-refresh.md
   - Changelog: changelog.md

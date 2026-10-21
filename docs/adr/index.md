@@ -273,3 +273,4 @@ implementation without one.
 - [ADR-0232: Bounded owner-memory formation and recall repairs](0232-owner-memory-incident-repairs.md)
 
 - [ADR-0233: Owner-directed source learning](0233-owner-directed-source-learning.md)
+- [ADR-0234: Email list in recency order, named correspondents and refresh in place](0234-email-list-recency-names-and-in-place-refresh.md)

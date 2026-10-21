@@ -21,6 +21,21 @@ import Testing
         #expect(subscriptions.contains("email.subscription.inline."))
     }
 
+    /// The row names people rather than addresses, dates by recency, keeps its state to a short
+    /// chip (the reason waits in the detail), and arrivals slide in from the top.
+    @Test
+    func testTheThreadRowNamesPeopleAndDatesByRecency() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let start = try #require(email.range(of: "private struct EmailThreadRow")).upperBound
+        let end = email.range(of: "private struct ", range: start..<email.endIndex)?.lowerBound ?? email.endIndex
+        let row = String(email[start..<end])
+        #expect(row.contains("thread.correspondents"))
+        #expect(!row.contains("thread.senders.joined"))
+        #expect(row.contains("EmailRowDate.label("))
+        #expect(email.contains("struct EmailStateChip"))
+        #expect(email.contains(".move(edge: .top)"))
+    }
+
     @Test
     func testAuxiliarySurfacesExposeTheReferenceReadingAndDisclosureControls() throws {
         let artifact = try source(at: "Veetbot/Views/ArtifactViewerView.swift")
