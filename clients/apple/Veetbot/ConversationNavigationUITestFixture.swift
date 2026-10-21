@@ -95,6 +95,18 @@ enum ConversationNavigationUITestFixture {
         return FolderSidebarPreferences(defaults: defaults)
     }
 
+    /// The right panel's widths and open choices live in a suite of their own,
+    /// emptied at launch unless a relaunch journey asks to keep them.
+    static func makeInspectorLayoutIfRequested() -> InspectorLayoutStore? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.inspector"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_KEEP_INSPECTOR"] != "1" {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return InspectorLayoutStore(defaults: defaults)
+    }
+
     #if os(macOS)
     /// The Email inbox width lives in a suite of its own, emptied at launch so
     /// a journey never inherits another's, or the owner's, divider. A relaunch

@@ -24,12 +24,18 @@ struct WorkStrip: View {
     /// The settled approvals the calls carry.
     var approvals: [ApprovalView] = []
     let openArtifact: (UUID) -> Void
+    /// On the Mac the calls open in the right panel instead of here (ADR-0237).
+    @Environment(\.inspectorReveal) private var inspectorReveal
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+                if let reveal = inspectorReveal {
+                    reveal.activity(revealID)
+                } else {
+                    withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+                }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "chevron.right")
@@ -40,12 +46,18 @@ struct WorkStrip: View {
                         .veetType(.ui)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
+                    if inspectorReveal != nil {
+                        Image(systemName: "sidebar.trailing")
+                            .veetIcon(.small)
+                            .accessibilityHidden(true)
+                    }
                 }
-                .foregroundColor(AppTheme.inkSoft)
+                .foregroundColor(shownInPanel ? AppTheme.tealText : AppTheme.inkSoft)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .help(inspectorReveal == nil ? "" : "Show these calls in the panel")
+            .accessibilityValue(summaryValue)
             .accessibilityIdentifier(summaryIdentifier)
 
             if expanded {
@@ -87,6 +99,23 @@ struct WorkStrip: View {
         case .single(let activity): return [activity]
         case .bundle(let bundle): return bundle.activities
         }
+    }
+
+    /// The conversation activity id the panel's ledger groups by.
+    private var revealID: String {
+        switch content {
+        case .single(let activity): return "tool:\(activity.id)"
+        case .bundle(let bundle): return "tool:\(bundle.id)"
+        }
+    }
+
+    private var shownInPanel: Bool {
+        inspectorReveal?.activeActivityID == revealID
+    }
+
+    private var summaryValue: String {
+        if inspectorReveal != nil { return shownInPanel ? "Shown in panel" : "In panel" }
+        return expanded ? "Expanded" : "Collapsed"
     }
 
     private var summaryIdentifier: String {
@@ -511,36 +540,8 @@ struct WorkingStatePanel: View {
             .accessibilityIdentifier("chat.working-state")
 
             if expanded {
-                VStack(alignment: .leading, spacing: 9) {
-                    if let objective = state.objective {
-                        DetailBlock(title: "Objective", text: objective)
-                    }
-                    if !state.tasks.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Tasks")
-                                .veetType(.meta, weight: .semibold)
-                                .foregroundColor(AppTheme.inkSoft)
-                            ForEach(state.tasks) { task in
-                                Label(task.description, systemImage: icon(for: task.status))
-                                    .veetType(.ui)
-                            }
-                        }
-                    }
-                    if !state.establishedFacts.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Facts")
-                                .veetType(.meta, weight: .semibold)
-                                .foregroundColor(AppTheme.inkSoft)
-                            ForEach(state.establishedFacts) { fact in
-                                Text("• \(fact.statement)").veetType(.ui)
-                            }
-                        }
-                    }
-                    if let nextAction = state.nextAction {
-                        DetailBlock(title: "Next action", text: nextAction)
-                    }
-                }
-                .padding(.leading, 18)
+                WorkingStateDetails(state: state)
+                    .padding(.leading, 18)
             }
         }
     }
@@ -548,6 +549,46 @@ struct WorkingStatePanel: View {
     private var summary: String {
         if let objective = state.objective, !objective.isEmpty { return "Working state · \(objective)" }
         return "Working state"
+    }
+}
+
+/// The run's working notes: objective, tasks, facts and the next action.
+/// Behind a disclosure above the transcript on touch; always open in the
+/// Mac right panel.
+struct WorkingStateDetails: View {
+    let state: WorkingStateView
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let objective = state.objective {
+                DetailBlock(title: "Objective", text: objective)
+            }
+            if !state.tasks.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Tasks")
+                        .veetType(.meta, weight: .semibold)
+                        .foregroundColor(AppTheme.inkSoft)
+                    ForEach(state.tasks) { task in
+                        Label(task.description, systemImage: icon(for: task.status))
+                            .veetType(.ui)
+                    }
+                }
+            }
+            if !state.establishedFacts.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Facts")
+                        .veetType(.meta, weight: .semibold)
+                        .foregroundColor(AppTheme.inkSoft)
+                    ForEach(state.establishedFacts) { fact in
+                        Text("• \(fact.statement)").veetType(.ui)
+                    }
+                }
+            }
+            if let nextAction = state.nextAction {
+                DetailBlock(title: "Next action", text: nextAction)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func icon(for status: String) -> String {

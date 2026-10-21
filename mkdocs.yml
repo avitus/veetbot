@@ -369,4 +369,5 @@ nav:
       - ADR-0229 Verified entrypoints and cost-reserve transition: adr/0229-verified-entrypoints-and-cost-reserve-transition.md
       - "0235 — Verified accessibility contrast findings": adr/0235-verified-accessibility-contrast-findings.md
       - ADR-0236 Real-browser cases off the desktop: adr/0236-real-browser-cases-run-off-the-owners-desktop.md
+      - "0237 — Mac right panel": adr/0237-mac-right-panel.md
   - Changelog: changelog.md

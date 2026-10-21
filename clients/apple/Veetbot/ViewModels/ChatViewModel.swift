@@ -2802,6 +2802,14 @@ public final class ChatViewModel: ObservableObject {
         isConfigured = false
     }
 
+    /// One run's events from the start, ending at its terminal event, for a
+    /// replay that is not this conversation's: the Mac Email panel shows the
+    /// calls that produced a draft (ADR-0237). Without a connection it is empty.
+    public func runFrames(_ runID: UUID) -> AsyncThrowingStream<SSEFrame, Error> {
+        guard let eventStream else { return AsyncThrowingStream { $0.finish() } }
+        return eventStream.frames(runID: runID)
+    }
+
     private func watch(runID: UUID, touchHistoryOnCompletion: Bool = true) {
         guard let eventStream else { return }
         watchTasks.cancel()

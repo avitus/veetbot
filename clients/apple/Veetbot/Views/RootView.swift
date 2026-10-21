@@ -60,6 +60,9 @@ public struct RootView: View {
     @StateObject private var globalPersona = PersonaViewModel()
     @StateObject private var globalSchedules = ScheduleViewModel()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The Mac right panel in each mode (ADR-0237). Held without observing:
+    /// a width drag redraws the panel and its toolbar button, not the root.
+    @State private var inspector = InspectorModel()
     @State private var globalPeopleLookup: PeopleLookup?
     @State private var showingGlobalMemory = false
     @State private var showingGlobalPersona = false
@@ -271,7 +274,9 @@ public struct RootView: View {
                         openAttention: { sessionID in
                             coordinator.mode = .chat
                             Task { await model.openSharedSession(sessionID) }
-                        }
+                        },
+                        inspector: inspector,
+                        runFrames: { model.runFrames($0) }
                     )
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
@@ -283,6 +288,12 @@ public struct RootView: View {
                 // Mounted navigation trees must fit the available window instead
                 // of moving the mode controls outside a smaller Mac window.
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                #if os(macOS)
+                // Too narrow a window collapses a mode's panel (ADR-0237).
+                .onAppear { inspector.windowWidthChanged(geometry.size.width) }
+                .onChange(of: geometry.size.width) { _, width in inspector.windowWidthChanged(width) }
+                .modifier(InspectorRevealEnvironment(inspector: inspector))
+                #endif
             }
         }
         // Clipping each tree to the space above the home indicator also clips
@@ -325,6 +336,7 @@ public struct RootView: View {
                     .accessibilityLabel("Schedules")
                     .accessibilityIdentifier("sidebar.schedules")
                     ChatToolbarActions(model: model)
+                    InspectorToggleButton(inspector: inspector, mode: .chat)
                 } else {
                     // The entry exists only where an account advertises support.
                     if coordinator.email.unsubscribeAvailable {
@@ -341,6 +353,7 @@ public struct RootView: View {
                     .accessibilityLabel("Email learning").help("Email learning")
                     .accessibilityIdentifier("email.learning")
                     EmailRefreshButton(model: coordinator.email)
+                    InspectorToggleButton(inspector: inspector, mode: .email)
                 }
             }
         }
@@ -402,7 +415,14 @@ public struct RootView: View {
                 max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
             )
         } detail: {
+            #if os(macOS)
             ChatView(model: model)
+                .macInspector(inspector, mode: .chat) {
+                    ChatInspectorPanel(model: model, inspector: inspector)
+                }
+            #else
+            ChatView(model: model)
+            #endif
         }
         #if os(macOS)
         .toolbarBackground(.hidden, for: .windowToolbar)

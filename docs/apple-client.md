@@ -576,6 +576,34 @@ headings and tables; other text remains literal, and HTML is never executed.
 The macOS UI regression loads an SVG from a reply, cancels a download, then saves it and
 compares the exported bytes.
 
+### The Mac right panel
+
+On the Mac each mode has a right panel (ADR-0237; MagicPath merry-moon-8243 and
+clever-village-5022), a column on `paperDeep` behind a hairline the owner can
+drag between 260 and 440 points. One toolbar button, contributed only by the
+active mode, shows or hides it (⌥⌘I), and the panel has its own hide button.
+Each mode's width and the owner's open-or-closed choice are kept on this Mac
+(`veetbot.inspector.<mode>.width`, `.open`). A window narrower than 1,100
+points starts with Chat's panel collapsed, and narrower than 1,300 points
+Email's, whose inbox and thread already take three columns; crossing the
+threshold collapses or restores it without recording a choice.
+
+Chat's panel has two tabs. **Activity** holds a card naming what the run is
+doing (running, waiting for an approval or an answer, finished, failed or
+stopped) with its call count, the working notes, and every tool call the
+conversation holds, grouped under the owner's request that started them and
+numbered across the conversation; each call opens into its arguments, result,
+trust and risk. **Artifacts** lists every file or image found in the
+conversation's tool results and messages, each once with the call that made it,
+and previews the chosen one in place with Download. There is no session
+artifact list on the server, so the list is as complete as the loaded
+conversation. On the Mac the transcript keeps its one-line work strips, which
+no longer expand in place: choosing one opens the panel at its group and tints
+it, and a file chip opens its preview in Artifacts. The working notes leave the
+top of the transcript. Approvals and clarifying questions stay docked above the
+composer. iPhone and iPad keep the inline strips, the working-state disclosure
+and the viewer sheet.
+
 The current public SSE contract exposes tool result content and trust but does
 not expose every invocation's stored `structured_result`, effect classification,
 or a general tool-detail route. The client therefore renders those richer
@@ -751,7 +779,13 @@ and the thread menu join the back button in a paper navigation bar instead,
 so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
 its reason; the messages follow as prose, each under its sender's line and
 parted by hairlines, with View in People and Message details kept beside the
-sender. A "Teach Veetbot" card on `paperDeep` opens into the same scoped
+sender. On the Mac, View in People opens the sender's card in the right panel's
+**Context** tab (ADR-0237), which also says why the thread is in the priority
+list (its level and reason), lists the attachments without opening them, shows
+the draft's state with a way to ask for one, and holds Teach Veetbot; its
+**Activity** tab replays the draft run's events and shows the calls that made
+the draft. Elsewhere a "Teach Veetbot" card on `paperDeep` below the
+conversation opens into the same scoped
 feedback (thread, person, kind of content; Important / Less important; reply
 need) and reports what was applied with Undo. Topic feedback uses selectable
 chips and still requires an explicit topic. The thread menu offers Mark handled
