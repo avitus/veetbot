@@ -55,12 +55,13 @@ import Testing
     }
 
     @Test
-    func testTheTranscriptKeepsOneLineSummariesThatRevealThePanel() throws {
+    func testTheTranscriptUsesMessageOnlyRowsOnMac() throws {
         let activity = try source(at: "Veetbot/Views/ActivityViews.swift")
         let chat = try source(at: "Veetbot/Views/ChatView.swift")
 
         #expect(activity.contains("@Environment(\\.inspectorReveal) private var inspectorReveal"))
-        #expect(activity.contains("reveal.activity(revealID)"))
+        #expect(chat.contains("state.timeline.map(ConversationActivity.message)"))
+        #expect(chat.contains("ForEach(Array(transcriptActivities.enumerated())"))
         #expect(activity.contains("struct WorkingStateDetails"))
         // On the Mac the notes live in the panel, not above the transcript.
         #expect(chat.contains("if inspectorReveal == nil, let workingState = state.workingState"))

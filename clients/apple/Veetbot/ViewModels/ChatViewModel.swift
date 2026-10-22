@@ -1102,7 +1102,7 @@ public final class ChatViewModel: ObservableObject {
                 // Historical reports need not wait for their activity replay to
                 // reach the terminal event before acknowledging a loaded result.
                 if run.status.isTerminal { observedTerminalNotificationRunID = run.id }
-                watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive)
+                watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive, historical: run.status.isTerminal)
             }
             loadedNotificationSessionID = session.id
             Task { await synchronizeNotifications() }
@@ -2810,9 +2810,12 @@ public final class ChatViewModel: ObservableObject {
         return eventStream.frames(runID: runID)
     }
 
-    private func watch(runID: UUID, touchHistoryOnCompletion: Bool = true) {
+    private func watch(runID: UUID, touchHistoryOnCompletion: Bool = true, historical: Bool = false) {
         guard let eventStream else { return }
         watchTasks.cancel()
+        let replay = historical ? RunStateReducer() : nil
+        replay?.replace(with: runState)
+        let selectionID = selectionRequestID
         watchTasks.task = Task { [weak self] in
             var frames = 0
             defer {
@@ -2824,8 +2827,21 @@ public final class ChatViewModel: ObservableObject {
             }
             do {
                 for try await frame in eventStream.frames(runID: runID) {
-                    guard let self else { return }
+                    guard let self, !Task.isCancelled, self.selectionRequestID == selectionID else { return }
                     frames += 1
+                    if let replay {
+                        replay.reduce(frame)
+                        // Bind approval details while their original call is
+                        // current, but keep every historical state off-screen.
+                        if let api = self.api {
+                            for approvalID in replay.needsApprovalIDs {
+                                let approval = try await api.getApproval(approvalID)
+                                guard !Task.isCancelled, self.selectionRequestID == selectionID else { return }
+                                replay.mergeApproval(approval)
+                            }
+                        }
+                        continue
+                    }
                     self.runState.reduce(frame)
                     if ["run.completed", "run.failed", "run.cancelled"].contains(frame.event),
                         self.runState.activeRunID == runID {
@@ -2843,7 +2859,12 @@ public final class ChatViewModel: ObservableObject {
                         await self.refreshPendingApprovals()
                     }
                 }
-                guard let self else { return }
+                guard let self, !Task.isCancelled, self.selectionRequestID == selectionID else { return }
+                if let replay {
+                    self.runState.replace(with: replay)
+                    if self.selectedSessionUsesWebsiteProfile { await self.loadTaskGrant() }
+                    await self.synchronizeNotifications()
+                }
                 if touchHistoryOnCompletion {
                     await self.refreshHistoryAfterRun(runID)
                     self.scheduleTitleRefresh()
@@ -2851,7 +2872,8 @@ public final class ChatViewModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
-                self?.present(error)
+                guard let self, !Task.isCancelled, self.selectionRequestID == selectionID else { return }
+                self.present(error)
             }
         }
     }

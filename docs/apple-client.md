@@ -518,6 +518,12 @@ draw state it holds. That is how the blank weekday briefing was found: on
 window, about a fifth of its real height, and drew nothing. The transcript is
 therefore laid out eagerly rather than in a lazy stack.
 
+When the selected run is already terminal, its saved messages remain visible
+while activity replays into a separate reducer. Only a completed replay publishes
+the reconstructed state, so historical tool counts and intermediate run statuses
+do not move the transcript. Cancellation or an interrupted replay preserves the
+saved transcript; active runs continue to publish live events on every Apple client.
+
 ## Agent activity and artifacts
 
 The timeline includes generic, collapsible tool activity, approval checkpoints,
@@ -601,10 +607,11 @@ those invocation details. **Artifacts** lists every file or image found in the
 conversation's tool results and messages, each once with the call that made it,
 and previews the chosen one in place with Download. There is no session
 artifact list on the server, so the list is as complete as the loaded
-conversation. On the Mac the transcript keeps its one-line work strips, which
-no longer expand in place: choosing one opens the panel at its group and tints
-it, and a file chip opens its preview in Artifacts. The working notes leave the
-top of the transcript. Approvals and clarifying questions stay docked above the
+conversation. On the Mac tool calls appear only in the right panel, including
+when that panel is hidden; the toolbar button opens it. The transcript renders
+messages without tool rows or work strips, and its scrolling follows those
+messages rather than the tool count. A file chip opens its preview in Artifacts.
+The working notes leave the top of the transcript. Approvals and clarifying questions stay docked above the
 composer. iPhone and iPad keep the inline strips, the working-state disclosure
 and the viewer sheet.
 

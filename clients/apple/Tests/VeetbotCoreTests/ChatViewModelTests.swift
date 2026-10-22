@@ -991,17 +991,16 @@ import UserNotifications
 
     /// Reopening a chat whose answer followed three approved commands lands on
     /// the answer, with the commands in one collapsed summary above it.
-    @Test
-    func testReopenedChatShowsTheAnswerBelowTheApprovedCommandsItRan() async throws {
+    @Test(arguments: [3, 12])
+    func testReopenedChatShowsTheAnswerBelowTheApprovedCommandsItRan(commandCount: Int) async throws {
         let sessionID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-000000000123")
         )
         let runID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-000000000456")
         )
-        let approvalIDs = (1...3).map { index in
-            UUID(uuidString: "00000000-0000-0000-0000-00000000070\(index)")!
-        }
+        let approvalIDs = (1...commandCount).map { _ in UUID() }
+        let answerSequence = 3 + commandCount * 7
         let sessionBody = """
             {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Fwd: Intro","metadata":{},"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
             """
@@ -1048,11 +1047,11 @@ import UserNotifications
                 """
         }
         events += """
-            id: 24
+            id: \(answerSequence)
             event: assistant.message.completed
             data: {"message":{"kind":"assistant","content":[{"kind":"text","text":"Two partners track Polargrid."}]}}
 
-            id: 25
+            id: \(answerSequence + 1)
             event: run.completed
             data: {"run_id":"\(runID.uuidString)"}
 
@@ -1076,7 +1075,7 @@ import UserNotifications
                     body: """
                         {"items":[
                           {"sequence":2,"role":"user","content":[{"type":"text","text":"Is Polargrid being tracked?"}]},
-                          {"sequence":24,"role":"assistant","content":[{"type":"text","text":"Two partners track Polargrid."}]}
+                          {"sequence":\(answerSequence),"role":"assistant","content":[{"type":"text","text":"Two partners track Polargrid."}]}
                         ],"next_cursor":null}
                         """
                 )
@@ -1085,7 +1084,7 @@ import UserNotifications
                     for: request,
                     statusCode: 200,
                     body: """
-                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":4,"model_call_count":4,"tool_call_count":3,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z"}
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":4,"model_call_count":4,"tool_call_count":\(commandCount),"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z"}
                         """
                 )
             case ("GET", "/v1/runs/\(runID.uuidString)/events"):
@@ -1113,12 +1112,18 @@ import UserNotifications
             await model.configure(baseURLString: "https://veetbot.test", token: "replacement-token")
         )
 
+        var publishedStatuses: [RunStatus?] = []
+        let statusObservation = model.runState.$runStatus.sink { publishedStatuses.append($0) }
+        defer { statusObservation.cancel() }
+        var publishedToolCounts: [Int] = []
+        let observation = model.runState.$tools.sink { publishedToolCounts.append($0.count) }
+        defer { observation.cancel() }
         let entry = try #require(model.history.first)
         await model.selectSession(entry)
         // The stored run is already complete; wait for its replay to settle.
         for _ in 0 ..< 2_000 {
-            if model.runState.approvals.count == 3,
-                model.runState.tools.count == 3,
+            if model.runState.approvals.count == commandCount,
+                model.runState.tools.count == commandCount,
                 model.runState.tools.allSatisfy({ $0.status == .completed })
             {
                 break
@@ -1126,18 +1131,27 @@ import UserNotifications
             try await Task.sleep(for: .milliseconds(1))
         }
 
-        #expect(model.runState.tools.map(\.status) == [.completed, .completed, .completed])
+        #expect(publishedStatuses.allSatisfy { $0 == nil || $0 == .completed },
+            "Historical replay must not make a completed run appear active again")
+        #expect(publishedToolCounts.allSatisfy { $0 == 0 || $0 == commandCount },
+            "Historical replay must publish the complete ledger, never count through partial calls")
+        #expect(model.runState.tools.map(\.status) == Array(repeating: .completed, count: commandCount))
         #expect(model.runState.activityTimeline.map(\.id) == [
             "message:event-2",
             "tool:command-1",
-            "message:event-24",
+            "message:event-\(answerSequence)",
         ])
         guard case .toolBundle(let bundle) = model.runState.activityTimeline[1] else {
             Issue.record("expected the approved commands in one collapsed summary")
             return
         }
-        #expect(bundle.summary == "3 tool calls · Completed")
+        #expect(bundle.summary == "\(commandCount) tool calls · Completed")
         #expect(bundle.activities.map(\.approvalID) == approvalIDs)
+        #if os(macOS)
+        #expect(ChatView(model: model).transcriptActivities.map(\.id) == [
+            "event-2", "event-\(answerSequence)",
+        ].map { "message:\($0)" })
+        #endif
     }
 
     @Test

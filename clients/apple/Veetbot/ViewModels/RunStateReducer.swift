@@ -200,6 +200,29 @@ public final class RunStateReducer: ObservableObject {
 
     public init() {}
 
+    /// Copy a fully reduced snapshot without exposing its intermediate replay states.
+    func replace(with snapshot: RunStateReducer) {
+        timeline = snapshot.timeline
+        tools = snapshot.tools
+        approvals = snapshot.approvals
+        workingState = snapshot.workingState
+        clarifyingQuestion = snapshot.clarifyingQuestion
+        runStatus = snapshot.runStatus
+        activeRunID = snapshot.activeRunID
+        reasoningActive = snapshot.reasoningActive
+        reasoningTitle = snapshot.reasoningTitle
+        failure = snapshot.failure
+        lastTaskGrantEvent = snapshot.lastTaskGrantEvent
+        persistedSequences = snapshot.persistedSequences
+        pendingUserMessageID = snapshot.pendingUserMessageID
+        streamingMessageID = snapshot.streamingMessageID
+        toolIndex = snapshot.toolIndex
+        pendingApprovalIDs = snapshot.pendingApprovalIDs
+        activityOrder = snapshot.activityOrder
+        activitySequences = snapshot.activitySequences
+        summaryHeadings = snapshot.summaryHeadings
+    }
+
     public var isRunActive: Bool { runStatus?.isActive == true }
     public var needsApprovalIDs: [UUID] { Array(pendingApprovalIDs) }
     /// Interleave messages and tool activity, then group eligible adjacent tool outcomes.
