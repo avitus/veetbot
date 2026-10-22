@@ -223,6 +223,40 @@ final class ConversationNavigationUITests: XCTestCase {
         attachEmailScreenshot("A2 Email mailbox and inbox")
     }
 
+    /// The window's sidebar button hides Email's mailbox sidebar as it does
+    /// Chat's; the mode switch, search and collections move above the inbox.
+    func testEmailSidebarHidesFromTheWindowToolbar() {
+        app.launch()
+        activate(app.buttons["mode.email"])
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        let mailboxSettings = app.buttons["email.global.settings"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(mailboxSettings.waitForExistence(timeout: 5))
+        let besideSidebar = row.frame.minX
+
+        activate(sidebarToggle())
+        waitForDisappearance(of: mailboxSettings)
+        XCTAssertLessThan(row.frame.minX, besideSidebar - 150, "The inbox must take the sidebar's place")
+        XCTAssertTrue(app.buttons["mode.chat"].isHittable, "Hiding the sidebar must keep the mode switch")
+        XCTAssertTrue(app.textFields["email.search"].isHittable, "Search must move above the inbox")
+        XCTAssertTrue(app.buttons["email.collection.needsYou"].isHittable, "Collections must move above the inbox")
+        attachEmailScreenshot("Email with the sidebar hidden")
+
+        activate(sidebarToggle())
+        XCTAssertTrue(mailboxSettings.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForFrame(of: row, timeout: 5) { $0.minX >= besideSidebar - 1 },
+                      "Showing the sidebar must put the inbox back beside it")
+    }
+
+    /// The window toolbar's own sidebar button, which the split view adds.
+    private func sidebarToggle() -> XCUIElement {
+        let toggle = app.toolbars.buttons.matching(NSPredicate(
+            format: "NOT (identifier BEGINSWITH 'sidebar.') AND (identifier CONTAINS[c] 'sidebar' OR label CONTAINS[c] 'sidebar')"
+        )).firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.toolbars.firstMatch.debugDescription)
+        return toggle
+    }
+
     func testA2HandledCollectionDoesNotArchiveMail() {
         app.launch()
         openEmailMode()

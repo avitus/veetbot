@@ -166,6 +166,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2WideMemoryKeepsCollectionsBesideRecords \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2SchedulesKeepListBesideSelectedSchedule \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2EmailHasMailboxBesideTheInbox \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarHidesFromTheWindowToolbar \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2HandledCollectionDoesNotArchiveMail \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2PeopleHasDirectoryNavigation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2InlineUnsubscribeKeepsTheConfirmation \

@@ -134,6 +134,21 @@ import Testing
         #expect(!census.contains("EmailSurface.accent"))
     }
 
+    /// The Mac window's sidebar button belongs to Chat's split view, mounted
+    /// behind Email; Email's mailbox sidebar hides with it, and its controls
+    /// then sit above the inbox beside the mode bar.
+    @Test
+    func testTheMailboxSidebarFollowsTheWindowsSidebarButton() throws {
+        let root = try source(at: "Veetbot/Views/RootView.swift")
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(root.contains("NavigationSplitView(columnVisibility: $sidebarVisibility)"))
+        #expect(root.contains("mailboxSidebarVisible: mailboxSidebarVisible"))
+        #expect(root.contains("|| !mailboxSidebarVisible {"))
+        #expect(email.contains("if showsMailboxSidebar { mailboxSidebar"))
+        #expect(email.contains("if !showsMailboxSidebar { inboxHeader"))
+    }
+
     private func source(at relativePath: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
