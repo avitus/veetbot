@@ -47,8 +47,8 @@ checks it per commit; no trailer means lane A.
 
 | Subject | Document under `docs/plan/` |
 | --- | --- |
-| Startup, configuration, composition root, CLI | `bootstrap-and-composition.md` |
-| Makefile targets, compose, CI, local development | `development-toolchain.md` |
+| Startup, config, composition root, CLI | `bootstrap-and-composition.md` |
+| Makefile, compose, CI, local development | `development-toolchain.md` |
 | The run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
 | Tool registration, validation, execution, MCP | `tool-system.md` |
 | Builtin tools and their classification | `builtin-tools.md` |
@@ -60,27 +60,27 @@ checks it per commit; no trailer means lane A.
 | Memory retrieval, ranking, recall trace | `memory-retrieval-and-ranking.md`, `general-memory-recall.md` |
 | Evaluation cases, gates, the harness | `evaluation-harness.md` |
 | HTTP routes, error codes, scopes, event stream | `http-api-and-streaming.md` |
-| Isolated execution, egress, the artifact store | `sandbox-isolation.md` |
-| Skill packages, the catalog, the authoring loop | `skills.md` |
-| Knowledge documents, ingestion, passage retrieval | `knowledge-documents.md` |
+| Sandbox, egress, artifact store | `sandbox-isolation.md` |
+| Skill packages, catalog, authoring | `skills.md` |
+| Knowledge documents, ingestion, passages | `knowledge-documents.md` |
 | Public-web search and page extraction | `web-access.md` |
 | Authenticated browser automation | `browser-automation.md` |
 | Scheduled runs and recurrence | `scheduling.md` |
-| Notifications, device identity, push delivery | `notifications-and-devices.md` |
+| Notifications, device identity, push | `notifications-and-devices.md` |
 | Subagents, delegation, child runs | `subagents-and-delegation.md` |
 | Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
-| Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
+| Backups, restore, alerts, firewall, rollback | `operational-hardening.md` |
 | Memory evaluation and lifecycle | `memory-evaluation-and-lifecycle.md` |
-| Integrated episodes, high-recall formation, evidence-based forgetting | `adaptive-memory-distillation.md` |
+| Episodes, high-recall formation, evidence-based forgetting | `adaptive-memory-distillation.md` |
 | Persona surface, nominations, curated promotion | `persona-surface.md` |
-| Memory read API and native memory browser | `memory-read-api-and-browser.md` |
-| Gmail MCP servers, email tools, bootstrap ceremony | `email-integration.md` |
-| Client modes, foreground email, priority/style learning, drafts, mail memories | `email-experience.md` |
+| Memory read API and browser | `memory-read-api-and-browser.md` |
+| Gmail MCP servers, email tools, bootstrap | `email-integration.md` |
+| Client modes, foreground email, priority/style, drafts, mail memories | `email-experience.md` |
 | Devices, surfaces, Section 29 seam | `multi-device-and-surfaces.md` |
-| Device channel and SMS via the owner's iPhone | `device-channel-and-sms.md` |
+| Device channel, SMS via the owner's iPhone | `device-channel-and-sms.md` |
 | WhatsApp business surface and webhook ingress | `whatsapp-surface.md` |
-| Bland calling and public reception | `bland-calling.md` |
-| People, relationships, interaction history | `people-and-relationships.md` |
+| Bland calling, public reception | `bland-calling.md` |
+| People, relationships, interactions | `people-and-relationships.md` |
 | Chat folders, titles; typed judgment | `thread-folders.md`, `conversation-titles.md`, `typed-judgment.md` |
 | Email unsubscribe, bulk-sender census | `email-unsubscribe.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
@@ -150,7 +150,7 @@ GitHub mergeability is insufficient. Use only the CodeRabbit GitHub PR integrati
    Fix valid findings; answer inapplicable ones with concrete evidence and resolve the conversation.
 3. Push, wait for the review of the new head commit, and repeat until
    CodeRabbit reports no findings and every conversation is resolved.
-4. Request hosted CI for that final head (`run_verify: true`, ADR-0107) and confirm every required check passes on it.
+4. Merge `main` into the branch before its final push, so `main` reuses its verification (ADR-0114). Request hosted CI (`run_verify: true`, ADR-0107) with each push, alongside the review, and confirm every required check passes on the final head.
 5. After merging to `main`, follow the merge commit's CircleCI pipeline through production delivery. Verify the application and documentation jobs pass
    and their public release-identity checks report the merged revision, as defined in `docs/deployment.md`. If delivery fails, keep the work active through
    diagnosis and recovery; a merge is not complete until its production deployment succeeds.

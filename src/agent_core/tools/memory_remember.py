@@ -8,6 +8,7 @@ from agent_core.domain.memory import BeliefType, MemoryAuthority, Portability, S
 from agent_core.domain.messages import TextPart
 from agent_core.domain.people_tools import RememberPeopleArgs
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
+from agent_core.domain.sessions import project_scope
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolFailure,
@@ -16,6 +17,7 @@ from agent_core.domain.tools import (
     ToolSpec,
 )
 from agent_core.memory.formation import GovernedMemoryService
+from agent_core.ports.persistence import UnitOfWorkFactory
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -159,3 +161,31 @@ class PeopleMemoryRememberTool(MemoryRememberTool):
             content=[TextPart(text=f"Remembered as [m:{str(belief.id)[:8]}].")],
             structured={"belief_id": str(belief.id), "status": belief.status.value},
         )
+
+
+class SessionScopedMemoryRememberTool:
+    """Default new writes to the trusted session without changing pinned tools."""
+
+    def __init__(self, delegate: MemoryRememberTool, factory: UnitOfWorkFactory) -> None:
+        self._delegate = delegate
+        self._factory = factory
+        self.spec = delegate.spec.model_copy(deep=True)
+        self.spec = self.spec.model_copy(
+            update={
+                "version": "2.1.0" if isinstance(delegate, PeopleMemoryRememberTool) else "1.1.0",
+                "description": "Remember owner facts; scope defaults to session's project.",
+                "input_schema": {
+                    **self.spec.input_schema,
+                    "required": [
+                        key for key in self.spec.input_schema["required"] if key != "scope"
+                    ],
+                },
+            }
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        if "scope" not in arguments:
+            async with self._factory() as uow:
+                session = await uow.sessions.get(context.session_id, context.principal)
+            arguments = {**arguments, "scope": project_scope(session.metadata)}
+        return await self._delegate.execute(arguments, context)

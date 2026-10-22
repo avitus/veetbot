@@ -225,3 +225,62 @@ async def test_legacy_cached_assessment_is_replaced_once_on_foreground_refresh()
         assert (await service.threads(app.principal))["items"] == []
         third = await service.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(third.run_id)).model_call_count == 0
+
+
+async def _assess_then_restamp(revisions: list[str], turns: int) -> tuple[list[int], str]:
+    """Assess once, then rewrite the stored identity before each further refresh."""
+    from dataclasses import replace
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=FixedClock(datetime(2026, 9, 13, 17, tzinfo=UTC)),
+        mcp_client_factory=await _current_mail_factory(),
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(turns)]),
+    ) as app:
+        service = app.services.email
+        first = await service.submit_task(app.principal, kind="refresh")
+        calls = [(await app.runs.get(first.run_id)).model_call_count]
+        for revision in revisions:
+            async with app.uow_factory() as uow, uow.email.lock(app.principal):
+                [row] = await uow.email.list(app.principal, "assessment")
+                stamped = {**row.payload, "model_revision": revision}
+                await service._put_data(uow.email, app.principal, "assessment", row.key, stamped)
+            later = await service.submit_task(app.principal, kind="refresh")
+            calls.append((await app.runs.get(later.run_id)).model_call_count)
+        async with app.uow_factory() as uow:
+            [row] = await uow.email.list(app.principal, "assessment")
+        return calls, str(row.payload["model_revision"])
+
+
+async def test_assessment_identity_is_the_email_model_not_the_whole_registry() -> None:
+    """Unrelated provider-registry edits must not re-pay for every cached conversation."""
+    _, stored = await _assess_then_restamp([], turns=1)
+    assert stored == "fake:scripted:email-assessment@5"
+
+
+async def test_unrelated_registry_change_reuses_legacy_cached_assessment() -> None:
+    """A legacy row from any registry revision of the same model and prompt stays current."""
+    calls, stored = await _assess_then_restamp(
+        [
+            "fake:scripted:unrouted:email-assessment@5",
+            "fake:scripted:openai@0123456789ab+r89abcdef:email-assessment@5",
+        ],
+        turns=1,
+    )
+    assert calls == [1, 0, 0]
+    # Current rows are left alone rather than rewritten: no write, no model call.
+    assert stored == "fake:scripted:openai@0123456789ab+r89abcdef:email-assessment@5"
+
+
+async def test_a_different_email_model_or_prompt_still_reassesses() -> None:
+    """Only the registry segment is ignored: model, provider and prompt revision still bind."""
+    calls, _ = await _assess_then_restamp(
+        [
+            "fake:other-model:openai@0123456789ab+r89abcdef:email-assessment@5",
+            "other:scripted:email-assessment@5",
+            "fake:scripted:openai@0123456789ab+r89abcdef:email-assessment@4",
+            "fake:scripted:not-a-registry:extra:email-assessment@5",
+        ],
+        turns=5,
+    )
+    assert calls == [1, 1, 1, 1, 1]

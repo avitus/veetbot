@@ -254,6 +254,7 @@ implementation without one.
 - [ADR-0227: People directory attention, last contact and section counts](0227-people-directory-attention-recent-and-counts.md)
 - [ADR-0221: Unattended call plans, with retries and a follow-up](0221-unattended-call-plans.md)
 - [ADR-0228: CircleCI Smarter Testing runs three pytest partitions](0228-smarter-testing-partitions.md)
+- [ADR-0230: The longest verify jobs split across executors](0230-parallel-verify-partitions.md)
 - [ADR-0229: Verified entrypoints and the cost-reserve transition](0229-verified-entrypoints-and-cost-reserve-transition.md)
 
 - [ADR-0212: Checkpointed memory confirmation](0212-checkpointed-memory-confirmation.md)
@@ -266,3 +267,15 @@ implementation without one.
 - [ADR-0220: Owner-reviewed bounded recall rollout](0220-bounded-recall-rollout.md)
 - [ADR-0222: Owner-approved scope for the retained recall review](0222-owner-approved-recall-review-scope.md)
 - [ADR-0223: Owner trial with production recall review](0223-owner-production-recall-trial.md)
+
+- [ADR-0231: Email collections and scoped counts](0231-email-collections-and-counts.md)
+
+- [ADR-0232: Bounded owner-memory formation and recall repairs](0232-owner-memory-incident-repairs.md)
+
+- [ADR-0233: Owner-directed source learning](0233-owner-directed-source-learning.md)
+- [ADR-0234: Email list in recency order, named correspondents and refresh in place](0234-email-list-recency-names-and-in-place-refresh.md)
+
+- [ADR-0235: Independently verify known accessibility contrast findings](0235-verified-accessibility-contrast-findings.md)
+- [ADR-0236: Real-browser cases run off the owner's desktop](0236-real-browser-cases-run-off-the-owners-desktop.md)
+
+- [ADR-0237: A right panel for activity, artifacts and thread context on the Mac](0237-mac-right-panel.md)

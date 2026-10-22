@@ -432,6 +432,10 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
     """A rendered application shell is not yet the site's authentication decision."""
     require_real_browser()
     caplog.set_level(logging.INFO, logger="agent_core.browser_control_plane.sessions")
+    # The overall deadline includes browser/page setup. Leave room for the
+    # ten-second session-start bound plus the six-second pending assertion;
+    # eight seconds could legitimately expire during that assertion under load.
+    verification_seconds = 30
     checking_session = asyncio.Event()
     answer_session = asyncio.Event()
     session_answered = asyncio.Event()
@@ -445,6 +449,10 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
             response = await super().learn(request)
             if response.status_code != 200:
                 return response
+            if outcome == "timeout":
+                # Exercise page setup that consumes part of the overall budget
+                # before the test observes the pending session-check request.
+                await asyncio.sleep(3)
             return HTMLResponse(
                 "<main>Checking session</main><script>fetch('/updates');fetch('/session-check')"
                 ".then(r => r.json()).then(result => {"
@@ -487,7 +495,7 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
     async with (
         local_https_site(members.app) as site,
         profile_service(
-            site, tmp_path / "profiles", verification_seconds=8 if outcome == "timeout" else 30
+            site, tmp_path / "profiles", verification_seconds=verification_seconds
         ) as service,
     ):
         checking = asyncio.create_task(
@@ -538,7 +546,10 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
             assert [record.msg for record in unfinished] == [
                 "device verification did not finish (%s) after %.1f s"
             ]
-            assert unfinished[0].args == ("with_session=settle", pytest.approx(8, abs=2))
+            assert unfinished[0].args == (
+                "with_session=settle",
+                pytest.approx(verification_seconds, abs=2),
+            )
             assert members.token not in repr(vars(unfinished[0]))
             assert "site.test" not in repr(vars(unfinished[0]))
             # Let the site's cancelled request finish rotating its cookie

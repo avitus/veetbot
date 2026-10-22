@@ -17,10 +17,7 @@ import SwiftUI
     #if os(macOS)
     /// Renders real AppKit list geometry without desktop automation or private mailbox data.
     @Test func testEmailInboxRenderedLayout() async throws {
-        let rows = (1...5).map { index in
-            threadJSON().replacingOccurrences(of: threadID.uuidString,
-                with: "00000000-0000-0000-0000-00000000080\(index)")
-        }.joined(separator: ",")
+        let rows = variedInboxRows()
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
             return (200, "{\"items\":[\(rows)],\"next_cursor\":null}")
@@ -1115,6 +1112,85 @@ import SwiftUI
         #expect(model.thread?.isHandled == true)
     }
 
+    /// Counts come from the whole server collection, never the visible first page.
+    @Test func testCollectionCountsAndSwitchPreserveUnsentDraft() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") {
+                return (200, self.pageJSON().replacingOccurrences(of: "\"next_cursor\":null",
+                    with: "\"next_cursor\":\"5\",\"collection_counts\":{\"inbox\":23,\"needs_you\":9,\"handled\":4}"))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.reload()
+        #expect(model.collectionCounts?.count(for: .inbox) == 23)
+        #expect(model.collectionCounts?.count(for: .needsYou) == 9)
+        #expect(model.items.count == 1)
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Keep my words")
+        model.setCollection(.handled)
+        for _ in 0..<100 {
+            if requests.snapshot.contains(where: { $0.url?.query?.contains("view=handled") == true }) { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(requests.snapshot.contains { $0.url?.query?.contains("view=handled") == true })
+        #expect(model.collection == .handled)
+        #expect(model.currentEdit?.body == "Keep my words")
+        model.resetConnection()
+        #expect(model.collectionCounts == nil)
+    }
+
+    /// A same-query refresh retains confirmed totals while waiting and after a transient failure.
+    @Test(arguments: [false, true])
+    func testCollectionCountsDuringFailedReload(preserveOrder: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let reads = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+            if reads > 1 {
+                _ = gate.wait(timeout: .now() + 5)
+                return (502, "Temporary failure")
+            }
+            return (200, self.pageJSON().replacingOccurrences(of: "\"next_cursor\":null",
+                with: "\"next_cursor\":null,\"collection_counts\":{\"inbox\":23,\"needs_you\":9,\"handled\":4}"))
+        }
+        await model.reload()
+        #expect(model.collectionCounts?.count(for: .inbox) == 23)
+        let refresh = Task { await model.reload(preserveOrder: preserveOrder) }
+        try await waitForEmailTestCondition {
+            requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count == 2
+        }
+        #expect(model.collectionCounts?.count(for: .inbox) == (preserveOrder ? 23 : nil))
+        gate.signal()
+        await refresh.value
+        #expect(model.collectionCounts?.count(for: .inbox) == (preserveOrder ? 23 : nil))
+    }
+
+    /// Search stays in the selected collection and old servers never imply zero counts.
+    @Test func testCollectionSearchAndUnknownCounts() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, self.pageJSON())
+        }
+        model.setCollection(.needsYou)
+        model.setSearchText("board")
+        await model.reload()
+        #expect(requests.snapshot.contains {
+            $0.url?.query?.contains("view=needs_you") == true && $0.url?.query?.contains("text=board") == true
+        })
+        #expect(model.collectionCounts == nil)
+        model.resetConnection()
+        #expect(model.collection == .inbox)
+        #expect(model.searchText.isEmpty)
+    }
+
     /// Undo clears attention state, while a newer source revision reopens an older dismissal.
     @Test func testHandledStateCanBeUndoneAndNewSourceReopensIt() async throws {
         let requests = EmailRequestRecorder()
@@ -1826,6 +1902,72 @@ import SwiftUI
         #expect(model.items.map(\.id) == originalOrder)
     }
 
+    /// Whatever the server ranked first, the list reads newest first.
+    @Test func testRowsReadNewestFirstWhateverTheServerRanks() async throws {
+        let newerID = UUID(uuidString: "00000000-0000-0000-0000-000000000805")!
+        let older = threadJSON()
+        let newer = older.replacingOccurrences(of: threadID.uuidString, with: newerID.uuidString)
+            .replacingOccurrences(of: "\"updated_at\":\"2026-09-11T00:00:00Z\"", with: "\"updated_at\":\"2026-09-12T00:00:00Z\"")
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, "{\"items\":[\(older),\(newer)],\"next_cursor\":null}")
+        }
+        await model.reload()
+        #expect(model.items.map(\.id) == [newerID, threadID])
+    }
+
+    /// New mail in a conversation moves it to the top on the next refresh; the others keep their places.
+    @Test func testRefreshMovesAConversationWithNewMailToTheTop() async throws {
+        let requests = EmailRequestRecorder()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000805")!
+        let first = threadJSON()
+        let second = first.replacingOccurrences(of: threadID.uuidString, with: otherID.uuidString)
+            .replacingOccurrences(of: "\"updated_at\":\"2026-09-11T00:00:00Z\"", with: "\"updated_at\":\"2026-09-10T00:00:00Z\"")
+        let updated = second.replacingOccurrences(of: "\"updated_at\":\"2026-09-10T00:00:00Z\"", with: "\"updated_at\":\"2026-09-12T00:00:00Z\"")
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let count = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+            return (200, "{\"items\":[\(first),\(count == 1 ? second : updated)],\"next_cursor\":null}")
+        }
+        await model.reload()
+        #expect(model.items.map(\.id) == [threadID, otherID])
+        await model.reload(preserveOrder: true)
+        #expect(model.items.map(\.id) == [otherID, threadID])
+    }
+
+    /// Coming back to Email refreshes the rows in place: nothing disappears and no loading indicator restarts.
+    @Test func testReturningToEmailKeepsTheLoadedRowsWhileItRefreshes() async throws {
+        let requests = EmailRequestRecorder()
+        let gate = EmailArchiveResponseGate()
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000805")!
+        let first = threadJSON()
+        let arrival = first.replacingOccurrences(of: threadID.uuidString, with: arrivalID.uuidString)
+            .replacingOccurrences(of: "\"updated_at\":\"2026-09-11T00:00:00Z\"", with: "\"updated_at\":\"2026-09-12T00:00:00Z\"")
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.hasSuffix("refresh") { return (202, self.operationJSON(status: "COMPLETED"), nil) }
+            let count = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+            if count == 1 { return (200, "{\"items\":[\(first)],\"next_cursor\":null}", nil) }
+            return (200, "{\"items\":[\(arrival),\(first)],\"next_cursor\":null}", count == 2 ? gate : nil)
+        }
+        defer {
+            gate.release()
+            model.setActive(false)
+            model.resetConnection()
+        }
+        await model.reload()
+        #expect(model.items.map(\.id) == [threadID])
+        model.setActive(true)
+        try await waitForEmailTestCondition { gate.isWaiting }
+        #expect(model.items.map(\.id) == [threadID], "The rows already on screen stay while the new visit reads")
+        #expect(!model.isLoading, "A refresh in place restarts no initial loading indicator")
+        gate.release()
+        try await waitForEmailTestCondition { model.items.count == 2 }
+        #expect(model.items.map(\.id) == [arrivalID, threadID])
+    }
+
     @Test func testEmptyInboxPollingDoesNotRestartTheLoadingIndicator() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
@@ -2535,6 +2677,38 @@ import SwiftUI
     }
 
     /// Isolates each model's URLSession route and allows real transport errors from its handler.
+    /// Five rows as a real inbox reads: named senders, several accounts, a draft,
+    /// dates spread across the week, newest first. Their IDs are 801 through 805.
+    private func variedInboxRows() -> String {
+        let rows: [(senders: String, subject: String, summary: String, updated: String, needsReply: Bool, draft: String,
+                    account: String)] = [
+            ("\"Max Abram <max@example.test>\"", "Board discussion", "Asks for your view on the agenda before Friday.",
+             "2026-09-11T16:30:00Z", true, "null", "personal"),
+            ("\"Claire Yoon <claire@example.test>\",\"Sid Ramakrishnan <sid@example.test>\"",
+             "Design review for the autumn release", "Two open questions on the onboarding flow.",
+             "2026-09-11T09:05:00Z", true, "null", "work"),
+            ("\"alex@example.test\"", "Friday planning notes", "Notes from the planning call, nothing to answer.",
+             "2026-09-10T18:00:00Z", false, "null", "personal"),
+            ("\"\\\"Docusign\\\" <dse@example.test>\"", "Please sign: closing documents",
+             "A signature request; a reply is drafted.", "2026-09-08T12:00:00Z", true, draftJSON(), "work"),
+            ("\"Wendy Oropeza <wendy@example.test>\"", "Travel details for next week",
+             "Confirms the hotel and asks about your arrival time.", "2026-08-30T08:00:00Z", true, "null", "personal"),
+        ]
+        return rows.enumerated().map { index, row in
+            threadJSON(draft: row.draft)
+                .replacingOccurrences(of: threadID.uuidString, with: "00000000-0000-0000-0000-00000000080\(index + 1)")
+                .replacingOccurrences(of: "\"summary\":\"Review the board agenda.\"", with: "\"summary\":\"\(row.summary)\"")
+                .replacingOccurrences(of: row.draft == "null" ? "\"draft_id\":\"\(draftID)\"" : "\"draft_id\":\"-\"",
+                                      with: "\"draft_id\":null")
+                .replacingOccurrences(of: "\"senders\":[\"alex@example.test\"]", with: "\"senders\":[\(row.senders)]")
+                .replacingOccurrences(of: "\"subject\":\"Board discussion\"", with: "\"subject\":\"\(row.subject)\"")
+                .replacingOccurrences(of: "\"updated_at\":\"2026-09-11T00:00:00Z\",\"revision\"",
+                                      with: "\"updated_at\":\"\(row.updated)\",\"revision\"")
+                .replacingOccurrences(of: "\"needs_reply\":true", with: "\"needs_reply\":\(row.needsReply)")
+                .replacingOccurrences(of: "\"account_id\":\"personal\"", with: "\"account_id\":\"\(row.account)\"")
+        }.joined(separator: ",")
+    }
+
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init,

@@ -319,6 +319,16 @@ class ReconsolidationStore(Protocol):
         """Filter at most 32 candidates independently before queuing; revalidate on use."""
         ...
 
+    async def selection_input(
+        self, principal: Principal, sources: tuple[SourceVersion, ...], now: datetime
+    ) -> ReconsolidationInput | None:
+        """Preview complete evidence for 2 to 32 current sources before durable grouping.
+
+        The transient group has no durable lease or send authority. Queuing and
+        provider admission must independently revalidate its complete membership.
+        """
+        ...
+
     async def neighbors(
         self, principal: Principal, source: SourceVersion, now: datetime
     ) -> tuple[SourceVersion, ...]: ...

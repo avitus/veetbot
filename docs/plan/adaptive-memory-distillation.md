@@ -974,3 +974,13 @@ are an explicit extension, not an in-place change to formation@9, formation@10
 or communication-attribution-v1. Existing policy evidence, precedence, authority
 and gates remain binding; new-policy activation waits for its own quality and
 source-lifecycle evidence. Old LOCAL excerpt memories retain that portability.
+
+
+### Owner-directed source-learning extension
+
+ADR-0233 adds the separate `memory.learn` path described in
+[memory formation](memory-formation-and-consolidation.md). It admits only
+explicitly authorized current-run website evidence as attributed tentative
+hypotheses and can reinforce eligible tentative beliefs without promotion.
+The automatic extraction source gate and all frozen distillation policy
+versions remain unchanged; this extension does not relabel their evaluations.

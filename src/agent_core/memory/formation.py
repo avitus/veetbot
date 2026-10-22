@@ -26,6 +26,7 @@ from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.hazards import INJECTION_PATTERN, SECRET_PATTERN
 from agent_core.domain.memory import (
     LIFECYCLE_POLICY_VERSION,
+    LIVE_MEMORY_STATUSES,
     MEMORY_SUBJECT_MAX_LENGTH,
     SENSITIVITY_ORDER,
     BeliefRejection,
@@ -47,6 +48,7 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecallQuery,
     RecallTrace,
     RejectionKind,
     Sensitivity,
@@ -493,12 +495,15 @@ class DeterministicCandidateExtractor:
 
     name = "deterministic-formation-v2"
 
-    def __init__(self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS) -> None:
+    def __init__(
+        self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS, *, strict_possessives: bool = True
+    ) -> None:
         if maximum_candidates < 1:
             raise ValueError("maximum memory candidates must be positive")
         if maximum_candidates > MAX_EXTRACTOR_PROPOSALS:
             raise ValueError(f"maximum memory candidates must not exceed {MAX_EXTRACTOR_PROPOSALS}")
         self._maximum_candidates = maximum_candidates
+        self._strict_possessives = strict_possessives
 
     async def extract(
         self,
@@ -818,6 +823,16 @@ class DeterministicCandidateExtractor:
             )
 
         for match in _POSSESSIVE_ENTITY.finditer(stripped):
+            # Bare capitalization also names people, weekdays and platforms.
+            # This fallback requires a model number or a concrete device noun; ordinary
+            # affirmative ownership clauses are handled above without this limit.
+            if self._strict_possessives and not (
+                any(character.isdigit() for character in match.group(1))
+                or re.search(
+                    r"\b(?:watch|phone|laptop|tablet|camera|headphones)$", match.group(1), re.I
+                )
+            ):
+                continue
             cleaned = _clean_object(match.group(1))
             if cleaned is None:
                 continue
@@ -2235,6 +2250,20 @@ class DeterministicSalience:
         return explicit or len(value.split()) >= 3
 
 
+def _resource_restatement_key(statement: str) -> str | None:
+    """A narrow owner assertion, preserving numbers, negation and the full object."""
+    match = re.fullmatch(
+        r"(?:the\s+)?user\s+(has|owns|drives|uses)\s+(?:(?:a|an|the)\s+)?(?:new\s+(?=\d))?(.+?)\.?",
+        statement.strip(),
+        re.I,
+    )
+    if match is None:
+        return None
+    verb, value = match.groups()
+    verb = "has" if verb.casefold() in {"has", "owns"} else verb.casefold()
+    return f"{verb} {' '.join(value.casefold().split())}"
+
+
 class DeterministicConflictResolver:
     @staticmethod
     def _normalized(value: str) -> str:
@@ -2271,6 +2300,24 @@ class DeterministicConflictResolver:
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
+        if (
+            same_session
+            and existing.belief_type is BeliefType.USER_MODEL_ATTR
+            and existing.polarity is polarity is Polarity.ASSERT
+            and (resource := _resource_restatement_key(statement)) is not None
+            and resource == _resource_restatement_key(existing.statement)
+        ):
+            return "duplicate"
+        if existing.belief_type is BeliefType.RELATIONSHIP and polarity is Polarity.ASSERT:
+            generalization = re.fullmatch(
+                r"User has at least one (daughter|son)\.", statement, re.I
+            )
+            if generalization is not None and re.fullmatch(
+                rf"User's {generalization.group(1)} is [^.]+\.", existing.statement, re.I
+            ):
+                # Existence does not contradict the named child, and does not
+                # corroborate that particular child's identity either.
+                return "independent"
         if _AUTHORITY_RANK[authority] < _AUTHORITY_RANK[existing.authority]:
             return "conflict"
         if _AUTHORITY_RANK[authority] == _AUTHORITY_RANK[existing.authority] and not self._ordered(
@@ -2489,6 +2536,8 @@ class GovernedMemoryService:
         evidence_at: datetime | None = None,
         attributed_external: bool = False,
         semantic_external: bool = False,
+        source_learning: bool = False,
+        source_learning_target: UUID | None = None,
         audit_model: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
@@ -2521,6 +2570,8 @@ class GovernedMemoryService:
             origin_trust is TrustLevel.MEMORY and not explicit
         ):
             raise ToolTrustRejectedError("external content cannot directly write persistent memory")
+        if source_learning and not (attributed_external and attributed_shape):
+            raise ToolTrustRejectedError("source learning requires attributed hypothesis ceilings")
         clean_statement = " ".join(statement.split())
         clean_subject = " ".join(subject.split())
         if not clean_subject or not self._salience.eligible(clean_statement, explicit=explicit):
@@ -2553,7 +2604,7 @@ class GovernedMemoryService:
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
                 model=audit_model or self._extractor.name,
-                policy_version=self._policy_version,
+                policy_version=trigger if source_learning else self._policy_version,
                 candidates_proposed=1,
                 committed=0,
                 reinforced=0,
@@ -2567,6 +2618,37 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
+            if (
+                belief_type is BeliefType.USER_MODEL_ATTR
+                and not clean_subject.startswith("person:")
+                and polarity is Polarity.ASSERT
+                and (resource_key := _resource_restatement_key(clean_statement)) is not None
+            ):
+                candidates = await uow.memories.query(
+                    RecallQuery(
+                        tenant_id=self._principal.tenant_id,
+                        principal_id=self._principal.principal_id,
+                        current_scope=scope,
+                        text=clean_statement,
+                        belief_types=[BeliefType.USER_MODEL_ATTR],
+                        candidate_selection="relevance",
+                        sensitivity_ceiling=Sensitivity.RESTRICTED,
+                        max_items=8,
+                        budget_tokens=2000,
+                        min_score=0,
+                    )
+                )
+                known = {record.id for record in related}
+                related.extend(
+                    record
+                    for record in candidates
+                    if record.id not in known
+                    and record.source_session_id == session_id
+                    and record.polarity is Polarity.ASSERT
+                    and record.derivation is derivation
+                    and resource_key == _resource_restatement_key(record.statement)
+                    and not record.subject.startswith("person:")
+                )
             classified = [
                 (
                     current,
@@ -2582,6 +2664,20 @@ class GovernedMemoryService:
                 )
                 for current in sorted(related, key=lambda item: item.store_position, reverse=True)
             ]
+            if source_learning:
+                # Source observations never contradict or promote an owner's belief.
+                # Their receipts, not session-local sequence numbers, fence replay.
+                classified = [
+                    (current, "duplicate")
+                    for current in related
+                    if current.statement == clean_statement
+                    and (source_learning_target is None or current.id == source_learning_target)
+                    and current.status in LIVE_MEMORY_STATUSES
+                    and current.authority is MemoryAuthority.INFERRED
+                    and current.derivation is MemoryDerivation.HYPOTHESIS
+                    and current.longevity is MemoryLongevity.TENTATIVE
+                    and current.polarity is Polarity.ASSERT
+                ]
             if semantic_external:
                 # Import order is not evidence order. A historical message cannot
                 # supersede or cast doubt on a newer source merely because its
@@ -2672,6 +2768,38 @@ class GovernedMemoryService:
             for current, relation in classified:
                 if relation == "duplicate":
                     position = await uow.memories.next_position()
+                    if source_learning:
+                        evidence_instant = evidence_at or self._clock.now()
+                        reinforced = current.model_copy(
+                            update={
+                                "evidence_count": current.evidence_count + 1,
+                                "confidence": max(
+                                    current.confidence, min(0.55, current.confidence + 0.1)
+                                ),
+                                "sensitivity": max(
+                                    (current.sensitivity, sensitivity),
+                                    key=SENSITIVITY_ORDER.__getitem__,
+                                ),
+                                "flagged_for_review": True,
+                                "last_evidence_at": max(current.last_evidence_at, evidence_instant),
+                                "expires_at": max(current.last_evidence_at, evidence_instant)
+                                + timedelta(days=30),
+                                "last_reinforced_at": self._clock.now(),
+                                "updated_at": self._clock.now(),
+                                "store_position": position,
+                            }
+                        )
+                        stored = await uow.memories.reinforce(reinforced)
+                        await self._append_event(
+                            uow, session_id, run_id, "memory.reinforced", stored
+                        )
+                        if record_audit:
+                            await uow.memories.record_consolidation(
+                                formation_run.model_copy(
+                                    update={"reinforced": 1, "finished_at": self._clock.now()}
+                                )
+                            )
+                        return stored, "reinforced"
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))
                     portable_scope_promoted = (
                         current.portability is not Portability.LOCAL and len(origin_scopes) >= 2
@@ -2854,6 +2982,8 @@ class GovernedMemoryService:
                 longevity,
                 evidence_at,
             )
+            if source_learning:
+                record = record.model_copy(update={"consolidation_policy_version": trigger})
             stored = await uow.memories.upsert_belief(record)
             await self._append_event(uow, session_id, run_id, "memory.formed", stored)
             if record_audit:

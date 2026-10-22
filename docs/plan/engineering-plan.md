@@ -3072,7 +3072,12 @@ Acceptance criteria for this workstream:
   tool or web, foreign-principal, and foreign-tenant content cannot become
   sources. Correspondent content forms only an explicitly attributed,
   short-lived hypothesis and never becomes owner speech.
-- Formation is never inline with the user-visible run: terminal runs enqueue one
+- ADR-0233 additionally admits owner-directed website learning through the
+  explicit governed `memory.learn` tool. Current-run owner authorization, exact
+  retained read evidence, conservative grounding, tentative authority ceilings,
+  replay fences, and source erasure are mandatory. This does not broaden the
+  automatic extractor's source set or promote external content to owner speech.
+- Automatic formation is never inline with the user-visible run: terminal runs enqueue one
   idempotent flag and maintenance performs full extraction only after the idle
   boundary. Session close remains an immediate boundary.
 - Secrets and injection-shaped candidates remain rejected, and one consolidation
@@ -4045,7 +4050,9 @@ Implement:
 - A shared Chat/Email mode shell on iPhone, iPad and Mac, preserving one owner,
   agent, persona, memory, connection and ordinary run machinery and existing Chat
   state. A mode changes presentation and task context, never authority.
-- Both existing Gmail accounts in a short high-precision priority view. Refresh
+- Both existing Gmail accounts in a short high-precision priority view. ADR-0231
+  extends the approved A2 presentation with Inbox, Needs you, and Handled
+  collections and authorized cached-thread counts; the priority view remains available. Refresh
   on entry and foreground return and every sixty seconds while visible. Only
   fresh client requests admit bounded work; no unattended monitor is authorized.
 - Owner-requested archive and move-to-Inbox actions from the Email checkbox,

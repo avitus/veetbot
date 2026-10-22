@@ -11,6 +11,7 @@ cache or model context.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -18,6 +19,7 @@ from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import EventEnvelope, is_schedule_instruction_event
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import MemoryRecord, Sensitivity
+from agent_core.domain.people import PeopleQuery, PeopleSource, SourceMemoryLink
 from agent_core.domain.people_sources import source_id
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.views import (
@@ -42,14 +44,30 @@ async def memory_evidence(
     uow: RepositoryUnitOfWork, principal: Principal, record: MemoryRecord, ceiling: Sensitivity
 ) -> MemoryEvidenceView:
     """At most five cited sources, newest first, each shown no further than it may be."""
-    sequences = sorted(set(record.source_event_ids), reverse=True)[:MEMORY_EVIDENCE_LIMIT]
-    session_id = record.source_session_id
-    try:
-        await uow.sessions.get(session_id, principal)
-    except NotFoundError:
-        return MemoryEvidenceView(items=[_erased(session_id, sequence) for sequence in sequences])
+    references = {(record.source_session_id, sequence) for sequence in record.source_event_ids}
+    links = await uow.people.query(
+        PeopleQuery(
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            kinds=["source_memory_link"],
+            belief_id=record.id,
+            sensitivity_ceiling=ceiling,
+            limit=32,
+        )
+    )
+    for link in links[:32]:
+        if isinstance(link, SourceMemoryLink):
+            for key in link.support_ids:
+                source = await uow.people.get(principal, key, ceiling=ceiling)
+                if isinstance(source, PeopleSource):
+                    references.add((source.session_id, source.event_sequence))
     items = []
-    for sequence in sequences:
+    for session_id, sequence in references:
+        try:
+            await uow.sessions.get(session_id, principal)
+        except NotFoundError:
+            items.append(_erased(session_id, sequence))
+            continue
         events = await uow.events.list_after(session_id, sequence - 1, principal, limit=1)
         event = next((row for row in events if row.sequence == sequence), None)
         if event is None or await uow.people.source_suppressed(
@@ -58,7 +76,14 @@ async def memory_evidence(
             items.append(_erased(session_id, sequence))
             continue
         items.append(_shown(event, principal, ceiling))
-    return MemoryEvidenceView(items=items)
+    items.sort(
+        key=lambda item: (
+            item.evidence_at or datetime.min.replace(tzinfo=UTC),
+            item.event_sequence,
+        ),
+        reverse=True,
+    )
+    return MemoryEvidenceView(items=items[:MEMORY_EVIDENCE_LIMIT])
 
 
 def _erased(session_id: UUID, sequence: int) -> MemoryEvidenceItemView:

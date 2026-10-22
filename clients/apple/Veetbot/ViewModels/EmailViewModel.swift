@@ -47,6 +47,8 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var accounts: [EmailAccountView] = []
     @Published private var inboxItems: [EmailThreadView] = []
     @Published private var archiveHiddenThreads: Set<UUID> = []
+    /// Rows the latest refresh added, so the list can show where they landed.
+    @Published public private(set) var arrivedThreadIDs: Set<UUID> = []
     @Published public private(set) var thread: EmailThreadView?
     @Published public private(set) var draft: EmailDraftView?
     @Published public private(set) var edits: [UUID: EmailDraftEdit] = [:]
@@ -71,7 +73,20 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var feedbackID: UUID?
     @Published public private(set) var hasMore = false
     @Published public private(set) var selectedAccountID: String?
-    @Published public private(set) var listView = "priority"
+    @Published public private(set) var listView = "inbox"
+    @Published private var loadedCollectionCounts: EmailCollectionCounts?
+    /// A pending optimistic mailbox change makes the last confirmed counts stale.
+    public var collectionCounts: EmailCollectionCounts? {
+        archiveHiddenThreads.isEmpty ? loadedCollectionCounts : nil
+    }
+    private var queryListView: String {
+        searchText.isEmpty || EmailCollection(rawValue: listView) != nil ? listView : "all"
+    }
+    public var collection: EmailCollection { EmailCollection(rawValue: listView) ?? .inbox }
+
+    public func setCollection(_ value: EmailCollection) {
+        setListView(value.rawValue)
+    }
     @Published public private(set) var searchText = ""
     @Published public private(set) var selectedThreadID: UUID?
     @Published public private(set) var learning: EmailLearningState?
@@ -170,9 +185,22 @@ public final class EmailViewModel: ObservableObject {
         archiveTasks.values.forEach { $0.cancel() }
     }
 
-    /// Keeps pending rows in their original positions for rollback without presenting them as archived.
+    /// The rows as the list shows them: newest first by each conversation's latest
+    /// activity, ties in the server's order. A pending archive stays in its place for
+    /// rollback without presenting as archived.
     public var items: [EmailThreadView] {
-        inboxItems.filter { !archiveHiddenThreads.contains($0.id) || archiveErrors[$0.id] != nil }
+        inboxItems.enumerated()
+            .filter { !archiveHiddenThreads.contains($0.element.id) || archiveErrors[$0.element.id] != nil }
+            .sorted { lhs, rhs in
+                lhs.element.updatedAt != rhs.element.updatedAt
+                    ? lhs.element.updatedAt > rhs.element.updatedAt : lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
+    /// The row has shown where it landed; a later refresh may mark it again.
+    public func acknowledgeArrival(_ id: UUID) {
+        arrivedThreadIDs.remove(id)
     }
 
     public var currentEdit: EmailDraftEdit? { draft.flatMap { edits[$0.id] } }
@@ -206,7 +234,8 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            await self.reload(activation: foreground)
+            // Rows already on screen stay and refresh in place; only an empty list loads from nothing.
+            await self.reload(preserveOrder: !self.inboxItems.isEmpty, activation: foreground)
             while self.acceptsRead(connection: connection, activation: foreground) {
                 await self.refresh(activation: foreground)
                 do { try await Task.sleep(nanoseconds: self.refreshNanoseconds) }
@@ -244,6 +273,7 @@ public final class EmailViewModel: ObservableObject {
         active = false
         accounts = []
         inboxItems = []
+        arrivedThreadIDs = []
         thread = nil
         draft = nil
         edits = [:]
@@ -252,6 +282,9 @@ public final class EmailViewModel: ObservableObject {
         reviewDraft = nil
         selectedThreadID = nil
         selectedAccountID = nil
+        loadedCollectionCounts = nil
+        listView = "inbox"
+        searchText = ""
         nextCursor = nil
         hasMore = false
         unavailable = false
@@ -282,6 +315,7 @@ public final class EmailViewModel: ObservableObject {
     public func setAccount(_ id: String?) {
         guard id != selectedAccountID else { return }
         selectedAccountID = id
+        loadedCollectionCounts = nil
         clearSelection()
         let foreground = active ? activation : nil
         Task { await reload(activation: foreground) }
@@ -291,6 +325,8 @@ public final class EmailViewModel: ObservableObject {
     public func setListView(_ value: String) {
         guard value != listView else { return }
         listView = value
+        loadedCollectionCounts = nil
+        listRequest = UUID()
         let foreground = active ? activation : nil
         Task { await reload(activation: foreground) }
     }
@@ -298,6 +334,7 @@ public final class EmailViewModel: ObservableObject {
     /// Debounces search changes and binds the eventual reload to the visit that scheduled it.
     public func setSearchText(_ text: String) {
         searchText = text
+        loadedCollectionCounts = nil
         searchTask?.cancel()
         listRequest = UUID()
         let foreground = active ? activation : nil
@@ -320,6 +357,7 @@ public final class EmailViewModel: ObservableObject {
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         let requestID = UUID()
         listRequest = requestID
+        if !preserveOrder { loadedCollectionCounts = nil }
         let visibleCount = preserveOrder ? max(5, inboxItems.count) : 5
         isLoading = !preserveOrder
         if !preserveOrder {
@@ -332,13 +370,14 @@ public final class EmailViewModel: ObservableObject {
         do {
             async let accountPage = api.emailAccounts()
             async let threadPage = readInbox(api: api,
-                accountID: selectedAccountID, view: searchText.isEmpty ? listView : "all",
+                accountID: selectedAccountID, view: queryListView,
                 text: searchText, count: visibleCount, connection: connection, activation: foreground
             )
             let (loadedAccounts, page) = try await (accountPage, threadPage)
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
             accounts = loadedAccounts.items
+            loadedCollectionCounts = page.collectionCounts
             recordAccountFreshness(loadedAccounts.items)
             unavailable = false
             seenCursors = []
@@ -348,10 +387,12 @@ public final class EmailViewModel: ObservableObject {
                 let oldIDs = Set(inboxItems.map(\.id))
                 let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
                 let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-                // Keep surviving rows in place and reveal arrivals without a second gesture.
+                // Keep surviving rows and add arrivals; `items` places them all by recency.
                 inboxItems = inboxItems.compactMap { current[$0.id] } + additions
+                arrivedThreadIDs = Set(additions.map(\.id))
             } else {
                 inboxItems = loadedThreads
+                arrivedThreadIDs = []
             }
             for value in loadedThreads { observeArchive(value) }
         } catch {
@@ -366,8 +407,9 @@ public final class EmailViewModel: ObservableObject {
 
     /// Stops paging when the original connection or foreground visit no longer owns the read.
     private func readInbox(api: VeetbotAPIClient, accountID: String?, view: String, text: String, count: Int,
-                           connection: UUID, activation foreground: UUID?) async throws -> Page<EmailThreadView> {
+                           connection: UUID, activation foreground: UUID?) async throws -> EmailThreadPage {
         var rows: [EmailThreadView] = []
+        var counts: EmailCollectionCounts?
         var ids: Set<UUID> = []
         var cursor: String?
         var cursors: Set<String> = []
@@ -376,10 +418,11 @@ public final class EmailViewModel: ObservableObject {
             let page = try await api.emailThreads(accountID: accountID, view: view, text: text,
                                                  limit: min(100, count - rows.count), cursor: cursor)
             guard acceptsRead(connection: connection, activation: foreground) else { throw CancellationError() }
+            counts = page.collectionCounts
             rows.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
             cursor = try nextPageCursor(page.nextCursor, seen: &cursors)
         } while count > 100 && rows.count < count && cursor != nil
-        return Page(items: rows, nextCursor: cursor)
+        return EmailThreadPage(items: rows, nextCursor: cursor, collectionCounts: counts)
     }
 
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
@@ -394,10 +437,11 @@ public final class EmailViewModel: ObservableObject {
         defer { if listRequest == requestID { isLoading = false } }
         do {
             let page = try await api.emailThreads(
-                accountID: selectedAccountID, view: searchText.isEmpty ? listView : "all",
+                accountID: selectedAccountID, view: queryListView,
                 text: searchText, limit: 5, cursor: cursor
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            loadedCollectionCounts = page.collectionCounts
             var ids = Set(inboxItems.map(\.id))
             let loaded = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
             inboxItems.append(contentsOf: loaded.filter { ids.insert($0.id).inserted })

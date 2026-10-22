@@ -6,8 +6,16 @@ import AppKit
 
 enum ConversationNavigationUITestFixture {
     static let launchArgument = "--ui-testing-conversation-navigation"
+    static let callResultID = "00000000-0000-0000-0000-000000000D01"
+    static let callResultLaunchArgument = "--ui-testing-call-result"
     static let artifactID = "00000000-0000-0000-0000-000000000A01"
     static let artifactSVG = #"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>"#
+    static var isMarkdownArtifact: Bool { ProcessInfo.processInfo.arguments.contains("--ui-testing-markdown-artifact") }
+    static var artifactName: String { isMarkdownArtifact ? "appointment.md" : "garden.svg" }
+    static var artifactMediaType: String { isMarkdownArtifact ? "text/markdown" : "image/svg+xml" }
+    static var artifactContent: String {
+        isMarkdownArtifact ? "# Appointment notes\n\nThe office offered **Tuesday at 2:30 pm**.\n\n- Confirm availability\n- Reply to the office" : artifactSVG
+    }
     static let firstSessionID = "00000000-0000-0000-0000-000000000123"
     static let secondSessionID = "00000000-0000-0000-0000-000000000456"
     static let memoryID = "00000000-0000-0000-0000-000000000321"
@@ -85,6 +93,18 @@ enum ConversationNavigationUITestFixture {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
         defaults.removePersistentDomain(forName: suiteName)
         return FolderSidebarPreferences(defaults: defaults)
+    }
+
+    /// The right panel's widths and open choices live in a suite of their own,
+    /// emptied at launch unless a relaunch journey asks to keep them.
+    static func makeInspectorLayoutIfRequested() -> InspectorLayoutStore? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.inspector"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_KEEP_INSPECTOR"] != "1" {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return InspectorLayoutStore(defaults: defaults)
     }
 
     #if os(macOS)
@@ -175,6 +195,13 @@ enum ConversationNavigationUITestFixture {
             urlSession: URLSession(configuration: configuration)
         )
         openSessionIfRequested(model)
+        if ProcessInfo.processInfo.arguments.contains(callResultLaunchArgument),
+           let payload = NotificationPushPayload(userInfo: ["veetbot": [
+               "version": 1, "kind": "call_finished", "title": "New call result",
+               "call_id": callResultID, "notification_id": UUID().uuidString,
+           ]]) {
+            Task { @MainActor in await model.openNotification(payload) }
+        }
         return model
     }
 
@@ -211,6 +238,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailRevision = 1
     private static var emailStatus = "ready"
     private static var learningPaused = false
+    private static var callContentErased = false
     private static var emailHandled = false
     private static var emailArchiveTarget: Bool?
     private static var emailArchiveReads = 0
@@ -395,6 +423,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         emailRevision = 1
         emailStatus = "ready"
         learningPaused = false
+        callContentErased = false
         emailHandled = false
         emailArchiveTarget = nil
         emailArchiveReads = 0
@@ -421,6 +450,26 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         var stagedFrames: [String] = []
         var stagedInterval = 0.01
         switch (request.httpMethod, url.path) {
+        case ("GET", "/v1/calls/\(ConversationNavigationUITestFixture.callResultID)"):
+            statusCode = 200
+            body = Self.callResultJSON
+        case ("DELETE", "/v1/calls/\(ConversationNavigationUITestFixture.callResultID)"):
+            statusCode = 200
+            Self.emailLock.withLock { Self.callContentErased = true }
+            body = Self.callResultJSON
+        case ("GET", "/v1/persona"):
+            statusCode = 200
+            body = #"{"version":1,"voice":"Be clear and direct. Keep practical answers concise.","traits":["brief","direct"],"entries":[{"text":"User values clear explanations and practical next steps.","source":"user_edit","source_belief_id":null,"sensitivity":"internal","enabled":true,"stale":false}],"source":"user_edit","created_at":"2026-10-20T12:00:00Z"}"#
+        case ("GET", "/v1/persona/nominations"):
+            statusCode = 200
+            body = #"{"items":[],"next_cursor":null}"#
+        case ("GET", "/v1/persona/boundaries"):
+            statusCode = 200
+            if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_EMPTY_PERSONA_BOUNDARIES"] == "1" {
+                body = #"{"items":[]}"#
+                break
+            }
+            body = #"{"items":[{"id":"payments_ask","text":"Payments ask you first.","enforced_by":{"kind":"policy_rule","ref":"rules.financial=require_approval"},"active":true},{"id":"publishing_asks","text":"Posting anything publicly asks you first.","enforced_by":{"kind":"policy_rule","ref":"rules.publication=require_approval"},"active":true}]}"#
         case (_, let path) where path.hasPrefix("/v1/memory-reconsolidations") || path.hasPrefix("/v1/memories/00000000-0000-0000-0000-00000000320"):
             let result = Self.synthesisResponse(request)
             statusCode = result.0
@@ -444,11 +493,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"):
             statusCode = 200
             body = """
-                {"id":"\(ConversationNavigationUITestFixture.artifactID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","run_id":"\(Self.runID)","name":"garden.svg","media_type":"image/svg+xml","sha256":"fixture","size_bytes":\(ConversationNavigationUITestFixture.artifactSVG.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
+                {"id":"\(ConversationNavigationUITestFixture.artifactID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","run_id":"\(Self.runID)","name":"\(ConversationNavigationUITestFixture.artifactName)","media_type":"\(ConversationNavigationUITestFixture.artifactMediaType)","sha256":"fixture","size_bytes":\(ConversationNavigationUITestFixture.artifactContent.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
                 """
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)/content"):
             statusCode = 200
-            body = ConversationNavigationUITestFixture.artifactSVG
+            body = ConversationNavigationUITestFixture.artifactContent
         case ("GET", "/v1/people") where ProcessInfo.processInfo.arguments.contains(Self.peopleDirectoryArgument):
             statusCode = 200
             let secondPage = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
@@ -597,22 +646,52 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = Self.readSubscriptionOperation(url.lastPathComponent)
         case ("GET", "/v1/email/threads"):
             statusCode = 200
-            let view = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "view" }?.value ?? "priority"
-            let handled = Self.emailLock.withLock { Self.emailHandled || Self.emailArchived }
-            let included = view == "all" || (view == "other" ? handled : !handled)
-            var items = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
-                ? Self.fullInboxJSON : (included ? Self.emailThreadJSON : "")
-            if view == "priority", ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-next") {
-                items += (items.isEmpty ? "" : ",") + Self.nextEmailThreadJSON
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let view = query.first { $0.name == "view" }?.value ?? "priority"
+            var rawItems = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-full-inbox")
+                ? Self.fullInboxJSON : Self.emailThreadJSON
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-archive-next") {
+                rawItems += "," + Self.nextEmailThreadJSON
             }
-            if view == "priority", Self.bulkThreadEnabled {
-                items += (items.isEmpty ? "" : ",") + Self.bulkEmailThreadJSON
+            if Self.bulkThreadEnabled { rawItems += "," + Self.bulkEmailThreadJSON }
+            if Self.suspectedSpamEnabled { rawItems += "," + Self.spamThreadJSON }
+            let rows = (try? JSONSerialization.jsonObject(with: Data("[\(rawItems)]".utf8))) as? [[String: Any]] ?? []
+            let account = query.first { $0.name == "account_id" }?.value
+            let text = query.first { $0.name == "text" }?.value?.lowercased() ?? ""
+            let matching = rows.filter { row in
+                let searchable = [row["subject"] as? String ?? "", row["summary"] as? String ?? ""]
+                    + (row["senders"] as? [String] ?? [])
+                return (account == nil || row["account_id"] as? String == account)
+                    && (text.isEmpty || searchable.joined(separator: " ").lowercased().contains(text))
             }
-            // A reported conversation leaves the priority view, as the server's does.
-            if Self.suspectedSpamEnabled, view != "priority" || !Self.emailLock.withLock({ Self.spamInSpam }) {
-                items += (items.isEmpty ? "" : ",") + Self.spamThreadJSON
+            func handled(_ row: [String: Any]) -> Bool {
+                guard let revision = row["dismissed_revision"] as? Int else { return false }
+                return revision == row["revision"] as? Int
             }
-            body = "{\"items\":[\(items)],\"next_cursor\":null}"
+            func inbox(_ row: [String: Any]) -> Bool { row["in_inbox"] as? Bool == true }
+            func needs(_ row: [String: Any]) -> Bool {
+                inbox(row) && row["needs_reply"] as? Bool == true && !handled(row)
+            }
+            let counts = ["inbox": matching.filter(inbox).count,
+                          "needs_you": matching.filter(needs).count,
+                          "handled": matching.filter { inbox($0) && handled($0) }.count]
+            let selected = matching.filter { row in
+                switch view {
+                case "inbox": return inbox(row)
+                case "needs_you": return needs(row)
+                case "handled": return inbox(row) && handled(row)
+                case "all": return true
+                case "other": return !inbox(row) || handled(row)
+                default: return inbox(row) && !handled(row)
+                }
+            }
+            let limit = max(1, Int(query.first { $0.name == "limit" }?.value ?? "5") ?? 5)
+            let offset = max(0, Int(query.first { $0.name == "cursor" }?.value ?? "0") ?? 0)
+            let page = Array(selected.dropFirst(offset).prefix(limit))
+            let cursor: Any = offset + limit < selected.count ? String(offset + limit) : NSNull()
+            let payload: [String: Any] = ["items": page, "next_cursor": cursor, "collection_counts": counts]
+            body = String(data: try! JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!
+
         case ("GET", "/v1/email/threads/00000000-0000-0000-0000-000000000899"):
             statusCode = 200
             body = Self.nextEmailThreadJSON
@@ -809,7 +888,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         ):
             statusCode = 200
             let filePart = ProcessInfo.processInfo.arguments.contains("--ui-testing-artifact")
-                ? ",{\"type\":\"file\",\"artifact_id\":\"\(ConversationNavigationUITestFixture.artifactID)\",\"media_type\":\"image/svg+xml\",\"filename\":\"garden.svg\"}"
+                ? ",{\"type\":\"file\",\"artifact_id\":\"\(ConversationNavigationUITestFixture.artifactID)\",\"media_type\":\"\(ConversationNavigationUITestFixture.artifactMediaType)\",\"filename\":\"\(ConversationNavigationUITestFixture.artifactName)\"}"
                 : ""
             body = """
                 {"items":[
@@ -1376,6 +1455,15 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             """
     }
     /// Five synthetic priorities exercise real list geometry without using private mail.
+    /// A retained call receipt, with no fabricated calendar or messaging side effects.
+    private static var callResultJSON: String {
+        let id = ConversationNavigationUITestFixture.callResultID
+        if emailLock.withLock({ callContentErased }) {
+            return "{\"call_id\":\"\(id)\",\"erased\":true,\"provider_deleted\":false}"
+        }
+        return #"{"call_id":"\#(id)","direction":"outbound","status":"completed","counterparty":"+15555550100","created_at":"2026-10-20T15:40:00Z","duration_minutes":0.6833333333,"summary":"The office offered Tuesday at 2:30 pm. No appointment change was confirmed.","transcript":"Assistant: Which afternoons are available?\nOffice: Tuesday at 2:30 pm is available.\nAssistant: I will pass that option along.","summary_complete":true,"transcript_complete":true}"#
+    }
+
     private static var fullInboxJSON: String {
         let subjects = ["Board agenda", "Design review for the autumn release", "Friday planning notes",
                         "Updated project timeline", "Travel details for next week"]

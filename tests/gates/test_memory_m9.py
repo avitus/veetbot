@@ -195,7 +195,7 @@ async def test_remember_tool_survives_builtin_patch_upgrade(tmp_path: Path) -> N
             )
             current_checkpoint = await uow.checkpoints.latest(run_id)
         assert current_checkpoint is not None
-        assert current_checkpoint.pinned_tool_versions["memory.remember"] == "1.0.1"
+        assert current_checkpoint.pinned_tool_versions["memory.remember"] == "1.1.0"
 
         legacy_checkpoint = current_checkpoint.model_copy(
             update={

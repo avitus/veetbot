@@ -9,6 +9,44 @@ import Testing
 /// the identifier the journeys drive.
 @Suite struct EmailSurfaceStructureTests {
     @Test
+    func testReferenceNavigationAndDirectActionsArePresent() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let people = try source(at: "Veetbot/Views/PeopleBrowserView.swift")
+        let persona = try source(at: "Veetbot/Views/PersonaEditorView.swift")
+        let subscriptions = try source(at: "Veetbot/Views/EmailSubscriptionsView.swift")
+        #expect(email.contains("email.collection."))
+        #expect(email.contains("email.feedback-topic-chip."))
+        #expect(people.contains("people.collection."))
+        #expect(persona.contains("persona.section."))
+        #expect(subscriptions.contains("email.subscription.inline."))
+    }
+
+    /// The row names people rather than addresses, dates by recency, keeps its state to a short
+    /// chip (the reason waits in the detail), and arrivals slide in from the top.
+    @Test
+    func testTheThreadRowNamesPeopleAndDatesByRecency() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let start = try #require(email.range(of: "private struct EmailThreadRow")).upperBound
+        let end = email.range(of: "private struct ", range: start..<email.endIndex)?.lowerBound ?? email.endIndex
+        let row = String(email[start..<end])
+        #expect(row.contains("thread.correspondents"))
+        #expect(!row.contains("thread.senders.joined"))
+        #expect(row.contains("EmailRowDate.label("))
+        #expect(email.contains("struct EmailStateChip"))
+        #expect(email.contains(".move(edge: .top)"))
+    }
+
+    @Test
+    func testAuxiliarySurfacesExposeTheReferenceReadingAndDisclosureControls() throws {
+        let artifact = try source(at: "Veetbot/Views/ArtifactViewerView.swift")
+        let signIn = try source(at: "Veetbot/Views/DeviceSignInSheet.swift")
+        let call = try source(at: "Veetbot/Views/CallResultSheet.swift")
+        #expect(artifact.contains("MarkdownContentView(text: preview.text)"))
+        #expect(signIn.contains("device-sign-in.instructions"))
+        #expect(call.contains("call.transcript"))
+    }
+
+    @Test
     func testTheThreadListUsesTheReferenceRowAndKeepsItsControls() throws {
         let source = try source(at: "Veetbot/Views/EmailModeView.swift")
 

@@ -59,6 +59,11 @@ public struct RootView: View {
     @StateObject private var globalMemory = MemoryViewModel()
     @StateObject private var globalPersona = PersonaViewModel()
     @StateObject private var globalSchedules = ScheduleViewModel()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The Mac right panel in each mode (ADR-0237). Held without observing:
+    /// a width drag redraws the panel and its toolbar button, not the root.
+    @State private var inspector = InspectorModel()
+    @State private var globalPeopleLookup: PeopleLookup?
     @State private var showingGlobalMemory = false
     @State private var showingGlobalPersona = false
     @State private var showingGlobalSchedules = false
@@ -90,7 +95,7 @@ public struct RootView: View {
         _coordinator = StateObject(wrappedValue: AppCoordinator(chat: model))
     }
 
-    public var body: some View {
+    private var presentedContent: some View {
         Group {
             if onboarding != nil, model.isConfigured {
                 ConnectOnboardingView(model: model, step: $onboarding)
@@ -107,6 +112,7 @@ public struct RootView: View {
         }
         // Clears the composer at the foot of Chat.
         .toastHost(bottomInset: 88)
+        .sheet(item: $globalPeopleLookup) { PeopleLookupSheet(lookup: $0, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
         .sheet(isPresented: $showingGlobalSchedules) {
@@ -116,6 +122,10 @@ public struct RootView: View {
                     Task { await model.openSharedSession(sessionID) }
                 }
         }
+    }
+
+    private var activityContent: some View {
+        presentedContent
         .onChange(of: coordinator.mode) { updateEmailActivity() }
         .onChange(of: model.isConfigured) { updateEmailActivity() }
         .onChange(of: model.connectionGeneration) {
@@ -127,6 +137,7 @@ public struct RootView: View {
         .onChange(of: model.errorMessage) { updateEmailActivity() }
         .onChange(of: scenePhase) { _, phase in updateEmailActivity(scenePhase: phase) }
         .onAppear { updateEmailActivity() }
+        .onChange(of: globalPeopleLookup != nil) { updateEmailActivity() }
         .onChange(of: showingGlobalMemory) { updateEmailActivity() }
         .onChange(of: showingGlobalPersona) { updateEmailActivity() }
         .onChange(of: showingGlobalSchedules) { updateEmailActivity() }
@@ -135,6 +146,10 @@ public struct RootView: View {
         #else
         .onChange(of: showingSettings) { updateEmailActivity() }
         #endif
+    }
+
+    public var body: some View {
+        activityContent
         .task(id: "\(model.connectionGeneration)-\(model.isConfigured)-\(scenePhase == .active)") {
             guard model.isConfigured, scenePhase == .active else { return }
             while !Task.isCancelled {
@@ -153,10 +168,21 @@ public struct RootView: View {
         #endif
         #if os(iOS)
         .sheet(item: composedInvocation, onDismiss: { presentNextSmsInvocation() }) { invocation in
-            SmsComposeSheet(invocation: invocation) { result in
-                answerSmsInvocation(invocation, with: DeviceInvocationResult(composeResult: result))
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Veetbot wants to send a text").veetType(.display)
+                    Text("To \(invocation.recipient)").veetType(.ui, weight: .medium)
+                    Text("Texts go from this iPhone's number. Nothing is sent until you tap Send in Messages below.")
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                }
+                .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.paper)
+                .accessibilityIdentifier("sms.compose-context")
+                SmsComposeSheet(invocation: invocation) { result in
+                    answerSmsInvocation(invocation, with: DeviceInvocationResult(composeResult: result))
+                }
+                .ignoresSafeArea(edges: .bottom)
             }
-            .ignoresSafeArea()
         }
         .onChange(of: model.pendingSmsInvocation) { presentNextSmsInvocation() }
         .task(id: smsRecoveryKey) {
@@ -185,10 +211,7 @@ public struct RootView: View {
         }
         .alert(
             "Veetbot",
-            isPresented: Binding(
-                get: { model.errorMessage != nil },
-                set: { if !$0 { model.clearError() } }
-            )
+            isPresented: errorPresented
         ) {
             Button("OK") { model.clearError() }
         } message: {
@@ -199,10 +222,14 @@ public struct RootView: View {
         #endif
     }
 
-    /// Keeps both mode trees alive while constraining them to the space below the mode selector.
+    private var errorPresented: Binding<Bool> {
+        Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.clearError() } })
+    }
+
     @ViewBuilder
     private var configuredContent: some View {
         VStack(spacing: 0) {
+            if coordinator.mode != .email || !usesDirectSidebarActivation {
             HStack {
                 ModeSegment(selected: coordinator.mode) { coordinator.mode = $0 }
                 Spacer()
@@ -220,6 +247,7 @@ public struct RootView: View {
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(AppTheme.paperDeep)
             Rectangle().fill(AppTheme.hairline).frame(height: 1)
+            }
             // Keeping each navigation tree mounted preserves compact navigation,
             // scroll position and live Chat rendering across a mode switch.
             GeometryReader { geometry in
@@ -228,20 +256,44 @@ public struct RootView: View {
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
                         .opacity(coordinator.mode == .chat ? 1 : 0)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: coordinator.mode)
                         .allowsHitTesting(coordinator.mode == .chat)
                         .accessibilityHidden(coordinator.mode != .chat)
-                    EmailModeView(model: coordinator.email, viewportHeight: geometry.size.height) {
-                        await coordinator.discussSelectedThread()
-                    }
+                    EmailModeView(
+                        model: coordinator.email, viewportHeight: geometry.size.height,
+                        discussInChat: { await coordinator.discussSelectedThread() },
+                        openChat: { coordinator.mode = .chat },
+                        newChat: { model.newSession(); coordinator.mode = .chat },
+                        openMemory: { showingGlobalMemory = true },
+                        openPeople: { globalPeopleLookup = PeopleLookup(text: "", asOf: nil) },
+                        openSchedules: { showingGlobalSchedules = true },
+                        openPersona: { showingGlobalPersona = true },
+                        openSettings: presentSettings,
+                        chatAttention: SidebarAttention.rows(history: model.history,
+                            sessionsAwaitingApproval: model.sessionsNeedingApproval, hasUnreadReport: model.hasUnreadReport),
+                        openAttention: { sessionID in
+                            coordinator.mode = .chat
+                            Task { await model.openSharedSession(sessionID) }
+                        },
+                        inspector: inspector,
+                        runFrames: { model.runFrames($0) }
+                    )
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
                     .opacity(coordinator.mode == .email ? 1 : 0)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: coordinator.mode)
                     .allowsHitTesting(coordinator.mode == .email)
                     .accessibilityHidden(coordinator.mode != .email)
                 }
                 // Mounted navigation trees must fit the available window instead
                 // of moving the mode controls outside a smaller Mac window.
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                #if os(macOS)
+                // Too narrow a window collapses a mode's panel (ADR-0237).
+                .onAppear { inspector.windowWidthChanged(geometry.size.width) }
+                .onChange(of: geometry.size.width) { _, width in inspector.windowWidthChanged(width) }
+                .modifier(InspectorRevealEnvironment(inspector: inspector))
+                #endif
             }
         }
         // Clipping each tree to the space above the home indicator also clips
@@ -284,6 +336,7 @@ public struct RootView: View {
                     .accessibilityLabel("Schedules")
                     .accessibilityIdentifier("sidebar.schedules")
                     ChatToolbarActions(model: model)
+                    InspectorToggleButton(inspector: inspector, mode: .chat)
                 } else {
                     // The entry exists only where an account advertises support.
                     if coordinator.email.unsubscribeAvailable {
@@ -300,6 +353,7 @@ public struct RootView: View {
                     .accessibilityLabel("Email learning").help("Email learning")
                     .accessibilityIdentifier("email.learning")
                     EmailRefreshButton(model: coordinator.email)
+                    InspectorToggleButton(inspector: inspector, mode: .email)
                 }
             }
         }
@@ -320,7 +374,7 @@ public struct RootView: View {
         model.notificationSyncActive = model.isConfigured && active
         var visible = model.isConfigured && !model.isReconfiguring && active
             && model.errorMessage == nil && coordinator.mode == .chat
-            && !showingGlobalMemory && !showingGlobalPersona && !showingGlobalSchedules
+            && !showingGlobalMemory && !showingGlobalPersona && !showingGlobalSchedules && globalPeopleLookup == nil
         #if os(macOS)
         visible = visible && (keyWindow ?? (controlActiveState == .key))
         #else
@@ -361,7 +415,14 @@ public struct RootView: View {
                 max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
             )
         } detail: {
+            #if os(macOS)
             ChatView(model: model)
+                .macInspector(inspector, mode: .chat) {
+                    ChatInspectorPanel(model: model, inspector: inspector)
+                }
+            #else
+            ChatView(model: model)
+            #endif
         }
         #if os(macOS)
         .toolbarBackground(.hidden, for: .windowToolbar)
@@ -1535,7 +1596,7 @@ struct ConversationAgeSchedule: TimelineSchedule {
 
 /// Chat or Email: a two-way segment in a sunken field, the chosen one lifted
 /// onto a white pill, as the reference draws it.
-private struct ModeSegment: View {
+struct ModeSegment: View {
     let selected: ClientMode
     let choose: (ClientMode) -> Void
 

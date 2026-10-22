@@ -118,6 +118,9 @@ extension EnvironmentValues {
 public struct ChatView: View {
     @Environment(\.activeClientMode) private var activeMode
     @Environment(\.chatListOverlayPresented) private var chatListOverlayPresented
+    /// On the Mac the right panel holds the working notes, the full ledger
+    /// and every artifact (ADR-0237); elsewhere they stay in the transcript.
+    @Environment(\.inspectorReveal) private var inspectorReveal
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
     @State private var artifactSelection: ArtifactSelection?
@@ -342,9 +345,9 @@ public struct ChatView: View {
         }
         #endif
         .sheet(item: Binding(get: { model.callResult }, set: { if $0 == nil { model.dismissCallResult() } })) { result in
-            CallResultSheet(result: result, close: model.dismissCallResult) {
-                Task { await model.deleteCallResult() }
-            }
+            CallResultSheet(result: result, close: model.dismissCallResult,
+                delete: { Task { await model.deleteCallResult() } },
+                followUp: { model.prepareCallFollowUp($0) })
         }
         .sheet(isPresented: $showingWebsiteAccess) {
             ConnectionSettingsView(model: model, embedded: false)
@@ -453,7 +456,7 @@ public struct ChatView: View {
     /// each one is cheap and the transcript always draws what it holds.
     private var transcript: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let workingState = state.workingState {
+            if inspectorReveal == nil, let workingState = state.workingState {
                 WorkingStatePanel(state: workingState)
                     .padding(.bottom, VeetSpace.s4)
             }
@@ -489,6 +492,15 @@ public struct ChatView: View {
         }
     }
 
+    /// A file chip opens the panel's preview on the Mac, and the viewer sheet elsewhere.
+    private func openArtifact(_ artifactID: UUID) {
+        if let inspectorReveal {
+            inspectorReveal.artifact(artifactID)
+        } else {
+            artifactSelection = ArtifactSelection(id: artifactID)
+        }
+    }
+
     /// Approvals no tool call carries, such as one restored ahead of its call.
     private var detachedApprovals: [ApprovalView] {
         state.approvals.filter { approval in
@@ -509,9 +521,7 @@ public struct ChatView: View {
         case .message(let message):
             TimelineBubble(
                 item: message,
-                openArtifact: { artifactID in
-                    artifactSelection = ArtifactSelection(id: artifactID)
-                },
+                openArtifact: openArtifact,
                 selectText: { textSelection = $0 }
             )
             .id(item.id)
@@ -520,9 +530,7 @@ public struct ChatView: View {
                 WorkStrip(
                     content: .single(activity),
                     approvals: state.approvals,
-                    openArtifact: { artifactID in
-                        artifactSelection = ArtifactSelection(id: artifactID)
-                    }
+                    openArtifact: openArtifact
                 )
                 if let approval = state.approvals.first(where: { $0.id == activity.approvalID }),
                     approval.status.isPending
@@ -539,9 +547,7 @@ public struct ChatView: View {
             WorkStrip(
                 content: .bundle(bundle),
                 approvals: state.approvals,
-                openArtifact: { artifactID in
-                    artifactSelection = ArtifactSelection(id: artifactID)
-                }
+                openArtifact: openArtifact
             )
             .id(scrollID(for: bundle, fallback: item.id))
         }

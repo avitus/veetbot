@@ -19,7 +19,7 @@ The plan designed subagents under Milestone 10 and deferred them behind a gate:
 "add subagents only when evaluation evidence shows that a single agent fails"
 for one of five reasons — independent parallel work, context isolation,
 specialized permissions, specialized tools, or independent verification
-(engineering-plan.md:3127-3135). This document honours that gate as written.
+(engineering-plan.md:3132-3140). This document honours that gate as written.
 Construction is authorized now; tenant activation requires the evidence the
 gate names, and the evidence is part of the milestone rather than a
 precondition for starting it, because the platform has to be able to delegate
@@ -31,7 +31,7 @@ control tool that spawns a child run and suspends the parent
 `WAITING_FOR_APPROVAL` carrying a typed `CHILD_RUN` suspension rather than an
 eighth run state (runtime-loop.md:284-292); the child-run join is the one
 post-terminal hook that is genuinely part of the run lifecycle
-(runtime-loop.md:1257-1268); a child's result enters the parent labelled
+(runtime-loop.md:1264-1275); a child's result enters the parent labelled
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:1044-1050); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
@@ -40,7 +40,7 @@ background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
 The readiness review measured what was left (readiness.md:1012-1016 and
-readiness.md:1016-1019): the objective had a carrier and no schema, the child
+readiness.md:1016-1017): the objective had a carrier and no schema, the child
 budget was additive with no rule deriving a child's own limits, the separate
 trace and the artifact references were picked up by no specification, and a
 child run could not be inserted into its parent's session. This document
@@ -71,8 +71,8 @@ materializes bounded child runs. It includes:
   failures.
 
 The milestone does not include handoffs (the parent retains the user
-interaction and the final response, engineering-plan.md:3125); role-named
-agents for planning, writing, or criticism (engineering-plan.md:3137);
+interaction and the final response, engineering-plan.md:3130); role-named
+agents for planning, writing, or criticism (engineering-plan.md:3142);
 delegation deeper than one level; cross-tenant or cross-principal delegation;
 any change to model routing; a new `WAITING_FOR_CHILD` run status; a child that
 may itself call `delegate.run` or `skill.manage`; or push notification of child
@@ -231,12 +231,12 @@ No new run status. The parent's step ends when the pipeline raises a
 child_run_ids)`, the executor writes `WAITING_FOR_APPROVAL` and the
 `run.waiting_for_approval` event whose payload carries the suspension kind and
 child identifiers, and releases the lease exactly once, as
-runtime-loop.md:1090-1120 specifies for all three suspension kinds. The single
+runtime-loop.md:1097-1127 specifies for all three suspension kinds. The single
 terminal writer's finalize path, which today treats every non-user suspension
 as an approval, branches on the kind: a `CHILD_RUN` suspension appends no
 `approval.requested` and enqueues no Milestone 12 notification.
 
-The join is the post-terminal hook runtime-loop.md:1257-1268 describes. When a
+The join is the post-terminal hook runtime-loop.md:1264-1275 describes. When a
 `DELEGATED` child reaches a terminal state, the hook checks whether every
 sibling under the same `parent_run_id` is terminal. If so, it completes the
 parent's suspended invocation as `tool.call.completed` with one result item

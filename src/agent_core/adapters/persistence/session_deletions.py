@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import any_, bindparam, delete, func, select, update
+from sqlalchemy import any_, bindparam, delete, func, select, true, update
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -54,7 +54,13 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import Sensitivity
-from agent_core.domain.people import PeopleCopyCleanup, PeopleErasure, PeopleQuery, PeopleSource
+from agent_core.domain.people import (
+    PeopleCopyCleanup,
+    PeopleErasure,
+    PeopleQuery,
+    PeopleSource,
+    SourceMemoryLink,
+)
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.memory import TraceStore
@@ -102,7 +108,9 @@ class PostgresSessionDeletionRepository:
             purge_generated=purge_generated,
         )
 
-    async def _source_copy_keys(self, principal: Principal, source_ids: list[UUID]) -> list[UUID]:
+    async def _source_copy_keys(
+        self, principal: Principal, source_ids: list[UUID], *, learning_only: bool = False
+    ) -> list[UUID]:
         if not source_ids:
             return []
         belief_ids = (
@@ -122,6 +130,9 @@ class PostgresSessionDeletionRepository:
                     PeopleLinkRow.target_id
                     == any_(bindparam(None, source_ids, type_=ARRAY(PGUUID(as_uuid=True)))),
                     PeopleRevisionRow.payload["belief_id"].astext.is_not(None),
+                    PeopleRevisionRow.payload["kind"].astext == "source_memory_link"
+                    if learning_only
+                    else true(),
                 )
             )
         ).all()
@@ -149,6 +160,7 @@ class PostgresSessionDeletionRepository:
     ) -> None:
         if not sources:
             return
+        learned = await self._source_copy_keys(principal, sources, learning_only=True)
         beliefs = list(
             (
                 await self._session.scalars(
@@ -158,7 +170,8 @@ class PostgresSessionDeletionRepository:
                         MemoryRow.authority == "inferred"
                         if deleted_session_id is None
                         else (
-                            (MemoryRow.source_session_id == deleted_session_id)
+                            ((MemoryRow.authority == "inferred") & MemoryRow.id.in_(learned))
+                            | (MemoryRow.source_session_id == deleted_session_id)
                             | MemoryRow.formation_run_id.in_(
                                 select(RunRow.id).where(RunRow.session_id == deleted_session_id)
                             )
@@ -606,6 +619,14 @@ class InMemorySessionDeletionRepository:
         deleted_runs = {
             run.id for run in self._runs._runs.values() if run.session_id == deleted_session_id
         }
+        learned = {
+            record.belief_id
+            for key, revisions in self._people._records.items()
+            if key[:2] == (principal.tenant_id, principal.principal_id)
+            for record in revisions
+            if isinstance(record, SourceMemoryLink)
+            and set(sources).intersection(record.support_ids)
+        }
         beliefs = [
             record.id
             for record in self._memories._records.values()
@@ -615,7 +636,8 @@ class InMemorySessionDeletionRepository:
             and (
                 record.authority.value == "inferred"
                 if deleted_session_id is None
-                else record.source_session_id == deleted_session_id
+                else (record.authority.value == "inferred" and record.id in learned)
+                or record.source_session_id == deleted_session_id
                 or record.formation_run_id in deleted_runs
             )
         ]

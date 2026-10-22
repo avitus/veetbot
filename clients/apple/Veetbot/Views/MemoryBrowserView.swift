@@ -12,12 +12,21 @@ import AppKit
 public struct MemoryBrowserView: View {
     @ObservedObject var model: MemoryViewModel
     @StateObject private var people = PeopleViewModel()
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var collection = "memories"
     /// The person shown beside the Mac directory.
     @State private var selectedPersonID: UUID?
     @State private var pendingDeletion: MemoryView?
     private let sessionID: UUID?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var usesColumns: Bool {
+        #if os(macOS)
+        true
+        #else
+        sizeClass == .regular
+        #endif
+    }
 
     public init(model: MemoryViewModel, sessionID: UUID? = nil) {
         self.model = model
@@ -63,6 +72,9 @@ public struct MemoryBrowserView: View {
         .background(MemoryBrowserWindowResizeView())
         .memoryBrowserPresentationSizing()
         #endif
+        #if os(iOS)
+        .presentationSizing(.page)
+        #endif
     }
 
     /// The Mac keeps the collection beside its detail column; elsewhere the
@@ -70,8 +82,8 @@ public struct MemoryBrowserView: View {
     /// present its detail with `navigationDestination(isPresented:)`.
     @ViewBuilder
     private var navigationContainer: some View {
-        #if os(macOS)
-        NavigationSplitView {
+        if usesColumns {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             groupSidebar
                 .navigationSplitViewColumnWidth(min: 190, ideal: 212, max: 260)
         } content: {
@@ -83,17 +95,14 @@ public struct MemoryBrowserView: View {
                 .background(AppTheme.paper)
         }
         .tint(AppTheme.tealFill)
-        #else
-        NavigationStack {
-            collectionColumn
+        } else {
+        NavigationStack { collectionColumn }.tint(AppTheme.tealFill)
         }
-        .tint(AppTheme.tealFill)
-        #endif
     }
 
     private var collectionColumn: some View {
         VStack(spacing: 0) {
-            #if os(macOS)
+            if usesColumns {
             VStack(alignment: .leading, spacing: 4) {
                 Text(sidebarItem.title).veetType(.display)
                 if sidebarItem == .memories(.review) {
@@ -106,7 +115,7 @@ public struct MemoryBrowserView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            #else
+            } else {
             Picker("Memory collection", selection: $collection) {
                 Text("Memories").tag("memories")
                 Text("People").tag("people")
@@ -119,7 +128,7 @@ public struct MemoryBrowserView: View {
             .accessibilityLabel("Memory collection")
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            #endif
+            }
             if collection == "people" { PeopleBrowserView(model: people, sessionID: sessionID, selection: peopleSelection) }
             else if collection == "synthesis" { MemorySynthesisBrowserView() }
             else { content }
@@ -150,7 +159,7 @@ public struct MemoryBrowserView: View {
                 #if !os(macOS)
                 // The Mac's group sidebar carries the review queue and the types.
                 ToolbarItem(placement: .primaryAction) {
-                    if collection == "memories" { reviewQueueToggle }
+                    if !usesColumns, collection == "memories" { reviewQueueToggle }
                 }
                 #endif
                 ToolbarItem(placement: .primaryAction) {
@@ -158,14 +167,13 @@ public struct MemoryBrowserView: View {
                 }
                 #if !os(macOS)
                 ToolbarItem(placement: .primaryAction) {
-                    if collection == "memories" { typeFilterMenu }
+                    if !usesColumns, collection == "memories" { typeFilterMenu }
                 }
                 #endif
             }
     }
 
-    #if os(macOS)
-    /// The Mac's first column (MagicPath coolly-breeze-5701): the review
+    /// The wide workspace's first column (MagicPath coolly-breeze-5701): the review
     /// queue, the memories by type and the People directory, then the
     /// synthesis journal. The numbers come from the counts route (ADR-0224);
     /// an older server leaves the rows without them.
@@ -274,19 +282,13 @@ public struct MemoryBrowserView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("memory.group.\(group.id)")
     }
-    #endif
 
     /// On the Mac the directory selects the person its adjacent column shows;
     /// elsewhere each row pushes the profile.
     private var peopleSelection: Binding<UUID?>? {
-        #if os(macOS)
-        $selectedPersonID
-        #else
-        nil
-        #endif
+        usesColumns ? $selectedPersonID : nil
     }
 
-    #if os(macOS)
     /// The split view's second column. A memory row's navigation link replaces
     /// it while that memory is open.
     @ViewBuilder
@@ -306,7 +308,6 @@ public struct MemoryBrowserView: View {
             AppTheme.paper
         }
     }
-    #endif
 
     @ViewBuilder
     private var content: some View {
@@ -660,8 +661,7 @@ private extension View {
     }
 }
 
-#if os(macOS)
-/// One row of the Mac Memory sidebar.
+/// One row of the wide Memory sidebar.
 enum MemorySidebarItem: Hashable, Identifiable {
     case memories(MemoryBrowseGroup)
     case people
@@ -683,4 +683,3 @@ enum MemorySidebarItem: Hashable, Identifiable {
         }
     }
 }
-#endif

@@ -1278,6 +1278,25 @@ class InMemoryReconsolidationStore:
             )
             return await self._evidence.selectable_sources(principal, originals, now)
 
+    async def selection_input(
+        self, principal: Principal, sources: tuple[SourceVersion, ...], now: datetime
+    ) -> ReconsolidationInput | None:
+        if not 2 <= len(sources) <= 32 or len(set(sources)) != len(sources):
+            raise ValueError("Selection needs 2 to 32 distinct source candidates")
+        if self._evidence is None:
+            return None
+        async with (
+            self._transaction.owner((principal.tenant_id, principal.principal_id)),
+            self._evidence.people.lock(principal),
+        ):
+            if not all([await self._valid(principal, source, now) for source in sources]):
+                return None
+            return await self._evidence.selection_input(
+                principal,
+                tuple((self._memories._records[source.belief_id], source) for source in sources),
+                now,
+            )
+
     async def neighbors(
         self, principal: Principal, source: SourceVersion, now: datetime
     ) -> tuple[SourceVersion, ...]:

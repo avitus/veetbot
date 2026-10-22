@@ -33,7 +33,9 @@ import Testing
     @Test func testTheCensusPushesOnIPhoneAndSitsBesideItsDetailElsewhere() throws {
         let view = try source(at: "Veetbot/Views/EmailSubscriptionsView.swift")
 
-        #expect(view.contains("NavigationView {"))
+        #expect(view.contains("NavigationStack {"))
+        #expect(view.contains("if usesColumns, let selectedSender {"))
+        #expect(view.contains("Button { selectedSender = row }"))
         #expect(view.contains("NavigationLink {"))
         #expect(view.contains("EmailSubscriptionDetailView(model: model, row: row)"))
         #expect(view.contains(".navigationTitle(\"Subscriptions\")"))

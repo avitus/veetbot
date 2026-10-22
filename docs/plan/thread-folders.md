@@ -118,11 +118,11 @@ exists where the persona design deliberately omitted one.
 computes the deterministic result first, calls the provider under a strict
 response schema and a fixed budget, grounds every returned item against its
 source, and records an audited deterministic fallback on any failure
-(memory-formation-and-consolidation.md:763). The grouper is that design with
+(memory-formation-and-consolidation.md:776). The grouper is that design with
 a different schema.
 
 **The maintenance role.** Background work runs as sweeps in the maintenance
-worker under an advisory lock (runtime-loop.md:1526), each on its own timer
+worker under an advisory lock (runtime-loop.md:1533), each on its own timer
 when it is slow. The proposal pass is one more sweep.
 
 ## The domain model

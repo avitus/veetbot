@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 from collections.abc import Buffer, Generator
 from contextvars import ContextVar
 from functools import cache
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from tests.browser_host import host_browser_refusal
 from tests.browser_partition import BROWSER_MODULES
 
 NetworkMode = Literal["blocked", "integration", "live"]
@@ -115,6 +117,10 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """Select the policy before pytest constructs test-scoped fixtures."""
 
+    if item.get_closest_marker("browser") is not None:
+        refusal = host_browser_refusal(sys.platform, os.environ)
+        if refusal is not None:
+            pytest.skip(refusal)
     if item.get_closest_marker("live") is not None:
         NETWORK_MODE.set("live")
     elif item.get_closest_marker("integration") is not None:

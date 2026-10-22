@@ -47,31 +47,39 @@ the draft visible alongside or below its source conversation. Preserve the
 deployment floors ADR-0211 sets and the adaptive layouts.
 
 Switching modes preserves the active Chat run, unsent chat text, selected mail,
-scroll position, and unsent email edits. Memory, Persona, Schedules, and Settings
-remain global. Adding a future mode requires a small mode descriptor and a
+scroll position, unsent email edits, and the loaded mail list: returning to
+Email refreshes the rows in place rather than clearing them (ADR-0234). Memory,
+Persona, Schedules, and Settings remain global. Adding a future mode requires a small mode descriptor and a
 presentation module; this feature does not build a dynamic plugin system.
 
 ### Priority inbox
 
-The initial view combines both accounts and normally displays **up to five
-threads**. It displays fewer when fewer meet the relevance threshold. Account
+The priority view combines both accounts and normally displays **up to five
+threads**. ADR-0231 makes Inbox the A2 initial collection, still paged five
+threads at a time; the relevance threshold below applies to priority selection. It displays fewer when fewer meet the relevance threshold. Account
 badges and an account filter make the source clear without dividing the
 assistant's knowledge.
 
 Each row shows the correspondent, subject, a concise statement of what needs
 attention, and a state such as Needs reply, Draft ready, or For your attention.
-An expandable explanation gives the strongest supported reasons for inclusion.
+The correspondent is the sender's display name when the address carries one and
+the address only otherwise, each person once; the state is a short chip. An
+expandable explanation in the conversation gives the strongest supported
+reasons for inclusion; the row does not repeat it (ADR-0234).
 Numeric ranking scores and internal model details stay out of the main flow.
 
 The list is a selection, not a quota. There is no obligation to fill five slots.
 If more threads clear the threshold, a More important action expands the view
 to ten, then provides pagination over the remaining qualifying threads. Find
 mail and Review other mail make false negatives discoverable without cluttering
-the default list. On foreground refresh, new qualifying threads appear automatically
-after surviving visible rows, which retain their relative order. Preserve the open
-conversation and unsent edits; no reveal action or automatic scroll is required.
-Use a subtle insertion animation, disabled when Reduce Motion is enabled. This
-owner-approved behavior (2026-10-03) replaces the new-mail announcement button.
+the default list. Rows are ordered by each conversation's latest activity,
+newest first, whatever ranking selected them; ties keep the server's order
+(owner-requested, 2026-10-21, ADR-0234). On foreground refresh, surviving rows
+stay, new qualifying threads appear automatically in that order, and a
+conversation with new mail moves up. Preserve the open conversation and unsent
+edits; no reveal action or automatic scroll is required. Use a subtle insertion
+and move animation, disabled when Reduce Motion is enabled. This owner-approved
+behavior (2026-10-03) replaces the new-mail announcement button.
 
 Viewing a thread does not automatically mark it read in Gmail. On servers
 advertising archive support, the checkbox on each row and in thread detail
@@ -100,6 +108,17 @@ Legacy clients' **Mark handled** command remains a local, reversible dismissal
 of that source revision. It does not archive Gmail and is not evidence that a
 thread is archived. New clients must not silently substitute this command when
 the server or selected account lacks archive support.
+
+The approved A2 collection controls add **Inbox**, **Needs you**, and **Handled**.
+Inbox contains cached threads still in Gmail's Inbox; Needs you contains those
+with a current reply-needed assessment and no current-revision dismissal;
+Handled contains Inbox threads whose dismissed revision equals their source
+revision. Counts cover all authorized, retained cached threads matching the
+account and search, before pagination, and do not claim a complete Gmail census.
+New source revisions reopen handled attention. Archive remains its explicitly
+labelled Gmail action; the separate Mark handled/Undo handled control uses the
+reversible attention command and changes no Gmail labels. Collection changes
+preserve open content and unsaved draft text.
 
 Freshness is shown per account. A failed or unfinished scan says so. The UI
 must not equate an incomplete scan or model failure with an empty priority inbox.
@@ -262,7 +281,10 @@ eight, so neither waits for the other. A resynchronization resumes changes
 from a watermark read before its inbox re-listing.
 The first display may be partial while pagination completes; report that state
 and keep useful results visible. Invalidate assessments when the source or a
-relevant feedback/profile/model revision changes. Rerank affected existing mail
+relevant feedback/profile/model revision changes. The model revision is the
+email model's provider and model plus the assessment prompt revision; edits to
+other provider profiles, the catalog or cache settings do not invalidate mail,
+and earlier rows stamped with a registry revision stay current. Rerank affected existing mail
 immediately after learning changes, even if Gmail has not changed. A poll with
 unchanged sources and already-current assessment versions does no new model
 work; unfinished eligible historical analysis can still resume. Reuse completed
@@ -790,6 +812,14 @@ validation, authorization, unavailable/partial state, conflicts, cancellation,
 and uncertain results using the existing error vocabulary where possible. SSE
 continues to carry ordinary run progress; email projections refresh by version
 after completion. No custom streaming transport is required.
+
+`GET /v1/email/threads` also accepts `view=inbox|needs_you|handled` alongside
+existing `priority|other|all` views. It returns additive `collection_counts`
+(`inbox`, `needs_you`, `handled`) from the same authorized, feedback-adjusted
+snapshot as the page, before the view and pagination filters. Account and text
+filters apply to both counts and rows. Older clients ignore the new field;
+clients receiving no counts show no count rather than inferring one from a page.
+The API default remains `priority`; A2 clients explicitly request `inbox`.
 
 `POST /v1/email/threads/{id}/dismiss` accepts `expected_revision` and an optional
 strict boolean `dismissed` (default `true` for existing clients). `true` marks

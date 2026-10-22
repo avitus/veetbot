@@ -94,6 +94,14 @@ let package = Package(
             swiftSettings: fullXcodeFlags
         ),
         .testTarget(
+            name: "AccessibilityEvidenceTests",
+            path: "VeetbotUITests",
+            exclude: ["ConversationNavigationUITests.swift"],
+            sources: ["PeopleContrastEvidence.swift", "PeopleContrastEvidenceTests.swift"],
+            swiftSettings: commandLineTestingFlags + fullXcodeFlags,
+            linkerSettings: commandLineTestingLinkerFlags
+        ),
+        .testTarget(
             name: "VeetbotCoreTests",
             dependencies: ["VeetbotCore"],
             path: "Tests/VeetbotCoreTests",

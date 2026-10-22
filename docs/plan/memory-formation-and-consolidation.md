@@ -127,7 +127,9 @@ explicit + scheduled, with turn-boundary as a cheap flagger only.
   untrusted.
 - **Typed trust gate at selection.** Arbitrary spans that are solely
   `EXTERNAL_UNTRUSTED` (web, browser, file, or unknown tool content) are never a
-  formation source. ADR-0090 admits one narrower class: a recognized,
+  formation source for automatic extraction. The separately governed owner-directed
+  path in ADR-0233 admits cited website observations under the ceilings below.
+  ADR-0090 admits another narrower class: a recognized,
   principal-scoped communication event may form a bounded attributed summary
   without becoming an owner assertion. Gmail and SMS retain untrusted policy
   treatment and can produce only inferred, tentative, local, sensitive
@@ -193,7 +195,9 @@ the project it was learned in, and is defined in
   detail; a restatement of platform instructions or private reasoning. This
   mirrors the "never automatically store" list in Milestone 9 and ADR-0006/0007.
   The tool boundary reports an origin-trust rejection as
-  `tool.trust_rejected`, distinct from malformed arguments, so the model does
+  `tool.memory.manual_trust_rejected` for `memory.remember`, distinguishing the
+  failed manual save from pending background formation (`tool.trust_rejected`
+  remains the generic refusal), so the model does
   not retry the same unsafe write as though its JSON shape were wrong.
 - **Salience (soft ranking).** Keep candidates above a worth-remembering
   threshold: durability (will this matter next week?), specificity, corroboration,
@@ -206,6 +210,15 @@ the project it was learned in, and is defined in
   retain their separate authority and confidence path.
 
 ### 5. Resolve against existing memory
+
+[ADR-0232](../adr/0232-owner-memory-incident-repairs.md) adds a bounded,
+same-session possession-restatement match without using broad subject similarity
+as identity. A generic child-existence claim cannot supersede a named child.
+Bare capitalized possessives alone do not establish possessions. The People
+provider path classifies direct owner possessions as attributes while preserving
+the frozen formation@9 classification. New `memory.remember` versions default
+omitted scope to the authenticated session; pinned versions retain required scope.
+No historical scope, belief status, or production record is rewritten.
 
 For each surviving candidate, match against existing beliefs by subject + semantic
 + lexical similarity, then:
@@ -848,3 +861,38 @@ source age, not import time, governs lifecycle. Explicit corrections survive
 replay and policy upgrades. Source erasure removes retained copies and derived
 influence with suppression; independently supported owner evidence survives.
 All existing formation gates remain binding beside Milestone 26's new gates.
+
+
+## Owner-directed website learning (ADR-0233)
+
+`memory.learn` accepts one to thirty-two observations per batch and admits at
+most thirty-two per interactive run. Each names a successful first-party read
+call ID, an exact quote, an atomic claim, a subject, and optionally a tentative
+belief ID to reinforce. The run's authenticated owner seed must explicitly
+request learning from a public website URL. The returned URL must be on that
+host within its path subtree; external instructions cannot grant authority.
+Successful `web.fetch`, `browser.navigate`, and `browser.observe` results are
+the only admitted reads. Search snippets and text-only speculation about images
+are excluded. Deterministic phrase grounding preserves word order and rejects
+negation, unsupported subjects, instructions, and secrets. This intentionally
+rejects some valid paraphrases; it does not establish semantic truth.
+
+New claims are locally attributed, inferred provisional hypotheses, tentative,
+sensitive, flagged for review, with 0.35 confidence and thirty-day expiry.
+Reinforcement requires full support for a live inferred tentative assertion,
+retains its authority and status, and increases confidence by at most 0.1 up to
+0.55 (an already higher confidence is preserved). Owner corrections and explicit
+facts are never superseded. A host contributes once to a normalized claim;
+retries report unchanged only while the original belief remains live. Duplicate
+claims do not create additional memories, and identical quoted evidence cannot
+manufacture corroboration through another website.
+
+Source-only links in the existing evidence graph preserve supporting events
+across chats without creating People identities. Deleting a supporting chat
+fences the dependent inferred belief for the existing erasure cleanup, including
+when its original source was another chat. Evidence browsing includes these
+references under its existing sensitivity and owner-text rules. This conservative
+withdrawal avoids retaining confidence whose supporting evidence was removed.
+Receipts report committed, reinforced, unchanged, or rejected per observation;
+partial batches remain retryable. Automatic extraction policies, their frozen
+versions, watermarks, and evaluation evidence are unchanged.

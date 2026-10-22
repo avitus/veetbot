@@ -9,21 +9,28 @@ import AppKit
 #endif
 
 public struct ArtifactViewerView: View {
+    /// A sheet of its own, or a preview inside the Mac right panel (ADR-0237).
+    public enum Presentation { case sheet, embedded }
+
     @ObservedObject var model: ChatViewModel
     let artifactID: UUID
+    let presentation: Presentation
     @Environment(\.dismiss) private var dismiss
     @State private var artifact: LoadedArtifact?
     @State private var errorMessage: String?
     @State private var exporting = false
     @State private var exportError: String?
 
-    public init(model: ChatViewModel, artifactID: UUID) {
+    public init(model: ChatViewModel, artifactID: UUID, presentation: Presentation = .sheet) {
         self.model = model
         self.artifactID = artifactID
+        self.presentation = presentation
     }
 
     public var body: some View {
-        presentation
+        framed
+        .background(presentation == .embedded ? AppTheme.surface : AppTheme.paper)
+        .tint(AppTheme.tealFill)
         .task {
             do {
                 artifact = try await model.loadArtifact(artifactID)
@@ -52,7 +59,44 @@ public struct ArtifactViewerView: View {
     }
 
     @ViewBuilder
-    private var presentation: some View {
+    private var framed: some View {
+        if presentation == .embedded {
+            embedded
+        } else {
+            sheet
+        }
+    }
+
+    /// The panel's preview: the name and Download above the same preview the
+    /// sheet draws, at a height the panel can scroll past.
+    private var embedded: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
+                Text(artifact?.metadata.name ?? "Artifact")
+                    .veetType(.ui, weight: .semibold)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                Spacer(minLength: VeetSpace.s2)
+                Button("Download") { exporting = true }
+                    .primaryCapsule()
+                    .disabled(artifact == nil)
+                    .accessibilityIdentifier("inspector.artifact.download")
+            }
+            .padding(VeetSpace.s3)
+            HairlineDivider()
+            preview
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 160, idealHeight: 320, maxHeight: 360)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous).stroke(AppTheme.hairline))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inspector.artifact.preview")
+    }
+
+    @ViewBuilder
+    private var sheet: some View {
         #if os(macOS)
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -60,7 +104,7 @@ public struct ArtifactViewerView: View {
                     .veetType(.title)
                     .foregroundColor(.secondary)
                 Text(artifact?.metadata.name ?? "Artifact")
-                    .veetType(.ui, weight: .semibold)
+                    .veetType(.display)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
@@ -76,8 +120,10 @@ public struct ArtifactViewerView: View {
             HStack {
                 Spacer()
                 Button("Close") { dismiss() }
+                    .buttonStyle(QuietCapsuleButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button("Download") { exporting = true }
+                    .primaryCapsule()
                     .keyboardShortcut(.defaultAction)
                     .disabled(artifact == nil)
             }
@@ -163,11 +209,19 @@ public struct ArtifactViewerView: View {
 
             if artifact.metadata.mediaType.hasPrefix("text/") {
                 let preview = textPreview(data: artifact.data)
-                ScrollView([.horizontal, .vertical]) {
+                let markdown = artifact.metadata.mediaType == "text/markdown"
+                    || artifact.metadata.mediaType == "text/x-markdown"
+                    || artifact.metadata.name.lowercased().hasSuffix(".md")
+                ScrollView(markdown ? .vertical : [.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(preview.text)
-                            .veetMono()
-                            .textSelection(.enabled)
+                        if markdown {
+                            MarkdownContentView(text: preview.text)
+                                .frame(maxWidth: A2Metrics.transcriptMaxWidth, alignment: .leading)
+                        } else {
+                            Text(preview.text)
+                                .veetMono()
+                                .textSelection(.enabled)
+                        }
                         if preview.isTruncated {
                             Label(
                                 "Preview truncated. Download the artifact for the full content.",

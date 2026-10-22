@@ -885,6 +885,13 @@ and polls for cancellation, because all three are the same "has the outside
 world changed its mind" question and doing them in one place means one timer
 and one query rather than three.
 
+Under a fixed clock, sleeping advances simulated time, so a supervisor timed
+by `ctx.clock.sleep` would jump the clock a third of a lease each time the run
+awaited real I/O, and simulated time, with every deadline measured on it, would
+track database speed. The composition root therefore times the heartbeat beside
+a clock whose sleep advances it with a wait that only yields; a clock whose
+sleep waits in real time, the system clock included, times it as above.
+
 `heartbeat` returning `False` rather than raising is deliberate in the event
 log spec, and this is where that pays off: the supervisor's handling of
 being fenced is to set a token and return, which is a statement, not an

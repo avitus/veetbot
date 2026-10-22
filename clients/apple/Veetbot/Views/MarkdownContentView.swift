@@ -654,7 +654,10 @@ private struct MarkdownListView: View {
                 HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
                     marker(for: item)
                         .frame(width: VeetSpace.s5, alignment: .trailing)
+                    // Beside the marker the row can propose a line less than
+                    // the wrap needs, which cut the item off with an ellipsis.
                     inlineMarkdownText(item.text)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.leading, CGFloat(item.depth) * VeetSpace.s5)

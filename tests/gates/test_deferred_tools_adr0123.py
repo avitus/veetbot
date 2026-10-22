@@ -205,12 +205,13 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     assert len(plan.tool_names) == 30
     assert "tool.call" in defined
     # The six management tools are deferred by the default agent's configuration.
-    assert deferred >= MANAGEMENT_TOOLS
+    assert deferred >= MANAGEMENT_TOOLS | {"memory.learn", "workspace.write_text"}
     # Reads take the definition slots before anything that changes the world.
     assert defined >= DISCOVERED_READS
-    # The calling and Gmail reads fill the last definitions, so the Scale VP
-    # reads, which rank after them, are offered through the index (ADR-0153).
-    assert deferred >= SVP_READS
+    # Deferring workspace writes admits one additional read while all writes
+    # still follow the discovered reads (ADRs 0153 and 0233).
+    assert defined & SVP_READS == {"mcp.svp_read.call_operation"}
+    assert deferred >= SVP_READS - {"mcp.svp_read.call_operation"}
     writes = {
         spec.name for spec in discovered if spec.side_effect is not SideEffectClass.NETWORK_READ
     }

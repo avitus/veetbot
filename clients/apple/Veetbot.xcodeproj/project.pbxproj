@@ -99,6 +99,11 @@
 		10000000000000000000B002 /* MemorySynthesisAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000B002 /* MemorySynthesisAPIClient.swift */; };
 		10000000000000000000B003 /* MemorySynthesisViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000B003 /* MemorySynthesisViewModel.swift */; };
 		10000000000000000000B004 /* MemorySynthesisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000B004 /* MemorySynthesisView.swift */; };
+		A23500000000000000000001 /* PeopleContrastEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23500000000000000000002 /* PeopleContrastEvidence.swift */; };
+		10000000000000000000E001 /* InspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E001 /* InspectorModel.swift */; };
+		10000000000000000000E002 /* InspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E002 /* InspectorPanel.swift */; };
+		10000000000000000000E003 /* ChatInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E003 /* ChatInspectorPanel.swift */; };
+		10000000000000000000E004 /* EmailInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E004 /* EmailInspectorPanel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -208,6 +213,11 @@
 		20000000000000000000B002 /* MemorySynthesisAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySynthesisAPIClient.swift; sourceTree = "<group>"; };
 		20000000000000000000B003 /* MemorySynthesisViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySynthesisViewModel.swift; sourceTree = "<group>"; };
 		20000000000000000000B004 /* MemorySynthesisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySynthesisView.swift; sourceTree = "<group>"; };
+		A23500000000000000000002 /* PeopleContrastEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleContrastEvidence.swift; sourceTree = "<group>"; };
+		20000000000000000000E001 /* InspectorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorModel.swift; sourceTree = "<group>"; };
+		20000000000000000000E002 /* InspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorPanel.swift; sourceTree = "<group>"; };
+		20000000000000000000E003 /* ChatInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInspectorPanel.swift; sourceTree = "<group>"; };
+		20000000000000000000E004 /* EmailInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailInspectorPanel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -338,6 +348,7 @@
 				200000000000000000000010 /* RunStateReducer.swift */,
 				2000000000000000000000A3 /* EmailViewModel.swift */,
 				20000000000000000000D5 /* EmailSubscriptionsViewModel.swift */,
+				20000000000000000000E001 /* InspectorModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -381,6 +392,9 @@
 				2000000000000000000000A4 /* EmailModeView.swift */,
 				20000000000000000000D6 /* EmailSubscriptionsView.swift */,
 				2000000000000000000000B3 /* CallResultSheet.swift */,
+				20000000000000000000E002 /* InspectorPanel.swift */,
+				20000000000000000000E003 /* ChatInspectorPanel.swift */,
+				20000000000000000000E004 /* EmailInspectorPanel.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -406,6 +420,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000001D /* ConversationNavigationUITests.swift */,
+				A23500000000000000000002 /* PeopleContrastEvidence.swift */,
 			);
 			path = VeetbotUITests;
 			sourceTree = "<group>";
@@ -510,6 +525,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				10000000000000000000B004 /* MemorySynthesisView.swift in Sources */,
+				10000000000000000000E001 /* InspectorModel.swift in Sources */,
+				10000000000000000000E002 /* InspectorPanel.swift in Sources */,
+				10000000000000000000E003 /* ChatInspectorPanel.swift in Sources */,
+				10000000000000000000E004 /* EmailInspectorPanel.swift in Sources */,
 				10000000000000000000B003 /* MemorySynthesisViewModel.swift in Sources */,
 				10000000000000000000B002 /* MemorySynthesisAPIClient.swift in Sources */,
 				10000000000000000000B001 /* MemorySynthesisModels.swift in Sources */,
@@ -607,6 +626,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				10000000000000000000001D /* ConversationNavigationUITests.swift in Sources */,
+				A23500000000000000000001 /* PeopleContrastEvidence.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

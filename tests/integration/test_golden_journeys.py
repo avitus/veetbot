@@ -252,7 +252,9 @@ async def test_invalid_memory_arguments_are_corrected_and_retried_to_success() -
                         name="memory.remember",
                         arguments={
                             "statement": statement,
-                            "subject": "release train schedule",
+                            # Scope now defaults to the current project; omit
+                            # the still-required subject to exercise correction.
+                            "scope": "general",
                         },
                         call_id="golden-invalid-memory",
                     )

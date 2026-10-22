@@ -507,3 +507,36 @@ async def execution_never_groups_without_its_anchor(factory: Factory) -> None:
 
 
 EXECUTION_SCENARIOS.append(execution_never_groups_without_its_anchor)
+
+
+async def execution_oversized_neighbors_reach_review(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        oversized_neighbors_reach_owner_review,
+    )
+
+    await oversized_neighbors_reach_owner_review(factory)
+
+
+EXECUTION_SCENARIOS.append(execution_oversized_neighbors_reach_review)
+
+
+async def execution_oversized_queued_group_preserves_fitting_siblings(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        oversized_neighbors_reach_owner_review,
+    )
+
+    await oversized_neighbors_reach_owner_review(factory, queued=True)
+
+
+EXECUTION_SCENARIOS.append(execution_oversized_queued_group_preserves_fitting_siblings)
+
+
+async def execution_unfittable_pair_remains_blocked(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        oversized_pair_remains_explicitly_blocked,
+    )
+
+    await oversized_pair_remains_explicitly_blocked(factory)
+
+
+EXECUTION_SCENARIOS.append(execution_unfittable_pair_remains_blocked)

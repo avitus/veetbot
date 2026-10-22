@@ -36,6 +36,12 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.trust_rejected": (
         "The tool rejected content whose provenance was not trusted for this operation."
     ),
+    "tool.memory.manual_trust_rejected": (
+        "This manual save failed because its provenance was not trusted. Background formation "
+        "of owner-stated facts is separate and may run after the reply; its outcome is not yet "
+        "known. Do not claim that no memories were formed. For owner-requested website learning, "
+        "use memory.learn with exact source evidence when available."
+    ),
     "tool.output_invalid": "The tool returned data outside its declared contract.",
     "tool.timeout": "The tool did not finish within its allowed time.",
     "tool.internal_error": "The tool could not complete because of an internal error.",

@@ -1639,6 +1639,23 @@ class PostgresReconsolidationStore:
                 now,
             )
 
+    async def selection_input(
+        self, principal: Principal, sources: tuple[SourceVersion, ...], now: datetime
+    ) -> ReconsolidationInput | None:
+        if not 2 <= len(sources) <= 32 or len(set(sources)) != len(sources):
+            raise ValueError("Selection needs 2 to 32 distinct source candidates")
+        if self._evidence is None:
+            return None
+        await lock_owner(self._session, principal)
+        async with self._evidence.people.lock(principal):
+            rows = await self._sources(principal, sources, now)
+            if len(rows) != len(sources):
+                return None
+            originals = {row.id: (_memory(row), _version(row)) for row in rows}
+            return await self._evidence.selection_input(
+                principal, tuple(originals[source.belief_id] for source in sources), now
+            )
+
     async def neighbors(
         self, principal: Principal, source: SourceVersion, now: datetime
     ) -> tuple[SourceVersion, ...]:

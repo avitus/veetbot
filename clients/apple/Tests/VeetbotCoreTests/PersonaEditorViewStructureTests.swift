@@ -37,7 +37,8 @@ import Testing
     func testToneAndBoundariesFollowTheServer() throws {
         let source = try personaEditorViewSource()
 
-        #expect(source.contains("if model.toneSupported {\n                        voiceSection"))
+        #expect(source.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            .contains("if model.toneSupported { voiceSection"))
         #expect(source.contains(".accessibilityIdentifier(\"persona.trait.\\(trait)\")"))
         #expect(source.contains("if !model.boundaries.isEmpty"))
         #expect(source.contains("Turn one off to stop Veetbot treating it as a standing instruction."))

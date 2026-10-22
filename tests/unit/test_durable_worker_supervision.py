@@ -15,10 +15,11 @@ from typing import Any, cast
 
 import pytest
 
-from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.determinism import FixedClock, SystemClock, heartbeat_wait_for
 from agent_core.domain.events import NewEvent
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.runs import CancelReason, RunStatus
+from agent_core.evals.general_recall_database import EvaluationClock
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.executor import RunExecutor
@@ -192,6 +193,49 @@ async def test_a_healthy_lease_is_renewed_every_third_of_its_duration_without_ca
     assert len(queue.heartbeats) >= 3
     assert all(lease == LEASE for lease in queue.heartbeats)
     assert clock.sleeps and set(clock.sleeps) == {10.0}
+
+
+async def test_an_injected_heartbeat_wait_times_the_lease_without_moving_the_clock() -> None:
+    waits: list[float] = []
+
+    async def wait(seconds: float) -> None:
+        waits.append(seconds)
+        await asyncio.sleep(0)
+
+    worker, executor, queue, _unit, clock = _worker("three_heartbeats", [], heartbeat_wait=wait)
+
+    assert await worker.run_once() is True
+
+    assert executor.observed is None
+    assert len(queue.heartbeats) >= 3
+    assert waits and set(waits) == {10.0}
+    assert clock.sleeps == []
+    assert clock.now() == NOW
+
+
+async def test_a_fixed_clock_gets_a_heartbeat_wait_that_leaves_it_where_it_was() -> None:
+    clock = FixedClock(NOW)
+    wait = heartbeat_wait_for(clock)
+
+    assert wait is not None
+    await wait(10.0)
+    assert clock.now() == NOW
+
+
+class _RealTimeFixedClock(FixedClock):
+    async def sleep(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+
+
+@pytest.mark.parametrize(
+    "clock",
+    [SystemClock(), _RealTimeFixedClock(NOW), EvaluationClock(NOW)],
+    ids=["system", "fixed_with_real_sleep", "evaluation"],
+)
+def test_a_clock_whose_sleep_waits_in_real_time_keeps_timing_the_heartbeat(
+    clock: FixedClock | SystemClock,
+) -> None:
+    assert heartbeat_wait_for(clock) is None
 
 
 async def test_a_claim_is_announced_under_its_lease_before_execution() -> None:

@@ -6,16 +6,29 @@ struct EmailSubscriptionsScreen: View {
     @ObservedObject var model: EmailSubscriptionsViewModel
     let accounts: [EmailAccountView]
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var selectedSender: EmailSubscriptionView?
+    private var usesColumns: Bool {
+        #if os(macOS)
+        true
+        #else
+        sizeClass == .regular
+        #endif
+    }
 
     var body: some View {
-        NavigationView {
-            census
-            EmailEmptyState(
-                symbol: "tray.full", title: "Choose a sender",
-                message: "Its conversations, what it offers, and what you can still do appear here."
-            )
-            .frame(maxWidth: 400).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppTheme.paper)
+        NavigationStack {
+            HStack(spacing: 0) {
+                census.frame(minWidth: 300, maxWidth: .infinity)
+                if usesColumns, let selectedSender {
+                    HairlineDivider().frame(width: 1)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button("Close sender details") { self.selectedSender = nil }
+                            .buttonStyle(QuietCapsuleButtonStyle()).padding(12)
+                        EmailSubscriptionDetailView(model: model, row: selectedSender)
+                    }.frame(minWidth: 280, maxWidth: .infinity)
+                }
+            }
         }
         .tint(AppTheme.teal)
         .accessibilityIdentifier("email.subscriptions")
@@ -69,12 +82,25 @@ struct EmailSubscriptionsScreen: View {
                             .accessibilityValue(model.isSelected(row.id) ? "Selected" : "Not selected")
                             .accessibilityIdentifier("email.subscription.select.\(row.id)")
                         }
-                        NavigationLink {
-                            EmailSubscriptionDetailView(model: model, row: row)
-                        } label: {
-                            EmailSubscriptionRowLabel(model: model, row: row)
+                        Group {
+                            if usesColumns {
+                                Button { selectedSender = row } label: {
+                                    EmailSubscriptionRowLabel(model: model, row: row)
+                                }.buttonStyle(.plain)
+                            } else {
+                                NavigationLink {
+                                    EmailSubscriptionDetailView(model: model, row: row)
+                                } label: {
+                                    EmailSubscriptionRowLabel(model: model, row: row)
+                                }
+                            }
                         }
                         .accessibilityIdentifier("email.subscription.row.\(row.id)")
+                        if !model.isSelecting, model.actions(for: row).contains(.unsubscribe) || model.actions(for: row).contains(.tryAgain) {
+                            Button(row.state == "active" ? "Unsubscribe" : "Try again") { model.beginUnsubscribe(row) }
+                                .buttonStyle(SecondaryCapsuleButtonStyle())
+                                .accessibilityIdentifier("email.subscription.inline.\(row.id)")
+                        }
                     }
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowSeparatorTint(AppTheme.hairline)

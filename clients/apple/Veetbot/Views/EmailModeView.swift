@@ -30,6 +30,11 @@ enum EmailType {
     static let handledDiameter: CGFloat = 18
 }
 
+private extension EmailThreadView {
+    /// The people line of a row or heading; a conversation with no sender still reads.
+    var correspondentsOrUnknown: String { correspondents.isEmpty ? "Unknown sender" : correspondents }
+}
+
 #if os(macOS)
 /// The inbox width the owner chose by dragging the Mac Email divider, kept on
 /// this Mac and never sent to the server. Before any drag, and for an
@@ -162,11 +167,26 @@ public struct EmailModeView: View {
     var inboxWidth = EmailInboxWidthStore.app
     #endif
     let discussInChat: () async -> Void
+    var openChat: () -> Void = {}
+    var newChat: () -> Void = {}
+    var openMemory: () -> Void = {}
+    var openPeople: () -> Void = {}
+    var openSchedules: () -> Void = {}
+    var openPersona: () -> Void = {}
+    var openSettings: () -> Void = {}
+    var chatAttention: [SidebarAttention.Row] = []
+    var openAttention: (UUID) -> Void = { _ in }
+    /// The Mac right panel and the run stream its Activity tab replays (ADR-0237).
+    var inspector: InspectorModel? = nil
+    var runFrames: ((UUID) -> AsyncThrowingStream<SSEFrame, Error>)? = nil
+    @EnvironmentObject private var appearance: AppearancePreferences
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.activeClientMode) private var activeMode
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingLearning = false
     @State private var showingSubscriptions = false
     @State private var showingBudgetDetails = false
+    @State private var showingOtherMailViews = false
     @State private var navigationPath: [UUID] = []
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
@@ -183,16 +203,24 @@ public struct EmailModeView: View {
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
-            #if os(macOS)
-            macSplit
-            #else
             if directSelection {
-                NavigationSplitView {
-                    inbox
-                        .frame(height: macColumnHeight)
-                        .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
-                } detail: {
-                    detail.frame(height: macColumnHeight)
+                HStack(spacing: 0) {
+                    mailboxSidebar.frame(width: 232)
+                    #if os(macOS)
+                    withPanel(VStack(spacing: 0) {
+                        emailHeading
+                        macSplit
+                    })
+                    #else
+                    VStack(spacing: 0) {
+                        emailHeading
+                        HStack(spacing: 0) {
+                            inbox.frame(width: 300)
+                            HairlineDivider().frame(width: 1)
+                            detail.frame(maxWidth: .infinity)
+                        }
+                    }
+                    #endif
                 }
             } else {
                 NavigationStack(path: $navigationPath) {
@@ -201,7 +229,6 @@ public struct EmailModeView: View {
                     }
                 }
             }
-            #endif
         }
         .tint(AppTheme.teal)
         .sheet(isPresented: Binding(get: { model.review != nil }, set: { if !$0 { model.closeReview() } })) {
@@ -220,6 +247,7 @@ public struct EmailModeView: View {
         }
         .onChange(of: model.selectedThreadID) { _, id in
             if let id, navigationPath.last != id { navigationPath = [id] } else if id == nil { navigationPath = [] }
+            inspector?.threadChanged()
         }
         .onChange(of: navigationPath) { _, path in
             if path.isEmpty, !directSelection, model.selectedThreadID != nil { model.clearSelection() }
@@ -237,30 +265,34 @@ public struct EmailModeView: View {
     }
 
     #if os(macOS)
+    /// The thread's right panel beside the inbox and reading columns, when the
+    /// root provides one (ADR-0237).
+    @ViewBuilder
+    private func withPanel<Content: View>(_ content: Content) -> some View {
+        if let inspector {
+            content.macInspector(inspector, mode: .email) {
+                EmailInspectorPanel(model: model, inspector: inspector, runFrames: runFrames)
+            }
+        } else {
+            content
+        }
+    }
+
     /// Uses a native divider while the shared root owns the Mac window toolbar.
     private var macSplit: some View {
         HSplitView {
             inbox
                 .frame(minWidth: EmailInboxWidthStore.bounds.lowerBound, idealWidth: 340,
                        maxWidth: EmailInboxWidthStore.bounds.upperBound)
-                .frame(height: macColumnHeight)
+                .frame(maxHeight: .infinity)
                 .background(EmailInboxWidthAutosave(store: inboxWidth))
             detail
-                .frame(minWidth: 360, maxWidth: .infinity)
-                .frame(height: macColumnHeight)
+                .frame(minWidth: 250, maxWidth: .infinity)
+                .frame(maxHeight: .infinity)
                 .layoutPriority(1)
         }
     }
     #endif
-
-    /// Bounds AppKit split-view columns without imposing a fixed height on compact iOS navigation.
-    private var macColumnHeight: CGFloat? {
-        #if os(macOS)
-        viewportHeight
-        #else
-        nil
-        #endif
-    }
 
     private var visibleAccounts: [EmailAccountView] {
         model.accounts.filter { model.selectedAccountID == nil || $0.id == model.selectedAccountID }
@@ -269,8 +301,10 @@ public struct EmailModeView: View {
     /// Groups triage controls above independently actionable rows and per-account freshness below them.
     private var inbox: some View {
         VStack(spacing: 0) {
-            inboxHeader
-                .fixedSize(horizontal: false, vertical: true)
+            if !directSelection {
+                emailHeading
+                inboxHeader.fixedSize(horizontal: false, vertical: true)
+            }
             HairlineDivider()
             List {
                 if model.unavailable {
@@ -292,7 +326,7 @@ public struct EmailModeView: View {
                         .buttonStyle(SecondaryCapsuleButtonStyle())
                     }.padding(.vertical, 16).emailHideSeparator()
                 }
-                if let pause = model.budgetPauseMessage {
+                if !directSelection, let pause = model.budgetPauseMessage {
                     budgetPause(pause)
                         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                         .emailHideSeparator()
@@ -315,7 +349,10 @@ public struct EmailModeView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .transition(.opacity)
+                    .modifier(EmailArrivalWash(model: model, threadID: thread.id))
+                    // An arrival slides down into its place; a row that leaves fades.
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
                     .modifier(EmailRowChrome(selected: thread.id == model.selectedThreadID))
                 }
                 if model.hasMore {
@@ -327,7 +364,7 @@ public struct EmailModeView: View {
                     .emailHideSeparator()
                 }
             }
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.items.map(\.id))
+            .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15), value: model.items.map(\.id))
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .frame(minHeight: 0, maxHeight: .infinity)
@@ -407,6 +444,112 @@ public struct EmailModeView: View {
         .accessibilityIdentifier("email.inbox")
     }
 
+    private var emailHeading: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Email").veetType(.display)
+                Text(threadCount).veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            }
+            Spacer()
+            #if os(iOS)
+            if directSelection { EmailRefreshButton(model: model) }
+            #endif
+            Button { appearance.theme = colorScheme == .dark ? .light : .dark } label: {
+                Image(systemName: colorScheme == .dark ? "sun.max" : "moon")
+            }
+            .buttonStyle(QuietCapsuleButtonStyle())
+            .accessibilityLabel(colorScheme == .dark ? "Switch to light appearance" : "Switch to dark appearance")
+            .accessibilityIdentifier("email.appearance")
+        }
+        .padding(.horizontal, 24).padding(.vertical, 16)
+        .background(AppTheme.paper)
+    }
+
+    private var mailboxSidebar: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    inboxHeader
+                    Button(action: newChat) { Label("New chat", systemImage: "plus").frame(maxWidth: .infinity) }
+                        .primaryCapsule().accessibilityIdentifier("email.new-chat")
+                    ModeSegment(selected: .email) { if $0 == .chat { openChat() } }
+                    if !chatAttention.isEmpty {
+                        SidebarSectionLabel(title: "Needs you")
+                        ForEach(chatAttention) { row in
+                            Button { openAttention(row.entry.sessionID) } label: {
+                                SidebarRow { AttentionDot(kind: row.kind) } title: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(row.label)
+                                        Text(row.entry.title).veetType(.meta).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+                                    }
+                                }
+                            }.buttonStyle(.plain)
+                            .accessibilityLabel("\(row.label), \(row.entry.title)")
+                            .accessibilityIdentifier("email.chat-attention.\(row.id)")
+                        }
+                    }
+                    SidebarSectionLabel(title: "Mailbox")
+                    ForEach(EmailCollection.allCases, id: \.self) { collection in
+                        Button { model.setCollection(collection) } label: {
+                            SidebarRow { Image(systemName: collectionSymbol(collection)) } title: {
+                                Text(collectionTitle(collection))
+                            } trailing: { _ in
+                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                            }
+                            .padding(.horizontal, 8)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(model.listView == collection.rawValue ? AppTheme.selected : .clear))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(model.listView == collection.rawValue ? .isSelected : [])
+                        .accessibilityIdentifier("email.collection.\(collectionID(collection))")
+                    }
+                    if model.unsubscribeAvailable {
+                        Button { showingSubscriptions = true } label: {
+                            SidebarRow { Image(systemName: "tray.full") } title: { Text("Subscriptions") }
+                        }.buttonStyle(.plain)
+                        #if os(macOS)
+                        .accessibilityIdentifier("email.mailbox.subscriptions")
+                        #else
+                        .accessibilityIdentifier("email.subscriptions.open")
+                        #endif
+                    }
+                    Button { showingLearning = true } label: {
+                        SidebarRow { Image(systemName: "slider.horizontal.3") } title: { Text("Email learning") }
+                    }.buttonStyle(.plain)
+                    #if os(iOS)
+                    .accessibilityIdentifier("email.learning")
+                    #endif
+                    if let pause = model.budgetPauseMessage { budgetPause(pause) }
+                }.padding(12)
+            }
+            HStack {
+                globalButton("Chat", "bubble.left", openChat)
+                globalButton("Memory", "brain", openMemory)
+                globalButton("People", "person.2", openPeople)
+                globalButton("Schedules", "calendar.badge.clock", openSchedules)
+                globalButton("Persona", "sparkles", openPersona)
+                globalButton("Settings", "gearshape", openSettings)
+            }.padding(10)
+        }.background(AppTheme.paperDeep)
+    }
+
+    private func globalButton(_ title: String, _ symbol: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).frame(maxWidth: .infinity, minHeight: 32) }
+            .buttonStyle(.plain).foregroundColor(AppTheme.inkSoft)
+            .accessibilityLabel(title).help(title)
+            .accessibilityIdentifier("email.global.\(title.lowercased())")
+    }
+
+    private func collectionID(_ value: EmailCollection) -> String {
+        switch value { case .inbox: "inbox"; case .needsYou: "needsYou"; case .handled: "handled" }
+    }
+    private func collectionTitle(_ value: EmailCollection) -> String {
+        switch value { case .inbox: "Inbox"; case .needsYou: "Needs you"; case .handled: "Handled" }
+    }
+    private func collectionSymbol(_ value: EmailCollection) -> String {
+        switch value { case .inbox: "tray"; case .needsYou: "flag"; case .handled: "checkmark" }
+    }
+
     /// A paused budget is one short note on paperDeep, three lines tall with
     /// its accounting folded, so the first row still starts near the top.
     private func budgetPause(_ pause: String) -> some View {
@@ -458,8 +601,7 @@ public struct EmailModeView: View {
                 .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
                 .accessibilityIdentifier("email.accounts")
                 Spacer(minLength: 8)
-                Text(threadCount)
-                    .veetType(.meta).foregroundColor(AppTheme.inkSoft).fixedSize()
+
             }
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
@@ -478,7 +620,37 @@ public struct EmailModeView: View {
             .veetType(.ui)
             .padding(.horizontal, 10).frame(minHeight: A2Metrics.controlHeight + 4)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.field))
-            mailViewControl
+            if !directSelection {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(EmailCollection.allCases, id: \.self) { collection in
+                            Button {
+                                model.setCollection(collection)
+                            } label: {
+                                Text(collectionTitle(collection))
+                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                            }
+                            .buttonStyle(FilterPillButtonStyle(selected: model.listView == collection.rawValue))
+                            .accessibilityIdentifier("email.collection.\(collectionID(collection))")
+                        }
+                    }
+                }
+            }
+            Button {
+                showingOtherMailViews.toggle()
+            } label: {
+                HStack {
+                    Text("Find other mail")
+                    Spacer()
+                    Image(systemName: showingOtherMailViews ? "chevron.up" : "chevron.down")
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            .accessibilityIdentifier("email.other-mail-views")
+            .accessibilityValue(showingOtherMailViews ? "Expanded" : "Collapsed")
+            if showingOtherMailViews { mailViewControl }
         }.padding(12)
     }
 
@@ -504,11 +676,13 @@ public struct EmailModeView: View {
         #endif
     }
 
-    /// "5 threads · 2 need a reply", counted over the loaded rows as the reference's header line.
+    /// Prefer the server's count across pages; older servers describe only the loaded rows.
     private var threadCount: String {
-        let count = model.items.count
+        let counts = EmailCollection(rawValue: model.listView) == nil ? nil : model.collectionCounts
+        let count = counts?.count(for: model.collection) ?? model.items.count
         var line = "\(count) \(count == 1 ? "thread" : "threads")"
-        let needing = model.items.filter { $0.needsReply && !$0.isHandled && !$0.isArchived }.count
+        let needing = counts?.count(for: .needsYou)
+            ?? model.items.filter { $0.needsReply && !$0.isHandled && !$0.isArchived }.count
         if needing > 0 { line += " · \(needing) \(needing == 1 ? "needs" : "need") a reply" }
         return line
     }
@@ -581,9 +755,9 @@ private struct EmailRowChrome: ViewModifier {
     }
 }
 
-/// One thread as the reference draws it: who and when, the subject, Veetbot's
-/// gist, and what the conversation needs from the owner. A handled or
-/// archived conversation reads in soft ink.
+/// One thread as the reference draws it: who (by name) and when (by recency),
+/// the subject, Veetbot's gist, and what the conversation needs from the owner
+/// as one short chip. A handled or archived conversation reads in soft ink.
 private struct EmailThreadRow: View {
     @ObservedObject var model: EmailViewModel
     let thread: EmailThreadView
@@ -593,25 +767,31 @@ private struct EmailThreadRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: EmailType.rowSpacing) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(thread.senders.joined(separator: ", "))
+                Text(thread.correspondentsOrUnknown)
                     .veetType(EmailType.sender, weight: settled ? .regular : .semibold)
                     .foregroundColor(settled ? AppTheme.inkSoft : AppTheme.ink)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(thread.updatedAt, format: .dateTime.month(.abbreviated).day())
-                    .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
+                // The time today, Yesterday, the weekday within the week, then the date.
+                TimelineView(.everyMinute) { context in
+                    Text(EmailRowDate.label(for: thread.updatedAt, relativeTo: context.date))
+                        .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).monospacedDigit().fixedSize()
+                }
             }
             Text(thread.subject.isEmpty ? "No subject" : thread.subject)
                 .veetType(EmailType.subject).foregroundColor(settled ? AppTheme.inkSoft : AppTheme.ink).lineLimit(1)
-            Text(thread.summary).veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(1)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // The gist is the line that says what the mail needs; give it two lines.
+            Text(thread.summary).veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .center, spacing: 6) {
                 EmailThreadStatus(thread: thread)
                 if model.accounts.count > 1 {
                     Spacer(minLength: 4)
                     Text(model.accounts.first { $0.id == thread.accountID }?.label ?? thread.accountID)
-                        .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
+                        .veetType(.label, weight: .medium).foregroundColor(AppTheme.inkFaint).lineLimit(1)
                 }
             }
+            .padding(.top, 1)
             if !thread.complete {
                 Label("Partial thread", systemImage: "exclamationmark.circle")
                     .veetType(EmailType.meta).foregroundColor(AppTheme.amberText)
@@ -724,7 +904,7 @@ private struct EmailArchiveStatus: View {
 }
 
 private struct EmailThreadScreen: View {
-    private enum Field: Hashable { case to, cc, bcc, subject, body, feedback, refinement }
+    private enum Field: Hashable { case to, cc, bcc, subject, body, refinement }
     @ObservedObject var model: EmailViewModel
     @ObservedObject var subscriptions: EmailSubscriptionsViewModel
     let discussInChat: () async -> Void
@@ -733,17 +913,16 @@ private struct EmailThreadScreen: View {
     var actionsInNavigationBar = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.activeClientMode) private var activeMode
-    @State private var target: EmailFeedbackTarget = .thread
-    @State private var explanation = ""
-    @State private var targetValue = ""
     @State private var refinement = ""
     @State private var showingDiscard = false
     @State private var showingExclusion = false
     @State private var showingRevisions = false
-    @State private var showingFeedback = false
     @State private var showingEnvelope = false
     @State private var peopleLookup: PeopleLookup?
     @FocusState private var focusedField: Field?
+    @FocusState private var feedbackFocused: Bool
+    /// On the Mac the sender's card and Teach Veetbot live in the right panel.
+    @Environment(\.inspectorReveal) private var inspectorReveal
 
     private var replyScrollAnimation: Animation? {
         #if os(macOS)
@@ -769,7 +948,9 @@ private struct EmailThreadScreen: View {
                                     .accessibilityIdentifier("email.read-error")
                             }
                             conversation(thread)
-                            teachCard
+                            if inspectorReveal == nil {
+                                EmailTeachCard(model: model, explanationFocused: $feedbackFocused)
+                            }
                             draftEditor.id("reply")
                         }
                         .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 28)
@@ -846,7 +1027,10 @@ private struct EmailThreadScreen: View {
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { focusedField = nil }.accessibilityIdentifier("email.keyboard-done")
+                    Button("Done") {
+                        focusedField = nil
+                        feedbackFocused = false
+                    }.accessibilityIdentifier("email.keyboard-done")
                 }
             }
             .toolbar {
@@ -885,7 +1069,7 @@ private struct EmailThreadScreen: View {
                 Text(thread.subject.isEmpty ? "No subject" : thread.subject)
                     .veetType(.display)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                Text("\(thread.senders.joined(separator: ", ")) · \(thread.updatedAt, format: .dateTime.month(.abbreviated).day())")
+                Text("\(thread.correspondentsOrUnknown) · \(thread.updatedAt, format: .dateTime.month(.abbreviated).day())")
                     .veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft)
             }
             // Bulk mail only, on an account that advertises the action, with
@@ -908,6 +1092,13 @@ private struct EmailThreadScreen: View {
     /// Report spam and exclusion from learning, behind one ellipsis.
     private func threadActionsMenu(_ thread: EmailThreadView) -> some View {
         Menu {
+            Button(thread.isHandled ? "Mark not handled" : "Mark handled") {
+                Task { await model.setThreadHandled(thread, handled: !thread.isHandled) }
+            }
+            .disabled(model.isPerformingAction)
+            .accessibilityIdentifier("email.attention.toggle")
+            Divider()
+
             if model.canReportSpam(thread), !thread.isSuspectedSpam {
                 Button("Report spam") { Task { await model.setThreadSpam(thread, spam: true) } }
                     .accessibilityIdentifier("email.spam.menu.report")
@@ -935,7 +1126,11 @@ private struct EmailThreadScreen: View {
                             .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
                     }
                     Button {
-                        peopleLookup = .correspondent(message.sender, at: message.sentAt)
+                        if let inspectorReveal {
+                            inspectorReveal.sender(.correspondent(message.sender, at: message.sentAt))
+                        } else {
+                            peopleLookup = .correspondent(message.sender, at: message.sentAt)
+                        }
                     } label: {
                         Label("View in People", systemImage: "person.crop.circle")
                     }
@@ -967,104 +1162,6 @@ private struct EmailThreadScreen: View {
                 if message.id != messages.last?.id { HairlineDivider() }
             }
         }
-    }
-
-    /// Teach Veetbot: one paperDeep card that opens into scoped importance
-    /// feedback and reports what was applied, with Undo.
-    private var teachCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                showingFeedback.toggle()
-            } label: {
-                HStack {
-                    Text("Teach Veetbot").veetType(.meta, weight: .semibold)
-                    Spacer()
-                    Image(systemName: showingFeedback ? "chevron.up" : "chevron.down").veetType(.meta)
-                }.foregroundColor(AppTheme.inkSoft).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(showingFeedback ? "Expanded" : "Collapsed")
-            .accessibilityIdentifier("email.feedback")
-            if showingFeedback {
-                feedback
-            } else {
-                Text("Say whether mail like this deserves your attention: this thread, a person, or a kind of content.")
-                    .veetType(.meta).foregroundColor(AppTheme.inkFaint)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let message = model.feedbackMessage {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "checkmark").veetType(.meta, weight: .semibold)
-                    Text(message).veetType(.meta)
-                    if model.feedbackID != nil {
-                        Button("Undo") { Task { await model.undoFeedback() } }
-                            .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
-                    }
-                }.foregroundColor(AppTheme.inkSoft)
-            }
-        }
-        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(AppTheme.paperDeep))
-    }
-
-    /// Offer explicit importance feedback with supported person and topic targets.
-    private var feedback: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker("Apply to", selection: $target) {
-                ForEach(EmailFeedbackTarget.allCases, id: \.self) { value in Text(value.title).tag(value) }
-            }.pickerStyle(.menu).accessibilityIdentifier("email.feedback-target")
-                .onChange(of: target) { targetValue = "" }
-            if target == .person {
-                Picker("Person", selection: $targetValue) {
-                    Text("Choose a person").tag("")
-                    ForEach(model.thread?.senders ?? [], id: \.self) { person in Text(person).tag(person) }
-                }
-                .accessibilityIdentifier("email.feedback-person")
-            } else if target == .topic {
-                let topics = model.thread?.feedbackTopics ?? []
-                Picker("Content topic", selection: $targetValue) {
-                    Text("Choose a topic").tag("")
-                    ForEach(topics, id: \.self) { topic in Text(topic).tag(topic) }
-                }
-                .accessibilityIdentifier("email.feedback-topic")
-                .onChange(of: topics) { _, values in
-                    if !values.contains(targetValue) { targetValue = "" }
-                }
-                if topics.isEmpty {
-                    Text("No content topics are available yet. You can apply feedback to This thread.")
-                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
-                }
-            }
-            TextField("Explain what matters (optional)", text: $explanation).focused($focusedField, equals: .feedback)
-                .textFieldStyle(.plain).a2Field()
-            HStack(spacing: 8) {
-                Button("Important") {
-                    Task {
-                        await model.giveFeedback(
-                            target: target, judgment: "important", explanation: explanation, targetValue: targetValue)
-                    }
-                }
-                .accessibilityIdentifier("email.feedback-important")
-                Button("Less important") {
-                    Task {
-                        await model.giveFeedback(
-                            target: target, judgment: "less_important", explanation: explanation,
-                            targetValue: targetValue)
-                    }
-                }
-                .accessibilityIdentifier("email.feedback-less-important")
-            }.buttonStyle(SecondaryCapsuleButtonStyle())
-                .disabled(target == .person && targetValue.isEmpty)
-                .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
-            HairlineDivider()
-            Text("Does this thread need a reply?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
-            HStack(spacing: 8) {
-                Button("Needs reply") { Task { await model.giveFeedback(target: .thread, judgment: "needs_reply") } }
-                Button("No reply needed") {
-                    Task { await model.giveFeedback(target: .thread, judgment: "no_reply_needed") }
-                }
-            }.buttonStyle(QuietCapsuleButtonStyle())
-        }.veetType(.ui).disabled(model.isPerformingAction).padding(.top, 4)
     }
 
     /// The reply as one quiet column: a serif heading with the save state, any
@@ -1362,6 +1459,126 @@ private struct EmailThreadScreen: View {
 
 /// Veetbot's reading of the thread behind a teal rule: the gist, then what the
 /// conversation needs and why it reached the owner's attention.
+/// Teach Veetbot: one card that opens into scoped importance feedback and
+/// reports what was applied, with Undo. Below the conversation on touch; in
+/// the Mac right panel's Context tab (ADR-0237).
+struct EmailTeachCard: View {
+    @ObservedObject var model: EmailViewModel
+    var explanationFocused: FocusState<Bool>.Binding
+    /// On the panel's paperDeep the card is a surface card behind a hairline.
+    var inPanel = false
+    @State private var target: EmailFeedbackTarget = .thread
+    @State private var explanation = ""
+    @State private var targetValue = ""
+    @State private var showingFeedback = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                showingFeedback.toggle()
+            } label: {
+                HStack {
+                    Text("Teach Veetbot").veetType(.meta, weight: .semibold)
+                    Spacer()
+                    Image(systemName: showingFeedback ? "chevron.up" : "chevron.down").veetType(.meta)
+                }.foregroundColor(AppTheme.inkSoft).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(showingFeedback ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("email.feedback")
+            if showingFeedback {
+                feedback
+            } else {
+                Text("Say whether mail like this deserves your attention: this thread, a person, or a kind of content.")
+                    .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let message = model.feedbackMessage {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "checkmark").veetType(.meta, weight: .semibold)
+                    Text(message).veetType(.meta)
+                    if model.feedbackID != nil {
+                        Button("Undo") { Task { await model.undoFeedback() } }
+                            .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+                    }
+                }.foregroundColor(AppTheme.inkSoft)
+            }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(inPanel ? AppTheme.surface : AppTheme.paperDeep))
+        .overlay {
+            if inPanel { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.hairline) }
+        }
+    }
+
+    /// Offer explicit importance feedback with supported person and topic targets.
+    private var feedback: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Apply to", selection: $target) {
+                ForEach(EmailFeedbackTarget.allCases, id: \.self) { value in Text(value.title).tag(value) }
+            }.pickerStyle(.menu).accessibilityIdentifier("email.feedback-target")
+                .onChange(of: target) { targetValue = "" }
+            if target == .person {
+                Picker("Person", selection: $targetValue) {
+                    Text("Choose a person").tag("")
+                    ForEach(model.thread?.senders ?? [], id: \.self) { person in Text(person).tag(person) }
+                }
+                .accessibilityIdentifier("email.feedback-person")
+            } else if target == .topic {
+                let topics = model.thread?.feedbackTopics ?? []
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(topics, id: \.self) { topic in
+                            Button(topic) { targetValue = targetValue == topic ? "" : topic }
+                                .buttonStyle(FilterPillButtonStyle(selected: targetValue == topic))
+                                .accessibilityAddTraits(targetValue == topic ? .isSelected : [])
+                                .accessibilityIdentifier("email.feedback-topic-chip.\(topic)")
+                        }
+                    }
+                }
+                .accessibilityIdentifier("email.feedback-topic")
+                .onChange(of: topics) { _, values in
+                    if !values.contains(targetValue) { targetValue = "" }
+                }
+                if topics.isEmpty {
+                    Text("No content topics are available yet. You can apply feedback to This thread.")
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                }
+            }
+            TextField("Explain what matters (optional)", text: $explanation).focused(explanationFocused)
+                .textFieldStyle(.plain).a2Field()
+            HStack(spacing: 8) {
+                Button("Important") {
+                    Task {
+                        await model.giveFeedback(
+                            target: target, judgment: "important", explanation: explanation, targetValue: targetValue)
+                    }
+                }
+                .accessibilityIdentifier("email.feedback-important")
+                Button("Less important") {
+                    Task {
+                        await model.giveFeedback(
+                            target: target, judgment: "less_important", explanation: explanation,
+                            targetValue: targetValue)
+                    }
+                }
+                .accessibilityIdentifier("email.feedback-less-important")
+            }.buttonStyle(SecondaryCapsuleButtonStyle())
+                .disabled(target == .person && targetValue.isEmpty)
+                .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
+            HairlineDivider()
+            Text("Does this thread need a reply?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            HStack(spacing: 8) {
+                Button("Needs reply") { Task { await model.giveFeedback(target: .thread, judgment: "needs_reply") } }
+                Button("No reply needed") {
+                    Task { await model.giveFeedback(target: .thread, judgment: "no_reply_needed") }
+                }
+            }.buttonStyle(QuietCapsuleButtonStyle())
+        }.veetType(.ui).disabled(model.isPerformingAction).padding(.top, 4)
+    }
+
+}
+
 private struct EmailGistBlock: View {
     let thread: EmailThreadView
     var draft: EmailDraftView? = nil
@@ -1486,7 +1703,7 @@ private struct EmailThreadStatus: View {
     var draft: EmailDraftView? = nil
     var showsReason = false
 
-    private enum Tone { case attention, draft, settled }
+    enum Tone { case attention, draft, settled }
 
     private var state: (title: String, tone: Tone) {
         if thread.isInSpam { return ("Reported as spam", .settled) }
@@ -1519,7 +1736,10 @@ private struct EmailThreadStatus: View {
     var body: some View {
         let (title, tone) = state
         let reason = thread.reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        if tone == .attention, !reason.isEmpty {
+        if !showsReason {
+            // In a row the state is a chip; the reason is read in the conversation.
+            EmailStateChip(title: title, tone: tone)
+        } else if tone == .attention, !reason.isEmpty {
             Text("\(title) · \(reason)")
                 .veetType(EmailType.note, weight: .medium).foregroundColor(color(for: tone))
                 .lineLimit(showsReason ? nil : 1)
@@ -1531,6 +1751,66 @@ private struct EmailThreadStatus: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// A conversation's state as one short chip: an amber wash for attention, teal
+/// for a draft, and bare soft ink once the conversation is settled.
+private struct EmailStateChip: View {
+    let title: String
+    let tone: EmailThreadStatus.Tone
+
+    var body: some View {
+        Text(title)
+            .veetType(EmailType.note, weight: .medium)
+            .foregroundColor(foreground)
+            .padding(.horizontal, tone == .settled ? 0 : 7)
+            .padding(.vertical, tone == .settled ? 0 : 2)
+            .background(Capsule().fill(wash))
+    }
+
+    private var foreground: Color {
+        switch tone {
+        case .attention: AppTheme.amberText
+        case .draft: AppTheme.tealText
+        case .settled: AppTheme.inkSoft
+        }
+    }
+
+    private var wash: Color {
+        switch tone {
+        case .attention: AppTheme.amberWash
+        case .draft: AppTheme.tealWash
+        case .settled: .clear
+        }
+    }
+}
+
+/// A teal wash behind a row the last refresh brought in, fading once the eye
+/// has had a moment to find it. Reduce Motion skips the wash.
+private struct EmailArrivalWash: ViewModifier {
+    @ObservedObject var model: EmailViewModel
+    let threadID: UUID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var washed = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(AppTheme.tealWash)
+                    .padding(.horizontal, -8).padding(.vertical, -5)
+                    .opacity(washed ? 1 : 0)
+                    .accessibilityHidden(true)
+            )
+            .task(id: threadID) {
+                guard model.arrivedThreadIDs.contains(threadID) else { return }
+                model.acknowledgeArrival(threadID)
+                guard !reduceMotion else { return }
+                washed = true
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                withAnimation(.easeOut(duration: 1.4)) { washed = false }
+            }
     }
 }
 

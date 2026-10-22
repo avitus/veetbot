@@ -9,11 +9,18 @@ import AppKit
 /// reviews the nominations consolidation has raised for it. Drawn as an A2
 /// page: the entries as hairline rows of fields, a server conflict and each
 /// nomination in an amber-edged card, capsule buttons for the actions. One
-/// full-width column: a `NavigationView` with a single child draws it on the
-/// Mac as a narrow sidebar beside an empty pane.
+/// section sidebar on wide screens and a section menu on compact screens.
 public struct PersonaEditorView: View {
     @ObservedObject var model: PersonaViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var usesColumns: Bool {
+        #if os(macOS)
+        true
+        #else
+        sizeClass == .regular
+        #endif
+    }
 
     public init(model: PersonaViewModel) {
         self.model = model
@@ -21,7 +28,17 @@ public struct PersonaEditorView: View {
 
     public var body: some View {
         NavigationStack {
-            content
+            HStack(spacing: 0) {
+                if usesColumns { sectionSidebar.frame(width: 232) }
+                VStack(spacing: 0) {
+                    if !usesColumns {
+                        Picker("Persona section", selection: $model.selectedSection) {
+                            ForEach(PersonaViewModel.Section.allCases) { Text($0.rawValue).tag($0) }
+                        }.pickerStyle(.menu).padding(12).accessibilityIdentifier("persona.section-picker")
+                    }
+                    content
+                }
+            }
                 .navigationTitle("Persona")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -47,13 +64,15 @@ public struct PersonaEditorView: View {
         .task { await model.load() }
         #if os(macOS)
         .sheetFrame(
-            minWidth: 520,
-            idealWidth: 640,
+            minWidth: 820,
+            idealWidth: 1000,
             maxWidth: .infinity,
             minHeight: 480,
             idealHeight: 640,
             maxHeight: .infinity
         )
+        #else
+        .presentationSizing(.page)
         #endif
         .alert(
             "The persona changed while you were editing",
@@ -87,16 +106,21 @@ public struct PersonaEditorView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    heading
-                    if model.toneSupported {
-                        voiceSection
-                        traitSection
-                        sampleSection
+                    Text(model.selectedSection.rawValue).veetType(.display)
+                    switch model.selectedSection {
+                    case .voice:
+                        if model.toneSupported {
+                            voiceSection
+                            traitSection
+                            sampleSection
+                        } else {
+                            Text("Voice settings are not available on this server.").veetType(.ui)
+                        }
+                    case .assumptions: entries
+                    case .nominations: nominations
+                    case .boundaries: boundarySection
                     }
-                    entries
                     conflict
-                    nominations
-                    boundarySection
                     if let message = model.errorMessage {
                         Text(message)
                             .veetType(.ui)
@@ -113,11 +137,29 @@ public struct PersonaEditorView: View {
         }
     }
 
+    private var sectionSidebar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            heading.padding(.bottom, 12)
+            SidebarSectionLabel(title: "Sections")
+            ForEach(PersonaViewModel.Section.allCases) { page in
+                Button { model.selectedSection = page } label: {
+                    SidebarRow { Image(systemName: page.symbol) } title: { Text(page.rawValue) }
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(model.selectedSection == page ? AppTheme.selected : .clear))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(model.selectedSection == page ? .isSelected : [])
+                .accessibilityIdentifier("persona.section.\(page.rawValue)")
+            }
+            Text("Veetbot nominates new assumptions from your chats. Nothing joins the persona until you accept it.")
+                .veetType(.meta).foregroundColor(AppTheme.inkSoft).padding(.top, 16)
+            Spacer(minLength: 0)
+        }.padding(16).background(AppTheme.paperDeep)
+    }
+
     private var heading: some View {
         VStack(alignment: .leading, spacing: 4) {
-            #if os(macOS)
             Text("Persona").veetType(.display)
-            #endif
             Text("How Veetbot sounds, and what it may assume about you.")
                 .veetType(.ui)
                 .foregroundColor(AppTheme.inkSoft)
@@ -147,7 +189,7 @@ public struct PersonaEditorView: View {
     private var traitSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             A2SectionHeading(title: "Lean towards")
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90, maximum: 120), alignment: .leading)], alignment: .leading, spacing: 8) {
                 ForEach(PersonaViewModel.traitChoices, id: \.self) { trait in
                     let chosen = model.traits.contains(trait)
                     Button {
@@ -226,6 +268,11 @@ public struct PersonaEditorView: View {
                     .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
+        } else {
+            Text("This server does not list any boundaries.")
+                .veetType(.ui)
+                .foregroundColor(AppTheme.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -369,6 +416,11 @@ public struct PersonaEditorView: View {
                     PersonaNominationCard(nomination: nomination, model: model)
                 }
             }
+        } else {
+            Text("Veetbot has no new assumptions to suggest right now.")
+                .veetType(.ui)
+                .foregroundColor(AppTheme.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

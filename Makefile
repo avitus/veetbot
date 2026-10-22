@@ -6,6 +6,11 @@ STATIC_TEST_WORKERS ?= 2
 # path here (.circleci/test-suites.yml). Empty runs the whole partition.
 PYTEST_ARGS ?=
 BROWSER_IMAGE ?= veetbot-browser-profile-service:check
+HOST_OS ?= $(shell uname -s)
+# The simulator UI suite runs on these devices; CI gives each its own executor.
+IOS_UI_DEVICES ?= iphone ipad
+# INDEX/TOTAL runs every TOTAL-th enumerated case from INDEX (ADR-0230).
+IOS_UI_SHARD ?=
 
 # Keep one Make graph so repeated goals share prerequisites. Independent lanes
 # overlap; static and contract tests retain their specified sequence.
@@ -18,6 +23,7 @@ endif
 
 .PHONY: install format lint typecheck test check db-up migrate env-pull client-build \
 	test-static test-contract test-fast test-integration test-live browser-install test-browser \
+	test-browser-cases \
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-macos-vm \
 	test-apple-ui-ios \
 	test-deploy sandbox-image browser-image test-browser-image \
@@ -76,9 +82,26 @@ test-contract:
 
 test-fast: test-static test-contract
 
+# Hosted browsers are headed. Linux gives each a private Xvfb display; a Mac
+# would open the windows on the owner's desktop, so there both browser targets
+# run on the Linux chunk sidecar instead (ADR-0236). VEETBOT_BROWSER_ON_HOST=1
+# runs them on the Mac deliberately. test-browser-cases runs only the named
+# cases, so it writes no gate report.
+ifeq ($(HOST_OS)$(VEETBOT_BROWSER_ON_HOST),Darwin)
+test-browser:
+	@scripts/run_on_sidecar.sh make test-browser
+
+test-browser-cases:
+	@scripts/run_on_sidecar.sh "make test-browser-cases CASES='$(CASES)'"
+else
 test-browser: browser-install
 	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 -m browser \
 		-p tests.browser_report --browser-report test-results/browser/baseline.json
+
+test-browser-cases: browser-install
+	@test -n "$(CASES)" || { echo 'test-browser-cases needs CASES=<pytest paths or node ids>' >&2; exit 2; }
+	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 $(CASES)
+endif
 
 test-integration:
 	@uv run pytest -m "integration and not sandbox and not browser_image" $(PYTEST_ARGS); \
@@ -135,6 +158,17 @@ test-apple-ui-macos:
 		-scheme Veetbot \
 		-destination 'platform=macOS' \
 		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2PersonaSectionsPreserveUnsavedVoice \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPersonaEmptyPagesExplainMissingData \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallResultDisclosesTranscriptAndStagesANewCall \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallConcernStagesEditableChat \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2MarkdownArtifactRendersAReadableDocument \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2WideMemoryKeepsCollectionsBesideRecords \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2SchedulesKeepListBesideSelectedSchedule \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2EmailHasMailboxBesideTheInbox \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2HandledCollectionDoesNotArchiveMail \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2PeopleHasDirectoryNavigation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2InlineUnsubscribeKeepsTheConfirmation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalCollapsesAfterApproval \
@@ -214,10 +248,21 @@ test-apple-ui-ios:
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPhone") and not device["deviceTypeIdentifier"].rsplit(".", 1)[-1].startswith("iPhone-Duo")]; print(max(candidates)[1] if candidates else "")'); \
 	ipad_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPad")]; print(max(candidates)[1] if candidates else "")'); \
-	if test -z "$$iphone_device_id" -o -z "$$ipad_device_id"; then \
+	run_iphone=; run_ipad=; \
+	for device in $(IOS_UI_DEVICES); do \
+		case "$$device" in \
+			iphone) run_iphone=1 ;; \
+			ipad) run_ipad=1 ;; \
+			*) echo "IOS_UI_DEVICES names iphone and ipad, not $$device." >&2; exit 2 ;; \
+		esac; \
+	done; \
+	if { test -n "$$run_iphone" && test -z "$$iphone_device_id"; } \
+		|| { test -n "$$run_ipad" && test -z "$$ipad_device_id"; }; then \
 		echo '$@ requires available iPhone and iPad simulator runtimes.' >&2; \
 		exit 1; \
 	fi; \
+	test -n "$$run_iphone" || iphone_device_id=""; \
+	test -n "$$run_ipad" || ipad_device_id=""; \
 	apple_ui_tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/veetbot-apple-ui.XXXXXX"); \
 	simulators_booted_here=""; \
 	finish_apple_ui() { \
@@ -232,10 +277,11 @@ test-apple-ui-ios:
 	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild build-for-testing -quiet \
 		-project clients/apple/Veetbot.xcodeproj \
 		-scheme Veetbot \
-		-destination "platform=iOS Simulator,id=$$iphone_device_id" \
+		-destination "platform=iOS Simulator,id=$${iphone_device_id:-$$ipad_device_id}" \
 		-testProductsPath "$$test_products_path" \
 		-only-testing:VeetbotUITests || exit $$?; \
 	boot_ios_simulator() { \
+		test -n "$$1" || return 0; \
 		boot_report=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl bootstatus "$$1" -b 2>&1) || { \
 			printf '%s\n' "$$boot_report" >&2; \
 			return 1; \
@@ -259,6 +305,7 @@ test-apple-ui-ios:
 		return 1; \
 	}; \
 	for device_id in "$$iphone_device_id" "$$ipad_device_id"; do \
+		test -n "$$device_id" || continue; \
 		if ! DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices booted | grep -q "$$device_id"; then \
 			simulators_booted_here="$$simulators_booted_here $$device_id"; \
 		fi; \
@@ -273,15 +320,27 @@ test-apple-ui-ios:
 		echo "Apple simulators failed to boot (iPhone=$$iphone_boot_status, iPad=$$ipad_boot_status)." >&2; \
 		exit 1; \
 	fi; \
+	only_testing=-only-testing:VeetbotUITests; \
+	if test -n "$(IOS_UI_SHARD)"; then \
+		DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test-without-building -quiet \
+			-destination "platform=iOS Simulator,id=$${iphone_device_id:-$$ipad_device_id}" \
+			-testProductsPath "$$test_products_path" \
+			-collect-test-diagnostics never \
+			-enumerate-tests -test-enumeration-style flat -test-enumeration-format json \
+			-test-enumeration-output-path "$$apple_ui_tmp/tests.json" \
+			-only-testing:VeetbotUITests || exit $$?; \
+		only_testing=$$(python3 scripts/ios_ui_shard.py "$$apple_ui_tmp/tests.json" "$(IOS_UI_SHARD)") || exit $$?; \
+	fi; \
 	run_ios_ui_tests() { \
 		device_label="$$1"; \
 		device_id="$$2"; \
+		test -n "$$device_id" || return 0; \
 		DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test-without-building -quiet \
 			-destination "platform=iOS Simulator,id=$$device_id" \
 			-testProductsPath "$$test_products_path" \
 			-resultBundlePath "$$apple_results_run_dir/$$device_label.xcresult" \
 			-collect-test-diagnostics never \
-			-only-testing:VeetbotUITests; \
+			$$only_testing; \
 	}; \
 	run_ios_ui_tests iphone "$$iphone_device_id" & \
 	iphone_pid=$$!; \

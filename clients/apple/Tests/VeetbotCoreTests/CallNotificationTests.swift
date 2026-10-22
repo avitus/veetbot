@@ -4,6 +4,23 @@ import Testing
 @testable import VeetbotCore
 
 struct CallNotificationTests {
+    @Test func metadataReflectsOnlyAvailableCallFields() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let result = try decoder.decode(CallResultViewData.self, from: Data("""
+        {"call_id":"00000000-0000-0000-0000-000000000123","created_at":"2026-10-20T12:00:00Z","duration_minutes":0.6833333333,"status":"completed"}
+        """.utf8))
+        #expect(result.createdAt != nil)
+        #expect(result.durationText == "41 s")
+        #expect(result.canFollowUp)
+        for suffix in [",\"erased\":true", ",\"result_pending\":true", ",\"status\":\"active\""] {
+            let hidden = try decoder.decode(CallResultViewData.self, from: Data(
+                "{\"call_id\":\"00000000-0000-0000-0000-000000000123\"\(suffix)}".utf8))
+            #expect(!hidden.canFollowUp)
+            #expect(hidden.durationText == nil)
+        }
+    }
+
     @Test
     func acceptsOnlyContentFreeCallIdentity() throws {
         var payload: [String: Any] = [
@@ -77,6 +94,32 @@ struct CallResultPresentationTests {
         #expect(model.callResult == nil)
     }
 
+    @Test(arguments: [CallFollowUpAction.callAgain, .somethingWrong])
+    func followUpStagesAnEditableReferenceWithoutSendingOrCopyingCallContent(action: CallFollowUpAction) async throws {
+        let model = try await model()
+        let id = UUID()
+        await model.openNotification(try payload(id))
+        model.composerText = "Keep my unfinished question"
+        #expect(model.prepareCallFollowUp(action))
+        #expect(model.composerText.hasPrefix("Keep my unfinished question\n\n"))
+        #expect(model.composerText.contains(id.uuidString))
+        #expect(!model.composerText.contains("Private call"))
+        #expect(model.callResult == nil)
+        let saved = model.composerText
+        #expect(!model.prepareCallFollowUp(action))
+        #expect(model.composerText == saved)
+    }
+
+    @Test(arguments: [",\"erased\":true", ",\"result_pending\":true", ",\"status\":\"active\""])
+    func unavailableCallsNeverStageFollowUp(fields: String) async throws {
+        let model = try await model(callFields: fields)
+        await model.openNotification(try payload(UUID()))
+        model.composerText = "Keep this"
+        #expect(!model.prepareCallFollowUp(.callAgain))
+        #expect(model.composerText == "Keep this")
+        #expect(model.callResult != nil)
+    }
+
     private func payload(_ callID: UUID) throws -> NotificationPushPayload {
         try #require(NotificationPushPayload(userInfo: ["veetbot": [
             "version": 1, "kind": "call_finished", "title": "New call result",
@@ -93,7 +136,7 @@ struct CallResultPresentationTests {
     }
 
     private func model(delayedCallID: UUID? = nil, gate: CallResultResponseGate? = nil,
-                       status: Int = 200) async throws -> ChatViewModel {
+                       status: Int = 200, callFields: String = "") async throws -> ChatViewModel {
         let configuration = URLSessionConfiguration.ephemeral
         let handlerID = CallResultURLProtocol.register { request in
             guard let url = request.url else { throw URLError(.badURL) }
@@ -104,7 +147,7 @@ struct CallResultPresentationTests {
                 let delayed = callID == delayedCallID
                 let code = delayed ? status : 200
                 let body = code == 200
-                    ? "{\"call_id\":\"\(callID)\",\"summary\":\"Private call\"}"
+                    ? "{\"call_id\":\"\(callID)\",\"summary\":\"Private call\"\(callFields)}"
                     : #"{"error":{"code":"internal_error","message":"Late failure"}}"#
                 return (code, body, delayed ? gate : nil)
             }

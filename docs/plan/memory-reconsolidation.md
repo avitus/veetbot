@@ -1730,3 +1730,20 @@ readiness. This is a selection preview: queued membership is never silently
 trimmed, and preparation, verification and application still revalidate every
 queued original together. No source type, privacy classification or daily budget
 is widened by this repair.
+
+Provider-backed selection also previews the complete original evidence under the
+same owner and People guards before fixing a group's membership. Outside the
+transaction, it measures the actual proposal request, including the schema,
+metadata, JSON escaping and UTF-8 bytes, using the configured model, egress policy
+and unchanged admission ceilings. If the group exceeds the input or cost bound,
+selection removes the lowest-ranked neighbors until the anchor and at least one
+neighbor fit. Each retained source keeps every required complete excerpt; omitted
+sources remain originals and retain their own inventory opportunities. Preview
+identities are transient and grant no provider, spend or write authority.
+
+The eventual queued group gets its own digest and normal durable identity, and
+admission rechecks its entire membership and both provider requests. Already queued
+groups are never trimmed or rewritten. A group that cannot fit even as a pair,
+or fails another admission check, retains the existing explicit refusal and
+bounded retry path; it is not reported as an absence of work. The four-group,
+two-call, daily-cadence and spend ceilings remain unchanged.

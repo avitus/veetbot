@@ -54,7 +54,14 @@ def checkout(tmp_path: Path) -> Path:
 
 
 def run_make(checkout: Path, *goals: str, **settings: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "PATH": f"{checkout}{os.pathsep}{os.environ['PATH']}", **settings}
+    # The in-place graph CI and the sidecar run; a Mac sends its browser lane
+    # to the sidecar instead (ADR-0236, test_browser_host_guard.py).
+    env = {
+        **os.environ,
+        "PATH": f"{checkout}{os.pathsep}{os.environ['PATH']}",
+        "HOST_OS": "Linux",
+        **settings,
+    }
     # A subprocess is a fresh invocation, not a participant in pytest's parent Make jobserver.
     env.pop("MAKEFLAGS", None)
     env.pop("MFLAGS", None)
