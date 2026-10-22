@@ -213,7 +213,10 @@ tool run on iPhone and iPad one sentence that opens into a monospaced ledger,
 while Mac tool calls open in the right panel's Activity tab; a pending approval or
 clarifying question docked above a translucent composer while the transcript
 shows one amber "Waiting for your approval" line. On a compact window the chat
-list slides over the conversation from the leading edge. Email follows (see
+list slides over the conversation from the leading edge. On Mac, the transcript
+and composer fill the center panel with 32-point side gutters, including when
+the activity panel is hidden; they do not stop at a centered 680-point column.
+iPhone, iPad and artifact reading widths retain their existing limits. Email follows (see
 "Email mode" below), then Memory, People and Schedules (see "Memory and
 People" below), and Persona, Settings and Connect complete the set: the
 persona's entries as a card of hairline rows of fields, a server conflict and

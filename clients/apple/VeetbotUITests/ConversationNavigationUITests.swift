@@ -351,12 +351,24 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(panel.waitForExistence(timeout: 5), "A wide window opens the panel")
         XCTAssertTrue(app.descendants(matching: .any)["inspector.chat.run"].exists)
         let toggle = app.buttons["inspector.toggle"]
+        let input = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        waitForSettledFrame(of: input)
+        let withPanel = input.frame
+        let panelWidth = panel.frame.width
         XCTAssertEqual(toggle.value as? String, "Shown")
         toggle.click()
         XCTAssertFalse(panel.waitForExistence(timeout: 1))
         XCTAssertEqual(toggle.value as? String, "Hidden")
+        XCTAssertTrue(waitForFrame(of: input, timeout: 5) {
+            abs($0.width - withPanel.width - panelWidth) <= 4
+                && abs($0.minX - withPanel.minX) <= 2
+        }, "Hiding the panel must widen Chat instead of adding empty center-panel margins")
         toggle.click()
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForFrame(of: input, timeout: 5) {
+            abs($0.width - withPanel.width) <= 2
+        })
 
         let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))

@@ -160,6 +160,16 @@ public struct ChatView: View {
         self.state = model.runState
     }
 
+    /// Mac Chat fills its center panel with fixed side gutters, including
+    /// when hiding the inspector gives the conversation more room.
+    private var columnMaxWidth: CGFloat {
+        #if os(macOS)
+        return .infinity
+        #else
+        return A2Metrics.transcriptMaxWidth
+        #endif
+    }
+
     private var notificationCovered: Bool {
         var covered = artifactSelection != nil || textSelection != nil || model.isPeopleLookupPresented
             || showingWebsiteAccess || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
@@ -203,7 +213,7 @@ public struct ChatView: View {
                                 )
                         }
                         .padding(.horizontal, A2Metrics.transcriptSidePadding)
-                        .frame(maxWidth: A2Metrics.transcriptMaxWidth)
+                        .frame(maxWidth: columnMaxWidth)
                         .frame(maxWidth: .infinity)
                         Color.clear
                             .frame(height: max(dockHeight + VeetSpace.s2, 1))
@@ -590,7 +600,7 @@ public struct ChatView: View {
         .padding(.horizontal, A2Metrics.transcriptSidePadding)
         .padding(.top, VeetSpace.s3)
         .padding(.bottom, VeetSpace.s3)
-        .frame(maxWidth: A2Metrics.transcriptMaxWidth)
+        .frame(maxWidth: columnMaxWidth)
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
