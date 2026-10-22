@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Literal
 from uuid import UUID
 from weakref import WeakValueDictionary
 
@@ -188,6 +189,7 @@ class EventContextPlanner:
         session_browser_origins: SessionBrowserOrigins | None = None,
         attach_device_tools: DeviceToolAttach | None = None,
         snapshot_profiles: SnapshotProfiles | None = None,
+        memory_candidate_selection: Literal["recent", "relevance"] = "recent",
         cache_capacity: int = 1_024,
     ) -> None:
         if cache_capacity <= 0:
@@ -201,6 +203,7 @@ class EventContextPlanner:
         self._policy_version = policy_version
         self._skill_catalogs = skill_catalogs
         self._memory_retriever = memory_retriever
+        self._memory_candidate_selection = memory_candidate_selection
         self._session_tool_filter = session_tool_filter
         self._session_required_tools = session_required_tools
         self._session_browser_origins = session_browser_origins
@@ -698,6 +701,7 @@ class EventContextPlanner:
                     current_scope=project_scope(session.metadata),
                     profile=RecallProfile.CORE,
                     budget_tokens=memory_token_cap,
+                    candidate_selection=self._memory_candidate_selection,
                     max_items=snapshot_profile.max_items,
                     min_score=0.1,
                     sensitivity_ceiling=Sensitivity.RESTRICTED,

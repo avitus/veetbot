@@ -939,6 +939,11 @@ class RecallQuery(BaseModel):
     include_provisional: bool = True
     profile: RecallProfile = RecallProfile.TASK
     budget_tokens: PositiveInt
+    # Serialized tool content, bounded before issuing the recall receipt.
+    budget_bytes: PositiveInt | None = None
+    relationship_group: Literal["family", "partner", "friend", "work", "other"] | None = None
+    people_after: UUID | None = None
+    next_people_after: UUID | None = None
     max_items: PositiveInt
     min_score: float = Field(ge=0, le=1)
     # The recall delta bounds a query by the store position a session froze its

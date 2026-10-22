@@ -77,10 +77,16 @@ def people_narrowing(parent: RecallQuery, query: RecallQuery) -> bool:
         "sensitivity_ceiling",
         "max_items",
         "budget_tokens",
+        "relationship_group",
+        "next_people_after",
     }
     return (
         parent.people_scope is None
-        and query.people_scope is not None
+        and (query.people_scope is not None or query.relationship_group is not None)
+        and (
+            query.relationship_group == parent.relationship_group
+            or (parent.relationship_group is None and query.relationship_group == "family")
+        )
         and parent.model_dump(exclude=varying) == query.model_dump(exclude=varying)
         and encoder_text(parent) == encoder_text(query)
         and {subject.casefold() for subject in query.subjects}
@@ -93,6 +99,16 @@ def people_narrowing(parent: RecallQuery, query: RecallQuery) -> bool:
         <= SENSITIVITY_ORDER[parent.sensitivity_ceiling]
         and query.max_items <= parent.max_items
         and query.budget_tokens <= parent.budget_tokens
+    )
+
+
+def output_budget_narrowing(parent: RecallQuery, query: RecallQuery) -> bool:
+    """A tighter render limit changes neither encoder input nor retrieval authority."""
+    return (
+        query.budget_bytes is not None
+        and (parent.budget_bytes is None or query.budget_bytes <= parent.budget_bytes)
+        and parent.model_dump(exclude={"budget_bytes"})
+        == query.model_dump(exclude={"budget_bytes"})
     )
 
 
@@ -181,12 +197,19 @@ class SemanticQueryPreparation:
             key = self._key(query, context_key)
             value = self._cache.get(key)
             if value is None:
-                if query.people_scope is not None:
+                if (
+                    query.people_scope is not None
+                    or query.relationship_group is not None
+                    or query.budget_bytes is not None
+                ):
                     for parent_key, parent in reversed(tuple(self._cache.items())):
                         if (
                             parent_key == self._key(parent.query, context_key)
                             and self._clock.now() < parent.expires_at
-                            and people_narrowing(parent.query, query)
+                            and (
+                                people_narrowing(parent.query, query)
+                                or output_budget_narrowing(parent.query, query)
+                            )
                         ):
                             self._cache.move_to_end(parent_key)
                             return parent.value.model_copy(

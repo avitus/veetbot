@@ -3607,7 +3607,7 @@ async def _compose(
         else semantic_index_pass.source_recovery,
         reranking_admitted=None if semantic_index_pass is None else semantic_index_pass.admitted,
     )
-    registry.register(MemorySearchTool(memory_retriever))
+    registry.register(MemorySearchTool(memory_retriever, inline_output_bytes=inline_output_bytes))
     people_context = (
         PeopleContextService(uow_factory, memory_retriever) if settings.people_enabled else None
     )
@@ -3617,6 +3617,17 @@ async def _compose(
             model_planning=True,
             factory=uow_factory,
             people_context=people_context,
+            inline_output_bytes=inline_output_bytes,
+        )
+    )
+    registry.register(
+        MemorySearchTool(
+            memory_retriever,
+            model_planning=True,
+            overview_enabled=True,
+            factory=uow_factory,
+            people_context=people_context,
+            inline_output_bytes=inline_output_bytes,
         )
     )
     people_erasure = PeopleErasureService(uow_factory, clock)
@@ -3835,6 +3846,7 @@ async def _compose(
             ),
             attach_device_tools=attach_device_tools,
             snapshot_profiles=memory_profiles.snapshots,
+            memory_candidate_selection=memory_profiles.retrieval.candidate_selection,
         )
 
         async def session_project_scope(session_id: UUID) -> str:
@@ -4450,7 +4462,13 @@ async def _compose(
             validate_browser_binding=_scheduled_browser_binding_validator(browser_provider),
             model_settings=model_settings_catalog,
             prepare_recall=(
-                SemanticRecallPreparation(uow_factory, principal, memory_retriever, query_former)
+                SemanticRecallPreparation(
+                    uow_factory,
+                    principal,
+                    memory_retriever,
+                    query_former,
+                    inline_output_bytes=inline_output_bytes,
+                )
                 if semantic_index_pass is not None and semantic_index_pass.queries is not None
                 else None
             ),
