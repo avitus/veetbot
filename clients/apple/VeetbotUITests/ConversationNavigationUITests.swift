@@ -508,6 +508,7 @@ final class ConversationNavigationUITests: XCTestCase {
         let answer = app.staticTexts["Your answer is visible below the tool summary."].firstMatch
         XCTAssertTrue(answer.waitForExistence(timeout: 10))
         #if os(macOS)
+        checkAnswerInsideTranscript(answer, above: composer)
         XCTAssertFalse(summary.exists)
         app.buttons["inspector.toggle"].click()
         #else
@@ -542,7 +543,7 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         XCTAssertFalse(app.staticTexts["Example result 1"].exists)
         #if os(macOS)
-        XCTAssertTrue(answer.exists)
+        checkAnswerInsideTranscript(answer, above: composer)
         #else
         checkAnswerStaysVisible(answer, below: summary)
         #endif
@@ -799,6 +800,18 @@ final class ConversationNavigationUITests: XCTestCase {
         waitForExpectations(timeout: 20)
         Thread.sleep(forTimeInterval: 1)
     }
+
+    #if os(macOS)
+    /// Checks visible transcript geometry after streaming or an inspector resize.
+    private func checkAnswerInsideTranscript(_ answer: XCUIElement, above composer: XCUIElement) {
+        XCTAssertTrue(waitForFrame(of: answer, timeout: 5) { frame in
+            frame.width > 0 && frame.height > 0
+                && self.app.windows.firstMatch.frame.contains(frame)
+                && frame.minY >= self.transcriptTop()
+                && frame.maxY <= composer.frame.minY
+        }, "Answer must remain above the composer and inside the visible transcript: \(answer.frame)")
+    }
+    #endif
 
     /// Keeps the answer on screen under the summary row.
     ///
