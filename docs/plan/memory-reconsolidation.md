@@ -1755,6 +1755,12 @@ refused anchor, fewer than two permitted sources or an unavailable policy preser
 the explicit admission refusal. Shared original excerpts are never stripped or
 reclassified to admit their dependent memories. The eventual group and verifier
 still repeat the complete current policy checks; this preview grants no export.
+If any policy-refused candidate shares an original event with a permitted candidate,
+selection also excludes that permitted candidate from new groups. Innocuous-looking
+text cannot shed the refused candidate's restriction through shared provenance.
+An affected anchor retains the original explicit refusal; independent permitted
+candidates may still group together. Omitting an otherwise permitted candidate for
+size does not itself prohibit its shared event, and no excerpt is partially removed.
 
 An exhausted full/changed inventory starts its next generation on a later UTC day
 even when deferred groups remain pending. The existing job retains its identity

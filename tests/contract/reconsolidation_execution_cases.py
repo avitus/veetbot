@@ -564,3 +564,14 @@ EXECUTION_SCENARIOS.extend(
         execution_deferred_queue_does_not_stall_new_inventory,
     )
 )
+
+
+async def execution_shared_refused_original_preserves_independent_review(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        shared_refused_original_preserves_independent_review,
+    )
+
+    await shared_refused_original_preserves_independent_review(factory)
+
+
+EXECUTION_SCENARIOS.append(execution_shared_refused_original_preserves_independent_review)

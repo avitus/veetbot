@@ -246,6 +246,35 @@ async def test_released_learning_tool_version_remains_executable() -> None:
         assert app.tool_pipeline._registry.get("memory.learn").spec.version == "1.1.0"
 
 
+@pytest.mark.parametrize("version", ["1.0.0", "1.1.0"])
+@pytest.mark.parametrize(
+    "quote_length,explicit_claim,status",
+    [(512, False, "committed"), (513, False, "rejected"), (2048, True, "committed")],
+)
+async def test_learning_quote_limits_preserve_explicit_evidence_compatibility(
+    version: str, quote_length: int, explicit_claim: bool, status: str
+) -> None:
+    quote = ("Family album caption. " * 100)[:quote_length]
+    proposal = {"call_id": "read-album", "quote": quote}
+    if explicit_claim:
+        proposal.update(claim="Family album caption.", subject="Family album")
+    async with read_archive(text=quote) as (app, context, _):
+        tool = app.tool_pipeline._registry.get("memory.learn", version)
+        result = await tool.execute({"observations": [proposal]}, context)
+        assert result.structured is not None
+        receipt = result.structured["results"][0]
+        assert receipt["status"] == status
+        beliefs = await app.memory.list_memories()
+        if status == "rejected":
+            assert receipt["reason"] == "observation_too_long"
+            assert beliefs == []
+        else:
+            assert len(beliefs) == 1
+            assert beliefs[0].subject == proposal.get("subject", quote)
+            claim = proposal.get("claim", quote)
+            assert beliefs[0].statement == f"Source suggests: {claim} [Source: {URL}]"
+
+
 @asynccontextmanager
 async def read_archive(
     *,

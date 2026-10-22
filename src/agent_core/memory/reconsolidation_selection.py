@@ -28,6 +28,7 @@ def fit_selection(
     if anchor not in original:
         return original
     allowed = []
+    refused_events: set[tuple[UUID, int]] = set()
     for source in original:
         value = _subset(preview, (source,))
         _, _, reason = _egress(principal, model, egress_policy, value, now)
@@ -35,6 +36,23 @@ def fit_selection(
             return original
         if reason is None:
             allowed.append(source)
+        else:
+            refused_events.update(
+                (item.record.source_session_id, sequence)
+                for item in value.sources
+                for sequence in item.record.source_event_ids
+            )
+    # An innocuous excerpt cannot shed a policy-refused memory's restriction
+    # merely because another, permitted memory cites the same complete event.
+    sharing_refused = {
+        item.version
+        for item in preview.sources
+        if any(
+            (item.record.source_session_id, sequence) in refused_events
+            for sequence in item.record.source_event_ids
+        )
+    }
+    allowed = [source for source in allowed if source not in sharing_refused]
     # Refused anchors still produce the explicit refusal. Eligible anchors can
     # select their own siblings without exporting any part of a refused source.
     if anchor not in allowed or len(allowed) < 2:

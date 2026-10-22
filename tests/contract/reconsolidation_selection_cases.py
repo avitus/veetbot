@@ -287,3 +287,67 @@ async def privacy_refused_neighbors_preserve_review(
             await uow.reconsolidation.release(principal(), retry_lease.lease_token, at)
     assert await worker.run_once() == 0
     assert len(provider.requests) == 2
+
+
+async def shared_refused_original_preserves_independent_review(factory: Factory) -> None:
+    from agent_core.memory.reconsolidation_policy import local_egress_policy
+
+    originals = []
+    async with factory() as uow:
+        for _ in range(2):
+            await uow.events.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=principal().principal_id,
+                    payload={"content": memory().statement},
+                )
+            )
+        for index in range(4):
+            original = memory(belief_id=501 + index).model_copy(
+                update={
+                    "store_position": index + 1,
+                    "source_event_ids": [1 if index < 2 else 2],
+                    "statement": "User prefers confidential answers."
+                    if index == 0
+                    else memory().statement,
+                }
+            )
+            originals.append(original)
+            await uow.memories.upsert_belief(original)
+    tracked = TrackedFactory(factory)
+    provider = MergeProvider(tracked)
+    worker = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        FixedClock(NOW),
+        principal(),
+        worker_id="shared-refused-source",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=local_egress_policy(model().provider),
+        owner_review=True,
+    )
+    await worker.run_once()
+    assert len(provider.requests) == 2, "Independent sources must still reach owner review"
+    message = provider.requests[0].conversation[1]
+    assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+    payload = json.loads(message.content[0].text)
+    exported = {item["belief_id"] for group in payload["groups"] for item in group["sources"]}
+    assert exported == {str(original.id) for original in originals[2:]}, (
+        "A permitted memory must not export the original it shares with a refused memory"
+    )
+    assert all(
+        excerpt["text"] == memory().statement
+        for group in payload["groups"]
+        for excerpt in group["excerpts"]
+    )
+    async with factory() as uow:
+        runs = await uow.reconsolidation.dreaming_runs(principal(), NOW)
+        assert runs[0].outcome == "proposed" and runs[0].proposals > 0
+        assert "egress_denied" in runs[0].deferrals
+        for original in originals:
+            assert await uow.memories.get(original.id, principal()) == original
