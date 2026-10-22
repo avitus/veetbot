@@ -239,6 +239,13 @@ com.apple.springboard.finishedstartup` holds SpringBoard's process id, and says
 so; `xcrun simctl erase <udid>` repairs such a simulator. Simulators the target
 booted are shut down when it ends, as xcodebuild did when it booted them; one
 that was already open stays open.
+The iOS navigation helper opens More with one window-anchored touch at its
+observed centre after its frame settles, rejecting empty, infinite, or
+out-of-window geometry. On the hosted iPhone 17 / iOS 27.0 runner, XCTest can
+report the visible button as unhittable or throw while evaluating hittability.
+The requested menu item must appear after the touch; geometry alone never
+counts as successful activation. The Persona journey still requires the
+unsaved voice text to survive switching sections.
 The cases tap an overflow-menu item at its centre rather than as an element,
 after requiring it to exist and be hittable. On the iOS 27.0 iPad simulator
 XCUITest's element tap on the menu's first item is swallowed and the menu stays

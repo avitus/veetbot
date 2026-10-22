@@ -3726,10 +3726,19 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(window.waitForExistence(timeout: 10))
         let moreButton = window.buttons["sidebar.more"]
         XCTAssertTrue(moreButton.waitForExistence(timeout: 10))
-        let moreReady = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hittable == true"), object: moreButton)
-        XCTAssertEqual(XCTWaiter.wait(for: [moreReady], timeout: 10), .completed)
-        moreButton.tap()
+        // On iOS 27 the compact drawer's visible More button can have valid
+        // geometry while XCTest's hittability query throws or stays false.
+        // Touch its observed centre through the window, then require the
+        // requested menu item to appear as proof that More actually opened.
+        waitForSettledFrame(of: moreButton, stableFor: 3)
+        let moreFrame = moreButton.frame
+        let mainFrame = window.frame
+        XCTAssertFalse(mainFrame.isEmpty || mainFrame.isInfinite || mainFrame.isNull)
+        XCTAssertFalse(moreFrame.isEmpty || moreFrame.isInfinite || moreFrame.isNull)
+        XCTAssertTrue(mainFrame.contains(moreFrame))
+        window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: moreFrame.midX - mainFrame.minX, dy: moreFrame.midY - mainFrame.minY
+        )).tap()
 
         let destination = window.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
