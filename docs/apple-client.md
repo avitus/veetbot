@@ -536,6 +536,8 @@ do not move the transcript. Cancellation or an interrupted replay preserves the
 saved transcript; active runs continue to publish live events on every Apple client.
 Sending a follow-up cancels unfinished replay before adding its optimistic message,
 so a delayed historical snapshot cannot overwrite the new submission.
+If submission fails, replay resumes only if that same conversation and terminal
+run still own the view; switching conversations prevents the old replay from returning.
 Each approval is fetched once per historical replay, even when later events name
 the same request. On Mac, approval notifications target the corresponding card
 in the attention dock; the dock remains visible independently of transcript scroll.
@@ -774,6 +776,7 @@ Needs you, Handled and Subscriptions. Its bottom row opens Chat, Memory, People,
 Schedules, Persona and Settings. On the Mac the window's sidebar button hides
 it together with Chat's sidebar; the mode bar with Chat / Email and More then
 returns, and account, search and collection pills sit above the inbox.
+This visibility binding is Mac-only; iPad retains UIKit-managed split navigation.
 The main page has an Email heading, count and appearance toggle. Compact screens put the mailbox collections in horizontal
 filter pills. Important / Other mail remains available under Find other mail.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560

@@ -1306,6 +1306,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Submits one optimistic turn, preserving the prior history on failure.
     @discardableResult
     public func send(_ rawText: String) async -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1332,10 +1333,20 @@ public final class ChatViewModel: ObservableObject {
         }
         // A follow-up takes ownership before its first suspension; a delayed
         // historical replay must not replace the optimistic message or new run.
+        let interruptedRunID = runState.runStatus?.isTerminal == true ? runState.activeRunID : nil
+        let submissionSelectionID = selectionRequestID
         watchTasks.cancel()
         isSending = true
         sessionBusy = false
-        defer { isSending = false }
+        defer {
+            isSending = false
+            // A failed submission leaves the previous terminal run in place.
+            // Resume its history only while it still owns this selection.
+            if let interruptedRunID, selectionRequestID == submissionSelectionID,
+                runState.activeRunID == interruptedRunID, runState.runStatus?.isTerminal == true {
+                watch(runID: interruptedRunID, touchHistoryOnCompletion: false, historical: true)
+            }
+        }
         let sentAttachments = attachments
         let content: [ContentBlock] =
             sentAttachments.compactMap(\.contentBlock) + (text.isEmpty ? [] : [.text(text)])
@@ -2813,6 +2824,7 @@ public final class ChatViewModel: ObservableObject {
         return eventStream.frames(runID: runID)
     }
 
+    /// Streams live state or reconstructs terminal history offscreen before publishing it once.
     private func watch(runID: UUID, touchHistoryOnCompletion: Bool = true, historical: Bool = false) {
         guard let eventStream else { return }
         watchTasks.cancel()

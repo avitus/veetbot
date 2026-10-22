@@ -991,14 +991,14 @@ import UserNotifications
 
     /// A follow-up owns visible state before its submission returns, even if
     /// the terminal run's delayed replay finishes in the meantime.
-    @Test
-    func testFollowUpSurvivesHistoricalReplayFinishingDuringSubmission() async throws {
+    @Test(arguments: ["accepted", "failed", "switched"])
+    func testFollowUpSurvivesHistoricalReplayFinishingDuringSubmission(outcome: String) async throws {
         let sessionID = UUID(), oldRunID = UUID(), newRunID = UUID()
         let lock = NSLock()
         let releaseReplay = DispatchSemaphore(value: 0)
         let releaseSubmission = DispatchSemaphore(value: 0)
         defer { releaseReplay.signal(); releaseSubmission.signal() }
-        var replayStarted = false, submissionStarted = false
+        var replayRequests = 0, submissionStarted = false
         let sessionBody = """
             {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Saved chat","metadata":{},"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z","active_run_id":null,"last_run_id":"\(oldRunID)"}
             """
@@ -1017,17 +1017,33 @@ import UserNotifications
                     {"id":"\(oldRunID)","session_id":"\(sessionID)","parent_run_id":null,"status":"COMPLETED","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z"}
                     """)
             case ("GET", "/v1/runs/\(oldRunID)/events"):
-                lock.withLock { replayStarted = true }
-                #expect(releaseReplay.wait(timeout: .now() + 10) == .success)
+                let requestNumber = lock.withLock { replayRequests += 1; return replayRequests }
+                if requestNumber == 1 {
+                    #expect(releaseReplay.wait(timeout: .now() + 10) == .success)
+                }
                 return try response(for: request, statusCode: 200, body: """
                     id: 3
+                    event: context.working_state.updated
+                    data: {"working_state":{"objective":"Restored history","constraints":[],"tasks":[],"established_facts":[],"open_questions":[],"next_action":null}}
+
+                    id: 4
                     event: run.completed
                     data: {"run_id":"\(oldRunID)"}
 
                     """)
             case ("POST", "/v1/sessions/\(sessionID)/messages"):
-                lock.withLock { submissionStarted = true }
-                #expect(releaseSubmission.wait(timeout: .now() + 10) == .success)
+                let firstAttempt = lock.withLock {
+                    let first = !submissionStarted
+                    submissionStarted = true
+                    return first
+                }
+                if firstAttempt {
+                    #expect(releaseSubmission.wait(timeout: .now() + 10) == .success)
+                }
+                if outcome != "accepted" {
+                    return try response(for: request, statusCode: 503,
+                        body: #"{"error":{"code":"service_unavailable","message":"Submission unavailable","details":{},"request_id":"follow-up-failed"}}"#)
+                }
                 return try response(for: request, statusCode: 202, body: "{\"run_id\":\"\(newRunID)\",\"status\":\"QUEUED\"}")
             case ("GET", "/v1/runs/\(newRunID)/events"):
                 return try response(for: request, statusCode: 200, body: "")
@@ -1041,10 +1057,10 @@ import UserNotifications
         defer { model.newSession() }
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         await model.selectSession(try #require(model.history.first))
-        for _ in 0..<2_000 where !lock.withLock({ replayStarted }) {
+        for _ in 0..<2_000 where lock.withLock({ replayRequests }) == 0 {
             try await Task.sleep(for: .milliseconds(1))
         }
-        try #require(lock.withLock { replayStarted })
+        try #require(lock.withLock { replayRequests } == 1)
         let send = Task { await model.send("Follow-up") }
         for _ in 0..<2_000 where !lock.withLock({ submissionStarted }) {
             try await Task.sleep(for: .milliseconds(1))
@@ -1055,10 +1071,25 @@ import UserNotifications
         // Leave submission suspended while the released historical stream drains.
         try await Task.sleep(for: .milliseconds(250))
         #expect(model.runState.timeline.map(\.text) == ["Saved answer", "Follow-up"])
+        if outcome == "switched" { model.newSession() }
         releaseSubmission.signal()
-        #expect(await send.value)
-        #expect(model.runState.timeline.map(\.text) == ["Saved answer", "Follow-up"])
-        #expect(model.runState.activeRunID == newRunID)
+        #expect(await send.value == (outcome == "accepted"))
+        if outcome == "accepted" {
+            #expect(model.runState.timeline.map(\.text) == ["Saved answer", "Follow-up"])
+            #expect(model.runState.activeRunID == newRunID)
+        } else if outcome == "failed" {
+            for _ in 0..<2_000 where model.runState.workingState?.objective != "Restored history" {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(model.runState.workingState?.objective == "Restored history")
+            #expect(lock.withLock { replayRequests } == 2)
+            #expect(model.runState.timeline.map(\.text) == ["Saved answer"])
+            #expect(model.runState.activeRunID == oldRunID)
+        } else {
+            #expect(model.runState.timeline.isEmpty)
+            #expect(model.runState.activeRunID == nil)
+            #expect(lock.withLock { replayRequests } == 1)
+        }
     }
 
     /// Reopening a chat whose answer followed three approved commands lands on

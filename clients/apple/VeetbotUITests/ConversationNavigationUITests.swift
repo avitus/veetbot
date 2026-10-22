@@ -3401,6 +3401,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(memoryEffort.label, "Memory reasoning, Medium")
     }
 
+    /// Selects a settled native menu item and requires dismissal before checking the saved value.
     private func chooseMenuItem(_ title: String, from picker: XCUIElement) {
         XCTAssertTrue(picker.isEnabled)
         picker.tap()
@@ -3796,6 +3797,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     #if os(iOS)
+    /// Opens a compact sidebar destination after its native menu becomes interactive.
     private func openSidebarDestination(identifier: String) {
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))

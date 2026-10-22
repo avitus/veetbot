@@ -229,6 +229,7 @@ public struct RootView: View {
         Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.clearError() } })
     }
 
+    /// Keeps mode navigation available when Email's mailbox sidebar is hidden.
     @ViewBuilder
     private var configuredContent: some View {
         VStack(spacing: 0) {
@@ -408,29 +409,38 @@ public struct RootView: View {
     /// toolbar's own background removes that edge; the title bar keeps the
     /// window's colour.
     private var splitChat: some View {
+        #if os(macOS)
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            SessionSidebar(
-                model: model,
-                usesDirectActivation: usesDirectSidebarActivation,
-                openSettings: presentSettings
-            )
-            .navigationSplitViewColumnWidth(
-                min: A2Metrics.sidebarWidth - VeetSpace.s7, ideal: A2Metrics.sidebarWidth,
-                max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
-            )
+            chatSidebar
         } detail: {
-            #if os(macOS)
             ChatView(model: model)
                 .macInspector(inspector, mode: .chat) {
                     ChatInspectorPanel(model: model, inspector: inspector)
                 }
-            #else
-            ChatView(model: model)
-            #endif
         }
-        #if os(macOS)
         .toolbarBackground(.hidden, for: .windowToolbar)
+        #else
+        // UIKit owns the split view's adaptive visibility. The Mac-only Email
+        // toolbar binding must not replace that ownership on iPad.
+        NavigationSplitView {
+            chatSidebar
+        } detail: {
+            ChatView(model: model)
+        }
         #endif
+    }
+
+    /// Shares the sidebar content while each platform owns its split visibility.
+    private var chatSidebar: some View {
+        SessionSidebar(
+            model: model,
+            usesDirectActivation: usesDirectSidebarActivation,
+            openSettings: presentSettings
+        )
+        .navigationSplitViewColumnWidth(
+            min: A2Metrics.sidebarWidth - VeetSpace.s7, ideal: A2Metrics.sidebarWidth,
+            max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
+        )
     }
 
     #if os(iOS)

@@ -54,6 +54,7 @@ import Testing
         #expect(chat.contains(".accessibilityIdentifier(\"inspector.artifact.\\(artifact.id.uuidString)\")"))
     }
 
+    /// Keeps Mac tool details in Activity and each pending approval target in the dock.
     @Test
     func testTheTranscriptUsesMessageOnlyRowsOnMac() throws {
         let activity = try source(at: "Veetbot/Views/ActivityViews.swift")

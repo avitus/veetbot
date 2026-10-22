@@ -902,6 +902,7 @@ private struct AttentionDock: View {
     let maxHeight: CGFloat
     @State private var contentHeight: CGFloat = 0
 
+    /// Keeps actionable requests visible independently of transcript scrolling.
     var body: some View {
         let pending = state.approvals.filter { $0.status.isPending }
         if !pending.isEmpty || state.clarifyingQuestion != nil {
