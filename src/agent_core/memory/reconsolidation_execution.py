@@ -104,11 +104,13 @@ class ReconsolidationBatchExecutor:
         *,
         admitted: Callable[[], bool],
         egress_policy: EgressPolicy,
+        fit_verification_output: bool = False,
     ) -> None:
         self._factory = uow_factory
         self._clock = clock
         self._principal = principal
         self._admitted = admitted
+        self._fit_verification_output = fit_verification_output
         self._admission = ReconsolidationRequestAdmission(
             uow_factory, clock, principal, admitted=admitted, egress_policy=egress_policy
         )
@@ -354,6 +356,7 @@ class ReconsolidationBatchExecutor:
                 proposal_json,
                 model=model,
                 remaining_usd=SLICE_USD - current.slice_spent,
+                fit_output_budget=self._fit_verification_output,
             )
         except ProviderBatchError:
             await self._decide(lease, calls, StageDecision(status="invalid_response"))

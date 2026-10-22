@@ -139,6 +139,7 @@ class ReconsolidationRequestAdmission:
         *,
         model: ResolvedModel,
         remaining_usd: Decimal,
+        fit_output_budget: bool = False,
     ) -> tuple[VerificationPreparation, ReconsolidationSpend | None]:
         self._check_admission()
         if (original.context.tenant_id, original.context.principal_id) != (
@@ -158,6 +159,7 @@ class ReconsolidationRequestAdmission:
                 model=model,
                 egress_policy=self._policy,
                 remaining_usd=remaining_usd,
+                fit_output_budget=fit_output_budget,
                 now=self._clock.now(),
             )
             reservation = await self._reserve(uow, result.prepared)

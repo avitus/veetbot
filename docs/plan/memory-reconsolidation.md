@@ -1669,6 +1669,16 @@ owner explicitly approves their current revision. Approval revalidates sources,
 is idempotent, preserves original facts and clocks, and retains undo/rejection.
 The default-off reviewed-mode flag enables daily bounded generation and only
 owner-approved recall without claiming that autonomous quality gates passed.
+For supervised previews only, verification lowers its response-token allowance
+when the full 4,096-token maximum would exceed the remaining slice budget. It
+chooses the largest affordable positive allowance by pricing the complete final
+serialized request, including the highest input/cache and output/reasoning rates.
+Complete evidence and proposed clauses remain unchanged. If even the minimum
+request cannot fit, admission still defers; incomplete or length-stopped replies
+still fail validation. The exact reservation, two-call limit, $0.25 slice and $2
+daily ceilings remain unchanged. Unattended and frozen evaluation paths retain
+their existing request limits and behavior.
+
 Daily claims, pause and content-free run outcomes are durable. Cancellation records
 a failed run through a shielded receipt write bounded to five seconds; unavailable
 spend is reported as unknown. Only settled provider charges appear as exact costs.
