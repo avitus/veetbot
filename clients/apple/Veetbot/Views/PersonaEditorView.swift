@@ -268,6 +268,11 @@ public struct PersonaEditorView: View {
                     .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
             }
+        } else {
+            Text("This server does not list any boundaries.")
+                .veetType(.ui)
+                .foregroundColor(AppTheme.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -411,6 +416,11 @@ public struct PersonaEditorView: View {
                     PersonaNominationCard(nomination: nomination, model: model)
                 }
             }
+        } else {
+            Text("Veetbot has no new assumptions to suggest right now.")
+                .veetType(.ui)
+                .foregroundColor(AppTheme.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

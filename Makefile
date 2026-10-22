@@ -159,6 +159,7 @@ test-apple-ui-macos:
 		-destination 'platform=macOS' \
 		-resultBundlePath "$$apple_results_run_dir/macos.xcresult" \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2PersonaSectionsPreserveUnsavedVoice \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPersonaEmptyPagesExplainMissingData \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallResultDisclosesTranscriptAndStagesANewCall \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallConcernStagesEditableChat \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2MarkdownArtifactRendersAReadableDocument \

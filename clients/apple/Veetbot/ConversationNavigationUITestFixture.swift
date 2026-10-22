@@ -465,6 +465,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = #"{"items":[],"next_cursor":null}"#
         case ("GET", "/v1/persona/boundaries"):
             statusCode = 200
+            if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_EMPTY_PERSONA_BOUNDARIES"] == "1" {
+                body = #"{"items":[]}"#
+                break
+            }
             body = #"{"items":[{"id":"payments_ask","text":"Payments ask you first.","enforced_by":{"kind":"policy_rule","ref":"rules.financial=require_approval"},"active":true},{"id":"publishing_asks","text":"Posting anything publicly asks you first.","enforced_by":{"kind":"policy_rule","ref":"rules.publication=require_approval"},"active":true}]}"#
         case (_, let path) where path.hasPrefix("/v1/memory-reconsolidations") || path.hasPrefix("/v1/memories/00000000-0000-0000-0000-00000000320"):
             let result = Self.synthesisResponse(request)

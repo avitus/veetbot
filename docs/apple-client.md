@@ -215,7 +215,10 @@ each nomination from memory in an amber-edged card with Affirm as the filled
 capsule and Decline as a quiet one. With a server that has them (ADR-0226),
 Persona uses a section sidebar on Mac and regular-width iPad, and a section
 menu on compact screens: Voice, What Veetbot assumes, Nominations and
-Boundaries. Moving between sections preserves unsaved edits. A server without
+Boundaries. Empty Nominations and Boundaries pages explain that no items are
+available. UI navigation checks wait for foreground and hittable controls, then
+anchor native menu touches to the app window and require the menu to close.
+Moving between sections preserves unsaved edits. A server without
 tone support opens What Veetbot assumes instead of Voice. Voice contains
 the Lean towards chips (Brief, Warm, Direct, Formal,
 Playful; up to three, Formal and Playful replacing each other) and How that
@@ -592,8 +595,9 @@ Chat's panel has two tabs. **Activity** holds a card naming what the run is
 doing (running, waiting for an approval or an answer, finished, failed or
 stopped) with its call count, the working notes, and every tool call the
 conversation holds, grouped under the owner's request that started them and
-numbered across the conversation; each call opens into its arguments, result,
-trust and risk. **Artifacts** lists every file or image found in the
+numbered across the conversation. Each call exposes the result content and
+trust supplied by its events, with arguments and risk when the payload includes
+those invocation details. **Artifacts** lists every file or image found in the
 conversation's tool results and messages, each once with the call that made it,
 and previews the chosen one in place with Download. There is no session
 artifact list on the server, so the list is as complete as the loaded

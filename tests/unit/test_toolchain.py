@@ -2827,6 +2827,8 @@ def test_apple_ui_overflow_destinations_are_tapped_at_a_point() -> None:
     item, Memory, is swallowed and the menu stays open, three runs of three,
     while a tap at any of eleven points across that item, its centre included,
     opens the browser. The item must still exist and be hittable first.
+    The point is anchored to the app window because menu-element coordinates
+    can carry zero-size parent-window metadata on the hosted simulator.
     """
     source = (
         ROOT / "clients" / "apple" / "VeetbotUITests" / "ConversationNavigationUITests.swift"
@@ -2835,9 +2837,15 @@ def test_apple_ui_overflow_destinations_are_tapped_at_a_point() -> None:
 
     assert "XCTAssertTrue(destination.waitForExistence(timeout: 5))" in helper
     assert "XCTAssertTrue(destination.isHittable)" in helper
-    assert (
-        "destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()" in helper
-    )
+    assert "let window = app.windows.firstMatch" in helper
+    assert "let destination = window.buttons[identifier]" in helper
+    assert "let target = destination.frame" in helper
+    assert "let windowFrame = window.frame" in helper
+    assert "XCTAssertTrue(windowFrame.contains(target))" in helper
+    assert "window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(" in helper
+    assert "dx: target.midX - windowFrame.minX, dy: target.midY - windowFrame.minY" in helper
+    assert ")).tap()" in helper
+    assert "destination.waitForNonExistence(timeout: 2)" in helper
     assert "destination.tap()" not in helper
 
 

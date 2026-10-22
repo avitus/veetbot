@@ -93,7 +93,12 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["# Appointment notes"].exists)
         XCTAssertTrue(app.buttons["Download"].isEnabled)
         attachEmailScreenshot("A2 rendered Markdown artifact")
+        #if os(macOS)
+        activate(app.buttons["inspector.hide"])
+        XCTAssertTrue(app.descendants(matching: .any)["inspector.chat"].waitForNonExistence(timeout: 5))
+        #else
         activate(app.buttons["Close"])
+        #endif
         XCTAssertTrue(file.waitForExistence(timeout: 5))
     }
 
@@ -112,6 +117,22 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(voice.waitForExistence(timeout: 5))
         XCTAssertTrue((voice.value as? String ?? "").contains("Keep explanations concrete."))
         attachEmailScreenshot("A2 Persona voice and sections")
+    }
+
+    func testPersonaEmptyPagesExplainMissingData() {
+        app.launchEnvironment["VEETBOT_UI_TEST_EMPTY_PERSONA_BOUNDARIES"] = "1"
+        app.launch()
+        #if os(iOS)
+        // Navigation helpers must recover the foreground before querying hit targets.
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
+        #endif
+        openA2Destination("sidebar.persona")
+        XCTAssertTrue(app.descendants(matching: .any)["persona.voice"].waitForExistence(timeout: 10))
+        choosePersonaSection("Nominations")
+        XCTAssertTrue(app.staticTexts["Veetbot has no new assumptions to suggest right now."].waitForExistence(timeout: 5))
+        choosePersonaSection("Boundaries")
+        XCTAssertTrue(app.staticTexts["This server does not list any boundaries."].waitForExistence(timeout: 5))
     }
 
     func testA2WideMemoryKeepsCollectionsBesideRecords() throws {
@@ -390,7 +411,7 @@ final class ConversationNavigationUITests: XCTestCase {
     func testEmailPanelShowsTheThreadsContextAndFoldsInANarrowWindow() {
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1400,860"
         app.launch()
-        activate(app.buttons["mode.email"])
+        openEmailAfterWindowResize(width: 1400, height: 860)
         let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         activate(row)
@@ -412,13 +433,29 @@ final class ConversationNavigationUITests: XCTestCase {
         app.terminate()
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1100,760"
         app.launch()
-        activate(app.buttons["mode.email"])
+        openEmailAfterWindowResize(width: 1100, height: 760)
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         activate(row)
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
         XCTAssertFalse(panel.waitForExistence(timeout: 2), "Three columns leave no room for the panel")
         showEmailPanel()
         XCTAssertTrue(app.descendants(matching: .any)["inspector.email.priority"].waitForExistence(timeout: 5))
+    }
+
+    /// The fixture resizes the window after launch. A click computed before
+    /// that resize can land in the title bar instead of the Email control.
+    private func openEmailAfterWindowResize(width: CGFloat, height: CGFloat) {
+        app.activate()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: window, timeout: 10) {
+            abs($0.width - width) <= 1 && abs($0.height - height) <= 1
+        })
+        let email = window.buttons["mode.email"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: email)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+        waitForSettledFrame(of: email, stableFor: 3)
+        email.click()
     }
     #endif
 
@@ -3683,26 +3720,35 @@ final class ConversationNavigationUITests: XCTestCase {
 
     #if os(iOS)
     private func openSidebarDestination(identifier: String) {
-        let moreButton = app.buttons["sidebar.more"]
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        let moreButton = window.buttons["sidebar.more"]
         XCTAssertTrue(moreButton.waitForExistence(timeout: 10))
-        XCTAssertTrue(moreButton.isHittable)
+        let moreReady = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"), object: moreButton)
+        XCTAssertEqual(XCTWaiter.wait(for: [moreReady], timeout: 10), .completed)
         moreButton.tap()
 
-        let destination = app.buttons[identifier]
+        let destination = window.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
-        // The item exists before the menu has finished opening; on the iPad it
-        // reports unhittable for a moment after that, so give it a few seconds.
-        let hittableBy = Date().addingTimeInterval(3)
-        while !destination.isHittable && Date() < hittableBy { usleep(100_000) }
+        // Menu elements appear before their presentation becomes interactive.
+        let destinationReady = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"), object: destination)
+        XCTAssertEqual(XCTWaiter.wait(for: [destinationReady], timeout: 10), .completed)
         XCTAssertTrue(destination.isHittable)
-        // The iOS 27.0 iPad simulator swallows XCUITest's element tap on the
-        // menu's first item and leaves the menu open; a touch at the item's
-        // centre, like any other point on it, activates it. It also drops a
-        // touch that lands while the menu is still opening, so the item must
-        // stop moving first, and the menu must close for the tap to count.
+        // iOS 27.0 can synthesize a menu-element coordinate tap with a zero-size
+        // parent window. Anchor the observed target point to the actual window;
+        // require the menu to close before treating the navigation as complete.
         for _ in 0..<3 {
-            waitForSettledFrame(of: destination)
-            destination.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            waitForSettledFrame(of: destination, stableFor: 3)
+            let target = destination.frame
+            let windowFrame = window.frame
+            XCTAssertTrue(windowFrame.contains(target))
+            window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: target.midX - windowFrame.minX, dy: target.midY - windowFrame.minY
+            )).tap()
             if destination.waitForNonExistence(timeout: 2) { return }
         }
         XCTFail("The menu stayed open after three taps on \(identifier)")
