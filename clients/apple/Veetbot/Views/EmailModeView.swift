@@ -163,6 +163,8 @@ private final class EmailInboxWidthAutosaveView: NSView {
 public struct EmailModeView: View {
     @ObservedObject var model: EmailViewModel
     var viewportHeight: CGFloat? = nil
+    /// False once the Mac window's sidebar button hides the sidebar.
+    var mailboxSidebarVisible = true
     #if os(macOS)
     var inboxWidth = EmailInboxWidthStore.app
     #endif
@@ -200,12 +202,15 @@ public struct EmailModeView: View {
         #endif
     }
 
+    /// Without the mailbox sidebar, its search, accounts and collections sit above the inbox.
+    private var showsMailboxSidebar: Bool { directSelection && mailboxSidebarVisible }
+
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
             if directSelection {
                 HStack(spacing: 0) {
-                    mailboxSidebar.frame(width: 232)
+                    if showsMailboxSidebar { mailboxSidebar.frame(width: 232) }
                     #if os(macOS)
                     withPanel(VStack(spacing: 0) {
                         emailHeading
@@ -301,10 +306,8 @@ public struct EmailModeView: View {
     /// Groups triage controls above independently actionable rows and per-account freshness below them.
     private var inbox: some View {
         VStack(spacing: 0) {
-            if !directSelection {
-                emailHeading
-                inboxHeader.fixedSize(horizontal: false, vertical: true)
-            }
+            if !directSelection { emailHeading }
+            if !showsMailboxSidebar { inboxHeader.fixedSize(horizontal: false, vertical: true) }
             HairlineDivider()
             List {
                 if model.unavailable {
@@ -326,7 +329,7 @@ public struct EmailModeView: View {
                         .buttonStyle(SecondaryCapsuleButtonStyle())
                     }.padding(.vertical, 16).emailHideSeparator()
                 }
-                if !directSelection, let pause = model.budgetPauseMessage {
+                if !showsMailboxSidebar, let pause = model.budgetPauseMessage {
                     budgetPause(pause)
                         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                         .emailHideSeparator()
@@ -620,15 +623,18 @@ public struct EmailModeView: View {
             .veetType(.ui)
             .padding(.horizontal, 10).frame(minHeight: A2Metrics.controlHeight + 4)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.field))
-            if !directSelection {
+            if !showsMailboxSidebar {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(EmailCollection.allCases, id: \.self) { collection in
                             Button {
                                 model.setCollection(collection)
                             } label: {
-                                Text(collectionTitle(collection))
-                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                                // One label, so the pill style draws one capsule around title and count.
+                                HStack(spacing: 6) {
+                                    Text(collectionTitle(collection))
+                                    if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                                }
                             }
                             .buttonStyle(FilterPillButtonStyle(selected: model.listView == collection.rawValue))
                             .accessibilityIdentifier("email.collection.\(collectionID(collection))")

@@ -764,8 +764,10 @@ an account failure only when the server has recorded a refresh error.
 The wide Email sidebar contains account and search controls, New chat, the
 Chat / Email switch, pending chat attention, and Mailbox navigation for Inbox,
 Needs you, Handled and Subscriptions. Its bottom row opens Chat, Memory, People,
-Schedules, Persona and Settings. The main page has an Email heading, count and
-appearance toggle. Compact screens put the mailbox collections in horizontal
+Schedules, Persona and Settings. On the Mac the window's sidebar button hides
+it together with Chat's sidebar; the mode bar with Chat / Email and More then
+returns, and account, search and collection pills sit above the inbox.
+The main page has an Email heading, count and appearance toggle. Compact screens put the mailbox collections in horizontal
 filter pills. Important / Other mail remains available under Find other mail.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560
 points while retaining at least 250 points for reading in a small window.
