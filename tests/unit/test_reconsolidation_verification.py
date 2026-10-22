@@ -28,7 +28,11 @@ from agent_core.domain.reconsolidation_inputs import (
     VerificationPreparation,
 )
 from agent_core.domain.reconsolidation_provider import CandidateReview
-from agent_core.memory.reconsolidation_inputs import EgressPolicy, prepare_proposal_request
+from agent_core.memory.reconsolidation_inputs import (
+    EgressPolicy,
+    _maximum_cost,
+    prepare_proposal_request,
+)
 from agent_core.memory.reconsolidation_provider import (
     ProviderBatchError,
     parse_proposal,
@@ -139,6 +143,7 @@ def prepare(
     policy: EgressPolicy = permit,
     now: datetime = NOW,
     remaining: Decimal = Decimal("0.20"),
+    fit_output_budget: bool = False,
 ) -> VerificationPreparation:
     original = original or build().prepared
     assert original is not None
@@ -151,6 +156,7 @@ def prepare(
         egress_policy=policy,
         remaining_usd=remaining,
         now=now,
+        fit_output_budget=fit_output_budget,
     )
 
 
@@ -540,3 +546,70 @@ def test_reclassified_proposed_text_is_not_assumed_safe_from_its_sources() -> No
     assert result.prepared is not None
     assert "Private inference" not in result.prepared.serialized_request
     assert result.rejected[0].reason == "input_unavailable"
+
+
+@pytest.mark.parametrize("reasoning", [False, True])
+def test_supervised_verifier_fits_only_output_to_exact_remaining_headroom(reasoning: bool) -> None:
+    model = resolved_model().model_copy(
+        update={
+            "pricing": ModelPricing(
+                input_per_mtok=Decimal("5"),
+                output_per_mtok=Decimal("30"),
+                cache_write_per_mtok=Decimal("6.25"),
+                reasoning_priced_separately=reasoning,
+                reasoning_per_mtok=Decimal("40"),
+            )
+        }
+    )
+    full = prepare(model=model, remaining=Decimal("0.25")).prepared
+    assert full is not None
+    remaining = full.maximum_cost_usd - Decimal("0.02")
+    # The unattended/frozen path preserves its original refusal.
+    assert prepare(model=model, remaining=remaining).prepared is None
+    fitted = prepare(model=model, remaining=remaining, fit_output_budget=True).prepared
+    assert fitted is not None
+    cap = fitted.request.maximum_output_tokens
+    assert cap is not None and 1 <= cap < 4096
+    assert fitted.request.model_copy(update={"maximum_output_tokens": 4096}) == full.request
+    assert fitted.maximum_cost_usd <= remaining
+    assert fitted.estimated_input_tokens == len(fitted.serialized_request.encode())
+    larger = fitted.request.model_copy(update={"maximum_output_tokens": cap + 1})
+    larger_cost = _maximum_cost(model, len(larger.model_dump_json().encode()), cap + 1)
+    assert larger_cost is not None and larger_cost > remaining
+    assert fitted.request_digest != full.request_digest
+    assert prepare(model=model, remaining=Decimal("0.25"), fit_output_budget=True).prepared == full
+
+
+@pytest.mark.parametrize("ceiling", [1, 1024])
+def test_supervised_verifier_fits_output_to_context_without_truncating_evidence(
+    ceiling: int,
+) -> None:
+    full = prepare().prepared
+    assert full is not None
+    bounded = full.request.model_copy(update={"maximum_output_tokens": ceiling})
+    context_limit = len(bounded.model_dump_json().encode()) + ceiling
+    model = resolved_model().model_copy(
+        update={"limits": ModelLimits(context_window_tokens=context_limit)}
+    )
+    assert prepare(model=model).prepared is None
+    fitted = prepare(model=model, fit_output_budget=True).prepared
+    assert fitted is not None
+    assert fitted.request.maximum_output_tokens == ceiling
+    assert fitted.request.conversation == full.request.conversation
+    assert fitted.estimated_input_tokens + ceiling == context_limit
+    larger = fitted.request.model_copy(update={"maximum_output_tokens": ceiling + 1})
+    assert len(larger.model_dump_json().encode()) + ceiling + 1 > context_limit
+
+
+def test_supervised_verifier_cannot_spend_below_the_minimum_complete_request() -> None:
+    full = prepare().prepared
+    assert full is not None
+    minimum = full.request.model_copy(update={"maximum_output_tokens": 1})
+    cost = _maximum_cost(resolved_model(), len(minimum.model_dump_json().encode()), 1)
+    assert cost is not None
+    refused = prepare(remaining=cost - Decimal("0.0000000001"), fit_output_budget=True)
+    assert refused.prepared is None
+    assert {item.reason for item in refused.deferred} == {"cost_budget"}
+    fitted = prepare(remaining=cost, fit_output_budget=True).prepared
+    assert fitted is not None and fitted.request.maximum_output_tokens == 1
+    assert fitted.maximum_cost_usd == cost

@@ -49,7 +49,12 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
         self._last_execution: ReconsolidationExecution | None = None
         self._proposal_count = 0
         self._executor = ReconsolidationBatchExecutor(
-            factory, clock, principal, admitted=admitted, egress_policy=egress_policy
+            factory,
+            clock,
+            principal,
+            admitted=admitted,
+            egress_policy=egress_policy,
+            fit_verification_output=owner_review,
         )
 
     async def run_once(self) -> int:
