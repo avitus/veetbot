@@ -182,7 +182,10 @@ def _fit_output_budget(
         cost = _maximum_cost(model, count, output)
         if cost is None:
             return request
-        if max(cost, Decimal("0.0000000001")) <= remaining_usd:
+        if (
+            count + output <= model.limits.context_window_tokens
+            and max(cost, Decimal("0.0000000001")) <= remaining_usd
+        ):
             best = candidate
             low = output + 1
         else:

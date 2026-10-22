@@ -170,6 +170,8 @@ on any view under `Views/` that sets a literal size, a raw text style or bold.
 The table gives Mac base sizes; explicit text-size choices scale them together,
 preserving the hierarchy. Comfortable panel rows are 14.56 points, metadata
 13.44, and section labels 12.32. The iPhone and iPad roles scale with Dynamic Type.
+Mac People filter titles use medium-weight UI text in ink to keep the scaled
+relationship label legible on standard-resolution displays.
 `.veetMono()` sets the work ledger and code in SF Mono at the scaled Mac meta size, and
 `.veetIcon(_:)` sizes symbols to the row icon (15, 18 or 20 points).
 `.transcriptBody()` marks the transcript, where the body role follows the
@@ -207,7 +209,8 @@ saves, and accepted or declined persona suggestions.
 Chat is the first surface drawn with these tokens: the sidebar on `paperDeep`
 with a "Needs you" group ahead of Recent, folders and Scheduled; answers on bare
 paper behind a small teal mark; the owner's messages in `tealWash` capsules; each
-tool run one sentence that opens into a monospaced ledger; a pending approval or
+tool run on iPhone and iPad one sentence that opens into a monospaced ledger,
+while Mac tool calls open in the right panel's Activity tab; a pending approval or
 clarifying question docked above a translucent composer while the transcript
 shows one amber "Waiting for your approval" line. On a compact window the chat
 list slides over the conversation from the leading edge. Email follows (see
