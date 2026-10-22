@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from typing import cast
 
 from agent_core.adapters.determinism import FixedClock, RandomIdFactory
@@ -197,3 +198,92 @@ async def oversized_pair_remains_explicitly_blocked(factory: Factory) -> None:
     async with factory() as uow:
         runs = await uow.reconsolidation.dreaming_runs(principal(), NOW)
         assert runs[0].outcome == "blocked" and runs[0].deferrals == ("input_budget",)
+
+
+async def privacy_refused_neighbors_preserve_review(
+    factory: Factory, *, queued: bool = False
+) -> None:
+    from agent_core.memory.reconsolidation_policy import local_egress_policy
+
+    originals = []
+    async with factory() as uow:
+        for index in range(14):
+            # The first memory is harmless; its complete original also contains
+            # private material. Its other parts must not be stripped for export.
+            text = memory().statement + (" My passport number is 123456789." if index == 0 else "")
+            await uow.events.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=principal().principal_id,
+                    payload={"content": text + " Notes: " + ('"é" ' * 260)},
+                )
+            )
+            original = memory(belief_id=501 + index).model_copy(
+                update={"store_position": index + 1, "source_event_ids": [index + 1]}
+            )
+            originals.append(original)
+            await uow.memories.upsert_belief(original)
+        if queued:
+            lease = await uow.reconsolidation.claim_due(principal(), NOW, "old-selection")
+            assert lease is not None
+            page = await uow.reconsolidation.inventory(principal(), lease.lease_token, NOW)
+            old_groups = await uow.reconsolidation.checkpoint(
+                principal(), lease.lease_token, page, (page.sources,), NOW
+            )
+            released = await uow.reconsolidation.release(principal(), lease.lease_token, NOW)
+            assert released.full_cursor == released.full_bound
+            assert released.change_cursor == released.change_bound
+            assert released.state == "ready"
+    at = NOW + timedelta(days=1) if queued else NOW
+    tracked = TrackedFactory(factory)
+    provider = MergeProvider(tracked)
+    worker = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        FixedClock(at),
+        principal(),
+        worker_id="privacy-selection",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=local_egress_policy(model().provider),
+        owner_review=True,
+    )
+    await worker.run_once()
+    assert len(provider.requests) == 2, "Private neighbors must not block eligible owner review"
+    for request in provider.requests:
+        assert len(request.model_dump_json().encode()) <= 16384
+        assert "passport" not in request.model_dump_json()
+    message = provider.requests[0].conversation[1]
+    assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+    payload = json.loads(message.content[0].text)
+    assert all(
+        source["belief_id"] != str(originals[0].id)
+        for group in payload["groups"]
+        for source in group["sources"]
+    )
+    async with factory() as uow:
+        runs = await uow.reconsolidation.dreaming_runs(principal(), at)
+        assert runs[0].outcome == "proposed" and runs[0].proposals > 0
+        assert "egress_denied" in runs[0].deferrals
+        for original in originals:
+            assert await uow.memories.get(original.id, principal()) == original
+        assert not await uow.reconsolidation.active_merges(
+            principal(), tuple(original.id for original in originals), at
+        )
+        if queued:
+            # Original blocked work is still retried, with its immutable membership.
+            retry_lease = await uow.reconsolidation.claim_due(principal(), at, "inspect-retry")
+            assert retry_lease is not None
+            retry = await uow.reconsolidation.claim_group(principal(), retry_lease.lease_token, at)
+            assert retry is not None and retry.id == old_groups[0].id
+            assert retry.sources == old_groups[0].sources and retry.attempts == 2
+            await uow.reconsolidation.finish_group(
+                principal(), retry_lease.lease_token, retry.id, "retry", at
+            )
+            await uow.reconsolidation.release(principal(), retry_lease.lease_token, at)
+    assert await worker.run_once() == 0
+    assert len(provider.requests) == 2

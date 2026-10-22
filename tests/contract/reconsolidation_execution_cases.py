@@ -540,3 +540,27 @@ async def execution_unfittable_pair_remains_blocked(factory: Factory) -> None:
 
 
 EXECUTION_SCENARIOS.append(execution_unfittable_pair_remains_blocked)
+
+
+async def execution_privacy_refused_neighbors_preserve_review(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        privacy_refused_neighbors_preserve_review,
+    )
+
+    await privacy_refused_neighbors_preserve_review(factory)
+
+
+async def execution_deferred_queue_does_not_stall_new_inventory(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        privacy_refused_neighbors_preserve_review,
+    )
+
+    await privacy_refused_neighbors_preserve_review(factory, queued=True)
+
+
+EXECUTION_SCENARIOS.extend(
+    (
+        execution_privacy_refused_neighbors_preserve_review,
+        execution_deferred_queue_does_not_stall_new_inventory,
+    )
+)
