@@ -649,6 +649,8 @@ private struct PeopleFilter<Option: Identifiable & Equatable>: View {
     var body: some View {
         HStack {
             Text(title)
+                .veetType(.ui, weight: .medium)
+                .foregroundColor(AppTheme.ink)
             Button { isPresented = true } label: {
                 Label(label(selection), systemImage: "chevron.up.chevron.down")
             }

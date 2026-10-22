@@ -336,25 +336,39 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// A wide window opens Chat's panel with the run's status; the toolbar
-    /// hides and shows it, and a work strip reveals its calls there while the
-    /// transcript keeps its one line.
+    /// hides and shows it, and calls stay exclusively in that panel.
     func testChatPanelHoldsTheRunAndRevealsAWorkStripsCalls() {
         app.launchArguments.append("--ui-testing-mixed-tools")
         app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1400,860"
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_CENTER"] = "1"
         app.launch()
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForFrame(of: window, timeout: 5) { $0.width >= 1300 })
+        XCTAssertTrue(waitForFrame(of: window, timeout: 5) {
+            abs($0.width - 1400) <= 3 && $0.minX >= 0
+        })
         let panel = app.descendants(matching: .any)["inspector.chat"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5), "A wide window opens the panel")
         XCTAssertTrue(app.descendants(matching: .any)["inspector.chat.run"].exists)
         let toggle = app.buttons["inspector.toggle"]
+        let input = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        waitForSettledFrame(of: input)
+        let withPanel = input.frame
+        let panelWidth = panel.frame.width
         XCTAssertEqual(toggle.value as? String, "Shown")
         toggle.click()
         XCTAssertFalse(panel.waitForExistence(timeout: 1))
         XCTAssertEqual(toggle.value as? String, "Hidden")
+        XCTAssertTrue(waitForFrame(of: input, timeout: 5) {
+            abs($0.width - withPanel.width - panelWidth) <= 4
+                && abs($0.minX - withPanel.minX) <= 2
+        }, "Hiding the panel must widen Chat instead of adding empty center-panel margins")
         toggle.click()
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForFrame(of: input, timeout: 5) {
+            abs($0.width - withPanel.width) <= 2
+        })
 
         let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
@@ -371,16 +385,11 @@ final class ConversationNavigationUITests: XCTestCase {
         composer.click()
         composer.typeText("Show tool summary")
         app.buttons["Send"].click()
-        let summary = app.buttons["tool.bundle.gmail-1"]
-        XCTAssertTrue(summary.waitForExistence(timeout: 10))
-        XCTAssertEqual(summary.value as? String, "In panel")
-        summary.click()
-        XCTAssertEqual(summary.value as? String, "Shown in panel")
-        XCTAssertTrue(app.descendants(matching: .any)["inspector.ledger.tool:gmail-1"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["tool.bundle.gmail-1"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["inspector.ledger.tool:gmail-1"].waitForExistence(timeout: 10))
         let detail = app.descendants(matching: .any)["tool.detail.gmail-1"].firstMatch
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
-        XCTAssertTrue(panel.frame.contains(detail.frame), "The calls open in the panel, not the transcript")
-        XCTAssertLessThan(summary.frame.height, 80, "The transcript keeps one line per run of calls")
+        XCTAssertTrue(panel.frame.contains(detail.frame), "Calls appear only in the right panel")
         attachEmailScreenshot("Chat right panel")
     }
 
@@ -496,23 +505,25 @@ final class ConversationNavigationUITests: XCTestCase {
         app.buttons["Send"].tap()
         #endif
         let summary = app.buttons["tool.bundle.gmail-1"]
+        let answer = app.staticTexts["Your answer is visible below the tool summary."].firstMatch
+        XCTAssertTrue(answer.waitForExistence(timeout: 10))
+        #if os(macOS)
+        checkAnswerInsideTranscript(answer, above: composer)
+        XCTAssertFalse(summary.exists)
+        app.buttons["inspector.toggle"].click()
+        #else
         XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        // The bundle appears with its first call and grows as the stream's
+        // twenty calls are reduced one frame at a time (seen in the Tart VM on
+        // 2026-10-22: "4 tool calls · Completed"), so wait for the whole run.
+        let complete = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS '20 tool calls'"), object: summary)
+        XCTAssertEqual(XCTWaiter.wait(for: [complete], timeout: 10), .completed, summary.label)
         XCTAssertTrue(summary.label.contains("20 tool calls"))
         XCTAssertTrue(summary.label.contains("6 Failed"))
-        #if os(macOS)
-        // On the Mac the calls open in the right panel, collapsed in this narrow window.
-        XCTAssertEqual(summary.value as? String, "In panel")
-        #else
         XCTAssertEqual(summary.value as? String, "Collapsed")
-        #endif
         XCTAssertLessThan(summary.frame.height, 80)
-        // SwiftUI nests a second copy of the text, so resolve one match for frames.
-        let answer = app.staticTexts["Your answer is visible below the tool summary."].firstMatch
-        XCTAssertTrue(answer.waitForExistence(timeout: 5))
         checkAnswerStaysVisible(answer, below: summary)
-        #if os(macOS)
-        summary.click()
-        #else
         summary.tap()
         #endif
         let detail = app.descendants(matching: .any)["tool.detail.gmail-1"].firstMatch
@@ -524,15 +535,18 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
         XCTAssertTrue(app.staticTexts["Example result 1"].waitForExistence(timeout: 5))
         #if os(macOS)
-        XCTAssertEqual(summary.value as? String, "Shown in panel")
         app.buttons["inspector.hide"].click()
-        XCTAssertEqual(summary.value as? String, "In panel")
+        XCTAssertFalse(summary.exists)
         #else
         summary.tap()
         XCTAssertEqual(summary.value as? String, "Collapsed")
         #endif
         XCTAssertFalse(app.staticTexts["Example result 1"].exists)
+        #if os(macOS)
+        checkAnswerInsideTranscript(answer, above: composer)
+        #else
         checkAnswerStaysVisible(answer, below: summary)
+        #endif
     }
 
     /// The owner reads a short scheduled report, then opens the weekday
@@ -786,6 +800,18 @@ final class ConversationNavigationUITests: XCTestCase {
         waitForExpectations(timeout: 20)
         Thread.sleep(forTimeInterval: 1)
     }
+
+    #if os(macOS)
+    /// Checks visible transcript geometry after streaming or an inspector resize.
+    private func checkAnswerInsideTranscript(_ answer: XCUIElement, above composer: XCUIElement) {
+        XCTAssertTrue(waitForFrame(of: answer, timeout: 5) { frame in
+            frame.width > 0 && frame.height > 0
+                && self.app.windows.firstMatch.frame.contains(frame)
+                && frame.minY >= self.transcriptTop()
+                && frame.maxY <= composer.frame.minY
+        }, "Answer must remain above the composer and inside the visible transcript: \(answer.frame)")
+    }
+    #endif
 
     /// Keeps the answer on screen under the summary row.
     ///

@@ -6,11 +6,12 @@ import UIKit
 
 /// Design-system type revision 2 (MagicPath skill veetbot-design-system-a2).
 /// Seven roles and nothing else: a view names a role, never a point size, a
-/// raw text style or a family. The Mac uses fixed sizes; the iPhone and iPad
+/// raw text style or a family. The Mac uses base point sizes; the iPhone and iPad
 /// map each role to a Dynamic Type text style. Display is serif; every other
-/// role uses the system face. The owner's Appearance face and text size reach
-/// transcript body text only (`.transcriptBody()`), never chrome, sidebars,
-/// tables or controls. `VeetTypeTests` holds the table and fails the build of
+/// role uses the system face. The owner's Appearance face reaches transcript
+/// body text only (`.transcriptBody()`). Text size scales every Mac text role,
+/// including sidebars and panels; touch preferences still reach only the body.
+/// `VeetTypeTests` holds the table and fails the build of
 /// any view that sets a font outside this file.
 enum VeetType {
     enum Role: CaseIterable {
@@ -125,8 +126,10 @@ enum VeetType {
         }
     }
 
-    static func preferenceScale(_ role: Role, textSize: AppTextSize, inTranscript: Bool) -> CGFloat? {
-        guard role == .body, inTranscript else { return nil }
+    static func preferenceScale(
+        _ role: Role, textSize: AppTextSize, inTranscript: Bool, platform: Platform = .current
+    ) -> CGFloat? {
+        guard platform == .mac || (role == .body && inTranscript) else { return nil }
         return textSize.fontScale
     }
 
@@ -144,7 +147,7 @@ enum VeetType {
         let weight = (weight ?? defaultWeight(role)).fontWeight
         let design = design(role, fontStyle: fontStyle, inTranscript: inTranscript)
         let size = pointSize(role, on: platform)
-        if let scale = preferenceScale(role, textSize: textSize, inTranscript: inTranscript) {
+        if let scale = preferenceScale(role, textSize: textSize, inTranscript: inTranscript, platform: platform) {
             return .system(size: size * scale, weight: weight, design: design)
         }
         switch platform {
@@ -159,9 +162,11 @@ enum VeetType {
     }
 
     /// SF Mono at a role's size: the work ledger and code.
-    static func monoFont(_ role: Role = .meta, platform: Platform = .current) -> Font {
+    static func monoFont(
+        _ role: Role = .meta, platform: Platform = .current, textSize: AppTextSize = .system
+    ) -> Font {
         switch platform {
-        case .mac: return .system(size: pointSize(role, on: .mac), design: .monospaced)
+        case .mac: return .system(size: pointSize(role, on: .mac) * (textSize.fontScale ?? 1), design: .monospaced)
         case .iPad, .iPhone: return .system(textStyle(role, on: platform), design: .monospaced)
         }
     }
@@ -263,7 +268,19 @@ private struct VeetTypeModifier: ViewModifier {
                     textSize: textSize, inTranscript: inTranscript, dynamicTypeSize: dynamicTypeSize
                 )
             )
-            .lineSpacing(VeetType.lineSpacing(role, on: platform))
+            .lineSpacing(
+                VeetType.lineSpacing(role, on: platform)
+                    * (platform == .mac ? (textSize.fontScale ?? 1) : 1)
+            )
+    }
+}
+
+private struct VeetMonoModifier: ViewModifier {
+    @Environment(\.appTextSize) private var textSize
+    let role: VeetType.Role
+
+    func body(content: Content) -> some View {
+        content.font(VeetType.monoFont(role, textSize: textSize))
     }
 }
 
@@ -289,7 +306,7 @@ extension View {
 
     /// SF Mono at a role's size, for the work ledger and code.
     func veetMono(_ role: VeetType.Role = .meta) -> some View {
-        font(VeetType.monoFont(role))
+        modifier(VeetMonoModifier(role: role))
     }
 
     /// Sizes an SF Symbol to the platform's icon scale.

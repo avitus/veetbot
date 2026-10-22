@@ -160,6 +160,16 @@ public struct ChatView: View {
         self.state = model.runState
     }
 
+    /// Mac Chat fills its center panel with fixed side gutters, including
+    /// when hiding the inspector gives the conversation more room.
+    private var columnMaxWidth: CGFloat {
+        #if os(macOS)
+        return .infinity
+        #else
+        return A2Metrics.transcriptMaxWidth
+        #endif
+    }
+
     private var notificationCovered: Bool {
         var covered = artifactSelection != nil || textSelection != nil || model.isPeopleLookupPresented
             || showingWebsiteAccess || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
@@ -203,7 +213,7 @@ public struct ChatView: View {
                                 )
                         }
                         .padding(.horizontal, A2Metrics.transcriptSidePadding)
-                        .frame(maxWidth: A2Metrics.transcriptMaxWidth)
+                        .frame(maxWidth: columnMaxWidth)
                         .frame(maxWidth: .infinity)
                         Color.clear
                             .frame(height: max(dockHeight + VeetSpace.s2, 1))
@@ -281,7 +291,7 @@ public struct ChatView: View {
         .task(id: "transcript-\(model.selectedSessionID?.uuidString ?? "new")") {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled, let sessionID = model.selectedSessionID else { return }
-            let rows = state.activityTimeline.count
+            let rows = transcriptActivities.count
             let content = Int(transcriptProbe.contentHeight)
             let viewport = Int(transcriptProbe.viewportHeight)
             ConversationDiagnostics.logger.notice(
@@ -449,6 +459,14 @@ public struct ChatView: View {
 
     // MARK: - Transcript
 
+    var transcriptActivities: [ConversationActivity] {
+        #if os(macOS)
+        state.timeline.map(ConversationActivity.message)
+        #else
+        state.activityTimeline
+        #endif
+    }
+
     /// Laid out eagerly. A lazy stack, opened on a report after another
     /// conversation, could settle at an estimated height of a few hundred
     /// points with both of its rows held and draw neither, leaving a blank
@@ -460,11 +478,11 @@ public struct ChatView: View {
                 WorkingStatePanel(state: workingState)
                     .padding(.bottom, VeetSpace.s4)
             }
-            ForEach(Array(state.activityTimeline.enumerated()), id: \.element.id) { index, item in
+            ForEach(Array(transcriptActivities.enumerated()), id: \.element.id) { index, item in
                 row(for: item)
                     .padding(.top, index == 0 ? 0 : spacingBefore(item))
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                        if case .message = item, item.id == state.activityTimeline.last?.id {
+                        if case .message = item, item.id == transcriptActivities.last?.id {
                             latestMessage = MeasuredMessage(id: item.id, height: height)
                         }
                     }
@@ -582,7 +600,7 @@ public struct ChatView: View {
         .padding(.horizontal, A2Metrics.transcriptSidePadding)
         .padding(.top, VeetSpace.s3)
         .padding(.bottom, VeetSpace.s3)
-        .frame(maxWidth: A2Metrics.transcriptMaxWidth)
+        .frame(maxWidth: columnMaxWidth)
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
@@ -746,7 +764,7 @@ public struct ChatView: View {
     private var scrollChangeToken: String {
         // Follow newly inserted activity, but leave the viewport fixed while an
         // existing assistant message grows so its beginning remains readable.
-        "\(state.timeline.count):\(state.tools.count):\(state.approvals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none"):\(state.failure?.occurredAt.timeIntervalSince1970 ?? 0)"
+        "\(transcriptActivities.map(\.id)):\(detachedApprovals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none"):\(state.failure?.occurredAt.timeIntervalSince1970 ?? 0)"
     }
 
     /// A notification for an approval a bundle now holds scrolls to the bundle.
@@ -762,7 +780,7 @@ public struct ChatView: View {
     /// lands there at once; only new activity in a conversation already on
     /// screen animates.
     private func scroll(_ proxy: ScrollViewProxy) {
-        let rows = state.activityTimeline.count
+        let rows = transcriptActivities.count
         let animated = lastScroll.session == model.selectedSessionID && lastScroll.rows > 0
         lastScroll = (model.selectedSessionID, rows)
         let target = ConversationScrollTarget.resolve(model.notificationFocus)
@@ -788,8 +806,8 @@ public struct ChatView: View {
 
     /// The newest row's height when it is a message already laid out.
     private var measuredLatestMessageHeight: CGFloat? {
-        guard case .message = state.activityTimeline.last,
-            let latestMessage, latestMessage.id == state.activityTimeline.last?.id
+        guard case .message = transcriptActivities.last,
+            let latestMessage, latestMessage.id == transcriptActivities.last?.id
         else { return nil }
         return latestMessage.height
     }
@@ -810,7 +828,7 @@ public struct ChatView: View {
         if let held = heldAnswerTop, abs(new.contentHeight - old.contentHeight) > 0.5 {
             // Rows above the answer changed height, as the header's status
             // line does when the run ends; keep the answer's beginning in place.
-            if held == state.activityTimeline.last?.id {
+            if held == transcriptActivities.last?.id {
                 DispatchQueue.main.async { proxy.scrollTo(held, anchor: .top) }
                 return
             }
@@ -821,7 +839,7 @@ public struct ChatView: View {
             if new.isAtEnd { followsTranscriptEnd = true }
             return
         }
-        let latest = state.activityTimeline.last
+        let latest = transcriptActivities.last
         switch TranscriptFollow.step(
             following: followsTranscriptEnd,
             contentGrew: contentGrew,

@@ -71,6 +71,9 @@ import Testing
         let compactDetail = detail.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         #expect(compactDetail.contains("Text(summary).veetType(.ui, weight: .medium)"))
         #expect(compactDetail.contains("Text(relationship.phrase(in: profile)) .veetType(.ui, weight: .medium)"))
+        let filter = try #require(browser.components(separatedBy: "private struct PeopleFilter").last)
+        let compactFilter = filter.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        #expect(compactFilter.contains("Text(title) .veetType(.ui, weight: .medium) .foregroundColor(AppTheme.ink)"))
     }
 
     @Test

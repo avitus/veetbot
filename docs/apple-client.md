@@ -123,12 +123,13 @@ restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
 position are restored without interfering with the settings window. Appearance
 preferences choose a text size and a system, rounded, serif, or monospaced face.
-They are stored in device preferences, apply immediately, and reach transcript
-body text only (and the composer that writes it): sidebars, tables, toolbars,
-docks and controls keep the system face at their role sizes. System sizing
-preserves the platform's accessibility setting, while the three explicit sizes
-scale the body role deterministically on both platforms. The face defaults to
-System.
+They are stored in device preferences and apply immediately. The face reaches
+transcript body text and the composer only; panels and controls keep the system
+face, and tool text stays monospaced. On Mac, text size scales every text role,
+including both panels, by 0.9 (Compact), 1.12 (Comfortable), or 1.3 (Large).
+System retains the design's base sizes. On iPhone and iPad, explicit sizes still
+scale transcript body text only, and System preserves Dynamic Type. The face
+defaults to System.
 
 ### Design tokens
 
@@ -166,8 +167,12 @@ on any view under `Views/` that sets a literal size, a raw text style or bold.
 | `meta` | counts, times, tool lines, help text | 12 | Footnote | Footnote |
 | `label` | section labels, 600 | 11 | Caption | Footnote |
 
-The Mac sizes are fixed; the iPhone and iPad roles scale with Dynamic Type.
-`.veetMono()` sets the work ledger and code in SF Mono at the meta size, and
+The table gives Mac base sizes; explicit text-size choices scale them together,
+preserving the hierarchy. Comfortable panel rows are 14.56 points, metadata
+13.44, and section labels 12.32. The iPhone and iPad roles scale with Dynamic Type.
+Mac People filter titles use medium-weight UI text in ink to keep the scaled
+relationship label legible on standard-resolution displays.
+`.veetMono()` sets the work ledger and code in SF Mono at the scaled Mac meta size, and
 `.veetIcon(_:)` sizes symbols to the row icon (15, 18 or 20 points).
 `.transcriptBody()` marks the transcript, where the body role follows the
 owner's face and size. Gaps come from one scale, `VeetSpace` (4, 8, 12, 16, 24,
@@ -204,10 +209,14 @@ saves, and accepted or declined persona suggestions.
 Chat is the first surface drawn with these tokens: the sidebar on `paperDeep`
 with a "Needs you" group ahead of Recent, folders and Scheduled; answers on bare
 paper behind a small teal mark; the owner's messages in `tealWash` capsules; each
-tool run one sentence that opens into a monospaced ledger; a pending approval or
+tool run on iPhone and iPad one sentence that opens into a monospaced ledger,
+while Mac tool calls open in the right panel's Activity tab; a pending approval or
 clarifying question docked above a translucent composer while the transcript
 shows one amber "Waiting for your approval" line. On a compact window the chat
-list slides over the conversation from the leading edge. Email follows (see
+list slides over the conversation from the leading edge. On Mac, the transcript
+and composer fill the center panel with 32-point side gutters, including when
+the activity panel is hidden; they do not stop at a centered 680-point column.
+iPhone, iPad and artifact reading widths retain their existing limits. Email follows (see
 "Email mode" below), then Memory, People and Schedules (see "Memory and
 People" below), and Persona, Settings and Connect complete the set: the
 persona's entries as a card of hairline rows of fields, a server conflict and
@@ -518,6 +527,12 @@ draw state it holds. That is how the blank weekday briefing was found: on
 window, about a fifth of its real height, and drew nothing. The transcript is
 therefore laid out eagerly rather than in a lazy stack.
 
+When the selected run is already terminal, its saved messages remain visible
+while activity replays into a separate reducer. Only a completed replay publishes
+the reconstructed state, so historical tool counts and intermediate run statuses
+do not move the transcript. Cancellation or an interrupted replay preserves the
+saved transcript; active runs continue to publish live events on every Apple client.
+
 ## Agent activity and artifacts
 
 The timeline includes generic, collapsible tool activity, approval checkpoints,
@@ -601,10 +616,11 @@ those invocation details. **Artifacts** lists every file or image found in the
 conversation's tool results and messages, each once with the call that made it,
 and previews the chosen one in place with Download. There is no session
 artifact list on the server, so the list is as complete as the loaded
-conversation. On the Mac the transcript keeps its one-line work strips, which
-no longer expand in place: choosing one opens the panel at its group and tints
-it, and a file chip opens its preview in Artifacts. The working notes leave the
-top of the transcript. Approvals and clarifying questions stay docked above the
+conversation. On the Mac tool calls appear only in the right panel, including
+when that panel is hidden; the toolbar button opens it. The transcript renders
+messages without tool rows or work strips, and its scrolling follows those
+messages rather than the tool count. A file chip opens its preview in Artifacts.
+The working notes leave the top of the transcript. Approvals and clarifying questions stay docked above the
 composer. iPhone and iPad keep the inline strips, the working-state disclosure
 and the viewer sheet.
 

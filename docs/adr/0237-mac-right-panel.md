@@ -62,3 +62,15 @@ not carry the draft run's calls; the run's own event stream does.
   server list of a session's artifacts would replace the derivation.
 - The draft run's replay opens one run event stream while the panel shows a
   thread with a draft.
+
+## Owner-requested presentation refinement (2026-10-22)
+
+The owner requested that Mac tool calls appear only in the right panel after
+opening Morning X Trends Summary made the thread flicker while its calls
+replayed. This supersedes decision 5's transcript summaries: Mac Chat renders
+messages without tool rows, and tool counts do not trigger transcript scrolling.
+The toolbar remains the way to open Activity, even in a narrow window. Pending
+approvals and questions remain in the dock. On every Apple client, a terminal
+run's activity is reconstructed separately and published only when its replay
+finishes; its saved answer stays visible meanwhile. Live runs keep streaming.
+No server contract, policy, or milestone changes.
