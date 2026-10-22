@@ -123,12 +123,13 @@ restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
 position are restored without interfering with the settings window. Appearance
 preferences choose a text size and a system, rounded, serif, or monospaced face.
-They are stored in device preferences, apply immediately, and reach transcript
-body text only (and the composer that writes it): sidebars, tables, toolbars,
-docks and controls keep the system face at their role sizes. System sizing
-preserves the platform's accessibility setting, while the three explicit sizes
-scale the body role deterministically on both platforms. The face defaults to
-System.
+They are stored in device preferences and apply immediately. The face reaches
+transcript body text and the composer only; panels and controls keep the system
+face, and tool text stays monospaced. On Mac, text size scales every text role,
+including both panels, by 0.9 (Compact), 1.12 (Comfortable), or 1.3 (Large).
+System retains the design's base sizes. On iPhone and iPad, explicit sizes still
+scale transcript body text only, and System preserves Dynamic Type. The face
+defaults to System.
 
 ### Design tokens
 
@@ -166,8 +167,10 @@ on any view under `Views/` that sets a literal size, a raw text style or bold.
 | `meta` | counts, times, tool lines, help text | 12 | Footnote | Footnote |
 | `label` | section labels, 600 | 11 | Caption | Footnote |
 
-The Mac sizes are fixed; the iPhone and iPad roles scale with Dynamic Type.
-`.veetMono()` sets the work ledger and code in SF Mono at the meta size, and
+The table gives Mac base sizes; explicit text-size choices scale them together,
+preserving the hierarchy. Comfortable panel rows are 14.56 points, metadata
+13.44, and section labels 12.32. The iPhone and iPad roles scale with Dynamic Type.
+`.veetMono()` sets the work ledger and code in SF Mono at the scaled Mac meta size, and
 `.veetIcon(_:)` sizes symbols to the row icon (15, 18 or 20 points).
 `.transcriptBody()` marks the transcript, where the body role follows the
 owner's face and size. Gaps come from one scale, `VeetSpace` (4, 8, 12, 16, 24,

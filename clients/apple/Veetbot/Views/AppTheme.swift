@@ -323,8 +323,8 @@ func appPointSize(for textStyle: Font.TextStyle, textSize: AppTextSize) -> CGFlo
 }
 
 /// Hands the owner's face and size to the transcript (`.transcriptBody()`)
-/// and sets everything else in the system face at the ui role: chrome,
-/// sidebars, tables and controls never follow the preference.
+/// and sets everything else in the system face at the ui role. Mac text
+/// roles also follow the size preference, including sidebars and panels.
 private struct AppTypographyModifier: ViewModifier {
     @ObservedObject var preferences: AppearancePreferences
 

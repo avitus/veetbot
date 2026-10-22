@@ -701,7 +701,9 @@ public struct ConnectionSettingsView: View {
 
                     settingsField(
                         title: "Text size",
-                        help: "System follows the device accessibility setting."
+                        help: VeetType.Platform.current == .mac
+                            ? "Sizes conversation text and both panels. System uses the design's standard sizes."
+                            : "System follows the device accessibility setting."
                     ) {
                         Picker("Text size", selection: $appearance.textSize) {
                             ForEach(AppTextSize.allCases) { size in
@@ -714,7 +716,7 @@ public struct ConnectionSettingsView: View {
 
                     settingsField(
                         title: "Typeface",
-                        help: "Code and terminal output remain monospaced."
+                        help: "Changes conversation text. Panels keep the system face; code remains monospaced."
                     ) {
                         Picker("Typeface", selection: $appearance.fontStyle) {
                             ForEach(AppFontStyle.allCases) { style in

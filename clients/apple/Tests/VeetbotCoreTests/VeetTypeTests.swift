@@ -2,11 +2,15 @@ import Foundation
 import SwiftUI
 import Testing
 
+#if os(macOS)
+import AppKit
+#endif
+
 @testable import VeetbotCore
 
 /// Design-system type revision 2 (MagicPath skill veetbot-design-system-a2,
 /// 19 Oct 2026): seven roles and nothing else, three weights, one spacing
-/// scale, and the owner's face and size preference on transcript body text only.
+/// scale, transcript-only face preference, and Mac-wide text sizing.
 @Suite struct VeetTypeTests {
     // MARK: - Roles
 
@@ -51,12 +55,62 @@ import Testing
     }
 
     @Test
-    func testTextSizePreferenceScalesOnlyTranscriptBody() {
-        #expect(VeetType.preferenceScale(.body, textSize: .large, inTranscript: true) == 1.3)
-        #expect(VeetType.preferenceScale(.body, textSize: .large, inTranscript: false) == nil)
-        #expect(VeetType.preferenceScale(.ui, textSize: .large, inTranscript: true) == nil)
-        #expect(VeetType.preferenceScale(.dense, textSize: .compact, inTranscript: true) == nil)
+    func testTouchTextSizePreferenceScalesOnlyTranscriptBody() {
+        #expect(VeetType.preferenceScale(.body, textSize: .large, inTranscript: true, platform: .iPhone) == 1.3)
+        #expect(VeetType.preferenceScale(.body, textSize: .large, inTranscript: false, platform: .iPad) == nil)
+        #expect(VeetType.preferenceScale(.ui, textSize: .large, inTranscript: true, platform: .iPhone) == nil)
+        #expect(VeetType.preferenceScale(.dense, textSize: .compact, inTranscript: true, platform: .iPhone) == nil)
     }
+
+    @Test
+    func testMacPanelFontsFollowEveryTextSizeAndKeepTheirHierarchy() {
+        for size in AppTextSize.allCases {
+            let scale = size.fontScale ?? 1
+            for role in VeetType.Role.allCases {
+                let expected = Font.system(
+                    size: VeetType.pointSize(role, on: .mac) * scale,
+                    weight: VeetType.defaultWeight(role).fontWeight,
+                    design: role == .display ? .serif : .default
+                )
+                #expect(VeetType.font(role, platform: .mac, fontStyle: .rounded, textSize: size) == expected)
+            }
+        }
+    }
+
+    @Test
+    func testMacToolTextScalesAndStaysMonospaced() {
+        for size in AppTextSize.allCases {
+            #expect(VeetType.monoFont(platform: .mac, textSize: size) == .system(
+                size: 12 * (size.fontScale ?? 1), design: .monospaced
+            ))
+            for platform in [VeetType.Platform.iPhone, .iPad] {
+                #expect(VeetType.monoFont(platform: platform, textSize: size)
+                    == VeetType.monoFont(platform: platform))
+                #expect(VeetType.font(.ui, platform: platform, textSize: size)
+                    == VeetType.font(.ui, platform: platform))
+            }
+        }
+    }
+
+    #if os(macOS)
+    @Test @MainActor
+    func testPanelTextModifiersReadTheAppearanceEnvironment() {
+        func renderedSize(_ size: AppTextSize, mono: Bool) -> CGSize {
+            let text = Text("Panel text")
+            let view = mono ? AnyView(text.veetMono()) : AnyView(text.veetType(.ui))
+            return NSHostingView(rootView: view.environment(\.appTextSize, size).fixedSize()).fittingSize
+        }
+        for mono in [false, true] {
+            let standard = renderedSize(.system, mono: mono)
+            let comfortable = renderedSize(.comfortable, mono: mono)
+            let large = renderedSize(.large, mono: mono)
+            #expect(comfortable.width > standard.width)
+            #expect(comfortable.height > standard.height)
+            #expect(large.width > comfortable.width)
+            #expect(large.height > comfortable.height)
+        }
+    }
+    #endif
 
     @Test
     func testTheFaceDefaultsToSystem() throws {
