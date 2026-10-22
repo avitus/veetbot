@@ -4375,6 +4375,7 @@ owner's current ranking, not a schedule.
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. Email entered as Milestone 18 (ADR-0071), Bland telephone calling as Milestone 27 (ADR-0097); other voice input and calendar remain deferred |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 | B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 25 |
+| B14 | Owner records: named numeric series the owner appends to and queries over time (blood pressure, weight, sleep), kept apart from beliefs, with a trust-gated append, deterministic window summaries, approval-gated deletion and no automatic recall in the first slice | The owner's authorization and `owner-records.md` with its gates registered; proposed in ADR-0239. Not a general SQL surface and not an alternate memory store |
 
 ## 22. Security baseline
 

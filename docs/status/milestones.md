@@ -399,8 +399,9 @@ and a learned memory policy (B6) — presence routing and
 hand-off (the B7 residue after Milestone 24), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and
-multi-tenant billing and quotas (B12), and the WhatsApp linked-device
-bridge (B13).
+multi-tenant billing and quotas (B12), the WhatsApp linked-device
+bridge (B13), and owner records — named numeric series the owner appends to
+and queries over time (B14, proposed in ADR-0239).
 
 Work each milestone explicitly set aside is recorded as that milestone's
 `deferred_scope` in [`project-state.yaml`](project-state.yaml); a deferred
