@@ -227,6 +227,8 @@ menu on compact screens: Voice, What Veetbot assumes, Nominations and
 Boundaries. Empty Nominations and Boundaries pages explain that no items are
 available. UI navigation checks wait for foreground and hittable controls, then
 anchor native menu touches to the app window and require the menu to close.
+Model-picker journeys also wait for settled menu geometry and confirm dismissal
+before asserting the exact server-saved choice and its later read-back.
 Moving between sections preserves unsaved edits. A server without
 tone support opens What Veetbot assumes instead of Voice. Voice contains
 the Lean towards chips (Brief, Warm, Direct, Formal,
@@ -532,6 +534,11 @@ while activity replays into a separate reducer. Only a completed replay publishe
 the reconstructed state, so historical tool counts and intermediate run statuses
 do not move the transcript. Cancellation or an interrupted replay preserves the
 saved transcript; active runs continue to publish live events on every Apple client.
+Sending a follow-up cancels unfinished replay before adding its optimistic message,
+so a delayed historical snapshot cannot overwrite the new submission.
+Each approval is fetched once per historical replay, even when later events name
+the same request. On Mac, approval notifications target the corresponding card
+in the attention dock; the dock remains visible independently of transcript scroll.
 
 ## Agent activity and artifacts
 

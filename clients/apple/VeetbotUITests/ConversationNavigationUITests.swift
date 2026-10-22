@@ -3406,7 +3406,24 @@ final class ConversationNavigationUITests: XCTestCase {
         picker.tap()
         let item = app.buttons[title].firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5))
-        item.tap()
+        let window = app.windows.firstMatch
+        // iOS 27 can ignore the first synthesized menu tap. Use settled
+        // geometry and prove dismissal before checking the server's saved choice.
+        for _ in 0..<3 {
+            waitForSettledFrame(of: item, stableFor: 3)
+            let ready = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "hittable == true"), object: item)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+            let target = item.frame
+            let windowFrame = window.frame
+            XCTAssertFalse(target.isEmpty || target.isInfinite || target.isNull)
+            XCTAssertTrue(windowFrame.contains(target))
+            window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: target.midX - windowFrame.minX, dy: target.midY - windowFrame.minY
+            )).tap()
+            if item.waitForNonExistence(timeout: 2) { return }
+        }
+        XCTFail("The model menu stayed open after three taps on \(title)")
     }
 
     /// Waits for the picker to report the server-confirmed choice and unlock.
@@ -3803,6 +3820,7 @@ final class ConversationNavigationUITests: XCTestCase {
         let destination = window.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
         // Menu elements appear before their presentation becomes interactive.
+        waitForSettledFrame(of: destination, stableFor: 3)
         let destinationReady = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "hittable == true"), object: destination)
         XCTAssertEqual(XCTWaiter.wait(for: [destinationReady], timeout: 10), .completed)

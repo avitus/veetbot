@@ -496,7 +496,13 @@ public struct ChatView: View {
                     }
                 }
                 .padding(.top, VeetSpace.s3)
+                #if os(macOS)
+                // The dock owns a pending approval's notification target.
+                .id(approval.status.isPending ? "approval-waiting-\(approval.id)"
+                    : NotificationFocus.approval(approval.id).scrollID)
+                #else
                 .id(NotificationFocus.approval(approval.id).scrollID)
+                #endif
             }
             if let prompt = state.clarifyingQuestion {
                 WaitingLine(text: "Waiting for your answer. See below.")
@@ -921,6 +927,9 @@ private struct AttentionDock: View {
                         }
                     }
                     .shadow(color: AppTheme.ink.opacity(0.12), radius: 20, x: 0, y: 10)
+                    #if os(macOS)
+                    .id(NotificationFocus.approval(approval.id).scrollID)
+                    #endif
                 }
                 if pending.isEmpty, let prompt = state.clarifyingQuestion {
                     ClarifyingQuestionCard(prompt: prompt) { answer in
