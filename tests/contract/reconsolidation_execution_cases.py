@@ -575,3 +575,14 @@ async def execution_shared_refused_original_preserves_independent_review(factory
 
 
 EXECUTION_SCENARIOS.append(execution_shared_refused_original_preserves_independent_review)
+
+
+async def execution_review_fits_verifier_to_remaining_budget(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        oversized_neighbors_reach_owner_review,
+    )
+
+    await oversized_neighbors_reach_owner_review(factory, priced=True)
+
+
+EXECUTION_SCENARIOS.append(execution_review_fits_verifier_to_remaining_budget)

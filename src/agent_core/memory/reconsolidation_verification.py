@@ -164,6 +164,32 @@ def _verification_request(
     )
 
 
+def _fit_output_budget(
+    request: ModelRequest, model: ResolvedModel, remaining_usd: Decimal
+) -> ModelRequest:
+    """Lower only the response ceiling; price the exact final serialized request.
+
+    Supervised previews may use remaining headroom instead of reserving the full
+    output ceiling. Unknown pricing or unaffordable input still defers normally.
+    Complete source evidence, claims and verification requirements stay intact.
+    """
+    low, high = 1, request.maximum_output_tokens or 0
+    best = request
+    while low <= high:
+        output = (low + high) // 2
+        candidate = request.model_copy(update={"maximum_output_tokens": output})
+        count = len(candidate.model_dump_json().encode("utf-8"))
+        cost = _maximum_cost(model, count, output)
+        if cost is None:
+            return request
+        if max(cost, Decimal("0.0000000001")) <= remaining_usd:
+            best = candidate
+            low = output + 1
+        else:
+            high = output - 1
+    return best
+
+
 def prepare_verification_request(
     principal: Principal,
     original: PreparedProposalRequest,
@@ -174,6 +200,7 @@ def prepare_verification_request(
     egress_policy: EgressPolicy,
     remaining_usd: Decimal,
     now: datetime,
+    fit_output_budget: bool = False,
 ) -> VerificationPreparation:
     """Fresh snapshots only; excluded candidates cannot be rescued by verifier prose."""
     now = utc_now(now)
@@ -248,6 +275,8 @@ def prepare_verification_request(
                 [*operations, operation],
                 version,
             )
+            if fit_output_budget:
+                request = _fit_output_budget(request, model, remaining_usd)
             serialized = request.model_dump_json()
             count = len(serialized.encode("utf-8"))
             output = request.maximum_output_tokens or 0
