@@ -1,5 +1,6 @@
 # ADR-0233: Owner authorized governed source learning and save reporting on
-# 2026-10-21. No milestone or gate moves; production delivery remains pending.
+# 2026-10-21; PR 181 delivered it on 2026-10-22. The owner-reported deferred-format
+# repair is authorized and awaits release. No milestone or gate moves.
 schema_version: 1
 
 project:

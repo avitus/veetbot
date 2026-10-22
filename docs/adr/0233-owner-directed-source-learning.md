@@ -74,3 +74,30 @@ People head constraint. It creates no person identities. Downgrade refuses while
 any such attribution remains, including erased-head suppression history. Source
 learning stamps its own policy version on new memories and consolidation audits;
 reinforcement keeps the original belief's formation version.
+
+## Repair: Usable deferred admission (2026-10-22)
+
+The motivating production replay reached `memory.learn`, but all 28 proposals
+were rejected: the model supplied explanatory summaries where exact phrases
+were required. The deferred index retained only the tool description's first
+sentence, hiding that requirement, and every rejection returned the same generic
+reason. Exact read evidence and owner authorization were present.
+
+Version 1.1 exposes the calling convention in that first sentence, accepts an
+8–512 character exact quote as the default claim and subject, and supplies closed
+rejection codes with corrective guidance. Explicit unsupported claims still
+fail; no paraphrase is silently converted, and all source, hazard, erasure,
+reinforcement, and authority checks remain mandatory. Regression coverage uses
+the deferred dispatcher, the compatible 1.0.0 handler for existing pinned chats,
+and the PostgreSQL rejection/retry/persistence path.
+This repairs the existing decision without broadening source authority or
+changing a milestone gate.
+
+The initial implementation reached production in pull request 181, revision
+`d32558f3b2517053c9b30b34c734abeb7b6adf0d`. An operator recovery passed the
+original retained reads and corrected exact excerpts through that deployed
+service, first with every transaction rolled back, then with normal commits.
+It retained 23 attributed tentative observations; two source-hazard refusals
+remained. An independent authenticated memory-API read found all 23 IDs and the
+already-formed album location. This verifies recovery of that chat, not delivery
+of the deferred-interface repair.

@@ -13,10 +13,11 @@ from agent_core.memory.source_learning import SourceLearningService
 class MemoryLearnTool:
     spec = ToolSpec(
         name="memory.learn",
-        version="1.0.0",
+        version="1.1.0",
         description=(
-            "Save useful observations from a website the owner explicitly asked you to learn "
-            "from or remember. Batch separate facts; cite a successful web.fetch, browser.navigate "
+            "Save owner-requested website observations as {call_id, quote} with an exact "
+            "8-512 character excerpt; omit claim and subject to save that excerpt itself. "
+            "Batch separate facts; cite a successful web.fetch, browser.navigate "
             "or browser.observe call_id and an exact quote for each claim. Claims must be "
             "a short contiguous phrase of that quote; do not paraphrase or infer identities. "
             "Do not claim to have inspected images from text-only reads. "
@@ -55,3 +56,9 @@ class MemoryLearnTool:
                 TextPart(text=json.dumps({"results": results})),
             ],
         )
+
+
+class LegacyMemoryLearnTool(MemoryLearnTool):
+    """Keep the compatible handler available to sessions pinned before version 1.1."""
+
+    spec = MemoryLearnTool.spec.model_copy(update={"version": "1.0.0"}, deep=True)

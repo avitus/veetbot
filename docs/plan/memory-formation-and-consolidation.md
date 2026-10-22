@@ -867,8 +867,11 @@ All existing formation gates remain binding beside Milestone 26's new gates.
 
 `memory.learn` accepts one to thirty-two observations per batch and admits at
 most thirty-two per interactive run. Each names a successful first-party read
-call ID, an exact quote, an atomic claim, a subject, and optionally a tentative
-belief ID to reinforce. The run's authenticated owner seed must explicitly
+call ID and an exact quote. Version 1.1 allows a quote-only observation of
+8–512 characters: the claim and subject default to that excerpt. Explicit
+claims must remain contiguous phrases of the quote, and explicit subjects
+must use its words. An optional tentative belief ID requests reinforcement.
+The run's authenticated owner seed must explicitly
 request learning from a public website URL. The returned URL must be on that
 host within its path subtree; external instructions cannot grant authority.
 Successful `web.fetch`, `browser.navigate`, and `browser.observe` results are
@@ -894,5 +897,11 @@ when its original source was another chat. Evidence browsing includes these
 references under its existing sensitivity and owner-text rules. This conservative
 withdrawal avoids retaining confidence whose supporting evidence was removed.
 Receipts report committed, reinforced, unchanged, or rejected per observation;
-partial batches remain retryable. Automatic extraction policies, their frozen
+partial batches remain retryable. Admission failures return closed reason codes
+and safe correction guidance, distinguishing unsupported paraphrases, subjects,
+missing quotes, unauthorized sources, hazards, and ineligible reinforcement.
+Unexpected validation and lookup failures retain a generic rejection without
+exposing exception details. The deferred index states the quote-only calling
+convention in its first sentence, which is the portion the model actually sees.
+Automatic extraction policies, their frozen
 versions, watermarks, and evaluation evidence are unchanged.
