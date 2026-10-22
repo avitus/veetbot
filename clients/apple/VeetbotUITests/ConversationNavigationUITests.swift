@@ -462,10 +462,14 @@ final class ConversationNavigationUITests: XCTestCase {
         let panel = app.descendants(matching: .any)["inspector.email"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         for identifier in [
-            "inspector.email.sender", "inspector.email.priority", "inspector.email.teach", "inspector.email.draft",
+            "inspector.email.summary", "inspector.email.priority", "inspector.email.sender", "inspector.email.message",
+            "inspector.email.teach", "inspector.email.draft", "inspector.email.thread",
         ] {
             XCTAssertTrue(app.descendants(matching: .any)[identifier].waitForExistence(timeout: 5), identifier)
         }
+        // The thread keeps the mail; what describes it moved to the panel.
+        XCTAssertFalse(app.buttons["View in People"].exists, "The sender's name opens the panel instead")
+        XCTAssertFalse(app.descendants(matching: .any)["Message details"].exists, "The envelope is in the panel")
         let feedback = app.buttons["email.feedback"]
         XCTAssertTrue(feedback.exists)
         XCTAssertTrue(panel.frame.contains(feedback.frame), "Teach Veetbot sits in the panel, not the thread")
@@ -1048,16 +1052,25 @@ final class ConversationNavigationUITests: XCTestCase {
         let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         activate(row)
+        #if os(macOS)
+        // On the Mac, Show original is one switch for the thread, in the panel.
+        showEmailPanel()
+        let toggle = firstElement("email.reader.original")
+        #else
         let toggle = app.buttons["email.reader.original"]
+        #endif
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Research and discovery"].exists)
         attachEmailScreenshot("Clean email reading view")
+        // macOS carries a text's string in its value, iOS in its label.
+        let original = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Unsubscribe", "Unsubscribe")).firstMatch
         activate(toggle)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Unsubscribe")).firstMatch.exists)
+        XCTAssertTrue(original.waitForExistence(timeout: 5))
         attachEmailScreenshot("Original email preserved")
         activate(toggle)
-        XCTAssertTrue(app.staticTexts["Research and discovery"].exists)
-        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Unsubscribe")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Research and discovery"].waitForExistence(timeout: 5))
+        XCTAssertFalse(original.exists)
     }
 
     /// Verifies the reading and reply flow with normal platform appearance.
@@ -1616,6 +1629,15 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["email.thread.00000000-0000-0000-0000-000000000801"].waitForExistence(timeout: 10))
     }
 
+    /// On the Mac what describes a thread (Unsubscribe, the spam flag, Show
+    /// original) lives in the right panel, which a narrow window folds away.
+    /// Elsewhere it sits in the thread.
+    private func revealThreadContext() {
+        #if os(macOS)
+        showEmailPanel()
+        #endif
+    }
+
     /// The census, where the server advertises it, opened from the Email toolbar.
     private func openSubscriptions() {
         let entry = app.buttons["email.subscriptions.open"]
@@ -1823,6 +1845,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(bulk.waitForExistence(timeout: 10))
         activate(bulk)
         XCTAssertTrue(texts("Everything in the store is on sale this week.").firstMatch.waitForExistence(timeout: 5))
+        revealThreadContext()
         let action = app.buttons["email.unsubscribe.thread"]
         XCTAssertTrue(action.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(action.label, "Unsubscribe from deals@shop.example.test")
@@ -1858,6 +1881,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(bulk.waitForExistence(timeout: 10))
         activate(bulk)
         XCTAssertTrue(texts("Everything in the store is on sale this week.").firstMatch.waitForExistence(timeout: 5))
+        revealThreadContext()
         XCTAssertFalse(app.buttons["email.unsubscribe.thread"].exists)
         XCTAssertFalse(app.buttons["email.subscriptions.open"].exists)
     }
@@ -1873,6 +1897,7 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(row)
         XCTAssertTrue(texts("Your account is locked. Sign in within 24 hours to keep it.").firstMatch
             .waitForExistence(timeout: 5), app.debugDescription)
+        revealThreadContext()
         XCTAssertTrue(firstElement("email.spam.tag.detail").waitForExistence(timeout: 5), app.debugDescription)
         return row
     }
@@ -1927,6 +1952,7 @@ final class ConversationNavigationUITests: XCTestCase {
         let reported = app.buttons["email.thread.\(Self.spamThreadID)"]
         XCTAssertTrue(reported.waitForExistence(timeout: 10))
         activate(reported)
+        revealThreadContext()
         XCTAssertTrue(texts("Reported as spam. Gmail empties Spam after thirty days.").firstMatch
             .waitForExistence(timeout: Self.archiveOutcomeTimeout), app.debugDescription)
         XCTAssertTrue(app.buttons["email.spam.restore"].exists)

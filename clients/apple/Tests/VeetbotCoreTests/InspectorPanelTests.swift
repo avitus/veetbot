@@ -153,6 +153,49 @@ import Testing
         #expect(model.sender == nil, "Another thread shows its own latest sender")
     }
 
+    /// The clean reader (MagicPath cozy-evening-6871): a sender's name opens
+    /// their card and that message's envelope, which left the thread.
+    @Test
+    func testAMessagesSenderShowsTheirCardAndThatMessagesEnvelope() throws {
+        let model = InspectorModel(store: store())
+        model.windowWidthChanged(1000)
+        model.emailTab = .activity
+        model.showMessage(try emailMessage(id: "m2", sender: "Priya <priya@example.test>"))
+        #expect(model.isOpen(.email))
+        #expect(model.emailTab == .context)
+        #expect(model.sender?.text == "priya@example.test")
+        #expect(model.senderMessageID == "m2")
+        #expect(model.senderRevealCount == 1)
+        model.threadChanged()
+        #expect(model.senderMessageID == nil, "Another thread shows its own latest message")
+    }
+
+    @Test
+    func testTheAttachmentLineRevealsTheAttachmentsInContext() {
+        let model = InspectorModel(store: store())
+        model.windowWidthChanged(1000)
+        model.emailTab = .activity
+        model.revealAttachments()
+        #expect(model.isOpen(.email))
+        #expect(model.emailTab == .context)
+        #expect(model.attachmentsRevealCount == 1)
+    }
+
+    /// Show original moved from every message to one switch in Context, which
+    /// the thread reads through the reveal.
+    @Test
+    func testShowOriginalIsOneChoiceForTheWholeThread() {
+        let model = InspectorModel(store: store())
+        #expect(!model.showsOriginal)
+        #expect(!InspectorReveal(model).showsOriginal)
+        model.showsOriginal = true
+        let reveal = InspectorReveal(model)
+        #expect(reveal.showsOriginal)
+        #expect(reveal != InspectorReveal(InspectorModel(store: store())), "The thread redraws when the choice changes")
+        model.threadChanged()
+        #expect(!model.showsOriginal, "Each thread opens in the reading view")
+    }
+
     // MARK: - The ledger: every call in the conversation, grouped by turn
 
     @Test
@@ -289,6 +332,36 @@ import Testing
             == .attention)
     }
 
+    /// Veetbot's gist and state left the thread for Context's summary card.
+    @Test
+    func testTheSummaryCardUsesTheThreadsGistAndStateWords() throws {
+        let thread = try emailThread(summary: "Asks whether you will renew.", reason: "Priya manages your lease.")
+        let summary = EmailThreadSummary.make(thread: thread, draft: nil)
+        #expect(!summary.isPending)
+        #expect(summary.gist == "Asks whether you will renew.")
+        #expect(summary.state == "Needs reply")
+        #expect(summary.tone == .attention)
+        #expect(summary.reason == "Priya manages your lease.")
+        let drafted = EmailThreadSummary.make(thread: thread, draft: try draft(status: "ready", stale: false))
+        #expect(drafted.state == "Draft ready")
+        #expect(drafted.tone == .draft)
+        let handled = EmailThreadSummary.make(
+            thread: try emailThread(summary: "Filed.", reason: "A bill on autopay.", handled: true), draft: nil)
+        #expect(handled.state == "Handled")
+        #expect(handled.tone == .settled)
+    }
+
+    /// The server's placeholder is both the gist and the reason; the card
+    /// says it once.
+    @Test
+    func testAThreadVeetbotHasNotReadSaysSoOnce() throws {
+        let thread = try emailThread(summary: "Assessment pending", reason: "Assessment pending", needsReply: false)
+        let summary = EmailThreadSummary.make(thread: thread, draft: nil)
+        #expect(summary.isPending)
+        #expect(summary.state == "For your attention")
+        #expect(summary.reason == nil, "The reason only repeats the gist")
+    }
+
     // MARK: - The draft run's calls
 
     @Test
@@ -340,6 +413,27 @@ import Testing
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(EmailDraftView.self, from: Data(json.utf8))
+    }
+
+    private func emailMessage(id: String, sender: String) throws -> EmailMessageView {
+        let json = """
+        {"id": "\(id)", "sender": "\(sender)", "to": ["andy@example.test"], "cc": [], "subject": "Lease",
+         "body": "Hi Andy", "sent_at": "2026-10-21T16:48:00Z", "complete": true}
+        """
+        return try JSONDecoder.server.decode(EmailMessageView.self, from: Data(json.utf8))
+    }
+
+    private func emailThread(
+        summary: String, reason: String, needsReply: Bool = true, handled: Bool = false
+    ) throws -> EmailThreadView {
+        let json = """
+        {"id": "\(UUID().uuidString)", "account_id": "personal", "subject": "Lease renewal",
+         "senders": ["Priya <priya@example.test>"], "updated_at": "2026-10-21T16:48:00Z", "revision": 1,
+         "dismissed_revision": \(handled ? "1" : "null"), "summary": "\(summary)", "reason": "\(reason)",
+         "needs_reply": \(needsReply), "draft_id": null, "session_id": null, "priority": 0.86,
+         "complete": true, "messages": [], "draft": null}
+        """
+        return try JSONDecoder.server.decode(EmailThreadView.self, from: Data(json.utf8))
     }
 
     private func userMessageFrame(id: Int, text: String) -> SSEFrame {
