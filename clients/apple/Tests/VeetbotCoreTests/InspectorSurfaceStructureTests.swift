@@ -68,6 +68,9 @@ import Testing
         #expect(chat.contains("inspectorReveal.artifact(artifactID)"))
         // Approvals and questions still dock above the composer.
         #expect(chat.contains("AttentionDock(model: model, state: state"))
+        let dock = try #require(chat.components(separatedBy: "private struct AttentionDock").last)
+        #expect(dock.contains(".id(NotificationFocus.approval(approval.id).scrollID)"))
+        #expect(chat.contains(".id(approval.status.isPending ? \"approval-waiting-\\(approval.id)\""))
     }
 
     @Test
