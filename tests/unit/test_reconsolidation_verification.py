@@ -580,6 +580,27 @@ def test_supervised_verifier_fits_only_output_to_exact_remaining_headroom(reason
     assert prepare(model=model, remaining=Decimal("0.25"), fit_output_budget=True).prepared == full
 
 
+@pytest.mark.parametrize("ceiling", [1, 1024])
+def test_supervised_verifier_fits_output_to_context_without_truncating_evidence(
+    ceiling: int,
+) -> None:
+    full = prepare().prepared
+    assert full is not None
+    bounded = full.request.model_copy(update={"maximum_output_tokens": ceiling})
+    context_limit = len(bounded.model_dump_json().encode()) + ceiling
+    model = resolved_model().model_copy(
+        update={"limits": ModelLimits(context_window_tokens=context_limit)}
+    )
+    assert prepare(model=model).prepared is None
+    fitted = prepare(model=model, fit_output_budget=True).prepared
+    assert fitted is not None
+    assert fitted.request.maximum_output_tokens == ceiling
+    assert fitted.request.conversation == full.request.conversation
+    assert fitted.estimated_input_tokens + ceiling == context_limit
+    larger = fitted.request.model_copy(update={"maximum_output_tokens": ceiling + 1})
+    assert len(larger.model_dump_json().encode()) + ceiling + 1 > context_limit
+
+
 def test_supervised_verifier_cannot_spend_below_the_minimum_complete_request() -> None:
     full = prepare().prepared
     assert full is not None
