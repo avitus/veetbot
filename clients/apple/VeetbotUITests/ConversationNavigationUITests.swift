@@ -512,6 +512,12 @@ final class ConversationNavigationUITests: XCTestCase {
         app.buttons["inspector.toggle"].click()
         #else
         XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        // The bundle appears with its first call and grows as the stream's
+        // twenty calls are reduced one frame at a time (seen in the Tart VM on
+        // 2026-10-22: "4 tool calls · Completed"), so wait for the whole run.
+        let complete = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS '20 tool calls'"), object: summary)
+        XCTAssertEqual(XCTWaiter.wait(for: [complete], timeout: 10), .completed, summary.label)
         XCTAssertTrue(summary.label.contains("20 tool calls"))
         XCTAssertTrue(summary.label.contains("6 Failed"))
         XCTAssertEqual(summary.value as? String, "Collapsed")
