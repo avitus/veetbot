@@ -394,7 +394,11 @@ class ReconsolidationBatchExecutor:
             ),
         )
         return ReconsolidationExecution(
-            reason="reviewed", calls=tuple(calls), prepared=second.prepared, review=review
+            reason="reviewed",
+            calls=tuple(calls),
+            prepared=second.prepared,
+            review=review,
+            deferrals=tuple(sorted({d.reason for d in (*first.deferred, *second.deferred)})),
         )
 
     async def run(

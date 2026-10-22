@@ -1747,3 +1747,27 @@ groups are never trimmed or rewritten. A group that cannot fit even as a pair,
 or fails another admission check, retains the existing explicit refusal and
 bounded retry path; it is not reported as an absence of work. The four-group,
 two-call, daily-cadence and spend ceilings remain unchanged.
+
+Selection assesses each candidate memory and all of its complete original excerpts
+against the same local provider policy before size fitting. A refused neighbor is
+excluded only from a new group anchored in an independently admitted source. A
+refused anchor, fewer than two permitted sources or an unavailable policy preserves
+the explicit admission refusal. Shared original excerpts are never stripped or
+reclassified to admit their dependent memories. The eventual group and verifier
+still repeat the complete current policy checks; this preview grants no export.
+If any policy-refused candidate shares an original event with a permitted candidate,
+selection also excludes that permitted candidate from new groups. Innocuous-looking
+text cannot shed the refused candidate's restriction through shared provenance.
+An affected anchor retains the original explicit refusal; independent permitted
+candidates may still group together. Omitting an otherwise permitted candidate for
+size does not itself prohibit its shared event, and no excerpt is partially removed.
+
+An exhausted full/changed inventory starts its next generation on a later UTC day
+even when deferred groups remain pending. The existing job retains its identity
+while the new scan pins fresh bounds, rotates the full-store cursor from the
+forward boundary and keeps the completed change cursor. An unfinished scan keeps
+its bounds and progress, and same-day continuation does not restart a generation.
+Pending groups retain their membership, attempt counts, ordering and retry limit;
+they are processed alongside newly selected groups under the unchanged four-group,
+two-call and daily-review limits. Provider deferrals cannot prevent new inventory,
+and inventory completion is still distinct from completed provider analysis.

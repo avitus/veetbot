@@ -1979,8 +1979,9 @@ and URL inputs remain outside these two tools.
 
 ## Governed source learning
 
-`memory.learn@1.0.0` is always registered, enabled and deferred through
-`tool.call`. `workspace.write_text` is also deferred to preserve the existing
+`memory.learn@1.1.0` is always registered, enabled and deferred through
+`tool.call`; the compatible 1.0.0 handler remains registered for existing pinned
+sessions. `workspace.write_text` is also deferred to preserve the existing
 browser tool-definition budget when the dispatcher is added. Both remain
 enabled and pinned. Source learning is classified as `MEMORY_WRITE`, with
 `side_effect: NONE`, medium risk, idempotent execution, no additional required

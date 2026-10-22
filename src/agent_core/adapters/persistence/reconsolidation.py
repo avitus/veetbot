@@ -1497,15 +1497,21 @@ class PostgresReconsolidationStore:
                 )
             )
         fresh = old is None or old.state == "complete"
+        rescan = fresh or (
+            old is not None
+            and old.due_day < now.date()
+            and old.full_cursor == old.full_bound
+            and old.change_cursor == old.change_bound
+        )
         job = ReconsolidationJob(
             id=self._ids.new_id() if old is None or fresh else old.id,
             tenant_id=principal.tenant_id,
             principal_id=principal.principal_id,
-            due_day=now.date() if old is None or fresh else old.due_day,
-            generation=1 if old is None else old.generation + int(fresh),
-            full_bound=owner.creation_count if old is None or fresh else old.full_bound,
-            change_bound=owner.change_count if old is None or fresh else old.change_bound,
-            full_cursor=0 if old is None or fresh else old.full_cursor,
+            due_day=now.date() if old is None or rescan else old.due_day,
+            generation=1 if old is None else old.generation + int(rescan),
+            full_bound=owner.creation_count if old is None or rescan else old.full_bound,
+            change_bound=owner.change_count if old is None or rescan else old.change_bound,
+            full_cursor=0 if old is None or rescan else old.full_cursor,
             change_cursor=0 if old is None else old.change_cursor,
             lease_owner=lease_owner,
             lease_token=self._ids.new_id(),

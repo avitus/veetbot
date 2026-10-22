@@ -7,7 +7,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.messages import ResolvedModel
 from agent_core.domain.reconsolidation import SourceVersion, group_digest
 from agent_core.domain.reconsolidation_inputs import ReconsolidationInput
-from agent_core.memory.reconsolidation_inputs import EgressPolicy, prepare_proposal_request
+from agent_core.memory.reconsolidation_inputs import EgressPolicy, _egress, prepare_proposal_request
 
 
 def fit_selection(
@@ -27,32 +27,41 @@ def fit_selection(
     original = preview.group.sources
     if anchor not in original:
         return original
-    neighbors = [source for source in original if source != anchor]
-    for count in range(len(original), 1, -1):
-        wanted = {anchor, *neighbors[: count - 1]}
-        sources = tuple(source for source in preview.sources if source.version in wanted)
-        versions = tuple(source for source in original if source in wanted)
-        leaves = {
-            (source.record.source_session_id, sequence)
-            for source in sources
-            for sequence in source.record.source_event_ids
-        }
-        value = preview.model_copy(
-            update={
-                "group": preview.group.model_copy(
-                    update={
-                        "sources": versions,
-                        "input_digest": group_digest(versions),
-                    }
-                ),
-                "sources": sources,
-                "excerpts": tuple(
-                    excerpt
-                    for excerpt in preview.excerpts
-                    if (excerpt.session_id, excerpt.event_sequence) in leaves
-                ),
-            }
+    allowed = []
+    refused_events: set[tuple[UUID, int]] = set()
+    for source in original:
+        value = _subset(preview, (source,))
+        _, _, reason = _egress(principal, model, egress_policy, value, now)
+        if reason == "egress_unavailable":
+            return original
+        if reason is None:
+            allowed.append(source)
+        else:
+            refused_events.update(
+                (item.record.source_session_id, sequence)
+                for item in value.sources
+                for sequence in item.record.source_event_ids
+            )
+    # An innocuous excerpt cannot shed a policy-refused memory's restriction
+    # merely because another, permitted memory cites the same complete event.
+    sharing_refused = {
+        item.version
+        for item in preview.sources
+        if any(
+            (item.record.source_session_id, sequence) in refused_events
+            for sequence in item.record.source_event_ids
         )
+    }
+    allowed = [source for source in allowed if source not in sharing_refused]
+    # Refused anchors still produce the explicit refusal. Eligible anchors can
+    # select their own siblings without exporting any part of a refused source.
+    if anchor not in allowed or len(allowed) < 2:
+        return original
+    neighbors = [source for source in allowed if source != anchor]
+    for count in range(len(allowed), 1, -1):
+        wanted = {anchor, *neighbors[: count - 1]}
+        versions = tuple(source for source in original if source in wanted)
+        value = _subset(preview, versions)
         result = prepare_proposal_request(
             principal,
             (value,),
@@ -66,3 +75,30 @@ def fit_selection(
         if any(item.reason not in {"input_budget", "cost_budget"} for item in result.deferred):
             break
     return original
+
+
+def _subset(
+    preview: ReconsolidationInput, versions: tuple[SourceVersion, ...]
+) -> ReconsolidationInput:
+    sources = tuple(source for source in preview.sources if source.version in versions)
+    leaves = {
+        (source.record.source_session_id, sequence)
+        for source in sources
+        for sequence in source.record.source_event_ids
+    }
+    return preview.model_copy(
+        update={
+            "group": preview.group.model_copy(
+                update={
+                    "sources": versions,
+                    "input_digest": group_digest(versions),
+                }
+            ),
+            "sources": sources,
+            "excerpts": tuple(
+                excerpt
+                for excerpt in preview.excerpts
+                if (excerpt.session_id, excerpt.event_sequence) in leaves
+            ),
+        }
+    )

@@ -676,7 +676,7 @@ from agent_core.tools.media_generation import (
     LegacyVideoGenerationTool,
     VideoGenerationTool,
 )
-from agent_core.tools.memory_learn import MemoryLearnTool
+from agent_core.tools.memory_learn import LegacyMemoryLearnTool, MemoryLearnTool
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
 from agent_core.tools.memory_remember import (
     LegacyMemoryRememberTool,
@@ -892,7 +892,10 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "your reply automatically. Never say a file is attached unless its export or "
     "generation tool succeeded. When the owner asks you to learn from or remember a named "
     "website, proactively retain useful separate observations with memory.learn after reading "
-    "it. Discover the tool through tool.call if deferred. Search existing memories and reinforce "
+    "it. Use observations with call_id and an exact 8-512 character quote; omit claim and "
+    "subject to save the excerpt itself, without a paraphrase or explanatory wrapper. "
+    "Call it through tool.call if deferred. Follow rejection guidance to correct a proposal; "
+    "never weaken or bypass a refusal. Search existing memories and reinforce "
     "tentative beliefs only when the cited text supports their full claim. Keep historical "
     "observations and uncertain relationships tentative; text-only reads do not inspect photos. "
     "Report only confirmed memory tool outcomes. A failed manual save is separate from "
@@ -3393,7 +3396,9 @@ async def _compose(
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
-    registry.register(MemoryLearnTool(SourceLearningService(memory_service, uow_factory, clock)))
+    source_learning = SourceLearningService(memory_service, uow_factory, clock)
+    registry.register(LegacyMemoryLearnTool(source_learning))
+    registry.register(MemoryLearnTool(source_learning))
     if settings.people_enabled:
         registry.register(PeopleMemoryRememberTool(memory_service))
     registry.register(

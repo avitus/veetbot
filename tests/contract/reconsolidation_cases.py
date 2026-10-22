@@ -269,6 +269,60 @@ async def pending_groups_continue_after_inventory(factory: Factory) -> None:
         assert await uow.reconsolidation.claim_due(principal(), NOW, "a") is None
 
 
+async def deferred_inventory_generations_preserve_retries(factory: Factory) -> None:
+    async with factory() as uow:
+        for index in range(2):
+            await uow.memories.upsert_belief(
+                memory(belief_id=600 + index).model_copy(update={"store_position": index + 1})
+            )
+        lease = await uow.reconsolidation.claim_due(principal(), NOW, "first")
+        assert lease is not None
+        page = await uow.reconsolidation.inventory(principal(), lease.lease_token, NOW)
+        await uow.reconsolidation.checkpoint(
+            principal(), lease.lease_token, page, (page.sources,), NOW
+        )
+        original = await uow.reconsolidation.claim_group(principal(), lease.lease_token, NOW)
+        assert original is not None and original.attempts == 1
+        await uow.reconsolidation.finish_group(
+            principal(), lease.lease_token, original.id, "retry", NOW
+        )
+        await uow.reconsolidation.release(principal(), lease.lease_token, NOW)
+        await uow.memories.upsert_belief(
+            memory(belief_id=602).model_copy(update={"store_position": 3})
+        )
+        later = NOW + timedelta(days=1)
+        rescan = await uow.reconsolidation.claim_due(principal(), later, "next-day")
+        assert rescan is not None and rescan.id == lease.id
+        assert rescan.generation == lease.generation + 1
+        assert rescan.full_cursor == 0 and rescan.change_cursor == page.change_cursor
+        assert rescan.full_bound == 3 and rescan.change_bound > lease.change_bound
+        new_page = await uow.reconsolidation.inventory(principal(), rescan.lease_token, later)
+        assert {source.belief_id for source in new_page.sources} == {
+            UUID(int=i) for i in range(600, 603)
+        }
+        await uow.reconsolidation.checkpoint(principal(), rescan.lease_token, new_page, (), later)
+        retry = await uow.reconsolidation.claim_group(principal(), rescan.lease_token, later)
+        assert retry is not None and retry.id == original.id and retry.sources == original.sources
+        assert retry.attempts == 2
+        await uow.reconsolidation.finish_group(
+            principal(), rescan.lease_token, retry.id, "retry", later
+        )
+        await uow.reconsolidation.release(principal(), rescan.lease_token, later)
+        same_day = await uow.reconsolidation.claim_due(principal(), later, "same-day")
+        assert same_day is not None and same_day.generation == rescan.generation
+        assert same_day.full_cursor == same_day.full_bound
+        retry = await uow.reconsolidation.claim_group(principal(), same_day.lease_token, later)
+        assert retry is not None and retry.id == original.id and retry.attempts == 3
+        failed = await uow.reconsolidation.finish_group(
+            principal(), same_day.lease_token, retry.id, "retry", later
+        )
+        assert failed.state == "failed" and failed.reason == "attempts_exhausted"
+        assert (
+            await uow.reconsolidation.release(principal(), same_day.lease_token, later)
+        ).state == "complete"
+        assert await uow.reconsolidation.claim_due(principal(), later, "same-day") is None
+
+
 async def exact_spend_precision(factory: Factory) -> None:
     async with factory() as uow:
         lease = await uow.reconsolidation.claim_due(principal(), NOW, "a")
@@ -519,5 +573,6 @@ SCENARIOS = (
     midnight_and_settlement,
     grouping_boundaries,
     pending_groups_continue_after_inventory,
+    deferred_inventory_generations_preserve_retries,
     exact_spend_precision,
 )
