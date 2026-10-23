@@ -730,6 +730,8 @@ approximates rather than reimplements the PostgreSQL parser: a URL carrying a
 query string and a date divide differently there. Those edges change what the
 ranker is offered, never what a principal may see, which is the reason lexical
 recall is allowed to be an approximation and the isolation predicates are not.
+Each belief's vector is computed once, in a lateral join every per-term match
+reads; inline, a 221-term scheduled instruction took nine seconds per recall.
 
 **Episode paging.** Episode search reads one page of events and stops, so a
 match beyond the first page is invisible. It becomes a bounded page loop with
