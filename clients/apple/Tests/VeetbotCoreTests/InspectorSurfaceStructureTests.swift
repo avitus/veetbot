@@ -80,6 +80,9 @@ import Testing
         let mode = try source(at: "Veetbot/Views/EmailModeView.swift")
 
         #expect(email.contains("EmailSenderCard(lookup:"))
+        // StateObject retains its initial date unless both lookup inputs identify the card.
+        #expect(email.contains(".id(lookup.asOf)"))
+        #expect(email.contains(".id(lookup.text)"))
         #expect(email.contains("PeopleViewModel(searchText: lookup.text, asOf: lookup.asOf)"))
         #expect(email.contains("EmailPriority(thread.priority)"))
         #expect(email.contains("EmailTeachCard(model: model"))

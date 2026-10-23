@@ -105,6 +105,7 @@ struct EmailInspectorPanel: View {
         if let lookup = senderLookup(thread) {
             InspectorSection(title: "Sender") {
                 EmailSenderCard(lookup: lookup, highlighted: senderFlash)
+                    .id(lookup.asOf)
                     .id(lookup.text)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("inspector.email.sender")
