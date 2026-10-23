@@ -67,6 +67,9 @@ from agent_core.ports.memory import MemoryRetriever, QueryFormer
 from agent_core.ports.tools import ToolRegistry
 
 MAX_LOADED_SKILL_BODIES = 2
+# Tool-result truncation advances in this many blocks of its budget (ADR-0242).
+TOOL_RESULT_TRUNCATION_BLOCKS = 4
+
 # The shipped classes.records_catalog.max_items; composition passes the knob.
 CATALOG_MAX_SERIES = 16
 CATALOG_ZONE = ZoneInfo("UTC")
@@ -989,19 +992,38 @@ class BudgetedContextBuilder:
         items: list[ConversationItem],
         plan: ContextPlan,
     ) -> tuple[list[ConversationItem], bool]:
+        """Truncate the oldest tool results to pointers, in budget-quarter blocks.
+
+        The minimal truncation that fits the aggregate budget would move by one
+        result on every step of a long tool loop, rewriting the oldest bytes of
+        the body on each request and defeating the provider's cache of
+        everything behind them. So once truncation is needed, it continues to
+        the next quarter-budget boundary of truncated tokens (ADR-0242). The
+        truncated prefix then changes once per quarter budget of new results,
+        and the function stays a pure function of the items it is given.
+        """
+
         result = [item.model_copy(deep=True) for item in items]
         indexes = [index for index, item in enumerate(result) if isinstance(item, ToolResultItem)]
+        budget = plan.budget.tool_result_tokens
+        block = max(1, budget // TOOL_RESULT_TRUNCATION_BLOCKS)
         truncated = False
+        truncated_tokens = 0
+        target_tokens: int | None = None
         while indexes:
-            tool_items = [result[index] for index in indexes]
-            if (
-                self._estimator.estimate(tool_items, plan.model_id)
-                <= plan.budget.tool_result_tokens
-            ):
+            if target_tokens is None:
+                tool_items = [result[index] for index in indexes]
+                if self._estimator.estimate(tool_items, plan.model_id) <= budget:
+                    if truncated:
+                        target_tokens = -(-truncated_tokens // block) * block
+                        continue
+                    break
+            elif truncated_tokens >= target_tokens:
                 break
             index = indexes.pop(0)
             item = result[index]
             assert isinstance(item, ToolResultItem)
+            truncated_tokens += self._estimator.estimate([item], plan.model_id)
             byte_length = len(_canonical_json(item.model_dump(mode="json")))
             artifact = next(
                 (

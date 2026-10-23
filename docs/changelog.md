@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-23 — Website tasks: a long task no longer spends its budget re-reading
+
+- A chat bound to a website that works through many pages, such as compiling
+  a Kindle reading history, used to run out of its USD 30 budget part way
+  through: once its older page readings had to be shortened to make room,
+  every further step re-read the whole conversation at full price. Shortening
+  now happens in larger, less frequent steps, so the conversation stays cached
+  between them and a step costs what it did before the budget filled.
+- The budget, the final-answer reserve and the message you see when the
+  reserve is reached are unchanged.
+
 ## 2026-10-21 — Email: model settings changes no longer re-read your mail
 
 - Changing an unrelated model setting, such as a caching option or another

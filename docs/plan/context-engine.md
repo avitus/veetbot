@@ -310,7 +310,8 @@ can change. Working-state edits, skill loads and date changes also change the
 fresh context after completed exchanges. The run marker protects the growing
 portable prefix before those rows, and the carried-history marker additionally
 protects prior runs. Tool-result truncation or history compaction can change
-history itself and legitimately lose that hit. Never freeze corrections, suppress
+history itself and legitimately lose that hit; truncation does so once per block
+of its budget, never on every step (ADR-0242). Never freeze corrections, suppress
 working-state updates, or exceed budgets to improve caching. Tests compare the
 actual Responses inputs, including the first changed byte at the latest
 reasoning item when the preceding body is stable. See
@@ -641,10 +642,20 @@ the cheapest and most recoverable loss first:
    selected against a relevance floor that can simply be raised, and it is the most
    recoverable thing in the request — the agent can call `memory.search` explicitly
    if it turns out to need it.
-3. **Tool results truncate to pointers, oldest first.** The full result is already
-   in the event log and, above the inline threshold, in the artifact store. What
-   remains is a typed pointer with the byte count and reference, so the model can
-   see that content exists and ask for it rather than concluding it never existed.
+3. **Tool results truncate to pointers, oldest first, in blocks.** The full result
+   is already in the event log and, above the inline threshold, in the artifact
+   store. What remains is a typed pointer with the byte count and reference, so the
+   model can see that content exists and ask for it rather than concluding it never
+   existed. Once the aggregate exceeds its budget, the builder truncates the oldest
+   results until the aggregate fits, then continues to the next quarter-budget
+   boundary of truncated tokens (ADR-0242). The truncated prefix therefore moves at
+   most once per quarter budget of new results. A minimal truncation would move by
+   one result on every step of a long tool loop, rewriting the oldest bytes of the
+   body on each request and losing the provider's cache of everything behind them:
+   the Kindle run of 2026-10-23 paid a full uncached read of about 60,000 tokens
+   on each of thirty-two consecutive steps that way. The block is a function of the
+   budget alone, so `build()` stays pure, and the pointer still names the event or
+   artifact that holds the content.
 4. **History compacts.** Deliberately last: it is the only step that costs a model
    call on the critical path, and the only one that loses information the run
    cannot cheaply re-fetch.
