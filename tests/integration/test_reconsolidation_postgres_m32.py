@@ -250,6 +250,40 @@ async def test_concurrent_claim_and_budget_admission(postgres_stores: Factory) -
     assert sorted(await asyncio.gather(reserve("a" * 64), reserve("b" * 64))) == [False, True]
 
 
+async def test_full_inventory_restart_rewrites_only_the_current_job(
+    postgres_stores: Factory,
+) -> None:
+    from datetime import timedelta
+
+    owner = principal()
+    async with postgres_stores() as uow:
+        first = await uow.reconsolidation.claim_due(owner, NOW, "day-one")
+        assert first is not None
+        released = await uow.reconsolidation.release(owner, first.lease_token, NOW)
+        assert released.state == "complete"
+    later = NOW + timedelta(days=1)
+    async with postgres_stores() as uow:
+        current = await uow.reconsolidation.claim_due(owner, later, "day-two")
+        assert current is not None and current.id != first.id
+        await uow.reconsolidation.release(owner, current.lease_token, later)
+
+    async def jobs() -> dict[UUID, tuple[str, int]]:
+        async with postgres_stores() as uow:
+            assert isinstance(uow.reconsolidation, PostgresReconsolidationStore)
+            rows = await uow.reconsolidation._session.execute(
+                text("SELECT id, state, revision FROM reconsolidation_jobs WHERE id IN (:a, :b)"),
+                {"a": first.id, "b": current.id},
+            )
+            return {row.id: (row.state, row.revision) for row in rows}
+
+    before = await jobs()
+    async with postgres_stores() as uow:
+        await uow.reconsolidation.restart_full_inventory(owner)
+    after = await jobs()
+    assert after[first.id] == before[first.id]
+    assert after[current.id] == ("ready", before[current.id][1] + 1)
+
+
 async def test_source_journal_and_lease_roll_back_together(postgres_stores: Factory) -> None:
     with pytest.raises(RuntimeError, match="abort"):
         async with postgres_stores() as uow:
