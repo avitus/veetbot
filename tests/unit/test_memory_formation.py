@@ -23,6 +23,7 @@ from agent_core.domain.errors import ConflictError, ToolValidationError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     BeliefType,
+    ConsolidationResult,
     DecayResult,
     MemoryAuthority,
     MemoryCandidate,
@@ -1822,10 +1823,16 @@ def test_recorded_elsewhere_matches_every_component() -> None:
     assert recorded_elsewhere("weight 82.400000 today", weight)
     assert not recorded_elsewhere("weight 182.4 today", weight)
     assert not recorded_elsewhere("weight 82.45 today", weight)
+    assert recorded_elsewhere("my blood pressure was 128 over 82.", bp)
+    assert recorded_elsewhere("My weight is 82.4.", weight)
+    assert recorded_elsewhere("128-82", bp)
+    twin = recorded_value_sets([_bp_event({"a": "82.000000", "b": "82.000000"})])
+    assert not recorded_elsewhere("82", twin)
+    assert recorded_elsewhere("82 and 82", twin)
     assert recorded_value_sets([_bp_event({"w": "abc"}), _bp_event({})]) == ()
 
 
-async def _run_with_record(statement: str) -> object:
+async def _run_with_record(statement: str) -> ConsolidationResult:
     clock, factory, baseline, _retriever = await formation_stack()
     source = await user_event(factory, "My blood pressure was 128 over 82 this morning")
     async with factory() as uow:
@@ -1869,11 +1876,13 @@ async def _run_with_record(statement: str) -> object:
 
 async def test_recorded_values_never_form_beliefs() -> None:
     result = await _run_with_record("My blood pressure was 128 over 82 this morning")
-    assert result.beliefs == []  # type: ignore[attr-defined]
-    assert result.run.rejected == 1  # type: ignore[attr-defined]
-    assert result.run.decision_counts == {"recorded_elsewhere": 1}  # type: ignore[attr-defined]
+    assert result.beliefs == []
+    assert result.run.rejected == 1
+    assert result.run.decision_counts == {"recorded_elsewhere": 1}
 
 
 async def test_one_value_of_two_still_forms() -> None:
     result = await _run_with_record("I weigh 82 kilos")
-    assert "recorded_elsewhere" not in result.run.decision_counts  # type: ignore[attr-defined]
+    assert len(result.beliefs) == 1
+    assert result.run.rejected == 0
+    assert "recorded_elsewhere" not in result.run.decision_counts
