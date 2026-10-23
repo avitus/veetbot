@@ -1,6 +1,7 @@
 # ADR-0233: Owner authorized governed source learning and save reporting on
 # 2026-10-21; PR 181 delivered it on 2026-10-22. The owner-reported deferred-format
-# repair is authorized and awaits release. No milestone or gate moves.
+# repair is authorized and awaits release; so does the 2026-10-22 owner-named site
+# repair (scheme-less names, www. and bare domain as one host). No milestone or gate moves.
 schema_version: 1
 
 project:

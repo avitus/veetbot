@@ -872,8 +872,12 @@ call ID and an exact quote. Version 1.1 allows a quote-only observation of
 claims must remain contiguous phrases of the quote, and explicit subjects
 must use its words. An optional tentative belief ID requests reinforcement.
 The run's authenticated owner seed must explicitly
-request learning from a public website URL. The returned URL must be on that
-host within its path subtree; external instructions cannot grant authority.
+request learning from a public website URL, with or without its scheme
+(`www.example.com` counts; an email address does not). A negation withholds
+that request only when it governs learning or limits its subject. The returned
+URL must be on that host within its path subtree, where `www.` and the bare
+domain are one host and other subdomains are not; external instructions cannot
+grant authority. A request naming no site is rejected as `source_not_named`.
 Successful `web.fetch`, `browser.navigate`, and `browser.observe` results are
 the only admitted reads. Search snippets and text-only speculation about images
 are excluded. Deterministic phrase grounding preserves word order and rejects

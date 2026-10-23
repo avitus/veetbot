@@ -37,9 +37,23 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 VERSION = "owner-source-learning@1"
 _READS = {"web.fetch", "browser.navigate", "browser.observe"}
-_URL = re.compile(r"https?://[^\s<>\"']+")
+# Owners name sites as people type them: "www.example.com" or "example.com/team"
+# with no scheme. Email addresses and longer hostnames never yield a site name.
+_URL = re.compile(
+    r"(?<![\w@.-])(?:https?://)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}"
+    r"(?![\w@-])(?::\d+)?(?:/[^\s<>\"']*)?",
+    re.I,
+)
 _INTENT = re.compile(r"\b(?:learn|remember|retain|memorize|memorise)\b", re.I)
 _DENIAL = re.compile(r"\b(?:not|never|don't|do not|avoid|forget|stop)\b", re.I)
+# A negation withholds learning only when it governs learning or limits its
+# subject ("do not remember", "not about Erin"); "I am not on Facebook" does not.
+_OWNER_DENIAL = re.compile(
+    r"\b(?:not|never|don'?t|avoid|stop)\b(?:\W+\w+){0,3}?\W+"
+    r"(?:learn|remember|retain|memori[sz]e|save|store|about|from)\w*\b"
+    r"|(?<!don't\s)(?<!dont\s)(?<!not\s)(?<!never\s)\bforget\b",
+    re.I,
+)
 _UNCERTAINTY = re.compile(r"\b(?:likely|possibly|perhaps|tentatively)\b", re.I)
 _INSTRUCTION = re.compile(
     r"(?:^|[.!?]\s+)(?:please\s+)?(?:ignore|send|execute|run|call|delete|store|save|remember|"
@@ -84,24 +98,37 @@ def _url(value: str) -> tuple[str, str] | None:
     return (parsed.hostname or "").casefold(), path
 
 
-def _authorized(owner_text: str, url: str) -> bool:
-    if not _INTENT.search(owner_text) or _DENIAL.search(owner_text):
-        return False
+def _site(host: str) -> str:
+    # "www.example.com" and "example.com" are one website; other subdomains are not.
+    return host.removeprefix("www.")
+
+
+def _owner_roots(owner_text: str) -> list[tuple[str, str]] | None:
+    """Return the websites an owner asked to learn from, or None without that request."""
+
+    owner_text = owner_text.replace("\u2019", "'")  # phone keyboards type a curly apostrophe
+    if not _INTENT.search(owner_text) or _OWNER_DENIAL.search(owner_text):
+        return None
     if not re.search(r"\blearn\b|\b(?:from|about)\b", owner_text, re.I):
-        return False
+        return None
+    roots = []
+    for match in _URL.finditer(owner_text):
+        value = match.group()
+        root = _url(value if re.match(r"https?://", value, re.I) else "https://" + value)
+        if root:
+            roots.append((_site(root[0]), root[1]))
+    return roots
+
+
+def _authorized(roots: list[tuple[str, str]], url: str) -> bool:
     destination = _url(url)
     if destination is None:
         return False
-    host, path = destination
-    for match in _URL.finditer(owner_text):
-        root = _url(match.group())
-        if (
-            root
-            and root[0] == host
-            and (root[1] == "/" or path == root[1] or path.startswith(root[1] + "/"))
-        ):
-            return True
-    return False
+    host, path = _site(destination[0]), destination[1]
+    return any(
+        site == host and (root == "/" or path == root or path.startswith(root + "/"))
+        for site, root in roots
+    )
 
 
 class SourceLearningRejectionError(ToolValidationError):
@@ -185,10 +212,18 @@ class SourceLearningService:
             )
         output = read.structured_result or {}
         url, text = output.get("url"), output.get("content", output.get("text"))
+        roots = _owner_roots(owner.text)
+        if roots == []:
+            raise SourceLearningRejectionError(
+                "source_not_named",
+                "The owner's request names no website address. Ask the owner to "
+                "resend the request with the site's address; do not retry this read.",
+            )
         if (
-            not isinstance(url, str)
+            roots is None
+            or not isinstance(url, str)
             or not isinstance(text, str)
-            or not _authorized(owner.text, url)
+            or not _authorized(roots, url)
         ):
             raise SourceLearningRejectionError(
                 "source_not_authorized",
@@ -278,7 +313,7 @@ class SourceLearningService:
                 uow, target.source_session_id, target.source_event_ids
             )
         claim = _claim_text(target.statement) if target else claim
-        host = urlsplit(url).hostname or ""
+        host = _site((urlsplit(url).hostname or "").casefold())
         identity = hashlib.sha256(
             (
                 principal.tenant_id
