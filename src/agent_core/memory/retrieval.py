@@ -49,12 +49,13 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.memory_candidates import candidate_strength
 from agent_core.domain.memory_sources import SourceRecoveryObservation
-from agent_core.domain.messages import MemoryRecallUsage
+from agent_core.domain.messages import MemoryRecallUsage, TextPart
 from agent_core.domain.recall_execution import recall_search
 from agent_core.domain.reconsolidation_merge import normalize_claim
 from agent_core.domain.reconsolidation_operations import StoredMerge
 from agent_core.domain.runs import Run
 from agent_core.domain.semantic_memory import SemanticHit, checked_vector, query_digest
+from agent_core.domain.tool_output import content_bytes
 from agent_core.memory.identity_recall import identity_scoped_records
 from agent_core.memory.people_retained import validate_people_dependencies
 from agent_core.memory.profiles import (
@@ -607,6 +608,12 @@ class HybridMemoryRetriever:
         if effective_query.include_owned_resources:
             policy_version += f"+{OWNED_RESOURCE_POLICY_VERSION}"
             render_policy += f"+{OWNED_RESOURCE_POLICY_VERSION}"
+        if effective_query.relationship_group is not None:
+            policy_version += "+owner-overview@1"
+            render_policy += "+owner-overview@1"
+        if effective_query.budget_bytes is not None:
+            policy_version += "+inline-budget@1"
+            render_policy += "+inline-budget@1"
         if semantic_key is not None:
             suffix = f"+semantic@2:{semantic_key}:fusion={self._profile.semantic_fusion_weight:g}"
             if self._profile.semantic_channel == "dense":
@@ -737,10 +744,24 @@ class HybridMemoryRetriever:
             partners.update(item.conflict_with)
             collapsed.append(item)
         coverage = effective_query.candidate_selection == "relevance"
-        render = partial(render_memory, bounded=coverage)
+        render = partial(
+            render_memory,
+            bounded=coverage,
+            relationship_group=effective_query.relationship_group,
+            next_people_after=effective_query.next_people_after,
+        )
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
-        measure_tokens = measure_rendered_tokens or _token_estimate
+        token_estimate = measure_rendered_tokens or _token_estimate
+
+        def measure_tokens(text: str) -> int:
+            if (
+                effective_query.budget_bytes is not None
+                and len(content_bytes([TextPart(text=text)])) > effective_query.budget_bytes
+            ):
+                return effective_query.budget_tokens + 1
+            return token_estimate(text)
+
         owner_core = (
             moment == RecallMoment.SNAPSHOT.value
             and effective_query.candidate_selection == "relevance"
@@ -769,6 +790,11 @@ class HybridMemoryRetriever:
             if (
                 len(selected_people) < min(8, max(1, effective_query.max_items // 2))
                 and measure_tokens(proposed) <= effective_query.budget_tokens * 0.4
+                and measure_tokens(
+                    render([], as_of=now, policy_version=render_policy, known_at=render_known_at)
+                    + proposed
+                )
+                <= effective_query.budget_tokens
             ):
                 selected_people.append(context_item)
                 people_rendered = proposed
@@ -998,7 +1024,7 @@ class HybridMemoryRetriever:
             people=selected_people,
             rendered=rendered,
             tokens=rendered_tokens,
-            truncated=bool(dropped),
+            truncated=bool(dropped) or effective_query.next_people_after is not None,
             trace_id=trace_id,
             watermark=head,
             validate_snapshot_dependencies=True,
@@ -1747,6 +1773,8 @@ def render_memory(
     policy_version: str = RETRIEVAL_POLICY_VERSION,
     known_at: datetime | None = None,
     bounded: bool = False,
+    relationship_group: str | None = None,
+    next_people_after: UUID | None = None,
 ) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
     history = (
@@ -1759,6 +1787,17 @@ def render_memory(
         f'<memory as_of="{html.escape(stamp)}"{history} '
         f'policy="{html.escape(policy_version)}"{coverage}>'
     ]
+    if relationship_group is not None:
+        continuation = (
+            f' Continue memory.search with relationship_group="{relationship_group}" '
+            f'and people_after="{next_people_after}".'
+            if next_people_after is not None
+            else ""
+        )
+        lines.append(
+            "  Direct owner relationships: bounded page of at most three people; "
+            "supporting facts may be omitted. Narrow the query for more detail." + continuation
+        )
     for item in items:
         lines.append(f"  {_line(item)}")
     lines.append("</memory>")

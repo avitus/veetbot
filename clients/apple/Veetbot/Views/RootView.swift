@@ -67,6 +67,9 @@ public struct RootView: View {
     @State private var showingGlobalMemory = false
     @State private var showingGlobalPersona = false
     @State private var showingGlobalSchedules = false
+    /// The Mac window's sidebar button belongs to Chat's split view, which
+    /// stays mounted behind Email, so Email's mailbox sidebar follows it.
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .automatic
     /// Connect's steps 2 and 3, shown once the first-run connection succeeds.
     @State private var onboarding: ConnectOnboardingStep?
     #if !os(macOS)
@@ -226,10 +229,11 @@ public struct RootView: View {
         Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.clearError() } })
     }
 
+    /// Keeps mode navigation available when Email's mailbox sidebar is hidden.
     @ViewBuilder
     private var configuredContent: some View {
         VStack(spacing: 0) {
-            if coordinator.mode != .email || !usesDirectSidebarActivation {
+            if coordinator.mode != .email || !usesDirectSidebarActivation || !mailboxSidebarVisible {
             HStack {
                 ModeSegment(selected: coordinator.mode) { coordinator.mode = $0 }
                 Spacer()
@@ -261,6 +265,7 @@ public struct RootView: View {
                         .accessibilityHidden(coordinator.mode != .chat)
                     EmailModeView(
                         model: coordinator.email, viewportHeight: geometry.size.height,
+                        mailboxSidebarVisible: mailboxSidebarVisible,
                         discussInChat: { await coordinator.discussSelectedThread() },
                         openChat: { coordinator.mode = .chat },
                         newChat: { model.newSession(); coordinator.mode = .chat },
@@ -404,29 +409,38 @@ public struct RootView: View {
     /// toolbar's own background removes that edge; the title bar keeps the
     /// window's colour.
     private var splitChat: some View {
-        NavigationSplitView {
-            SessionSidebar(
-                model: model,
-                usesDirectActivation: usesDirectSidebarActivation,
-                openSettings: presentSettings
-            )
-            .navigationSplitViewColumnWidth(
-                min: A2Metrics.sidebarWidth - VeetSpace.s7, ideal: A2Metrics.sidebarWidth,
-                max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
-            )
+        #if os(macOS)
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
+            chatSidebar
         } detail: {
-            #if os(macOS)
             ChatView(model: model)
                 .macInspector(inspector, mode: .chat) {
                     ChatInspectorPanel(model: model, inspector: inspector)
                 }
-            #else
-            ChatView(model: model)
-            #endif
         }
-        #if os(macOS)
         .toolbarBackground(.hidden, for: .windowToolbar)
+        #else
+        // UIKit owns the split view's adaptive visibility. The Mac-only Email
+        // toolbar binding must not replace that ownership on iPad.
+        NavigationSplitView {
+            chatSidebar
+        } detail: {
+            ChatView(model: model)
+        }
         #endif
+    }
+
+    /// Shares the sidebar content while each platform owns its split visibility.
+    private var chatSidebar: some View {
+        SessionSidebar(
+            model: model,
+            usesDirectActivation: usesDirectSidebarActivation,
+            openSettings: presentSettings
+        )
+        .navigationSplitViewColumnWidth(
+            min: A2Metrics.sidebarWidth - VeetSpace.s7, ideal: A2Metrics.sidebarWidth,
+            max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
+        )
     }
 
     #if os(iOS)
@@ -490,6 +504,15 @@ public struct RootView: View {
         settingsWindowPresenter.show(model: model, appearance: appearance)
         #else
         showingSettings = true
+        #endif
+    }
+
+    /// Only the Mac window offers a sidebar button while Email is showing.
+    private var mailboxSidebarVisible: Bool {
+        #if os(macOS)
+        sidebarVisibility != .detailOnly
+        #else
+        true
         #endif
     }
 

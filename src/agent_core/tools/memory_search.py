@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from agent_core.application.people_context import PeopleAwareMemoryRetriever, PeopleContextService
+from agent_core.domain.errors import ToolValidationError
 from agent_core.domain.memory import (
     BeliefType,
     RecallMoment,
@@ -87,11 +88,15 @@ class MemorySearchTool:
         model_planning: bool = False,
         factory: UnitOfWorkFactory | None = None,
         people_context: PeopleContextService | None = None,
+        overview_enabled: bool = False,
+        inline_output_bytes: int = 4096,
     ) -> None:
         self._retriever = retriever
         self._model_planning = model_planning
         self._factory = factory
         self._people_context = people_context
+        self._inline_output_bytes = inline_output_bytes
+        self._overview_enabled = overview_enabled
         if model_planning:
             schema = deepcopy(INPUT_SCHEMA)
             schema["required"] = ["text"]
@@ -115,6 +120,36 @@ class MemorySearchTool:
                     ),
                 }
             )
+            if overview_enabled:
+                schema["properties"]["relationship_group"] = {
+                    "type": "string",
+                    "enum": ["family", "partner", "friend", "work", "other"],
+                    "description": (
+                        "Read a bounded page of direct owner relationships; "
+                        "family includes partners."
+                    ),
+                }
+                schema["properties"]["people_after"] = {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Continue a relationship page using its returned cursor.",
+                }
+                schema["dependentRequired"] = {"people_after": ["relationship_group"]}
+                # The shared tool-definition allocation also serves browser sessions.
+                # Keep the schema's constraints and put its guidance in one short description.
+                for field in schema["properties"].values():
+                    field.pop("description", None)
+                self.spec = self.spec.model_copy(
+                    update={
+                        "version": "2.2.0",
+                        "input_schema": schema,
+                        "description": (
+                            "Recall memory before asking again. Type hints only rank. "
+                            "relationship_group pages owner relationships; "
+                            "people_after continues a page."
+                        ),
+                    }
+                )
 
     def query(
         self,
@@ -150,6 +185,11 @@ class MemorySearchTool:
                 "known_at": arguments.get("known_at") if self._model_planning else None,
                 "profile": RecallProfile.DEEP,
                 "budget_tokens": 2_000,
+                "budget_bytes": min(self._inline_output_bytes, self.spec.maximum_output_bytes),
+                "relationship_group": arguments.get("relationship_group")
+                if self._overview_enabled
+                else None,
+                "people_after": arguments.get("people_after") if self._overview_enabled else None,
                 "max_items": 20,
                 "min_score": 0.1,
                 "sensitivity_ceiling": Sensitivity.RESTRICTED,
@@ -157,6 +197,8 @@ class MemorySearchTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        if arguments.get("relationship_group") is not None and self._people_context is None:
+            raise ToolValidationError("People relationship lookup is unavailable")
         scope: str | None = None
         if self._model_planning and "scope" not in arguments:
             if self._factory is None:

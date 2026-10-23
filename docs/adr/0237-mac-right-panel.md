@@ -74,3 +74,24 @@ approvals and questions remain in the dock. On every Apple client, a terminal
 run's activity is reconstructed separately and published only when its replay
 finishes; its saved answer stays visible meanwhile. Live runs keep streaming.
 No server contract, policy, or milestone changes.
+
+## Owner-approved clean reader (2026-10-22)
+
+The owner asked for the Mac thread to be a clean reading surface and approved
+the MagicPath design "Mac — Email · Clean reader" (cozy-evening-6871). This
+extends decision 6: on the Mac everything that describes a thread moves from
+the thread into Context, which now leads with a spam flag (Report spam, Not
+spam), then Veetbot's summary (the gist and the state line; a thread not yet
+assessed says "Assessment pending" once), why it is here, the sender's card
+with the chosen message's From, To, Cc and date and, for an eligible bulk
+sender, Unsubscribe, then Teach Veetbot, the attachments, the draft, and a
+Thread card (the account, the Gmail state, why archiving is unavailable, and
+one Show original switch for every message in the thread). The thread keeps
+Archive in Gmail and the thread menu, the subject, who wrote and when, each
+message's text, the incomplete-message warning, Gmail's answer to an archive
+just asked for, the reply and the Discuss in Chat bar. A sender's name opens
+their card and that message's envelope; one line per message counts its
+attachments and opens their list. These items are visible only while the
+panel is open, as Teach Veetbot already was; journeys open it first. iPhone
+and iPad keep every item in the thread. No server contract, policy, or
+milestone changes.

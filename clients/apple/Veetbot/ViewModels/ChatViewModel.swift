@@ -1306,6 +1306,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Submits one optimistic turn, preserving the prior history on failure.
     @discardableResult
     public func send(_ rawText: String) async -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1330,9 +1331,22 @@ public final class ChatViewModel: ObservableObject {
             errorMessage = "Wait for the attachments to finish uploading, or remove them."
             return false
         }
+        // A follow-up takes ownership before its first suspension; a delayed
+        // historical replay must not replace the optimistic message or new run.
+        let interruptedRunID = runState.runStatus?.isTerminal == true ? runState.activeRunID : nil
+        let submissionSelectionID = selectionRequestID
+        watchTasks.cancel()
         isSending = true
         sessionBusy = false
-        defer { isSending = false }
+        defer {
+            isSending = false
+            // A failed submission leaves the previous terminal run in place.
+            // Resume its history only while it still owns this selection.
+            if let interruptedRunID, selectionRequestID == submissionSelectionID,
+                runState.activeRunID == interruptedRunID, runState.runStatus?.isTerminal == true {
+                watch(runID: interruptedRunID, touchHistoryOnCompletion: false, historical: true)
+            }
+        }
         let sentAttachments = attachments
         let content: [ContentBlock] =
             sentAttachments.compactMap(\.contentBlock) + (text.isEmpty ? [] : [.text(text)])
@@ -2810,6 +2824,7 @@ public final class ChatViewModel: ObservableObject {
         return eventStream.frames(runID: runID)
     }
 
+    /// Streams live state or reconstructs terminal history offscreen before publishing it once.
     private func watch(runID: UUID, touchHistoryOnCompletion: Bool = true, historical: Bool = false) {
         guard let eventStream else { return }
         watchTasks.cancel()
@@ -2818,6 +2833,7 @@ public final class ChatViewModel: ObservableObject {
         let selectionID = selectionRequestID
         watchTasks.task = Task { [weak self] in
             var frames = 0
+            var fetchedApprovalIDs = Set<UUID>()
             defer {
                 if let self {
                     ConversationDiagnostics.logger.notice(
@@ -2835,6 +2851,7 @@ public final class ChatViewModel: ObservableObject {
                         // current, but keep every historical state off-screen.
                         if let api = self.api {
                             for approvalID in replay.needsApprovalIDs {
+                                guard fetchedApprovalIDs.insert(approvalID).inserted else { continue }
                                 let approval = try await api.getApproval(approvalID)
                                 guard !Task.isCancelled, self.selectionRequestID == selectionID else { return }
                                 replay.mergeApproval(approval)

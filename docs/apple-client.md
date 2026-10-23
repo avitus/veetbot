@@ -227,6 +227,8 @@ menu on compact screens: Voice, What Veetbot assumes, Nominations and
 Boundaries. Empty Nominations and Boundaries pages explain that no items are
 available. UI navigation checks wait for foreground and hittable controls, then
 anchor native menu touches to the app window and require the menu to close.
+Model-picker journeys also wait for settled menu geometry and confirm dismissal
+before asserting the exact server-saved choice and its later read-back.
 Moving between sections preserves unsaved edits. A server without
 tone support opens What Veetbot assumes instead of Voice. Voice contains
 the Lean towards chips (Brief, Warm, Direct, Formal,
@@ -532,6 +534,13 @@ while activity replays into a separate reducer. Only a completed replay publishe
 the reconstructed state, so historical tool counts and intermediate run statuses
 do not move the transcript. Cancellation or an interrupted replay preserves the
 saved transcript; active runs continue to publish live events on every Apple client.
+Sending a follow-up cancels unfinished replay before adding its optimistic message,
+so a delayed historical snapshot cannot overwrite the new submission.
+If submission fails, replay resumes only if that same conversation and terminal
+run still own the view; switching conversations prevents the old replay from returning.
+Each approval is fetched once per historical replay, even when later events name
+the same request. On Mac, approval notifications target the corresponding card
+in the attention dock; the dock remains visible independently of transcript scroll.
 
 ## Agent activity and artifacts
 
@@ -764,8 +773,15 @@ an account failure only when the server has recorded a refresh error.
 The wide Email sidebar contains account and search controls, New chat, the
 Chat / Email switch, pending chat attention, and Mailbox navigation for Inbox,
 Needs you, Handled and Subscriptions. Its bottom row opens Chat, Memory, People,
-Schedules, Persona and Settings. The main page has an Email heading, count and
-appearance toggle. Compact screens put the mailbox collections in horizontal
+Schedules, Persona and Settings. On the Mac the window's sidebar button hides
+it together with Chat's sidebar; the mode bar with Chat / Email and More then
+returns, and account, search and collection pills sit above the inbox.
+This visibility binding is Mac-only; iPad retains UIKit-managed split navigation.
+Sender and attachment reveals are consumed once the Email panel mounts, including
+when it was closed; changing threads clears an unhandled reveal. Thread changes
+and panel dismissal also cancel transient highlights. Sender cards
+refresh People context for the selected message’s date, even for the same sender.
+The main page has an Email heading, count and appearance toggle. Compact screens put the mailbox collections in horizontal
 filter pills. Important / Other mail remains available under Find other mail.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560
 points while retaining at least 250 points for reading in a small window.
@@ -799,10 +815,18 @@ and the thread menu join the back button in a paper navigation bar instead,
 so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
 its reason; the messages follow as prose, each under its sender's line and
 parted by hairlines, with View in People and Message details kept beside the
-sender. On the Mac, View in People opens the sender's card in the right panel's
-**Context** tab (ADR-0237), which also says why the thread is in the priority
-list (its level and reason), lists the attachments without opening them, shows
-the draft's state with a way to ask for one, and holds Teach Veetbot; its
+sender. The Mac thread is a clean reader instead (ADR-0237; MagicPath
+cozy-evening-6871): the account, the gist and state line, View in People,
+Message details, each message's Reading view switch, the attachment names,
+Unsubscribe and the spam flag leave it for the right panel's **Context** tab.
+A sender's name opens their card there with that message's From, To, Cc and
+date, and one line per message counts its attachments and opens their list.
+Context leads with any spam flag, then Veetbot's summary (a thread not yet
+assessed says "Assessment pending" once), why the thread is in the priority
+list (its level and reason), the sender, Teach Veetbot, the attachments
+(listed, never opened), the draft's state with a way to ask for one, and a
+Thread card with the account, the Gmail state and one Show original switch
+for the whole thread; its
 **Activity** tab replays the draft run's events and shows the calls that made
 the draft. Elsewhere a "Teach Veetbot" card on `paperDeep` below the
 conversation opens into the same scoped

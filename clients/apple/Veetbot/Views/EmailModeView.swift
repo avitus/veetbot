@@ -163,6 +163,8 @@ private final class EmailInboxWidthAutosaveView: NSView {
 public struct EmailModeView: View {
     @ObservedObject var model: EmailViewModel
     var viewportHeight: CGFloat? = nil
+    /// False once the Mac window's sidebar button hides the sidebar.
+    var mailboxSidebarVisible = true
     #if os(macOS)
     var inboxWidth = EmailInboxWidthStore.app
     #endif
@@ -200,12 +202,15 @@ public struct EmailModeView: View {
         #endif
     }
 
+    /// Without the mailbox sidebar, its search, accounts and collections sit above the inbox.
+    private var showsMailboxSidebar: Bool { directSelection && mailboxSidebarVisible }
+
     /// Preserves platform navigation and presents learning and exact-send review above the inbox.
     public var body: some View {
         Group {
             if directSelection {
                 HStack(spacing: 0) {
-                    mailboxSidebar.frame(width: 232)
+                    if showsMailboxSidebar { mailboxSidebar.frame(width: 232) }
                     #if os(macOS)
                     withPanel(VStack(spacing: 0) {
                         emailHeading
@@ -301,10 +306,8 @@ public struct EmailModeView: View {
     /// Groups triage controls above independently actionable rows and per-account freshness below them.
     private var inbox: some View {
         VStack(spacing: 0) {
-            if !directSelection {
-                emailHeading
-                inboxHeader.fixedSize(horizontal: false, vertical: true)
-            }
+            if !directSelection { emailHeading }
+            if !showsMailboxSidebar { inboxHeader.fixedSize(horizontal: false, vertical: true) }
             HairlineDivider()
             List {
                 if model.unavailable {
@@ -326,7 +329,7 @@ public struct EmailModeView: View {
                         .buttonStyle(SecondaryCapsuleButtonStyle())
                     }.padding(.vertical, 16).emailHideSeparator()
                 }
-                if !directSelection, let pause = model.budgetPauseMessage {
+                if !showsMailboxSidebar, let pause = model.budgetPauseMessage {
                     budgetPause(pause)
                         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                         .emailHideSeparator()
@@ -620,15 +623,18 @@ public struct EmailModeView: View {
             .veetType(.ui)
             .padding(.horizontal, 10).frame(minHeight: A2Metrics.controlHeight + 4)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.field))
-            if !directSelection {
+            if !showsMailboxSidebar {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(EmailCollection.allCases, id: \.self) { collection in
                             Button {
                                 model.setCollection(collection)
                             } label: {
-                                Text(collectionTitle(collection))
-                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                                // One label, so the pill style draws one capsule around title and count.
+                                HStack(spacing: 6) {
+                                    Text(collectionTitle(collection))
+                                    if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                                }
                             }
                             .buttonStyle(FilterPillButtonStyle(selected: model.listView == collection.rawValue))
                             .accessibilityIdentifier("email.collection.\(collectionID(collection))")
@@ -924,6 +930,12 @@ private struct EmailThreadScreen: View {
     /// On the Mac the sender's card and Teach Veetbot live in the right panel.
     @Environment(\.inspectorReveal) private var inspectorReveal
 
+    /// The Mac's right panel describes the thread (ADR-0237, MagicPath
+    /// cozy-evening-6871): Veetbot's gist, the account, who wrote and to whom,
+    /// Unsubscribe, the spam flag and Show original. Without a panel the
+    /// thread describes itself.
+    private var describesInline: Bool { inspectorReveal == nil }
+
     private var replyScrollAnimation: Animation? {
         #if os(macOS)
         nil
@@ -942,13 +954,15 @@ private struct EmailThreadScreen: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 22) {
                             threadHeader(thread)
-                            EmailGistBlock(thread: thread, draft: model.draft)
+                            if describesInline {
+                                EmailGistBlock(thread: thread, draft: model.draft)
+                            }
                             if let error = model.threadReadMessage {
                                 Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
                                     .accessibilityIdentifier("email.read-error")
                             }
                             conversation(thread)
-                            if inspectorReveal == nil {
+                            if describesInline {
                                 EmailTeachCard(model: model, explanationFocused: $feedbackFocused)
                             }
                             draftEditor.id("reply")
@@ -1054,8 +1068,10 @@ private struct EmailThreadScreen: View {
     private func threadHeader(_ thread: EmailThreadView) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
-                Label(accountDescription(thread.accountID), systemImage: "envelope")
-                    .veetType(.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
+                if describesInline {
+                    Label(model.accountDescription(for: thread.accountID), systemImage: "envelope")
+                        .veetType(.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
+                }
                 if !actionsInNavigationBar {
                     Spacer(minLength: 8)
                     // The capsule keeps its full name; the account label is what gives way.
@@ -1064,7 +1080,10 @@ private struct EmailThreadScreen: View {
                     threadActionsMenu(thread)
                 }
             }
-            EmailArchiveStatus(model: model, thread: thread, showsAvailability: true)
+            // What Gmail said about an archive the owner just asked for stays
+            // beside the button; why archiving is unavailable is a fact about
+            // the account, which the Mac shows in the panel.
+            EmailArchiveStatus(model: model, thread: thread, showsAvailability: describesInline)
             VStack(alignment: .leading, spacing: 4) {
                 Text(thread.subject.isEmpty ? "No subject" : thread.subject)
                     .veetType(.display)
@@ -1072,20 +1091,24 @@ private struct EmailThreadScreen: View {
                 Text("\(thread.correspondentsOrUnknown) · \(thread.updatedAt, format: .dateTime.month(.abbreviated).day())")
                     .veetType(EmailType.gist).foregroundColor(AppTheme.inkSoft)
             }
-            // Bulk mail only, on an account that advertises the action, with
-            // verified evidence. Everything else offers nothing here.
-            if let block = thread.subscription, block.canUnsubscribe,
-               model.unsubscribeSupported(for: thread.accountID) {
-                HStack(spacing: 8) {
-                    Text(thread.senders.first ?? block.destination)
-                        .veetType(.meta).foregroundColor(AppTheme.inkSoft).lineLimit(1)
-                    Button("Unsubscribe") { subscriptions.beginUnsubscribe(thread: thread) }
-                        .buttonStyle(SecondaryCapsuleButtonStyle())
-                        .accessibilityLabel("Unsubscribe from \(thread.senders.first ?? block.destination)")
-                        .accessibilityIdentifier("email.unsubscribe.thread")
+            if describesInline {
+                // Bulk mail only, on an account that advertises the action, with
+                // verified evidence. Everything else offers nothing here.
+                if let block = thread.subscription, block.canUnsubscribe,
+                   model.unsubscribeSupported(for: thread.accountID) {
+                    HStack(spacing: 8) {
+                        Text(thread.senders.first ?? block.destination)
+                            .veetType(.meta).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+                        Button("Unsubscribe") { subscriptions.beginUnsubscribe(thread: thread) }
+                            .buttonStyle(SecondaryCapsuleButtonStyle())
+                            .accessibilityLabel("Unsubscribe from \(thread.senders.first ?? block.destination)")
+                            .accessibilityIdentifier("email.unsubscribe.thread")
+                    }
                 }
             }
-            EmailSpamControls(model: model, thread: thread)
+            if describesInline {
+                EmailSpamControls(model: model, thread: thread)
+            }
         }
     }
 
@@ -1120,33 +1143,31 @@ private struct EmailThreadScreen: View {
             ForEach(messages) { message in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(message.sender).veetType(EmailType.sender, weight: .semibold).textSelection(.enabled)
+                        senderName(message)
                         Spacer(minLength: 4)
                         Text(message.sentAt, format: .dateTime.month(.abbreviated).day().year().hour().minute())
                             .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
                     }
-                    Button {
-                        if let inspectorReveal {
-                            inspectorReveal.sender(.correspondent(message.sender, at: message.sentAt))
-                        } else {
+                    if describesInline {
+                        Button {
                             peopleLookup = .correspondent(message.sender, at: message.sentAt)
+                        } label: {
+                            Label("View in People", systemImage: "person.crop.circle")
                         }
-                    } label: {
-                        Label("View in People", systemImage: "person.crop.circle")
+                        .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+                        .accessibilityLabel("View people matching \(message.sender)")
+                        .accessibilityIdentifier("email.sender.people")
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("To: \(message.to.joined(separator: ", "))")
+                                if !message.cc.isEmpty { Text("Cc: \(message.cc.joined(separator: ", "))") }
+                            }.textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                        } label: {
+                            Text("Message details")
+                        }
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                     }
-                    .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
-                    .accessibilityLabel("View people matching \(message.sender)")
-                    .accessibilityIdentifier("email.sender.people")
-                    DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("To: \(message.to.joined(separator: ", "))")
-                            if !message.cc.isEmpty { Text("Cc: \(message.cc.joined(separator: ", "))") }
-                        }.textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
-                    } label: {
-                        Text("Message details")
-                    }
-                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
-                    EmailReadingView(message: message)
+                    EmailReadingView(message: message, showsOriginal: inspectorReveal?.showsOriginal)
                     if !message.complete {
                         Label(
                             "This message is incomplete. Refresh before relying on its full contents.",
@@ -1154,12 +1175,52 @@ private struct EmailThreadScreen: View {
                         )
                         .veetType(.ui).foregroundColor(AppTheme.amberText)
                     }
-                    ForEach(Array((message.attachments ?? []).enumerated()), id: \.offset) { _, attachment in
-                        Label("\(attachment.filename) · attachment not read", systemImage: "paperclip")
-                            .veetType(.meta).foregroundColor(AppTheme.inkSoft)
-                    }
+                    attachmentLine(message)
                 }
                 if message.id != messages.last?.id { HairlineDivider() }
+            }
+        }
+    }
+
+    /// Who wrote, in semibold. On the Mac the name opens their card and this
+    /// message's envelope in the panel.
+    @ViewBuilder private func senderName(_ message: EmailMessageView) -> some View {
+        if let inspectorReveal {
+            Button {
+                inspectorReveal.message(message)
+            } label: {
+                Text(message.sender).veetType(EmailType.sender, weight: .semibold).foregroundColor(AppTheme.ink)
+            }
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .pointerStyle(.link)
+            #endif
+            .help("Show who wrote this in the panel")
+            .accessibilityHint("Shows who wrote this message in the panel")
+            .accessibilityIdentifier("email.sender.people")
+        } else {
+            Text(message.sender).veetType(EmailType.sender, weight: .semibold).textSelection(.enabled)
+        }
+    }
+
+    /// Attachment names and the fact they were not read. The Mac lists them in
+    /// the panel, so the message keeps one quiet line that opens that list.
+    @ViewBuilder private func attachmentLine(_ message: EmailMessageView) -> some View {
+        let attachments = message.attachments ?? []
+        if let inspectorReveal, !attachments.isEmpty {
+            Button {
+                inspectorReveal.attachments()
+            } label: {
+                Label(attachments.count == 1 ? "1 attachment" : "\(attachments.count) attachments",
+                      systemImage: "paperclip")
+            }
+            .buttonStyle(.plain).veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            .help("Show the attachments in the panel")
+            .accessibilityIdentifier("email.message.attachments")
+        } else {
+            ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
+                Label("\(attachment.filename) · attachment not read", systemImage: "paperclip")
+                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
             }
         }
     }
@@ -1238,7 +1299,7 @@ private struct EmailThreadScreen: View {
     private func draftWell(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             envelopeRow("From") {
-                Text(accountDescription(draft.accountID)).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                Text(model.accountDescription(for: draft.accountID)).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                     .lineLimit(1).truncationMode(.middle)
             }
             HairlineDivider()
@@ -1450,11 +1511,6 @@ private struct EmailThreadScreen: View {
     private func editBinding(_ path: WritableKeyPath<EmailDraftEdit, String>) -> Binding<String> {
         Binding(get: { model.currentEdit?[keyPath: path] ?? "" }, set: { model.changeEdit(path, to: $0) })
     }
-    /// Identifies the source account by its label and address, falling back to the server identifier.
-    private func accountDescription(_ id: String) -> String {
-        guard let account = model.accounts.first(where: { $0.id == id }) else { return id }
-        return account.emailAddress.map { "\(account.label) · \($0)" } ?? account.label
-    }
 }
 
 /// Veetbot's reading of the thread behind a teal rule: the gist, then what the
@@ -1599,22 +1655,27 @@ private struct EmailGistBlock: View {
 /// Native text only: links open on a gesture; remote images and HTML never load.
 private struct EmailReadingView: View {
     let message: EmailMessageView
+    /// The whole thread's choice from the Mac panel; nil gives this message
+    /// its own Reading view and Show original switch.
+    var showsOriginal: Bool? = nil
     @State private var showingOriginal = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let reader = message.readerBody, !reader.isEmpty {
-                HStack {
-                    Text(showingOriginal ? "Original message" : "Reading view")
-                        .veetType(.meta).foregroundColor(AppTheme.inkFaint)
-                    Spacer()
-                    Button(showingOriginal ? "Reading view" : "Show original") {
-                        showingOriginal.toggle()
+                if showsOriginal == nil {
+                    HStack {
+                        Text(showingOriginal ? "Original message" : "Reading view")
+                            .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                        Spacer()
+                        Button(showingOriginal ? "Reading view" : "Show original") {
+                            showingOriginal.toggle()
+                        }
+                        .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+                        .accessibilityIdentifier("email.reader.original")
                     }
-                    .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
-                    .accessibilityIdentifier("email.reader.original")
                 }
-                if showingOriginal {
+                if showsOriginal ?? showingOriginal {
                     original
                 } else {
                     MarkdownContentView(text: reader)
@@ -1647,8 +1708,9 @@ extension View {
     }
 }
 
-/// A flag explains itself and offers the owner's two answers; a report offers its undo (ADR-0165).
-private struct EmailSpamControls: View {
+/// A flag explains itself and offers the owner's two answers; a report offers
+/// its undo (ADR-0165). Below the subject on touch; atop Context on the Mac.
+struct EmailSpamControls: View {
     @ObservedObject var model: EmailViewModel
     let thread: EmailThreadView
 
@@ -1703,26 +1765,9 @@ private struct EmailThreadStatus: View {
     var draft: EmailDraftView? = nil
     var showsReason = false
 
-    enum Tone { case attention, draft, settled }
+    typealias Tone = EmailThreadSummary.Tone
 
-    private var state: (title: String, tone: Tone) {
-        if thread.isInSpam { return ("Reported as spam", .settled) }
-        if thread.isArchived { return ("Archived", .settled) }
-        if thread.isHandled { return ("Handled", .settled) }
-        switch (draft ?? thread.draft)?.status {
-        case "ready": return ("Draft ready", .draft)
-        case "generating": return ("Preparing draft", .draft)
-        case "awaiting_approval": return ("Awaiting approval", .attention)
-        case "sending": return ("Sending reply", .draft)
-        case "sent": return ("Reply sent", .draft)
-        case "uncertain": return ("Check send status", .attention)
-        case "failed": return ("Draft needs attention", .attention)
-        default:
-            return thread.draftID != nil
-                ? ("Draft", .draft)
-                : thread.needsReply ? ("Needs reply", .attention) : ("For your attention", .attention)
-        }
-    }
+    private var state: (title: String, tone: Tone) { EmailThreadSummary.state(thread: thread, draft: draft) }
 
     private func color(for tone: Tone) -> Color {
         switch tone {

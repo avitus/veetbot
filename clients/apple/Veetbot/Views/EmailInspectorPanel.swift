@@ -1,16 +1,21 @@
 import SwiftUI
 
 #if os(macOS)
-/// Email's right panel (MagicPath clever-village-5022): Context holds who
-/// wrote, why the thread is in the priority list, Teach Veetbot, the
-/// attachments and the draft; Activity holds the calls of the run that made
-/// the draft.
+/// Email's right panel (MagicPath clever-village-5022, cozy-evening-6871):
+/// Context holds everything that describes the thread, so the thread keeps
+/// the mail itself: a spam flag, Veetbot's summary, why the thread is in the
+/// priority list, who wrote with that message's envelope and Unsubscribe,
+/// Teach Veetbot, the attachments, the draft, and the account with Show
+/// original. Activity holds the calls of the run that made the draft.
 struct EmailInspectorPanel: View {
     @ObservedObject var model: EmailViewModel
     @ObservedObject var inspector: InspectorModel
     let runFrames: ((UUID) -> AsyncThrowingStream<SSEFrame, Error>)?
     @StateObject private var replay = RunActivityReplay()
     @FocusState private var feedbackFocused: Bool
+    @State private var attachmentsFlash = false
+    @State private var senderFlash = false
+    @State private var flashTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,23 +24,35 @@ struct EmailInspectorPanel: View {
                 tabs: EmailInspectorTab.allCases.map { ($0, $0.title) },
                 hide: { inspector.toggle(.email) }
             )
-            ScrollView {
-                VStack(alignment: .leading, spacing: VeetSpace.s4) {
-                    if let thread = model.thread, !model.isLoadingThread {
-                        switch inspector.emailTab {
-                        case .context: context(thread)
-                        case .activity: activity
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: VeetSpace.s4) {
+                        if let thread = model.thread, !model.isLoadingThread {
+                            switch inspector.emailTab {
+                            case .context: context(thread)
+                            case .activity: activity
+                            }
+                        } else {
+                            InspectorEmptyState(
+                                symbol: "envelope.open", title: "No thread open",
+                                message: "Choose a thread to see who wrote it, why it is here and its draft."
+                            )
                         }
-                    } else {
-                        InspectorEmptyState(
-                            symbol: "envelope.open", title: "No thread open",
-                            message: "Choose a thread to see who wrote it, why it is here and its draft."
-                        )
                     }
+                    .padding(.horizontal, VeetSpace.s3)
+                    .padding(.top, VeetSpace.s1)
+                    .padding(.bottom, VeetSpace.s6)
                 }
-                .padding(.horizontal, VeetSpace.s3)
-                .padding(.top, VeetSpace.s1)
-                .padding(.bottom, VeetSpace.s6)
+                // A name or an attachment line in the thread brings its card into view.
+                .onChange(of: inspector.pendingEmailReveal, initial: true) {
+                    consumeReveal(with: proxy)
+                }
+                .onChange(of: model.isLoadingThread) {
+                    if model.isLoadingThread { cancelFlash() }
+                    consumeReveal(with: proxy)
+                }
+                .onDisappear { cancelFlash() }
+
             }
         }
         .task(id: draftRunID) {
@@ -46,20 +63,68 @@ struct EmailInspectorPanel: View {
 
     private var draftRunID: UUID? { model.draft?.runID ?? model.thread?.draft?.runID }
 
+    private enum Section: Hashable { case sender, attachments }
+
+    private func reveal(_ section: Section, with proxy: ScrollViewProxy) {
+        guard inspector.emailTab == .context else { return }
+        Task { @MainActor in
+            // The tab may have only just switched to Context; scroll once it has laid out.
+            await Task.yield()
+            withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(section, anchor: .top) }
+        }
+    }
+
+    /// Clears transient emphasis when a thread changes or the panel leaves the screen.
+    private func cancelFlash() {
+        flashTask?.cancel()
+        flashTask = nil
+        senderFlash = false
+        attachmentsFlash = false
+    }
+
+    /// Handles a queued request on mount as well as requests to an already-open panel.
+    private func consumeReveal(with proxy: ScrollViewProxy) {
+        guard !model.isLoadingThread, model.thread != nil,
+              let request = inspector.consumeEmailReveal() else { return }
+        flashTask?.cancel()
+        senderFlash = request == .sender
+        attachmentsFlash = request == .attachments
+        reveal(request == .sender ? .sender : .attachments, with: proxy)
+        flashTask = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 1_200_000_000) }
+            catch { return }
+            withAnimation(.easeOut(duration: 0.4)) {
+                senderFlash = false
+                attachmentsFlash = false
+            }
+        }
+    }
+
     // MARK: - Context
 
     @ViewBuilder
     private func context(_ thread: EmailThreadView) -> some View {
+        // A flag waits on the owner's answer, so it leads.
+        EmailSpamControls(model: model, thread: thread)
+        let summary = EmailThreadSummary.make(thread: thread, draft: model.draft ?? thread.draft)
+        InspectorSection(title: "Veetbot’s summary") {
+            summaryCard(summary)
+        }
+        InspectorSection(title: "Why it’s here") {
+            priority(thread, reason: summary.reason)
+        }
         if let lookup = senderLookup(thread) {
             InspectorSection(title: "Sender") {
-                EmailSenderCard(lookup: lookup, highlighted: inspector.senderRevealCount)
+                EmailSenderCard(lookup: lookup, highlighted: senderFlash)
+                    .id(lookup.asOf)
                     .id(lookup.text)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("inspector.email.sender")
+                if let message = chosenMessage(thread) {
+                    messageCard(message, in: thread)
+                }
             }
-        }
-        InspectorSection(title: "Why it’s here") {
-            priority(thread)
+            .id(Section.sender)
         }
         // The card's own header names it, so it needs no section label.
         EmailTeachCard(model: model, explanationFocused: $feedbackFocused, inPanel: true)
@@ -81,11 +146,20 @@ struct EmailInspectorPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(VeetSpace.s1)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(attachmentsFlash ? AppTheme.teal : .clear)
+            )
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("inspector.email.attachments")
         }
+        .id(Section.attachments)
         InspectorSection(title: "Draft") {
             draftCard(thread)
+        }
+        InspectorSection(title: "Thread") {
+            threadCard(thread)
         }
     }
 
@@ -96,7 +170,118 @@ struct EmailInspectorPanel: View {
         return thread.senders.first.map { .correspondent($0, at: thread.updatedAt) }
     }
 
-    private func priority(_ thread: EmailThreadView) -> some View {
+    /// The message whose sender the owner chose, or else the latest one.
+    private func chosenMessage(_ thread: EmailThreadView) -> EmailMessageView? {
+        let messages = thread.messages ?? []
+        return messages.first { $0.id == inspector.senderMessageID } ?? messages.last
+    }
+
+    /// Veetbot's gist and the state the row's chip names. A thread Veetbot has
+    /// not read yet says so once.
+    private func summaryCard(_ summary: EmailThreadSummary) -> some View {
+        VStack(alignment: .leading, spacing: VeetSpace.s1) {
+            if summary.isPending {
+                HStack(spacing: VeetSpace.s2) {
+                    ProgressView().controlSize(.mini)
+                    Text(EmailThreadSummary.pendingText).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                }
+            } else {
+                Text(summary.gist).veetType(.ui).foregroundColor(AppTheme.ink)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(summary.state).veetType(.meta, weight: .medium).foregroundColor(color(summary.tone))
+            if summary.isPending {
+                Text("Veetbot has not read this thread yet. Its summary and reason appear here once it has.")
+                    .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .inspectorCard()
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("inspector.email.summary")
+    }
+
+    /// The chosen message's envelope, which left the thread, and Unsubscribe
+    /// for a bulk sender on an account that advertises it.
+    private func messageCard(_ message: EmailMessageView, in thread: EmailThreadView) -> some View {
+        let messages = thread.messages ?? []
+        return VStack(alignment: .leading, spacing: VeetSpace.s2) {
+            VStack(alignment: .leading, spacing: VeetSpace.s1) {
+                fact("From", message.sender)
+                fact("To", message.to.joined(separator: ", "))
+                if !message.cc.isEmpty { fact("Cc", message.cc.joined(separator: ", ")) }
+                fact("Sent", message.sentAt.formatted(date: .abbreviated, time: .shortened))
+            }
+            .textSelection(.enabled)
+            if messages.count > 1, let index = messages.firstIndex(where: { $0.id == message.id }) {
+                Text("Message \(index + 1) of \(messages.count). Choose a sender’s name in the thread to switch.")
+                    .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Bulk mail only, on an account that advertises the action, with
+            // verified evidence. Everything else offers nothing here.
+            if let block = thread.subscription, block.canUnsubscribe,
+               model.unsubscribeSupported(for: thread.accountID) {
+                Button("Unsubscribe") { model.subscriptions.beginUnsubscribe(thread: thread) }
+                    .buttonStyle(SecondaryCapsuleButtonStyle())
+                    .accessibilityLabel("Unsubscribe from \(thread.senders.first ?? block.destination)")
+                    .accessibilityIdentifier("email.unsubscribe.thread")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .inspectorCard()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inspector.email.message")
+    }
+
+    /// Which account the thread is in, its Gmail state, and the switch that
+    /// shows every message's original body.
+    private func threadCard(_ thread: EmailThreadView) -> some View {
+        let messages = thread.messages ?? []
+        return VStack(alignment: .leading, spacing: VeetSpace.s2) {
+            VStack(alignment: .leading, spacing: VeetSpace.s1) {
+                fact("Account", model.accountDescription(for: thread.accountID))
+                fact("Gmail", thread.isInSpam ? "Spam" : thread.isArchived ? "Archived" : thread.inInbox == true ? "In Inbox" : "Not known yet")
+                fact("Messages", "\(messages.count)")
+            }
+            if let reason = model.archiveUnavailableReason(for: thread) {
+                Text(reason).veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Only a cleaned message has an original to show.
+            if messages.contains(where: { !($0.readerBody ?? "").isEmpty }) {
+                HairlineDivider()
+                HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show original").veetType(.ui).foregroundColor(AppTheme.ink)
+                        Text("The unchanged messages, without the reading view’s cleanup.")
+                            .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    // The switch alone is the control, so a click on it is a click on the switch.
+                    Toggle("Show original", isOn: $inspector.showsOriginal)
+                        .toggleStyle(.switch).controlSize(.small).labelsHidden()
+                        .accessibilityIdentifier("email.reader.original")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .inspectorCard()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inspector.email.thread")
+    }
+
+    private func fact(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
+            Text(label).foregroundColor(AppTheme.inkFaint).frame(width: 72, alignment: .leading)
+            Text(value).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+        }
+        .veetType(.meta)
+    }
+
+    private func priority(_ thread: EmailThreadView, reason: String?) -> some View {
         let level = EmailPriority(thread.priority)
         return VStack(alignment: .leading, spacing: VeetSpace.s2) {
             HStack(alignment: .firstTextBaseline) {
@@ -115,8 +300,7 @@ struct EmailInspectorPanel: View {
             }
             .frame(height: 6)
             .accessibilityHidden(true)
-            let reason = thread.reason.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !reason.isEmpty {
+            if let reason {
                 Text(reason).veetType(.ui).foregroundColor(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
             }
             let chips = (thread.needsReply ? ["Needs a reply"] : []) + thread.feedbackTopics
@@ -136,7 +320,7 @@ struct EmailInspectorPanel: View {
         }
         .inspectorCard()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(level.title), \(level.percent) out of 100. \(thread.reason)")
+        .accessibilityLabel("\(level.title), \(level.percent) out of 100. \(reason ?? "")")
         .accessibilityIdentifier("inspector.email.priority")
     }
 
@@ -198,6 +382,14 @@ struct EmailInspectorPanel: View {
     }
 
     private func color(_ tone: EmailDraftSummary.Tone) -> Color {
+        switch tone {
+        case .attention: AppTheme.amberText
+        case .draft: AppTheme.tealText
+        case .settled: AppTheme.inkSoft
+        }
+    }
+
+    private func color(_ tone: EmailThreadSummary.Tone) -> Color {
         switch tone {
         case .attention: AppTheme.amberText
         case .draft: AppTheme.tealText
@@ -267,12 +459,11 @@ private struct DraftRunActivity: View {
 struct EmailSenderCard: View {
     let lookup: PeopleLookup
     /// Changes when the owner chose this sender in the thread.
-    var highlighted = 0
+    var highlighted = false
     @StateObject private var people: PeopleViewModel
     @State private var showingPeople = false
-    @State private var flash = false
 
-    init(lookup: PeopleLookup, highlighted: Int = 0) {
+    init(lookup: PeopleLookup, highlighted: Bool = false) {
         self.lookup = lookup
         self.highlighted = highlighted
         _people = StateObject(wrappedValue: PeopleViewModel(searchText: lookup.text, asOf: lookup.asOf))
@@ -288,15 +479,8 @@ struct EmailSenderCard: View {
                 missing
             }
         }
-        .inspectorCard(border: flash ? AppTheme.teal : AppTheme.hairline)
+        .inspectorCard(border: highlighted ? AppTheme.teal : AppTheme.hairline)
         .task { await people.reload() }
-        .onChange(of: highlighted) {
-            flash = true
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_200_000_000)
-                withAnimation(.easeOut(duration: 0.4)) { flash = false }
-            }
-        }
         .sheet(isPresented: $showingPeople) { PeopleLookupSheet(lookup: lookup) }
     }
 
