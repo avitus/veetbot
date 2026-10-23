@@ -2,8 +2,10 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import timedelta
-from uuid import uuid4
+from pathlib import Path
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -13,9 +15,12 @@ from sqlalchemy.exc import IntegrityError
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.database import create_engine, create_session_factory
 from agent_core.adapters.persistence.records import InMemoryRecordStore, PostgresRecordStore
+from agent_core.adapters.persistence.session_deletions import PostgresSessionDeletionRepository
 from agent_core.adapters.persistence.sqlalchemy_models import RecordEntryRow
+from agent_core.bootstrap import build
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.domain.memory import Sensitivity
+from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.ports.records import Bucket, Order, RecordStore, Window
 from tests.contract.support import NOW, principal
 from tests.contract.test_record_store_contract import (
@@ -31,7 +36,7 @@ from tests.contract.test_record_store_contract import (
     records_scope_isolation_contract,
     records_summarize_contract,
 )
-from tests.integration.m2_support import database_settings
+from tests.integration.m2_support import PRINCIPAL, database_settings
 
 
 @pytest.mark.parametrize("contract", CONTRACTS, ids=lambda fn: fn.__name__)
@@ -193,3 +198,44 @@ async def test_erasure_postgres() -> None:
     ):
         async with _postgres_store() as fresh:
             await contract(fresh)
+
+
+async def test_postgres_session_deletion_keeps_entries_and_nulls_provenance(
+    tmp_path: Path,
+) -> None:
+    """Gate 6's session clause through the repository that production runs."""
+
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    owner = PRINCIPAL.model_copy(update={"principal_id": f"records-{uuid4().hex[:12]}"})
+    chat = Session(
+        id=uuid4(),
+        tenant_id=owner.tenant_id,
+        principal_id=owner.principal_id,
+        agent_id=UUID("00000000-0000-0000-0000-000000000010"),
+        agent_version="1.0.0",
+        status=SessionStatus.ACTIVE,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    async with build(settings=settings, storage="postgres") as composition:
+        async with composition.uow_factory() as uow:
+            await uow.sessions.create(chat)
+            series, _ = await uow.records.create_series(
+                make_series(owner, "Kept", components=("n",))
+            )
+            stored, _ = await uow.records.append(
+                make_entry(series, NOW, {"n": "7"}, session=chat.id)
+            )
+        assert stored.source_session_id == chat.id and stored.source_event_id is not None
+        async with composition.uow_factory() as uow:
+            assert isinstance(uow.session_deletions, PostgresSessionDeletionRepository)
+            assert await uow.session_deletions.delete(chat.id, owner, NOW)
+        async with composition.uow_factory() as uow:
+            rows = await uow.records.query(
+                owner, series.id, Window(until=NOW + timedelta(days=1)), Order.ASC, 5
+            )
+            assert [row.id for row in rows] == [stored.id]
+            assert rows[0].source_session_id is None
+            assert rows[0].source_event_id is None
+            assert rows[0].values == stored.values
+            await uow.records.erase_principal(owner)

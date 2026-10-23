@@ -31,12 +31,15 @@ from agent_core.domain.records import (
     RecordPrecision,
     RecordsCatalog,
     RecordSeries,
+    RecordTimeError,
     RecordValueError,
     SeriesSummary,
     Window,
     canonical_value,
     due_since,
     normalize_series_name,
+    ordered_values,
+    parse_instant,
     resolve_observed_at,
     validate_value,
 )
@@ -59,6 +62,16 @@ class RecordsRefusal(Exception):  # noqa: N818
         super().__init__(f"{code}: {detail}")
         self.code = code
         self.detail = detail
+
+
+def _edge(text: str, edge: str) -> datetime:
+    try:
+        return parse_instant(text)
+    except RecordTimeError as exc:
+        raise RecordsRefusal(
+            "records.invalid_arguments",
+            f"the window's {edge} edge must be an ISO 8601 instant with a UTC offset",
+        ) from exc
 
 
 class RecordsService:
@@ -105,7 +118,8 @@ class RecordsService:
         names = [component.name for component in components]
         if len(set(names)) != len(names):
             raise RecordsRefusal("records.component_mismatch", "component names must be unique")
-        texts = [display_name, *names]
+        units = [component.unit for component in components if component.unit is not None]
+        texts = [display_name, *names, *units]
         if any(contains_secret_material(text) for text in texts):
             raise RecordsRefusal("records.secret_detected", "a name matched the secret scan")
         if any(contains_injection_pattern(text) for text in texts):
@@ -134,7 +148,7 @@ class RecordsService:
                 series, created = await uow.records.create_series(candidate)
             except SeriesExists as exc:
                 raise RecordsRefusal(
-                    "records.series_exists", "the series exists with different components"
+                    "records.series_exists", "the series exists with a different declaration"
                 ) from exc
             if created:
                 await uow.events.append(
@@ -187,7 +201,9 @@ class RecordsService:
                     f"values must carry exactly: {', '.join(sorted(declared))}",
                 )
             try:
-                checked = {key: validate_value(value) for key, value in values.items()}
+                checked = ordered_values(
+                    series, {key: validate_value(value) for key, value in values.items()}
+                )
                 when = resolve_observed_at(observed_at, precision, now)
             except RecordValueError as exc:
                 raise RecordsRefusal("records.value_out_of_range", str(exc)) from exc
@@ -234,7 +250,10 @@ class RecordsService:
                             "entry_id": str(stored.id),
                             "observed_at": stored.observed_at.isoformat(),
                             "observed_precision": stored.observed_precision.value,
-                            "values": {k: canonical_value(v) for k, v in stored.values.items()},
+                            "values": {
+                                k: canonical_value(v)
+                                for k, v in ordered_values(series, stored.values).items()
+                            },
                             "note_withheld": stored.note_withheld,
                         },
                     )
@@ -255,8 +274,8 @@ class RecordsService:
     ) -> QueryResult:
         name = normalize_series_name(series_name)
         now = self._clock.now()
-        start = resolve_observed_at(since, RecordPrecision.EXACT, now) if since else None
-        end = resolve_observed_at(until, RecordPrecision.EXACT, now) if until else now + FUTURE_SKEW
+        start = _edge(since, "since") if since else None
+        end = _edge(until, "until") if until else now + FUTURE_SKEW
         window = Window(since=start, until=end)
         if (
             bucket is not None

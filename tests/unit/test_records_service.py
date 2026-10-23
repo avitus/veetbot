@@ -1,7 +1,7 @@
 """The records application service enforces scans, limits, replay and events."""
 
 from collections.abc import Awaitable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -11,6 +11,7 @@ import pytest
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.application.records import RecordsRefusal, RecordsService
+from agent_core.context.records_catalog import render_records_catalog
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.records import (
@@ -437,3 +438,84 @@ async def test_mean_is_half_even_six_places() -> None:
         zone=UTC_ZONE,
     )
     assert result.summary["v"].mean == D("0.000002")
+
+
+async def test_day_precision_today_is_inside_the_default_window_and_catalog() -> None:
+    svc, _, clock = await service()
+    now = datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
+    clock.advance(now - clock.now())
+    await create(svc, "Weight", (RecordComponent(name="kg"),))
+    stored = await svc.append(
+        principal(),
+        series_name="weight",
+        values={"kg": D("80.1")},
+        observed_at="2026-10-22T08:00:00-07:00",
+        precision=RecordPrecision.DAY,
+        note=None,
+        idempotency_key="day",
+        session_id=SESSION_ID,
+        run_id=None,
+        origin_trust=TrustLevel.USER,
+    )
+    assert stored.entry.observed_at == now
+    result = await svc.query(
+        principal(),
+        series_name="weight",
+        since=None,
+        until=None,
+        limit=10,
+        order=Order.DESC,
+        bucket=None,
+        zone=UTC_ZONE,
+    )
+    assert [entry.id for entry in result.entries] == [stored.entry.id]
+    catalog = await svc.catalog(principal(), ceiling=Sensitivity.RESTRICTED, max_series=16)
+    assert catalog is not None
+    assert catalog.lines[0].last_precision is RecordPrecision.DAY
+    assert render_records_catalog(catalog, zone=ZoneInfo("America/Los_Angeles"), now=now) == (
+        "Weight (kg): 1 entry, last 2026-10-22, logged ad hoc"
+    )
+
+
+async def test_query_until_in_the_future_is_accepted() -> None:
+    svc, _, _ = await service()
+    await create(svc)
+    await append(svc, {"systolic": D(1), "diastolic": D(2)})
+    ahead = (NOW + timedelta(days=4)).isoformat()
+    result = await svc.query(
+        principal(),
+        series_name="blood pressure",
+        since=None,
+        until=ahead,
+        limit=10,
+        order=Order.DESC,
+        bucket=None,
+        zone=UTC_ZONE,
+    )
+    assert len(result.entries) == 1
+    assert result.window.until == NOW + timedelta(days=4)
+
+
+async def test_create_scans_component_units() -> None:
+    svc, _, _ = await service()
+    credential_unit = (RecordComponent(name="v", unit="api_key: hunter2"),)
+    assert await refusal(create(svc, components=credential_unit)) == "records.secret_detected"
+
+
+async def test_series_exists_names_a_different_declaration() -> None:
+    svc, _, _ = await service()
+    await create(svc)
+    with pytest.raises(RecordsRefusal) as caught:
+        await create(svc, cadence=RecordCadence.WEEKLY)
+    assert caught.value.code == "records.series_exists"
+    assert "different declaration" in caught.value.detail
+
+
+async def test_values_follow_the_declared_component_order() -> None:
+    svc, factory, _ = await service()
+    await create(svc)
+    await append(svc, {"diastolic": D(82), "systolic": D(128)})
+    async with factory() as uow:
+        events = await uow.events.list_after(SESSION_ID, 0, principal())
+    appended = next(e for e in events if e.event_type == "records.entry.appended")
+    assert list(appended.payload["values"]) == ["systolic", "diastolic"]

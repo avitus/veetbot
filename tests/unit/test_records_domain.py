@@ -24,6 +24,8 @@ from agent_core.domain.records import (
     canonical_value,
     due_since,
     normalize_series_name,
+    ordered_values,
+    parse_instant,
     resolve_observed_at,
     short_value,
     validate_value,
@@ -211,3 +213,34 @@ def test_entry_observed_at_is_utc() -> None:
     e = _entry(observed_at=datetime(2026, 10, 22, 8, 0, tzinfo=timezone(timedelta(hours=-7))))
     assert e.observed_at == datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
     assert e.observed_at.utcoffset() == timedelta(0)
+
+
+def test_day_precision_today_is_never_stored_after_the_clock() -> None:
+    # Noon on the owner's date is 19:00 UTC, four hours past the clock: the
+    # stored instant is the clock itself, never a future instant.
+    today = resolve_observed_at("2026-10-22T08:00:00-07:00", RecordPrecision.DAY, NOW)
+    assert today == NOW
+    assert today.utcoffset() == timedelta(0)
+    yesterday = resolve_observed_at("2026-10-21T08:00:00-07:00", RecordPrecision.DAY, NOW)
+    assert yesterday == datetime(2026, 10, 21, 19, 0, tzinfo=UTC)
+    with pytest.raises(RecordTimeError, match="future"):
+        resolve_observed_at("2026-10-22T15:06:00+00:00", RecordPrecision.DAY, NOW)
+
+
+def test_parse_instant_requires_an_offset_and_has_no_future_bound() -> None:
+    ahead = parse_instant("2026-10-26T15:00:00+00:00")
+    assert ahead == datetime(2026, 10, 26, 15, 0, tzinfo=UTC)
+    assert ahead.utcoffset() == timedelta(0)
+    assert parse_instant(" 2026-10-22T08:00:00-07:00 ") == NOW
+    with pytest.raises(RecordTimeError, match="UTC offset"):
+        parse_instant("2026-10-22T07:40:00")
+    with pytest.raises(RecordTimeError):
+        parse_instant("not a time")
+
+
+def test_ordered_values_follow_the_declared_components() -> None:
+    series = _series(
+        components=(RecordComponent(name="systolic"), RecordComponent(name="diastolic"))
+    )
+    values = {"diastolic": Decimal(82), "systolic": Decimal(128)}
+    assert list(ordered_values(series, values)) == ["systolic", "diastolic"]

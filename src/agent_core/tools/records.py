@@ -24,6 +24,7 @@ from agent_core.domain.records import (
     RecordValueError,
     canonical_value,
     due_since,
+    ordered_values,
     short_value,
     validate_value,
 )
@@ -129,12 +130,18 @@ def _summary_body(summary: SeriesSummary, now: datetime) -> dict[str, Any]:
     }
 
 
-def _entry_body(entry: RecordEntry) -> dict[str, Any]:
+def _in_order(series: RecordSeries, keyed: Mapping[str, Any]) -> dict[str, Any]:
+    """Any per-component mapping in the series' declared component order."""
+
+    return {c.name: keyed[c.name] for c in series.components if c.name in keyed}
+
+
+def _entry_body(entry: RecordEntry, series: RecordSeries) -> dict[str, Any]:
     return {
         "entry_id": str(entry.id),
         "observed_at": _stamp(entry.observed_at),
         "precision": entry.observed_precision.value,
-        "values": _values(entry.values),
+        "values": _values(ordered_values(series, entry.values)),
         "note": WITHHELD_NOTE if entry.note_withheld else entry.note,
     }
 
@@ -309,8 +316,8 @@ class RecordsAppendTool(_RecordsTool):
         "records.append",
         "Add one entry to an existing series with a value for every declared component, "
         "an optional observed time and precision, and an optional note. Values are the "
-        "owner's own words; the series must already exist, and an append in a turn that "
-        "read external content asks the owner first.",
+        "owner's own words and the series must already exist. In a turn that read "
+        "external content the tool refuses; ask the owner to state the value in chat.",
         {
             "type": "object",
             "properties": {
@@ -353,10 +360,11 @@ class RecordsAppendTool(_RecordsTool):
             origin_trust=context.origin_trust,
         )
         entry, series = result.entry, result.series
+        values = ordered_values(series, entry.values)
         units = {c.name: c.unit or "" for c in series.components}
         rendered = ", ".join(
             f"{key} {short_value(value)}{' ' + units[key] if units[key] else ''}"
-            for key, value in entry.values.items()
+            for key, value in values.items()
         )
         observed = (
             entry.observed_at.astimezone(self._zone).date().isoformat()
@@ -371,7 +379,7 @@ class RecordsAppendTool(_RecordsTool):
             structured={
                 "entry_id": str(entry.id),
                 "series": series.display_name,
-                "values": _values(entry.values),
+                "values": _values(values),
                 "observed_at": _stamp(entry.observed_at),
                 "precision": entry.observed_precision.value,
                 "entry_count": result.entry_count,
@@ -437,7 +445,7 @@ class RecordsQueryTool(_RecordsTool):
                             "max": canonical_value(stats.maximum),
                             "mean": canonical_value(stats.mean),
                         }
-                        for key, stats in row.components.items()
+                        for key, stats in _in_order(result.series, row.components).items()
                     },
                 }
                 for row in result.buckets
@@ -453,8 +461,11 @@ class RecordsQueryTool(_RecordsTool):
             structured={
                 "series": name,
                 "window": window,
-                "entries": [_entry_body(entry) for entry in result.entries],
-                "summary": {k: _component_summary(v) for k, v in result.summary.items()},
+                "entries": [_entry_body(entry, result.series) for entry in result.entries],
+                "summary": {
+                    k: _component_summary(v)
+                    for k, v in _in_order(result.series, result.summary).items()
+                },
             },
         )
 

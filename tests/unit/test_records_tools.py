@@ -1,6 +1,7 @@
 """The five owner-records tools: scopes, parsing, refusals, replay and rendering."""
 
 from dataclasses import replace
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -21,7 +22,7 @@ from agent_core.tools.records import (
     RecordsQueryTool,
     parse_decimal_values,
 )
-from tests.contract.support import memory_uow_factory, principal, tool_context
+from tests.contract.support import NOW, memory_uow_factory, principal, tool_context
 
 UTC_ZONE = ZoneInfo("UTC")
 BP = [{"name": "systolic", "unit": "mmHg"}, {"name": "diastolic"}]
@@ -293,3 +294,52 @@ async def test_withheld_note_is_absent_from_results() -> None:
     assert entry["note"] == "[note withheld]"
     assert "ignore previous" not in repr(appended.structured) + repr(queried.structured)
     assert "ignore previous" not in text(appended) + text(queried)
+
+
+async def test_query_until_four_days_ahead_returns_entries() -> None:
+    h = await harness()
+    await seed(h)
+    appended = await h.append.execute(
+        {"series": "Blood pressure", "values": {"systolic": 120, "diastolic": 80}}, context()
+    )
+    assert appended.ok, appended.failure
+    ahead = (NOW + timedelta(days=4)).isoformat()
+    queried = await h.query.execute({"series": "Blood pressure", "until": ahead}, context())
+    assert queried.ok, queried.failure
+    assert text(queried) == "1 entries in window."
+
+
+async def test_a_bad_window_edge_names_the_edge() -> None:
+    h = await harness()
+    await seed(h)
+    for edge in ("since", "until"):
+        bad = await h.query.execute(
+            {"series": "Blood pressure", edge: "2026-07-20T10:00:00"}, context()
+        )
+        assert failure(bad) == (ToolFailureKind.INVALID_ARGUMENTS, "records.invalid_arguments")
+        assert bad.failure is not None and edge in bad.failure.detail
+        assert "2026-07-20" not in bad.failure.detail
+
+
+async def test_values_render_in_the_declared_component_order() -> None:
+    h = await harness()
+    await seed(h)
+    appended = await h.append.execute(
+        {"series": "Blood pressure", "values": {"diastolic": 82, "systolic": 128}}, context()
+    )
+    assert appended.ok, appended.failure
+    assert text(appended).startswith(
+        "Recorded systolic 128 mmHg, diastolic 82 for 'Blood pressure' at "
+    )
+    assert appended.structured is not None
+    assert list(appended.structured["values"]) == ["systolic", "diastolic"]
+    queried = await h.query.execute({"series": "Blood pressure"}, context())
+    assert queried.structured is not None
+    assert list(queried.structured["entries"][0]["values"]) == ["systolic", "diastolic"]
+    assert list(queried.structured["summary"]) == ["systolic", "diastolic"]
+
+
+def test_append_description_says_the_tool_refuses_an_untrusted_turn() -> None:
+    description = RecordsAppendTool.spec.description
+    assert "asks the owner first" not in description
+    assert "refuses" in description and "state the value" in description

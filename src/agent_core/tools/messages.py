@@ -188,7 +188,7 @@ TOOL_MESSAGES: dict[str, str] = {
         "first (it needs the owner's approval)."
     ),
     "records.series_exists": (
-        "A series with that name exists with different components; components cannot "
+        "A series with that name exists with a different declaration, which cannot "
         "change. Use another name or append to the existing series."
     ),
     "records.component_mismatch": (
@@ -213,8 +213,8 @@ TOOL_MESSAGES: dict[str, str] = {
         "Ask the owner to state the value in chat, then append it."
     ),
     "records.invalid_arguments": (
-        "An argument has an invalid shape or value; check the observed time format "
-        "and the component names."
+        "An argument has an invalid shape or value; check the observed time or window "
+        "edge format and the component names."
     ),
 }
 

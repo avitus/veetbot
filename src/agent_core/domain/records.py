@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Mapping
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -89,19 +90,38 @@ def short_value(value: Decimal) -> str:
     return text.rstrip("0").rstrip(".")
 
 
-def resolve_observed_at(text: str | None, precision: RecordPrecision, now: datetime) -> datetime:
-    if text is None:
-        return now
+def _aware(text: str, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(text.strip())
     except ValueError as exc:
-        raise RecordTimeError("observed_at is not an ISO 8601 instant") from exc
+        raise RecordTimeError(f"{field} is not an ISO 8601 instant") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise RecordTimeError("observed_at needs a UTC offset")
+        raise RecordTimeError(f"{field} needs a UTC offset")
+    return parsed
+
+
+def parse_instant(text: str) -> datetime:
+    """An aware ISO 8601 instant in UTC, with no future bound (query window edges)."""
+
+    return _aware(text, "instant").astimezone(UTC)
+
+
+def resolve_observed_at(text: str | None, precision: RecordPrecision, now: datetime) -> datetime:
+    """The stored instant of an append; never later than ``now`` for a day-precision entry.
+
+    The future refusal applies to the instant the owner gave. A day-precision
+    entry then moves to noon of its civil date in the owner's offset, capped
+    at the clock, so today's entry is never stored in the future.
+    """
+
+    if text is None:
+        return now
+    parsed = _aware(text, "observed_at")
     if parsed.astimezone(UTC) > now + FUTURE_SKEW:
         raise RecordFutureError("observed_at is in the future")
     if precision is RecordPrecision.DAY:
-        parsed = datetime.combine(parsed.date(), time(12, 0), tzinfo=parsed.tzinfo)
+        noon = datetime.combine(parsed.date(), time(12, 0), tzinfo=parsed.tzinfo)
+        return min(noon.astimezone(UTC), now.astimezone(UTC))
     return parsed.astimezone(UTC)
 
 
@@ -178,6 +198,12 @@ class RecordSeries(RecordValue):
         if self.updated_at < self.created_at:
             raise ValueError("series update precedes creation")
         return self
+
+
+def ordered_values(series: RecordSeries, values: Mapping[str, Decimal]) -> dict[str, Decimal]:
+    """``values`` in the series' declared component order, whatever order a store returned."""
+
+    return {c.name: values[c.name] for c in series.components if c.name in values}
 
 
 class RecordEntry(RecordValue):
