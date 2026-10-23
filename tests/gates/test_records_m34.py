@@ -716,12 +716,14 @@ async def test_append_replay_after_crash() -> None:
     async def mark() -> None:
         marks.append("sent")
 
-    context = replace(base, mark_effect_sent=mark)
-    await context.mark_effect_sent()  # the crash happened after the watermark
     tool = RecordsAppendTool(service, UTC_ZONE)
     arguments = {"series": "Blood pressure", "values": {"systolic": 120, "diastolic": 80}}
-    first = await tool.execute(arguments, context)
-    second = await tool.execute(arguments, context)
+    marked = replace(base, mark_effect_sent=mark)
+    first = await tool.execute(arguments, marked)
+    await marked.mark_effect_sent()  # the crash happened after the watermark
+    assert marks == ["sent", "sent"]
+    # (a) same key, watermark awaited: a replay of the stored entry.
+    second = await tool.execute(arguments, marked)
     assert first.ok and second.ok, (first.failure, second.failure)
     assert first.structured is not None and second.structured is not None
     assert first.structured["replayed"] is False
@@ -729,11 +731,23 @@ async def test_append_replay_after_crash() -> None:
     assert second.structured["entry_id"] == first.structured["entry_id"]
     assert second.structured["entry_count"] == 1
     assert second.structured["values"] == first.structured["values"]
-    assert await _entry_and_event_counts(service, factory, context) == (1, 1)
-    # A different key is a different entry, not a replay.
-    third = await tool.execute(arguments, replace(context, idempotency_key="another-key"))
-    assert third.structured is not None and third.structured["replayed"] is False
-    assert await _entry_and_event_counts(service, factory, context) == (2, 2)
+    assert await _entry_and_event_counts(service, factory, base) == (1, 1)
+    # (b) replay holds whether or not the watermark ran: the executor
+    # re-invokes the tool on both REPLAY and REEXECUTE.
+    fresh_marks: list[str] = []
+
+    async def never_awaited() -> None:
+        fresh_marks.append("sent")
+
+    unmarked = replace(base, mark_effect_sent=never_awaited)
+    third = await tool.execute(arguments, unmarked)
+    assert third.structured is not None and third.structured["replayed"] is True
+    assert third.structured["entry_id"] == first.structured["entry_id"]
+    assert await _entry_and_event_counts(service, factory, base) == (1, 1)
+    # (c) a different key is a different entry, not a replay.
+    fourth = await tool.execute(arguments, replace(marked, idempotency_key="another-key"))
+    assert fourth.structured is not None and fourth.structured["replayed"] is False
+    assert await _entry_and_event_counts(service, factory, base) == (2, 2)
 
 
 _INSTANT = st.integers(min_value=0, max_value=60 * 24 * 3600).map(
@@ -798,8 +812,11 @@ def _byte_identity_property(points: list[tuple[Decimal, datetime]]) -> None:
     asyncio.run(_determinism_property(points))
 
 
-# Hypothesis collects garbage between examples; sockets that earlier composition
-# tests leaked would otherwise be reported against this test.
+# gc.collect() up front only moves the warning onto the next test, so it stays
+# ignored here. The sockets and event loops come from the build() composition
+# tests in this module (test_registration_under_flag and
+# test_composed_builder_carries_the_catalog_under_the_flag), which hypothesis's
+# garbage collection reports against whichever test is running.
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_query_determinism() -> None:
     _byte_identity_property()
@@ -856,6 +873,17 @@ async def _query_clauses() -> None:
     )
     assert wide.ok is False and wide.failure is not None
     assert wide.failure.reason_code == "records.window_too_large"
+    exact = await tool.execute(
+        {
+            "series": "Weight",
+            "since": (NOW - timedelta(days=1000)).isoformat(),
+            "until": NOW.isoformat(),
+            "bucket": "day",
+        },
+        context,
+    )
+    assert exact.ok, exact.failure
+    assert exact.structured is not None and len(exact.structured["buckets"]) >= 1
     with pytest.raises(RecordsRefusal) as refused:
         await service.query(
             owner,
