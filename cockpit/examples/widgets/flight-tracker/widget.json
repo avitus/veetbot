@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "slug": "flight-tracker",
+  "title": "Flight tracker",
+  "purpose": "Shows boarding time, status and gate for one flight.",
+  "kit_api": 1,
+  "sizes": ["sm", "md"],
+  "feeds": [{ "id": "agent.flight-status" }],
+  "settings": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["flight"],
+    "properties": { "flight": { "type": "string", "maxLength": 12, "title": "Flight" } }
+  }
+}

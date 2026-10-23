@@ -75,7 +75,7 @@
   milestone: 35
   kind: property
   spec: docs/plan/cockpit.md#hard-gates
-  statement: "**Stale renders stale.** For any snapshot, interval, factor and corrected clock, a feed older than its expected interval times the stale factor is `stale` in every primitive, including after reconnect and snapshot refetch."
+  statement: "**Stale renders stale.** For any snapshot, interval and corrected clock, a feed older than three times its expected interval is `stale` and dims every primitive in its tile, including after reconnect and snapshot refetch."
   check: tests/gates/pending.py::pending_gate
 - id: gate.cockpit.stream_resume_and_reset
   milestone: 35
@@ -93,7 +93,7 @@
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
-  statement: "**The realm has no network.** Every member of the adversarial corpus — fetch, XHR, WebSocket, EventSource, beacon, peer connection, image, script, style, font and frame loads, and navigation — fails in headless WebKit and in a hosted `WKWebView`."
+  statement: "**The realm has no network.** Every member of the adversarial corpus — fetch, XHR, WebSocket, EventSource, beacon, peer connection, image, script, style, font and frame loads, evaluation, workers, popups, forms and navigation — fails in headless Chromium, in headless WebKit where it is installed, and in a hosted `WKWebView`; a navigating widget is quarantined."
   check: tests/gates/pending.py::pending_gate
 - id: gate.cockpit.token_absent_from_web_content
   milestone: 35

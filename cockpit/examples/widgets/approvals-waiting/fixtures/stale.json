@@ -1,0 +1,15 @@
+{
+  "now": "2026-10-22T18:00:00Z",
+  "settings": {},
+  "feeds": {
+    "veetbot.approvals.pending": {
+      "observedAt": "2026-10-22T17:40:00Z",
+      "expectedIntervalSec": 30,
+      "data": {
+        "count": 1,
+        "oldestMinutes": 38,
+        "items": [{ "kind": "Reserve now", "summary": "Weekend cabin · booking page", "ageMinutes": 38 }]
+      }
+    }
+  }
+}

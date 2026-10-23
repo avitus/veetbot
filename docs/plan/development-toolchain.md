@@ -213,11 +213,12 @@ lint        uv run ruff format --check . && uv run ruff check .
 typecheck   uv run mypy src tests
 test        uv run pytest -m "not live"
 check       lint typecheck test-fast test-browser test-deploy docs-check test-website
+            test-cockpit
 db-up       docker compose up -d postgres && wait-for-healthy
 migrate     uv run alembic upgrade head
 ```
 
-Ten targets exist that Section 21 does not list, because CI needs them
+Twelve targets exist that Section 21 does not list, because CI needs them
 and rule 3 above says CI may not invent commands:
 
 ```text
@@ -234,6 +235,9 @@ test-live         RUN_LIVE_MODEL_TESTS=1 pytest -m live
 docs              mkdocs build --strict
 website-install   validated local reuse or npm ci; always npm ci in CI
 test-website      website-install, static export tests, and lint
+cockpit-install   the same installer for the cockpit/ workspace
+test-cockpit      cockpit-install, Chromium, kit, builder and realm
+                  tests, then ESLint and tsc
 ```
 
 Nine more serve checks, CI steps, or operators. `docs-check` runs
@@ -246,10 +250,14 @@ development sandbox image, and `production-check` validates a host-native
 production deployment. `browser-image` builds the browser-profile service
 image, and `test-browser-image` measures what its browser asks for on its own
 (ADR-0152); both need Docker and stay outside `make check`.
+`cockpit-widgets-worktree` checks out the public `cockpit/widgets` branch under
+`.worktrees/` so a person can build widgets against the kit on `main`
+([cockpit.md](cockpit.md)).
 
 `make check` is `lint typecheck test-fast test-browser test-deploy docs-check
-test-website`. `test-fast` is `test-static` followed by `test-contract`;
-those Python checks plus the independent browser and Node website lanes are
+test-website test-cockpit`. `test-fast` is `test-static` followed by `test-contract`;
+those Python checks plus the independent browser lane and the Node website and
+Cockpit lanes are
 CI jobs 1, 2, 9, and 11 exactly — everything that needs neither a database nor a
 credential, partitioned rather than overlapping. This is the whole of
 the reconciliation the governing rule demands. A developer with no Docker
@@ -476,6 +484,7 @@ job           target invoked         needs     runs on
 8 apple-      shared archive and     signing   main, after deploy-app
   testflight  package script, altool API key
 9 public-site make test-website      Node 22   main, on request
+              make test-cockpit
 10 browser-   make test-browser-     machine   main, on request,
    image      image, x86_64 and arm64          when inputs changed
 11 browser    make test-browser      Chromium  main, on request

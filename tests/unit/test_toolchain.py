@@ -111,6 +111,8 @@ def test_required_make_targets_exist() -> None:
         "docs",
         "website-install",
         "test-website",
+        "cockpit-install",
+        "test-cockpit",
     ):
         assert f"{target}:" in text
 
@@ -1048,6 +1050,7 @@ def test_ci_has_the_required_partitions() -> None:
     for target in ("lint", "typecheck", "test-static", "test-deploy", "docs-check"):
         assert any(f"make {target}" in command for command in commands["static"])
     assert "make test-website" in commands["public-site"]
+    assert any("make test-cockpit" in command for command in commands["public-site"])
     assert any("make client-build" in command for command in commands["static"])
     assert any(
         "python -m scripts.check_reading_lane" in command and "READING_LANE_BASE" in command

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "slug": "schedule-health",
+  "title": "Schedules",
+  "purpose": "Shows how today's scheduled runs went and what runs next.",
+  "kit_api": 1,
+  "sizes": ["sm", "md", "tall"],
+  "feeds": [{ "id": "veetbot.schedules.health" }],
+  "settings": { "type": "object", "additionalProperties": false, "properties": {} }
+}

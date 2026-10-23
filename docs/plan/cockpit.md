@@ -174,19 +174,22 @@ The **manifest** contains:
   most 200 characters, such as "Flight tracker" and "Shows departure,
   delay and gate for one flight";
 - `kit_api`, an integer;
-- `sizes`, a subset of `s` (1×1), `m` (2×1), `l` (2×2) and `xl` (4×2);
+- `sizes`, a subset of the kit's tile sizes `sm` (1×1), `md` (2×1), `tall`
+  (1×2), `lg` (2×2) and `wide` (the full row);
 - `feeds`, a list of `{id, history}` where `history` is at most the knob
   ceiling;
 - `settings`, a closed JSON Schema whose properties are strings, numbers,
   booleans or enumerations with bounds, and which the owner can edit as a
   generated form.
 
-The **component** receives `{feeds, settings, size, theme, now}`, where:
+The **component** receives `{feeds, settings, size, theme}`, where:
 
-- each feed is
-  `{status: fresh|stale|missing|error, observedAt, expectedIntervalSeconds, data, history}`;
-- `now` is supplied by the host, so rendering is deterministic for a given
-  input.
+- each declared feed is
+  `{observedAt, expectedIntervalSec, error, data, history}`, with instants in
+  epoch milliseconds, or absent before its first snapshot;
+- time comes from the kit's clock (`useNow`), which the realm drives with
+  server-corrected time and each fixture freezes, so rendering is
+  deterministic for a given input.
 
 The component may import only `react` and `@veetbot/cockpit-kit`. It renders
 through kit primitives and plain elements styled with kit tokens.
@@ -231,9 +234,13 @@ locally against the kit on `main`.
   `clients/apple/Veetbot/Views/AppTheme.swift` for both light and dark, plus a
   night treatment for an always-on screen.
 - **Primitives.** Tile, Metric, Delta, Sparkline, Bars, Gauge, Countdown,
-  StatusPill, List and Row, Timeline, and the Empty, Stale and Error states.
+  StatusPill, List and Row, Timeline, and the Empty, Stale, Error and Pending
+  states, plus the boards' layout helpers Split, Headline and Between.
+  `TileHost` lets the realm give each widget's Tile its placement size,
+  selection and tap handler.
 - **Behaviour every primitive shares.**
-  - It shows freshness from the feed status it is given.
+  - It shows freshness from the feed envelope its Tile is given; a stale or
+    failed Tile dims every primitive inside it.
   - It renders strings only as text, never as markup.
   - It offers no link, telephone or URL affordance.
   - It reserves amber for needs-attention.
@@ -269,13 +276,24 @@ origin would need CORS headers the scheme handler does not send.
 - **The realm** loads React and the kit once. It mounts each widget's bundle
   into its tile behind an error boundary. A thrown render shows the kit's
   Error state for that tile only.
-- **The watchdog.** The host sends the realm a heartbeat. If the realm misses
-  the deadline (knob), the host reloads it and quarantines the widget whose
-  revision changed most recently. A quarantined widget shows a "paused"
-  state natively until its next revision or the owner's retry.
-- **Data flow.** The realm receives only, per widget, its declared feeds, its
-  own settings, its size, the theme and `now`. All of it arrives through typed
-  postMessage envelopes validated against `cockpit/schema/`.
+- **The watchdog** has two halves, because the realm can share the host
+  page's main thread.
+  - The host sends the realm a heartbeat. If the realm misses the deadline
+    (knob), or loads a second document because a widget navigated it, the
+    host remounts the realm and quarantines the widget whose revision changed
+    most recently.
+  - A widget that never yields also stops the host. Native code therefore
+    pings the host from outside the web view; when the host misses the
+    deadline, native code reloads the view and leaves the most recently
+    changed widget out of the next snapshot.
+
+  A quarantined widget shows a "paused" state natively until its next
+  revision or the owner's retry.
+- **Data flow.** The realm receives only, per widget, its declared feeds at
+  the declared history depth, its own settings, its size and the theme, with
+  the clock's server offset. All of it arrives through typed postMessage
+  envelopes; the realm's messages back are dropped unless they come from the
+  realm's own window and name a placed widget.
 
 ## Validation, the privacy screen and the build
 
@@ -482,12 +500,13 @@ present only when its source feature is enabled.
 
 ### Freshness and delivery
 
-- **Freshness** is computed at render time:
-  - `missing` when there is no snapshot;
-  - `stale` when `now − observed_at` exceeds `expected_interval × stale_factor`
-    (knob, default 3, as the approved designs show it);
-  - `error` when the schema version mismatches;
-  - `fresh` otherwise.
+- **Freshness** is computed by the kit at render time, with the approved
+  designs' thresholds:
+  - `pending` before the first value;
+  - `live` while the age is at most 1.5 times the expected interval;
+  - `aging` up to three times the interval;
+  - `stale` beyond three times;
+  - `error` when the last attempt failed or the schema version mismatches.
 
   Clients compute it with server-corrected time. Stale data is never shown as
   fresh, including after a reconnect.
@@ -600,7 +619,9 @@ scope classification, and `AUTH_SCOPES` in `deploy/veetbot.env.example`.
 ### The mode shell
 
 `ClientMode` moves into its own file and gains `cockpit`, whose symbol is
-`gauge.with.needle`. A pure refactor first replaces every two-way assumption
+`gauge.with.needle`. The owner set the order on 2026-10-22: the mode switch
+reads Cockpit · Chat · Email and is the first thing at the top of each mode's
+left pane, so Email's segment moves above its account header. A pure refactor first replaces every two-way assumption
 with an exhaustive switch. These are the places that assume two modes:
 
 - the mode title and symbol;
@@ -780,7 +801,6 @@ contract suite.
 - **Tuning document.** The shipped configuration root gains
   `cockpit/profiles.yaml`, beside `folders/profiles.yaml`. This is distinct
   from the repository's `cockpit/` workspace. Its knobs:
-  - stale factor;
   - history limits;
   - projection interval;
   - poll interval;
@@ -883,10 +903,10 @@ and a runbook covering:
     kit primitive, with no markup, link or URL affordance, and `discuss`
     context enters Chat as untrusted. Registered as
     `gate.cockpit.feed_text_inert`, case. **M35.**
-13. **Stale renders stale.** For any snapshot, interval, factor and corrected
-    clock, a feed older than its expected interval times the stale factor is
-    `stale` in every primitive, including after reconnect and snapshot
-    refetch. Registered as `gate.cockpit.stale_renders_stale`, property.
+13. **Stale renders stale.** For any snapshot, interval and corrected
+    clock, a feed older than three times its expected interval is `stale`
+    and dims every primitive in its tile, including after reconnect and
+    snapshot refetch. Registered as `gate.cockpit.stale_renders_stale`, property.
     **M35.**
 14. **The stream resumes and resets.** The stream resumes from
     `Last-Event-ID` without loss or duplication, sends `stream.reset` past
@@ -898,8 +918,10 @@ and a runbook covering:
     `gate.cockpit.flag_off_absent`, structural. **M35.**
 16. **The realm has no network.** Every member of the adversarial corpus —
     fetch, XHR, WebSocket, EventSource, beacon, peer connection, image,
-    script, style, font and frame loads, and navigation — fails in headless
-    WebKit and in a hosted `WKWebView`. Registered as
+    script, style, font and frame loads, evaluation, workers, popups, forms
+    and navigation — fails in headless Chromium, in headless WebKit where it
+    is installed, and in a hosted `WKWebView`; a navigating widget is
+    quarantined. Registered as
     `gate.cockpit.realm_network_blocked`, case. **M35.**
 17. **The token never enters web content.** No document or frame can read the
     bearer token or any credential, and the scheme handler's own requests

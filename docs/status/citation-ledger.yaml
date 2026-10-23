@@ -379,7 +379,7 @@ citations:
   - cite: "docs/plan/readiness.md#docs/plan/context-engine.md:513"
     excerpt: "costs nothing. It is nullable for the child runs of Section "
     digest: "f4634d86875301a2"
-  - cite: "docs/plan/readiness.md#docs/plan/development-toolchain.md:217"
+  - cite: "docs/plan/readiness.md#docs/plan/development-toolchain.md:218"
     excerpt: "migrate uv run alembic upgrade head"
     digest: "29d124e28035ce3e"
   - cite: "docs/plan/readiness.md#docs/plan/engineering-plan.md:1347"

@@ -1,0 +1,105 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+import { buildWidget } from '../builder/lib/build.mjs';
+import { readPackage } from '../builder/lib/package.mjs';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const examples = path.join(root, 'examples/widgets');
+const cli = path.join(root, 'builder/cli.mjs');
+
+function flight() {
+  return readPackage(path.join(examples, 'flight-tracker')).files;
+}
+
+function changed(edits) {
+  const files = flight();
+  for (const [name, content] of Object.entries(edits)) {
+    if (content === null) files.delete(name);
+    else files.set(name, typeof content === 'function' ? content(files.get(name)) : content);
+  }
+  return files;
+}
+
+function manifestWith(overrides) {
+  return (text) => JSON.stringify({ ...JSON.parse(text), ...overrides });
+}
+
+test('every reference widget builds', async () => {
+  for (const slug of readdirSync(examples)) {
+    const result = await buildWidget({ files: readPackage(path.join(examples, slug)).files, slug });
+    assert.deepEqual(result.diagnostics, [], slug);
+    assert.equal(result.ok, true, slug);
+    assert.equal(result.sha256, createHash('sha256').update(result.bundle).digest('hex'));
+    assert.equal(result.manifest.slug, slug);
+  }
+});
+
+test('each rejection category stops the build with its diagnostic and no bundle', async () => {
+  const cases = [
+    ['manifest.invalid_json', { 'widget.json': '{' }],
+    ['manifest.schema', { 'widget.json': manifestWith({ title: 'x'.repeat(41) }) }],
+    ['package.file_not_allowed', { 'helper.ts': 'export {}' }],
+    ['package.file_too_large', { 'widget.tsx': (text) => `${text}\n// ${'x'.repeat(64 * 1024)}` }],
+    ['lint.import', { 'widget.tsx': (text) => `import _ from 'lodash';\n${text}` }],
+    ['lint.banned', { 'widget.tsx': (text) => text.replace('const feed =', "void fetch('https://evil.example');\n  const feed =") }],
+    ['screen.credential', { 'widget.tsx': (text) => text.replace('const feed =', 'const token: string = "x";\n  void token;\n  const feed =') }],
+    ['fixture.undeclared_feed', { 'fixtures/typical.json': (text) => JSON.stringify({ ...JSON.parse(text), feeds: { 'agent.other': { observedAt: null, expectedIntervalSec: 60 } } }) }],
+    ['compile.typecheck', { 'widget.tsx': (text) => text.replace('size={size === \'sm\' ? \'m\' : \'l\'}', 'size={7}') }],
+    ['render.throws', { 'widget.tsx': (text) => text.replace('const flight =', "if (!feed) throw new Error('missing');\n  const flight =") }],
+  ];
+  for (const [rule, edits] of cases) {
+    const result = await buildWidget({ files: changed(edits), slug: 'flight-tracker' });
+    assert.equal(result.ok, false, rule);
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.rule === rule), `${rule}: ${JSON.stringify(result.diagnostics)}`);
+    assert.equal(result.bundle, undefined, rule);
+  }
+});
+
+test('the privacy screen uses the principal context the server supplies', async () => {
+  const files = changed({ 'fixtures/typical.json': (text) => text.replace('EX 100', 'XA 4421') });
+  const clean = await buildWidget({ files, slug: 'flight-tracker' });
+  assert.equal(clean.ok, true);
+  const screened = await buildWidget({ files, slug: 'flight-tracker', screen: { settingsValues: ['XA 4421'] } });
+  assert.deepEqual(screened.diagnostics.map((diagnostic) => diagnostic.rule), ['screen.setting']);
+});
+
+test('source checks run before anything is compiled', async () => {
+  const result = await buildWidget({ files: changed({ 'widget.tsx': (text) => `import _ from 'lodash';\n${text}` }), slug: 'flight-tracker' });
+  assert.ok(result.diagnostics.every((diagnostic) => !diagnostic.rule.startsWith('compile.') && !diagnostic.rule.startsWith('render.')));
+});
+
+test('the CLI reports JSON, writes the bundle, and exits by outcome', (t) => {
+  const work = mkdtempSync(path.join(tmpdir(), 'cockpit-cli-'));
+  t.after(() => rmSync(work, { recursive: true, force: true }));
+  const out = path.join(work, 'out');
+  const ok = spawnSync(process.execPath, [cli, 'build', path.join(examples, 'weather'), '--out', out], { encoding: 'utf8' });
+  assert.equal(ok.status, 0, ok.stderr);
+  const report = JSON.parse(ok.stdout);
+  assert.equal(report.ok, true);
+  assert.equal(report.slug, 'weather');
+  assert.equal(report.kit_api, 1);
+  assert.ok(existsSync(path.join(out, `${report.sha256}.js`)));
+
+  const broken = path.join(work, 'weather');
+  cpSync(path.join(examples, 'weather'), broken, { recursive: true });
+  writeFileSync(path.join(broken, 'widget.tsx'), `${readFileSync(path.join(broken, 'widget.tsx'), 'utf8')}\nvoid eval('1');\n`);
+  const rejected = spawnSync(process.execPath, [cli, 'build', broken], { encoding: 'utf8' });
+  assert.equal(rejected.status, 1);
+  assert.equal(JSON.parse(rejected.stdout).ok, false);
+
+  const screenFile = path.join(work, 'screen.json');
+  writeFileSync(screenFile, JSON.stringify({ names: ['Example City'] }));
+  const screened = spawnSync(process.execPath, [cli, 'build', path.join(examples, 'weather'), '--screen', screenFile], { encoding: 'utf8' });
+  assert.equal(screened.status, 1);
+  assert.deepEqual(new Set(JSON.parse(screened.stdout).diagnostics.map((diagnostic) => diagnostic.rule)), new Set(['screen.name']));
+
+  const usage = spawnSync(process.execPath, [cli, 'nonsense'], { encoding: 'utf8' });
+  assert.equal(usage.status, 2);
+});

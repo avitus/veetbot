@@ -1,0 +1,11 @@
+{
+  "now": "2026-10-22T18:00:00Z",
+  "settings": {},
+  "feeds": {
+    "veetbot.approvals.pending": {
+      "observedAt": "2026-10-22T17:59:54Z",
+      "expectedIntervalSec": 30,
+      "data": { "count": 0, "oldestMinutes": null, "items": [] }
+    }
+  }
+}

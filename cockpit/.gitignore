@@ -1,0 +1,4 @@
+# Dependencies and generated runtime assets.
+/node_modules
+/dist
+/test-results
