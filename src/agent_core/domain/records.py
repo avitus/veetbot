@@ -121,7 +121,8 @@ def resolve_observed_at(text: str | None, precision: RecordPrecision, now: datet
         raise RecordFutureError("observed_at is in the future")
     if precision is RecordPrecision.DAY:
         noon = datetime.combine(parsed.date(), time(12, 0), tzinfo=parsed.tzinfo)
-        return min(noon.astimezone(UTC), now.astimezone(UTC))
+        midnight = datetime.combine(parsed.date(), time(0, 0), tzinfo=parsed.tzinfo)
+        return max(midnight.astimezone(UTC), min(noon.astimezone(UTC), now.astimezone(UTC)))
     return parsed.astimezone(UTC)
 
 

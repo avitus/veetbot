@@ -206,8 +206,12 @@ TOOL_MESSAGES: dict[str, str] = {
     "records.window_too_large": (
         "The bucketed window spans too many buckets. Narrow it or use a larger bucket."
     ),
-    "records.secret_detected": ("Not recorded. A name or note looked like a credential or secret."),
-    "records.name_rejected": "Not recorded. A series or component name looked like an instruction.",
+    "records.secret_detected": (
+        "Not recorded. A name, unit or note looked like a credential or secret."
+    ),
+    "records.name_rejected": (
+        "Not recorded. A series, component or unit name looked like an instruction."
+    ),
     "records.untrusted_turn": (
         "Not recorded. This turn read external content, so nothing is stored from it. "
         "Ask the owner to state the value in chat, then append it."

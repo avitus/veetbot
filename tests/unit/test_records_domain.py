@@ -124,6 +124,12 @@ def test_resolve_observed_at_rules() -> None:
     assert timedelta(minutes=5) == FUTURE_SKEW
 
 
+def test_day_precision_clamp_stays_on_civil_date() -> None:
+    now = datetime(2026, 10, 22, 23, 58, tzinfo=UTC)
+    stored = resolve_observed_at("2026-10-23T00:02:00+00:00", RecordPrecision.DAY, now)
+    assert stored == datetime(2026, 10, 23, 0, 0, tzinfo=UTC)
+
+
 def test_cadence_intervals() -> None:
     assert [cadence_interval(c).days for c in RecordCadence] == [1, 7, 30]
 

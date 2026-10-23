@@ -475,7 +475,8 @@ class RecordsDeleteTool(_RecordsTool):
     spec = _spec(
         "records.delete",
         "Remove one entry by id, or a whole series with all its entries. This asks the "
-        "owner every time, and deleting what is already gone succeeds with zero removed.",
+        "owner every time. An entry already gone succeeds with zero removed, while an "
+        "unknown series is refused.",
         {
             "type": "object",
             "properties": {

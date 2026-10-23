@@ -114,7 +114,7 @@ offset, so a day-precision entry sorts inside its day and never crosses a
 date line when rendered elsewhere. The future refusal applies to the instant
 the owner gave, and the stored noon is capped at the clock: an entry for
 today whose local noon is still ahead is stored at the clock, so it is never
-in the future, sits inside the default query window and renders as its date
+in the future (but never before its civil date's local midnight), sits inside the default query window and renders as its date
 in the catalog. Query window edges are read by `parse_instant`, which needs an
 offset and has no future bound, so an `until` days ahead is accepted; an edge
 without an offset is `records.invalid_arguments` with a detail naming the
@@ -300,9 +300,9 @@ and a `structured` body the harness and the clients read.
   "min", "max", "mean"}}]}` and no entries. Empty buckets are omitted.
 - `records.delete` → `{"series", "entries_removed": n, "series_removed":
   bool}`. An entry delete on an existing series whose entry is already gone
-  succeeds with zeros; a delete naming an unknown series, entry or whole
-  series, is `records.series_unknown`, so a stranger's delete is
-  indistinguishable from a missing one.
+  succeeds with zeros; a delete that names a series the principal does not
+  have, whether for one entry or the whole series, is `records.series_unknown`,
+  so a stranger's delete is indistinguishable from a missing one.
 
 The window is half-open, `[since, until)`. `since` defaults to the earliest
 entry and `until` to the clock plus the five-minute future skew, so an entry
