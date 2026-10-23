@@ -203,6 +203,42 @@ import Testing
         #expect(model.consumeEmailReveal() == nil, "Another thread cannot inherit a reveal")
     }
 
+    /// Below the width four columns need, Email's mailbox sidebar and its
+    /// panel take turns: opening the panel folds the sidebar away.
+    @Test
+    func testAnOpenEmailPanelInANarrowWindowFoldsTheMailboxSidebar() {
+        let model = InspectorModel(store: store())
+        model.windowWidthChanged(1100)
+        #expect(!model.foldsMailboxSidebar, "A folded panel needs no room")
+        model.toggle(.email)
+        #expect(model.foldsMailboxSidebar)
+        model.windowWidthChanged(1400)
+        #expect(model.isOpen(.email))
+        #expect(!model.foldsMailboxSidebar, "A wide window fits all four columns")
+        model.windowWidthChanged(1100)
+        #expect(!model.isOpen(.email), "A squeeze folds the panel, as before")
+        #expect(!model.foldsMailboxSidebar)
+    }
+
+    @Test
+    func testShowingTheMailboxSidebarInANarrowWindowFoldsThePanelWithoutRememberingIt() {
+        let store = store()
+        let model = InspectorModel(store: store)
+        model.windowWidthChanged(1100)
+        model.toggle(.email)
+        model.mailboxSidebarShown()
+        #expect(!model.isOpen(.email))
+        #expect(!model.foldsMailboxSidebar)
+        #expect(store.openChoice(for: .email) == true, "Taking turns is not the owner closing the panel")
+        model.windowWidthChanged(1400)
+        #expect(model.isOpen(.email), "A wide window brings the panel back beside the sidebar")
+
+        let wide = InspectorModel(store: self.store())
+        wide.windowWidthChanged(1400)
+        wide.mailboxSidebarShown()
+        #expect(wide.isOpen(.email), "Where both fit, the sidebar leaves the panel open")
+    }
+
     /// Show original moved from every message to one switch in Context, which
     /// the thread reads through the reveal.
     @Test

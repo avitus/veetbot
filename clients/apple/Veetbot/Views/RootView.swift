@@ -70,6 +70,10 @@ public struct RootView: View {
     /// The Mac window's sidebar button belongs to Chat's split view, which
     /// stays mounted behind Email, so Email's mailbox sidebar follows it.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .automatic
+    /// In a window too narrow for four columns, Email's open panel folds the
+    /// mailbox sidebar (ADR-0237). The window's own sidebar state is left
+    /// alone, since macOS restores it at the next launch.
+    @State private var mailboxSidebarFolded = false
     /// Connect's steps 2 and 3, shown once the first-run connection succeeds.
     @State private var onboarding: ConnectOnboardingStep?
     #if !os(macOS)
@@ -298,6 +302,15 @@ public struct RootView: View {
                 .onAppear { inspector.windowWidthChanged(geometry.size.width) }
                 .onChange(of: geometry.size.width) { _, width in inspector.windowWidthChanged(width) }
                 .modifier(InspectorRevealEnvironment(inspector: inspector))
+                // There, an Email panel the owner opens folds the mailbox
+                // sidebar, and the window's sidebar button folds the panel
+                // instead, leaving the window's sidebar as it was.
+                .onReceive(inspector.$foldsMailboxSidebar) { mailboxSidebarFolded = $0 }
+                .onChange(of: sidebarVisibility) { previous, _ in
+                    guard coordinator.mode == .email, inspector.foldsMailboxSidebar else { return }
+                    inspector.mailboxSidebarShown()
+                    sidebarVisibility = previous
+                }
                 #endif
             }
         }
@@ -510,7 +523,7 @@ public struct RootView: View {
     /// Only the Mac window offers a sidebar button while Email is showing.
     private var mailboxSidebarVisible: Bool {
         #if os(macOS)
-        sidebarVisibility != .detailOnly
+        sidebarVisibility != .detailOnly && !mailboxSidebarFolded
         #else
         true
         #endif
