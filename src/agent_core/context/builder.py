@@ -320,8 +320,8 @@ class BudgetedContextBuilder:
     ) -> None:
         self._planner = planner
         self._catalog_source = catalog_source
-        if catalog_max_series < 1:
-            raise ValueError("records catalog series limit must be positive")
+        if catalog_max_series < 0:
+            raise ValueError("records catalog series limit must be nonnegative")
         self._catalog_max_series = catalog_max_series
         self._estimator = estimator
         self._clock = clock
@@ -502,7 +502,7 @@ class BudgetedContextBuilder:
                     principal_id=None,
                 )
             )
-        catalog_items = await self._catalog_items(run, principal)
+        catalog_items = await self._catalog_items(run, plan, principal)
         catalog_dropped = False
         if catalog_items and (
             self._estimator.estimate(envelope_items(catalog_items), plan.model_id)
@@ -697,14 +697,22 @@ class BudgetedContextBuilder:
         )
         return ContextAssembly(request=request, pressure=pressure)
 
-    async def _catalog_items(self, run: Run, principal: Principal) -> list[ConversationItem]:
+    async def _catalog_items(
+        self, run: Run, plan: ContextPlan, principal: Principal
+    ) -> list[ConversationItem]:
         """Read the owner's records catalog once per assembly, as one body item.
 
-        Absent without a source (the flag is off), without `records.read`, or
-        when the store holds no series, so such a body keeps today's bytes.
+        Absent without a source (the flag is off), without `records.read`,
+        without a configured class (zero caps), or when the store holds no
+        series, so such a body keeps today's bytes and reads nothing.
         """
 
-        if self._catalog_source is None or CATALOG_SCOPE not in principal.scopes:
+        if (
+            self._catalog_source is None
+            or CATALOG_SCOPE not in principal.scopes
+            or plan.budget.records_catalog_tokens == 0
+            or self._catalog_max_series == 0
+        ):
             return []
         try:
             catalog = await self._catalog_source.catalog(

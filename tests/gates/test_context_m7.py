@@ -21,7 +21,13 @@ from agent_core.context.history import select_history, validate_tool_pairs
 from agent_core.context.rendering import build_prefix, envelope_item, prefix_bytes
 from agent_core.context.working_state import WorkingStateLimitError, WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.context import ContextBudget, ContextPlan, TaskStatus, WorkingState
+from agent_core.domain.context import (
+    ContextAssembly,
+    ContextBudget,
+    ContextPlan,
+    TaskStatus,
+    WorkingState,
+)
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -37,6 +43,7 @@ from agent_core.domain.messages import (
     AssistantMessage,
     ConversationItem,
     FileReferencePart,
+    ModelRequest,
     ResolvedModel,
     TextPart,
     ToolCallItem,
@@ -337,12 +344,27 @@ def test_history_cut(
     validate_tool_pairs(retained)
 
 
-async def test_prefix_stability() -> None:
+async def test_prefix_stability(monkeypatch: pytest.MonkeyPatch) -> None:
     case = next(
         item
         for item in load_cases(ROOT / "tests/eval_cases")
         if item.name == "fifty_turn_prefix_stability"
     )
+    assembled: list[ModelRequest] = []
+    original_assemble = BudgetedContextBuilder.assemble
+
+    async def recording_assemble(
+        self: BudgetedContextBuilder,
+        run: Run,
+        checkpoint: RunCheckpoint,
+        agent: AgentSpec,
+        principal: Principal,
+    ) -> ContextAssembly:
+        result = await original_assemble(self, run, checkpoint, agent, principal)
+        assembled.append(result.request)
+        return result
+
+    monkeypatch.setattr(BudgetedContextBuilder, "assemble", recording_assemble)
     result = await run_case(case, FIXTURE_ROOT)
     requests = [event for event in result.events if event.event_type == "model.request.started"]
 
@@ -360,6 +382,28 @@ async def test_prefix_stability() -> None:
     assert {"records.series.created", "records.entry.appended"}.issubset(
         {event.event_type for event in result.events}
     )
+    # Every request from turn 40 on carries the catalog envelope in its body,
+    # none before it, and all of them share the one prefix hash.
+    turn_of = {str(item.id): index for index, item in enumerate(result.runs, start=1)}
+    by_turn: dict[int, list[ModelRequest]] = {}
+    for request in assembled:
+        by_turn.setdefault(turn_of[request.metadata["run_id"]], []).append(request)
+    assert sorted(by_turn) == list(range(1, 51))
+
+    def carries_catalog(request: ModelRequest) -> bool:
+        body = request.conversation[int(request.metadata["region_a_items"]) :]
+        return any(
+            'source="records.catalog"' in part.text
+            for item in body
+            for part in getattr(item, "content", [])
+            if isinstance(part, TextPart)
+        )
+
+    for turn, turn_requests in by_turn.items():
+        assert all(carries_catalog(request) is (turn >= 40) for request in turn_requests), turn
+    assert {request.metadata["prefix_sha256"] for request in assembled} == {
+        requests[0].payload["prefix_sha256"]
+    }
     assert requests[0].created_at.date() != requests[-1].created_at.date()
 
 

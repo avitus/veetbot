@@ -425,7 +425,8 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
-from agent_core.context.builder import CATALOG_MAX_SERIES, BudgetedContextBuilder
+from agent_core.context.budget import records_catalog_caps
+from agent_core.context.builder import BudgetedContextBuilder
 from agent_core.context.compactor import StructuredCompactor
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
@@ -915,20 +916,6 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}
 )
-
-
-def _records_catalog_max_series(context_classes: Mapping[str, object]) -> int:
-    """Read classes.records_catalog.max_items; an overlay without the class keeps 16."""
-
-    raw = context_classes.get("records_catalog")
-    if raw is None:
-        return CATALOG_MAX_SERIES
-    if not isinstance(raw, dict):
-        raise ConfigurationError("records catalog context configuration must be a mapping")
-    value = raw.get("max_items")
-    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise ConfigurationError("records catalog max_items must be a positive integer")
-    return value
 
 
 def _session_tool_filter(
@@ -3755,6 +3742,10 @@ async def _compose(
         registry.register(LegacyPeopleHistoryTool(people_service))
         registry.register(PeopleHistoryTool(people_service))
     records_service: RecordsService | None = None
+    try:
+        records_catalog_max_series, _ = records_catalog_caps(context_classes)
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
     if settings.records_enabled:
         records_service = RecordsService(uow_factory, clock)
         records_zone = ZoneInfo("UTC")
@@ -3909,7 +3900,7 @@ async def _compose(
             # cache availability or admission. Read current evidence per assembly.
             inline_output_bytes=inline_output_bytes,
             catalog_source=records_service,
-            catalog_max_series=_records_catalog_max_series(context_classes),
+            catalog_max_series=records_catalog_max_series,
         )
         compactor = StructuredCompactor(
             estimator,

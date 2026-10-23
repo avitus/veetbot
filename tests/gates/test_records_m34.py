@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.application.records import RecordsCatalog, RecordsService
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
@@ -437,7 +438,7 @@ async def test_catalog_region_bytes_and_trust() -> None:
     assert len(catalog_texts) == 1
     assert catalog_texts[0].startswith('<untrusted trust="internal_tool" source="records.catalog"')
     assert f"\n{rendered}\n</untrusted:" in catalog_texts[0]
-    assert "Blood pressure (systolic mmHg, diastolic mmHg): 1 entries" in rendered
+    assert "Blood pressure (systolic mmHg, diastolic mmHg): 1 entry" in rendered
     assert "Sleep (hours): no entries, logged ad hoc" in rendered
     # The catalog lives in the body, ahead of the runtime metadata row, and
     # never moves the prefix.
@@ -466,6 +467,86 @@ async def test_catalog_region_bytes_and_trust() -> None:
     baseline = await _catalog_builder(None).build(active, _checkpoint(), agent(), unscoped)
     assert _body_bytes(refused) == _body_bytes(baseline)
     assert refused_source.calls == []
+
+    # The ceiling: an internal-ceiling catalog omits the two sensitive series
+    # and holds nothing above internal; the restricted ceiling includes them.
+    await service.create_series(
+        CATALOG_OWNER,
+        display_name="Steps",
+        components=[RecordComponent(name="count")],
+        sensitivity=Sensitivity.INTERNAL,
+        cadence=None,
+        session_id=SESSION_ID,
+        run_id=None,
+    )
+    internal = await service.catalog(CATALOG_OWNER, ceiling=Sensitivity.INTERNAL, max_series=16)
+    restricted = await service.catalog(CATALOG_OWNER, ceiling=Sensitivity.RESTRICTED, max_series=16)
+    assert internal is not None
+    assert restricted is not None
+    assert [line.display_name for line in internal.lines] == ["Steps"]
+    assert internal.omitted == 0
+    assert [line.display_name for line in restricted.lines] == [
+        "Blood pressure",
+        "Sleep",
+        "Steps",
+    ]
+    internal_text = render_records_catalog(internal, zone=ZoneInfo("UTC"), now=NOW)
+    assert "Blood pressure" not in internal_text
+    assert "Sleep" not in internal_text
+
+
+async def test_catalog_is_absent_without_its_configured_class() -> None:
+    """An overlay without classes.records_catalog has zero caps: no read, no yield step."""
+
+    source = _StaticCatalog(
+        await (await _stored_catalog())[0].catalog(
+            CATALOG_OWNER, ceiling=Sensitivity.RESTRICTED, max_series=16
+        )
+    )
+    active = run(status=RunStatus.RUNNING)
+    assembled = await _catalog_builder(source, records_catalog_tokens=0).assemble(
+        active, _checkpoint(), agent(), CATALOG_OWNER
+    )
+    bare = await _catalog_builder(None, records_catalog_tokens=0).assemble(
+        active, _checkpoint(), agent(), CATALOG_OWNER
+    )
+    assert source.calls == []
+    assert assembled.pressure.yield_steps == ()
+    assert _body_bytes(assembled.request) == _body_bytes(bare.request)
+
+
+def _catalog_envelopes(request: ModelRequest) -> list[str]:
+    return [text for text in _texts(_body(request)) if 'source="records.catalog"' in text]
+
+
+@pytest.mark.parametrize("flag", ["1", "0"])
+async def test_composed_builder_carries_the_catalog_under_the_flag(flag: str) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(settings=load_settings(_environment(flag)), script=script) as composition:
+        provider = composition.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        assert "records.read" in composition.principal.scopes
+        session_id = await composition.sessions.create()
+        records = RecordsService(composition.uow_factory, composition.clock)
+        await records.create_series(
+            composition.principal,
+            display_name="Blood pressure",
+            components=[RecordComponent(name="systolic", unit="mmHg")],
+            sensitivity=None,
+            cadence=RecordCadence.DAILY,
+            session_id=session_id,
+            run_id=None,
+        )
+        run_id = await composition.runs.submit("How is my blood pressure?", session_id)
+        completed = await composition.runs.wait_terminal(run_id)
+        assert completed.status is RunStatus.COMPLETED, completed.failure
+        envelopes = _catalog_envelopes(provider.requests[-1])
+    if flag == "1":
+        assert len(envelopes) == 1
+        assert envelopes[0].startswith('<untrusted trust="internal_tool" source="records.catalog"')
+        assert "Blood pressure (systolic mmHg): no entries, due daily since " in envelopes[0]
+    else:
+        assert envelopes == []
 
 
 async def test_catalog_yields_whole_under_pressure() -> None:

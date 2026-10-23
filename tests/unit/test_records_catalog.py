@@ -85,6 +85,14 @@ def test_weekly_cadence_not_yet_elapsed_has_no_since() -> None:
     ) == ("weight (kg): 12 entries, last 2026-10-19 19:00 +00:00, due weekly")
 
 
+def test_one_entry_is_singular() -> None:
+    line = WEIGHT.model_copy(update={"entry_count": 1})
+
+    assert render_records_catalog(
+        RecordsCatalog(lines=(line,), omitted=0), zone=ZoneInfo("UTC"), now=NOW
+    ) == ("weight (kg): 1 entry, last 2026-10-19, logged ad hoc")
+
+
 def test_omitted_series_add_a_closing_line() -> None:
     catalog = RecordsCatalog(lines=(SLEEP,), omitted=3)
 

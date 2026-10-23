@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agent_core.context.budget import ContextBudgetAllocator
+from agent_core.context.budget import ContextBudgetAllocator, records_catalog_caps
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.messages import ModelLimits, ResolvedModel
 
@@ -174,6 +174,18 @@ def test_optional_persona_snapshot_and_catalog_classes_default_to_zero() -> None
     assert budget.persona_tokens == 0
     assert budget.records_catalog_tokens == 0
     assert budget.retrieved_context_tokens == 2_000
+
+
+def test_records_catalog_caps_are_parsed_in_one_place() -> None:
+    config = _config()
+
+    assert records_catalog_caps(config["classes"]) == (16, 600)
+    del config["classes"]["records_catalog"]
+    assert records_catalog_caps(config["classes"]) == (0, 0)
+    with pytest.raises(ValueError, match=r"classes\.records_catalog must be a mapping"):
+        records_catalog_caps({"records_catalog": 16})
+    with pytest.raises(ValueError, match="max_items must be a nonnegative integer"):
+        records_catalog_caps({"records_catalog": {"max_items": -1, "max_tokens": 600}})
 
 
 def _with(path: tuple[str, ...], value: object) -> dict[str, Any]:

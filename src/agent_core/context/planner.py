@@ -55,9 +55,10 @@ from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
 BUILDER_VERSION = "context-builder@13"
-# Plans from these builders carry no deferred tools and render the same bytes,
-# so they stay current: re-planning them would change no prefix, but it would
-# fail a run parked on an approval if its selection moved (ADR-0123).
+# Plans from these builders carry no deferred tools, so their builder version
+# alone does not rotate them (ADR-0123). Since context-builder@13 added the
+# records catalog sentence to the framing row they no longer render the same
+# bytes: their stored prefix hash fails the recheck below and they re-plan.
 _EQUIVALENT_EARLIER_BUILDERS = frozenset({"context-builder@11"})
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 # In priority order: the adapter keeps the earliest a model's breakpoint budget

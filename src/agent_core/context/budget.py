@@ -9,6 +9,23 @@ from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.messages import ResolvedModel
 
 
+def records_catalog_caps(classes: Mapping[str, object]) -> tuple[int, int]:
+    """Read `classes.records_catalog` as (max_items, max_tokens).
+
+    The one parser for both caps, shared by the allocator and composition. An
+    overlay without the class yields (0, 0): no catalog is read or rendered.
+    """
+
+    raw = classes.get("records_catalog")
+    if raw is None:
+        return 0, 0
+    mapping = ContextBudgetAllocator._mapping(raw, "classes.records_catalog")
+    return (
+        ContextBudgetAllocator._integer(mapping, "max_items"),
+        ContextBudgetAllocator._integer(mapping, "max_tokens"),
+    )
+
+
 class ContextBudgetAllocator:
     def __init__(self, config: Mapping[str, object]) -> None:
         self._config = config
@@ -69,12 +86,7 @@ class ContextBudgetAllocator:
                 raise ValueError("memory snapshot token allocation must be nonnegative")
             memory = memory_snapshot_tokens
         recall = self._integer(class_config("in_turn_recall"), "max_tokens")
-        raw_catalog = classes.get("records_catalog")
-        records_catalog = (
-            0
-            if raw_catalog is None
-            else self._integer(self._mapping(raw_catalog, "classes.records_catalog"), "max_tokens")
-        )
+        _catalog_items, records_catalog = records_catalog_caps(classes)
         working = self._integer(class_config("working_state"), "max_tokens")
         knowledge = self._integer(class_config("knowledge_passages"), "max_tokens")
         history_floor = self._integer(class_config("history"), "floor_tokens")

@@ -48,7 +48,8 @@ def _line(line: CatalogLine, zone: ZoneInfo) -> str:
     if line.entry_count == 0 or line.last_observed_at is None:
         parts.append("no entries")
     else:
-        parts.append(f"{line.entry_count} entries")
+        noun = "entry" if line.entry_count == 1 else "entries"
+        parts.append(f"{line.entry_count} {noun}")
         last = (
             line.last_observed_at.astimezone(zone).date().isoformat()
             if line.last_precision is RecordPrecision.DAY
