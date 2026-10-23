@@ -110,6 +110,7 @@ nav:
       - Device Channel & SMS: plan/device-channel-and-sms.md
       - WhatsApp Surface: plan/whatsapp-surface.md
       - Owner Records: plan/owner-records.md
+      - Cockpit Mode and Agent-Authored Widgets: plan/cockpit.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
@@ -373,4 +374,5 @@ nav:
       - "0237 — Mac right panel": adr/0237-mac-right-panel.md
       - "0238 — Owner overviews and memory delivery": adr/0238-owner-overview-and-memory-delivery.md
       - ADR-0239 Owner records and numeric series (Proposed): adr/0239-owner-records-and-numeric-series.md
+      - "0240 — Cockpit mode and agent-authored widgets": adr/0240-cockpit-mode-and-agent-authored-widgets.md
   - Changelog: changelog.md

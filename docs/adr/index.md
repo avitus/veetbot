@@ -282,3 +282,4 @@ implementation without one.
 
 - [ADR-0238: Owner relationship overviews and complete memory delivery](0238-owner-overview-and-memory-delivery.md)
 - [ADR-0239: Owner records — named numeric series the agent appends to and queries over time (Proposed)](0239-owner-records-and-numeric-series.md)
+- [ADR-0240: Cockpit mode and agent-authored widgets (Accepted; Milestone 35)](0240-cockpit-mode-and-agent-authored-widgets.md)

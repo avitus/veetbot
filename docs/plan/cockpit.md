@@ -1,0 +1,1004 @@
+---
+title: Cockpit Mode and Agent-Authored Widgets
+status: design
+canonical: true
+---
+
+# Cockpit mode and agent-authored widgets
+
+This document specifies Milestone 35. The engineering plan states the
+requirement; this document states the mechanism. It is subordinate to
+[engineering-plan.md](engineering-plan.md). It reuses rather than replaces
+these existing pieces:
+
+- the client-mode shell of [email-experience.md](email-experience.md);
+- the execution service of [sandbox-isolation.md](sandbox-isolation.md);
+- the deferred tool index of [context-engine.md](context-engine.md);
+- the policy pipeline of [policy-and-approvals.md](policy-and-approvals.md);
+- the streaming conventions of
+  [http-api-and-streaming.md](http-api-and-streaming.md).
+
+[ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md) records the
+architectural decisions and the owner's authorization.
+
+The owner wants a heads-up, real-time display of everything the owner
+monitors, and wants the assistant itself to build it. Milestone 35 delivers
+**Cockpit**, a third client mode beside Chat and Email. Cockpit is a board of
+**widgets**. A widget is a small React component that the production assistant
+creates, updates and deletes. Its code is committed to a dedicated branch of
+this repository and rendered on the owner's iPhone, iPad and Mac inside a
+sandbox that has no network. Widgets draw their data from **feeds**. A feed is
+either a projection of state the platform already holds or a snapshot the
+assistant publishes from an approved schedule. The visual layer is a **kit** of
+primitives designed in MagicPath and ported into code, so that every widget the
+assistant writes looks like part of the same instrument.
+
+## Scope
+
+### Owner decisions
+
+The owner decided these on 2026-10-22:
+
+| Area | Decision |
+| --- | --- |
+| Authorship | The assistant creates, updates and deletes widgets. |
+| Visual layer | Designed in MagicPath, in the Veetbot project beside the A2 designs. |
+| Source of truth | Widget code lives in this repository, on the dedicated branch `cockpit/widgets`. A change goes live in about a minute. People and Claude Code may commit there too, and the server picks their commits up. |
+| Privacy | The repository stays public, so widget code is data-free. Personal values live in private settings and feeds. |
+| Approval | Widget changes from the owner's own turns ship without a per-change approval. Turns influenced by untrusted content still ask. |
+
+### In scope
+
+1. The Cockpit mode on iPhone, iPad and Mac. Mac (full screen) and iPad (with
+   a keep-screen-on toggle) are the primary heads-up screens.
+2. The `cockpit/` TypeScript workspace on `main`, which holds:
+   - the kit;
+   - the host page and realm;
+   - the builder;
+   - the schemas;
+   - reference and adversarial example widgets.
+3. The widget lifecycle: validate, privacy-screen, build, commit, activate,
+   revert, delete and restore, plus import of human commits.
+4. The builder sandbox image.
+5. The GitHub App adapter and the commit outbox.
+6. Platform feeds and assistant-published feeds.
+7. The private widget settings and per-device-class layouts.
+8. The snapshot route, the event stream and the asset routes.
+9. Five deferred builtin tools.
+10. The native Cockpit mode, including the Mac right panel.
+
+### Out of scope
+
+- Deterministic collectors that fetch outside data with no model run. These
+  would serve sub-minute external data, but they need an egress allowlist and
+  their own design.
+- A browser or television rendering of Cockpit.
+- WidgetKit, Lock Screen widgets and Live Activities.
+- The assistant using MagicPath at runtime.
+- Webhook-driven import; polling comes first.
+- Widget-to-widget communication.
+- Widgets that act: a widget can only display and offer two
+  navigation intents.
+- More than one tenant's widgets on one branch.
+
+## Foundations this design reuses
+
+- **The mode shell.** `ClientMode`, the app coordinator and the per-mode right
+  panel (ADR-0092, ADR-0237). The Email design says a new mode is "a small
+  mode descriptor and a presentation module"
+  (`email-experience.md:52-53`), and that a mode confers no authority.
+- **The execution service.** It runs gVisor containers with a read-only root,
+  networking off, an empty environment and run leases. Its one-image
+  assumption is an open question in `sandbox-isolation.md:1695-1699`. This
+  design answers it for exactly one additional, platform-owned image.
+- **The tool pipeline.** Classification decides policy, and a `tool_rules`
+  entry can allow one tool by exact name. The trust overlay escalates an
+  untrusted origin or untrusted arguments. The credential-to-egress hardline
+  rule covers `publication` arguments.
+- **The deferred tool index.** Definitions are capped at thirty items, and
+  that cap already binds the owner's roster (`context-engine.md:368-372`).
+  The deferred index (`context-engine.md:399-404`) admits a tool as a
+  one-line entry reached through `tool.call`.
+- **Durable live delivery.** The run event stream already works this way: a
+  row is written, then NOTIFY sends its sequence inside the same transaction,
+  and readers replay from the table, send a heartbeat, and resume from
+  `Last-Event-ID`.
+- **Agent-authored, later-executed content.** `skill.manage` set the pattern
+  of an expected-revision edit, a validator, untrusted storage, revision
+  history and archive-not-delete. Widgets follow it, and add public
+  publication and a rendering sandbox.
+
+## The domain model
+
+Every row is tenant- and principal-scoped.
+
+- **Widget.** Fields: `slug` (unique per principal, `^[a-z][a-z0-9-]{1,47}$`),
+  `state` (`active` or `deleted`), `live_revision_id` and `created_at`. A
+  deleted widget keeps its revisions and settings until purged.
+- **Revision.** An immutable package. Fields:
+  - `files`: the manifest, component and fixtures;
+  - `source`: `assistant`, `owner_git` or `revert`;
+  - `origin_run_id` when the assistant wrote it;
+  - `state`;
+  - `diagnostics`;
+  - `bundle` and `bundle_sha256`;
+  - `kit_api`;
+  - `commit_sha`.
+
+  The states run in this order:
+
+  ```text
+  validating ─► rejected
+             └► pending_commit ─► committed ─► live ─► superseded
+                              └► conflicted
+  ```
+
+  Only `live` renders. At most one revision per widget is `live`.
+- **Settings.** The private value document for a widget, validated against
+  the settings schema in the live manifest. Settings never leave PostgreSQL,
+  except to the owner's own clients and the widget that declares them.
+- **Feed.** `id` is either `veetbot.<name>` (platform) or `agent.<slug>`
+  (assistant). A feed also has a closed JSON Schema of at most 8 KiB, a schema
+  version and a trust label.
+- **Feed snapshot.** `observed_at`, `expected_interval_seconds`, `data` (at
+  most 64 KiB) and `sequence`. A feed keeps a bounded history (knobs below).
+- **Layout.** One per device class (`compact`, `regular`, `wide`). It is an
+  ordered list of placements, each a widget slug and a size. Layouts are flow
+  grids, not coordinates.
+- **Commit outbox entry.** Fields: the revision, the operation (`write` or
+  `remove`), attempts, `next_attempt_at`, the last error and the expected
+  parent sha.
+- **Import failure.** The branch commit, the widget slug, the diagnostics, and
+  whether the owner has seen it.
+- **Cockpit event.** A per-tenant monotonic `sequence`, a `kind` and a small
+  payload. It is retained for the stream's resume window.
+
+## The widget package
+
+A widget lives on the branch at `cockpit/widgets/<slug>/`:
+
+```text
+cockpit/widgets/<slug>/
+  widget.json             manifest
+  widget.tsx              one default-exported React component
+  fixtures/typical.json   synthetic feed and settings values
+  fixtures/empty.json
+  fixtures/stale.json
+```
+
+The **manifest** contains:
+
+- `schema: 1`;
+- `slug`;
+- a generic `title` of at most 40 characters and a generic `purpose` of at
+  most 200 characters, such as "Flight tracker" and "Shows departure,
+  delay and gate for one flight";
+- `kit_api`, an integer;
+- `sizes`, a subset of `s` (1×1), `m` (2×1), `l` (2×2) and `xl` (4×2);
+- `feeds`, a list of `{id, history}` where `history` is at most the knob
+  ceiling;
+- `settings`, a closed JSON Schema whose properties are strings, numbers,
+  booleans or enumerations with bounds, and which the owner can edit as a
+  generated form.
+
+The **component** receives `{feeds, settings, size, theme, now}`, where:
+
+- each feed is
+  `{status: fresh|stale|missing|error, observedAt, expectedIntervalSeconds, data, history}`;
+- `now` is supplied by the host, so rendering is deterministic for a given
+  input.
+
+The component may import only `react` and `@veetbot/cockpit-kit`. It renders
+through kit primitives and plain elements styled with kit tokens.
+
+The **fixtures** are synthetic. They exist for the build's render check, for
+previews and for the gallery. Each one supplies feed values and settings
+values that satisfy the declared schemas.
+
+Package limits:
+
+- at most twelve files and 256 KiB in total;
+- the component at most 64 KiB;
+- each fixture at most 64 KiB;
+- the built bundle at most 256 KiB.
+
+## The kit and the runtime
+
+### The `cockpit/` workspace
+
+The workspace follows the `website/` precedent. It has its own `package.json`
+and lockfile, ESLint and TypeScript configuration, and Node tests. It adds a
+`make test-cockpit` target that joins `make check` and the CircleCI static
+lane, with a lockfile-keyed cache.
+
+```text
+cockpit/
+  kit/        @veetbot/cockpit-kit: tokens and primitives
+  host/       the trusted host page, the realm document, the bridge
+  builder/    the validate/screen/build/render CLI
+  schema/     JSON Schemas: manifest, settings, feed envelope, bridge messages
+  examples/   reference widgets and the adversarial corpus
+```
+
+`main` must never contain `cockpit/widgets/`, and a structure test enforces
+this. Widgets live only on their branch. A `make cockpit-widgets-worktree`
+target checks the branch out under `.worktrees/` so a person can build it
+locally against the kit on `main`.
+
+### The kit
+
+- **Tokens.** The kit's tokens are A2's, taken from
+  `clients/apple/Veetbot/Views/AppTheme.swift` for both light and dark, plus a
+  night treatment for an always-on screen.
+- **Primitives.** Tile, Metric, Delta, Sparkline, Bars, Gauge, Countdown,
+  StatusPill, List and Row, Timeline, and the Empty, Stale and Error states.
+- **Behaviour every primitive shares.**
+  - It shows freshness from the feed status it is given.
+  - It renders strings only as text, never as markup.
+  - It offers no link, telephone or URL affordance.
+  - It reserves amber for needs-attention.
+- **Change control.** The kit is ported from the approved MagicPath designs
+  (see [The visual design](#the-visual-design)) and changes only through
+  ordinary reviewed commits to `main`.
+- **Versioning.** `kit_api` increases on any breaking change.
+- **`kit.describe` catalogue.** A catalogue generated from the kit's types
+  feeds the read tool's `kit` operation. It lists each primitive's props with
+  an example and the authoring rules, including the naming rule that keeps
+  identifiers clear of the credential pattern.
+
+### The runtime
+
+The runtime is four content-hashed assets: the host page, the realm document,
+React, and the kit. They are built at release inside the builder image from
+`main`'s `cockpit/` sources. They are copied into
+`artifact_root/cockpit-runtime/` keyed by hash, and retained while any live
+revision's `kit_api` needs them. They therefore outlive the release
+directory's rotation. Widget bundles are classic IIFE scripts that read
+`React` and `VeetbotKit` from the realm's globals. ES modules from an opaque
+origin would need CORS headers the scheme handler does not send.
+
+### The host and the realm
+
+- **The host page** is trusted platform code. It owns these parts:
+  - the grid;
+  - edit-mode affordances drawn by native code;
+  - the bridge to native code;
+  - one realm iframe with `sandbox="allow-scripts"` and no `allow-same-origin`;
+  - a CSP of `default-src 'none'` that permits scripts and styles only from
+    the scheme, never `unsafe-eval`, and sets `connect-src 'none'`.
+- **The realm** loads React and the kit once. It mounts each widget's bundle
+  into its tile behind an error boundary. A thrown render shows the kit's
+  Error state for that tile only.
+- **The watchdog.** The host sends the realm a heartbeat. If the realm misses
+  the deadline (knob), the host reloads it and quarantines the widget whose
+  revision changed most recently. A quarantined widget shows a "paused"
+  state natively until its next revision or the owner's retry.
+- **Data flow.** The realm receives only, per widget, its declared feeds, its
+  own settings, its size, the theme and `now`. All of it arrives through typed
+  postMessage envelopes validated against `cockpit/schema/`.
+
+## Validation, the privacy screen and the build
+
+The builder CLI runs the same steps whether it is called from a tool, the
+importer, release preflight or a developer's checkout. In order:
+
+1. **Manifest and files.**
+   - The schema validates.
+   - The slug matches the directory.
+   - Files are on the allowlist and within the size caps.
+   - The fixtures exist and satisfy the declared feed and settings schemas.
+   - No path is absolute, contains `..`, or is a symlink.
+2. **Imports and lint.**
+   - Imports come only from `react` and the kit.
+   - These references are rejected: `fetch`, `XMLHttpRequest`, `WebSocket`,
+     `EventSource`, `navigator.sendBeacon`, `RTCPeerConnection`, `eval`,
+     `Function`, dynamic `import()`, `parent`, `top`, `opener`,
+     `document.cookie`, `localStorage`, `sessionStorage`, `indexedDB` and
+     `dangerouslySetInnerHTML`.
+   - Literal colour values outside kit tokens are rejected.
+
+   These rules are hygiene and fast feedback, not a security boundary;
+   computed property access defeats them. The boundary is the realm.
+3. **Credential shape.** Every file is checked against the pattern of the
+   hardline `credential_to_egress` rule. Without this step, the hardline rule
+   would deny the write tool outright on ordinary code such as
+   `token: string`. Here the assistant gets a diagnostic it can act on
+   instead.
+4. **Privacy screen.** Every file, and the commit message the outbox will
+   write, is checked for:
+   - email addresses and telephone numbers;
+   - the owner's name and the display names of People records and known
+     contacts (multi-token names, or single tokens of four or more
+     characters, matched case-insensitively on word boundaries);
+   - every current private settings string value of four or more characters,
+     across all of the principal's widgets.
+
+   A hit rejects the revision, and the diagnostic names the file and kind
+   but never echoes the matched value.
+5. **Typecheck and bundle.** `tsc --noEmit` runs against the kit's types, then
+   `esbuild` produces the IIFE bundle, minified and content-hashed.
+6. **Render.** Each fixture renders through `react-dom/server` at every
+   declared size. A throw, an empty render or an output over the size limit
+   rejects the revision.
+7. **Preview** (check tool only, not on the commit path). Playwright WebKit
+   renders the fixtures through the real host and realm, and the result is a
+   PNG returned as an image reference part.
+
+Rejection records the revision as `rejected` with diagnostics and nothing
+else. No outbox entry, commit or event is created.
+
+The builder runs in the **builder image** `execution/cockpit-builder`:
+
+- **Base.** It is built from the sandbox image's base, keeping `python` for
+  the execution service's workspace operations. It adds Node, the locked
+  `cockpit/` dependencies including esbuild's linux binary, Playwright WebKit,
+  and the built kit.
+- **Isolation.** It runs through the existing execution service under gVisor,
+  with networking off, a read-only root, a no-exec `/tmp`, the standard
+  limits, an empty environment and no credentials.
+- **Configuration.** It has its own `AGENT_COCKPIT_BUILDER_IMAGE` setting and
+  `SandboxManager`. The execution service accepts only the two configured
+  images.
+- **Leases.** A build inside a run uses that run's lease. A build started by
+  the importer or release preflight holds its own lease row and a
+  `purpose=cockpit_build` label, so the reaper leaves it alone.
+- **Release preflight.** It builds a canary under runsc and rebuilds every
+  live widget against the release's kit. A widget whose rebuild fails stays on
+  its previous `kit_api` runtime, the failure is reported, and nothing
+  half-migrates.
+
+## The repository branch and the commit outbox
+
+### The branch
+
+`cockpit/widgets` is an orphan branch of `avitus/veetbot`. It holds only
+`cockpit/widgets/README.md` and the widget directories.
+
+The owner creates it once at activation, or the adapter creates it with a
+root commit if it is absent and the App is allowed to.
+
+Repository rulesets enforce three things:
+
+- only admins may create, update or delete any other branch or any tag;
+- nobody may force-push or delete `cockpit/widgets`;
+- the App's installation is limited to this repository with `contents:write`.
+
+No CircleCI workflow runs on the branch, and no CodeRabbit review applies to
+it.
+
+### The credential
+
+A GitHub App's private key is delivered through systemd `LoadCredential` to
+the **maintenance** role only. The adapter mints short-lived installation
+tokens with the existing `cryptography` dependency and calls the REST API
+through the existing HTTP client. The execution service, the builder image,
+the API process and every sandbox stay credential-free.
+
+### Writing
+
+The outbox worker in the maintenance role takes entries in order per widget.
+For each one it:
+
+1. reads the branch head;
+2. creates blobs, a tree based on the head's tree that changes only
+   `cockpit/widgets/<slug>/`, and a commit whose parent is the head;
+3. updates the ref without `force`.
+
+The adapter refuses three things before calling GitHub:
+
+- any path outside `cockpit/widgets/<slug>/`;
+- any ref other than the configured branch;
+- any non-fast-forward update.
+
+Commit messages are a fixed template:
+
+```text
+cockpit: <create|update|delete|restore|revert> <slug>
+
+Cockpit-Widget: <slug>
+Veetbot-Revision: <revision uuid>
+```
+
+When the commit is recorded, the revision becomes `committed`. The
+application then makes it `live` and supersedes the previous live revision in
+one transaction, and emits `widget.revised` or `widget.deleted`.
+
+**Commit before activate** holds without exception. During a GitHub outage
+the entry retries with backoff and the previous live revision keeps rendering
+from PostgreSQL.
+
+### Ambiguity and conflict
+
+- **Non-fast-forward.** If the head moved, the worker re-reads it and retries
+  the same tree change on the new head.
+- **A human changed the same widget.** If the new commits since the expected
+  parent touched the same widget directory, the person's commit wins. The
+  revision becomes `conflicted` and the importer takes the person's version.
+- **Lost response.** If the ref update's response is lost, the worker reads
+  the head and its ancestry for the revision's `Veetbot-Revision` trailer
+  before retrying, so a retry never commits twice. The write tool is
+  therefore `CONDITIONALLY_IDEMPOTENT`.
+
+### Rate limits
+
+At most twelve commits per widget per hour and sixty per principal per hour
+(knobs). A rejected revision does not count.
+
+### Importing human commits
+
+The importer polls the branch head (knob, default sixty seconds). For each
+commit that does not carry a `Veetbot-Revision` trailer this deployment
+issued, it reads the changed widget directories and runs the builder on each.
+
+- A valid package becomes a `owner_git` revision, then `committed`, then
+  `live`.
+- An invalid package records an import failure, surfaces it in Cockpit and in
+  the widget's history, and leaves the live revision rendering.
+- A deleted directory deletes the widget.
+- Paths outside `cockpit/widgets/` record an `out_of_scope` import failure and
+  are otherwise ignored.
+
+### Delete, restore and revert
+
+- **Delete.** Commits the directory's removal, then removes the widget from
+  every layout and marks it `deleted`. Private settings remain until the purge
+  window (knob) passes.
+- **Restore.** Commits the last live package again, as a new commit, and
+  reactivates it.
+- **Revert.** Selecting an earlier revision creates a new `revert` revision
+  with that revision's files. It passes the whole pipeline again, including
+  the privacy screen against current settings.
+
+## Feeds
+
+### Platform feeds
+
+The maintenance role projects these on a short timer (knob, default thirty
+seconds). It publishes only when the content hash changes, and each is
+present only when its source feature is enabled.
+
+| Feed | Source | Contents |
+| --- | --- | --- |
+| `veetbot.approvals.pending` | approvals | count and up to ten pending approvals with kind and age |
+| `veetbot.email.priority` | Email mode | up to five priority threads: correspondent, subject, state |
+| `veetbot.schedules.health` | schedules | next occurrences, recent failures, paused schedules |
+| `veetbot.calls.recent` | calling | recent calls with status and outcome summary |
+| `veetbot.people.recent` | People | people most recently in touch, with interaction kind |
+| `veetbot.runs.activity` | runs | running, waiting and recently failed runs |
+
+### Assistant feeds
+
+`cockpit.feed.publish` writes a snapshot to `agent.<slug>`:
+
+- The first publish registers the schema. A later publish validates against
+  it, or carries a new schema and so bumps the schema version.
+- A widget whose manifest declared the old version renders `error` until it
+  is updated.
+- Assistant feeds are labelled untrusted. Their usual writer is a scheduled
+  run the owner approved, which keeps that schedule's existing approval,
+  budget and failure pause. For example, a schedule every fifteen minutes
+  reads a weather or market source with the existing web tools and publishes
+  the result.
+
+### Freshness and delivery
+
+- **Freshness** is computed at render time:
+  - `missing` when there is no snapshot;
+  - `stale` when `now − observed_at` exceeds `expected_interval × stale_factor`
+    (knob, default 3, as the approved designs show it);
+  - `error` when the schema version mismatches;
+  - `fresh` otherwise.
+
+  Clients compute it with server-corrected time. Stale data is never shown as
+  fresh, including after a reconnect.
+- **History** keeps the last `history_max` snapshots (knob, default 288) or
+  `history_days` (knob, default 7), whichever is smaller. A widget receives at
+  most the history depth its manifest declares.
+- **Delivery.** A widget receives exactly the feeds its live manifest
+  declares. The host never delivers an undeclared feed, another widget's
+  settings, or any account or session identifier beyond what a declared feed
+  contains.
+
+## The tools
+
+The `cockpit` builtin domain registers only under `AGENT_COCKPIT_ENABLED`.
+Its five tools are **deferred** index entries in the default agent's
+configuration, so the thirty-item definition roster is untouched.
+
+| Tool | Operations | Side effect | Default decision |
+| --- | --- | --- | --- |
+| `cockpit.read` | list widgets, read a widget (files, revisions, state, import failures), list and read feeds, get layouts, describe the kit | `none` | allow |
+| `cockpit.check` | validate a package; preview its fixtures as a PNG | `code_execution` (isolated) | allow |
+| `cockpit.widget.write` | create, update (`expected_revision`), delete, restore | `publication` | allow by exact-name `tool_rules` entry |
+| `cockpit.configure` | set a widget's private settings; set a device class's layout | `none` | allow |
+| `cockpit.feed.publish` | publish a snapshot (and schema) to `agent.<slug>` | `none` | allow |
+
+**`cockpit.widget.write`** has several further rules:
+
+- **Default profile entry.** The tool gets a commented `tool_rules` entry in
+  `policy/default.yaml`, following the `device.sms.send` and `browser.act`
+  precedent. `human_confirms_arguments` is not set.
+- **Trust overlay.** The overlay still escalates a turn whose origin is not
+  the user, the platform or trusted configuration, and any untrusted
+  argument. So a widget written after reading an email asks first.
+- **Hardline.** The credential-to-egress hardline rule applies to its
+  arguments.
+- **Policy version.** The profile edit moves the content-addressed policy
+  version. Pending approvals revalidate under the existing rule, and the step
+  that makes the edit updates the pinned shipped version and names any
+  version-bound evidence it affects.
+- **Where it is offered.** Session-environment filtering withholds the tool
+  from scheduled, delegated, operational and email-task sessions. Widget
+  writes happen in interactive chat with the owner.
+- **Waiting and results.** The tool waits up to `commit_wait_seconds` (knob,
+  default thirty) for the outbox. It returns the final state when the outbox
+  finishes in time, and `pending_commit` with the revision otherwise. A
+  rejected package returns its diagnostics.
+- **Approval view.** When an escalation produces an approval, the approval
+  view shows the file diff and the preview image.
+
+**`cockpit.read`** returns revision content with output trust derived from
+provenance:
+
+- assistant-written and owner-git revisions are labelled as stored owner
+  content;
+- feed data keeps its own label.
+
+Reading a widget before updating it therefore does not force every later turn
+into approval.
+
+**Feed publishing** is available in scheduled runs: the schedule principal's
+scopes gain `cockpit.write`. Widget writes stay interactive only.
+
+## The routes and the stream
+
+Every route is absent unless `AGENT_COCKPIT_ENABLED=1`. Each requires the
+scope named below. Each answers with `Cache-Control: private, no-store`,
+except the immutable asset route. A foreign or unknown widget, revision or
+feed is an indistinguishable 404.
+
+| Route | Scope | Purpose |
+| --- | --- | --- |
+| `GET /v1/cockpit` | `cockpit.read` | Snapshot: runtime asset hashes, live widgets with revision, manifest and bundle hash, settings, layouts, current feed snapshots with declared history, and the stream cursor |
+| `GET /v1/cockpit/stream` | `cockpit.read` | Server-sent events |
+| `GET /v1/cockpit/assets/{sha256}` | `cockpit.read` | Runtime and bundle assets by hash; `immutable`, long-lived private caching |
+| `GET /v1/cockpit/widgets/{slug}` | `cockpit.read` | Detail: revisions with commit links, import failures, settings schema |
+| `PUT /v1/cockpit/widgets/{slug}/settings` | `cockpit.write` | Owner edits private settings |
+| `PUT /v1/cockpit/layouts/{device_class}` | `cockpit.write` | Owner arranges a board |
+| `POST /v1/cockpit/widgets/{slug}/revert` | `cockpit.write` | Owner reverts to a named revision |
+| `POST /v1/cockpit/widgets/{slug}/delete` | `cockpit.write` | Owner deletes |
+| `POST /v1/cockpit/widgets/{slug}/restore` | `cockpit.write` | Owner restores |
+
+The owner's own write routes go through the same outbox and pipeline as the
+tool. They need no approval, because the owner's gesture is the decision.
+
+**The stream** follows the run stream's pattern:
+
+- Every check happens before the first byte.
+- There is a fifteen-second heartbeat and proxy buffering is disabled.
+- The client resumes from `Last-Event-ID`.
+
+The stream's own rules:
+
+- **Channel.** The LISTEN/NOTIFY channel is
+  `cockpit_<first 32 hex of sha256(tenant)>`, which keeps within the
+  identifier limit. NOTIFY carries only `{kind, sequence}`. Readers fetch
+  rows from `cockpit_events`, and keep polling at the existing interval when a
+  notification is missed.
+- **Event kinds.** `feed.updated`, `widget.revised`, `widget.deleted`,
+  `layout.updated`, `settings.updated`, `import.failed` and `stream.reset`.
+- **Reset.** A resume point older than the retention window gets
+  `stream.reset`, and the client refetches the snapshot.
+- **Lifetime.** A stream lives at most `stream_max_seconds` (knob, default
+  600) before a clean close, so token revocation takes effect on reconnect.
+
+`cockpit.read` and `cockpit.write` join `PLATFORM_SCOPES`, the deployment
+scope classification, and `AUTH_SCOPES` in `deploy/veetbot.env.example`.
+
+## The native experience
+
+### The mode shell
+
+`ClientMode` moves into its own file and gains `cockpit`, whose symbol is
+`gauge.with.needle`. A pure refactor first replaces every two-way assumption
+with an exhaustive switch. These are the places that assume two modes:
+
+- the mode title and symbol;
+- the compact top bar and the More menu;
+- the per-mode opacity and hit-testing blocks;
+- the Mac toolbar;
+- the mailbox sidebar's mode segment, which today silently drops any third
+  mode;
+- Chat's literal fallback title;
+- the inspector's width and minimum window width table;
+- the inspector panel's accessibility label;
+- the coordinator's notification routing.
+
+The existing source-text tests stay green. UI identifiers gain `mode.cockpit`.
+
+### `CockpitModeView`
+
+**Native chrome:**
+
+- connection and freshness state;
+- the last update time;
+- an edit mode for reordering and resizing tiles and hiding them per device
+  class;
+- an unavailable state for a server without the routes.
+
+**`CockpitWebView`** holds the one web view:
+
+- a non-persistent website data store;
+- a `WKURLSchemeHandler` for `veetbot-cockpit://` that resolves only the
+  content hashes named by the current snapshot to the asset route, fetches
+  them natively with the token, caches them by hash, and answers 404 for
+  everything else;
+- a `WKContentRuleList` that blocks every `http` and `https` load;
+- a document-start `WKUserScript` in every frame that removes
+  `RTCPeerConnection`, `WebSocket`, `EventSource` and `navigator.sendBeacon`;
+- a pure, testable navigation policy, after `DeviceSignInNavigationPolicy`,
+  that permits only the host document;
+- one script message handler that accepts messages only from the main frame,
+  and only `ready`, `tile_error` and two intents.
+
+Native code pushes data with `callAsyncJavaScript` arguments, never string
+interpolation.
+
+**Intents** are navigation only. Neither has a side effect.
+
+- `open` names a destination kind (approval, email thread, schedule, session)
+  and an identifier present in a delivered feed, and native code validates
+  both before navigating.
+- `discuss` opens Chat with the widget's context attached as untrusted
+  context, following the Email "Discuss in Chat" precedent. The owner writes
+  and sends the message.
+
+**`CockpitViewModel`:**
+
+- loads the snapshot, then streams over the path-based `SSEReader`;
+- reconnects with capped exponential backoff and no give-up limit, because
+  the run stream's limits suit a run, not an always-on display;
+- holds the stream only while Cockpit is the visible mode and the app is
+  active;
+- applies events in sequence order and refetches on `stream.reset`.
+
+### Per platform
+
+- **Mac**
+  - Supports full screen.
+  - The Cockpit right panel follows the ADR-0237 pattern. It shows the
+    selected widget's purpose, feeds and their freshness, a settings form
+    generated from the settings schema, revision history with commit links,
+    import failures, and Revert, Delete and Restore.
+- **iPad**
+  - Uses the Mac layout at touch sizes, with a keep-screen-on toggle that
+    sets the idle timer only while Cockpit is visible.
+  - Widget details open as a sheet.
+- **iPhone**
+  - Shows a compact single column in `compact` layout order.
+  - Widget details open as a bottom sheet.
+
+The mode keeps its board, scroll position and selected widget across mode
+switches, as the other modes do.
+
+## The visual design
+
+The visual layer is designed in MagicPath before the kit is ported. All
+designs live in the Veetbot project beside the A2 designs and extend A2's
+language: warm paper, one teal accent, and amber only for attention. They use
+tokens derived from `AppTheme.swift`.
+
+1. **`Design system · Cockpit A2`.** Covers:
+   - glanceable density and tile anatomy;
+   - the type scale for numbers read at a distance;
+   - freshness, stale and error treatments;
+   - the amber needs-attention rule;
+   - the night treatment.
+2. **`Cockpit · Kit primitives`.** An interactive gallery of every primitive
+   in every state, in light, dark and night, written as prop-driven
+   components that port one to one.
+3. **Three boards.** `Mac — Cockpit · A2`, `iPad — Cockpit · A2` and
+   `iPhone — Cockpit · A2`, inside the native chrome and the three-way mode
+   switch. They show the seed widgets with synthetic data and an edit state.
+
+The seed widgets are:
+
+- approvals waiting;
+- priority email;
+- schedule health;
+- recent calls;
+- people recently in touch;
+- weather;
+- markets.
+
+The owner approved the kit and the three boards on the canvas on 2026-10-22,
+which closes that step. The approved designs fix these choices:
+
+- Rising and falling values are never coloured: red means broken and amber
+  means waiting on the owner.
+- A stale tile sinks to a darker paper with a dashed edge and faint figures,
+  and states its last update and expected interval.
+- Lists fold the rows that do not fit into "+N more".
+- Night watch is a third theme, darker than A2 dark, with amber kept at full
+  strength. The assistant
+authors the production versions of these seeds itself at activation, as the
+milestone's first real use.
+
+## Events, telemetry, and privacy
+
+The platform records these on the ordinary event log:
+
+- widget revision transitions;
+- outbox attempts and their outcomes;
+- importer passes;
+- feed publishes;
+- route writes.
+
+Payloads carry identifiers, states, sizes, hashes and diagnostics codes, but
+never package content, settings values or feed data.
+
+The privacy screen's diagnostic names the rule and the file, never the
+match.
+
+Commit messages carry no free text.
+
+Feed data, settings and layouts are private PostgreSQL state:
+
+- they appear in no prompt unless a tool returns them;
+- they are covered by the existing source-erasure and retention rules;
+- deleting a People record makes any later commit that would contain that
+  person's name fail the screen.
+
+Public history is permanent. The design's protection is that personal values
+never reach a commit, not that they can be removed afterwards.
+
+## Migration, configuration, and operations
+
+### Migration
+
+One additive migration creates these tables:
+
+- `cockpit_widgets` and `cockpit_widget_revisions`;
+- `cockpit_widget_settings`;
+- `cockpit_feeds` and `cockpit_feed_snapshots`;
+- `cockpit_layouts`;
+- `cockpit_events`;
+- `cockpit_commit_outbox`;
+- `cockpit_import_failures`.
+
+Each has tenant and principal predicates, and the migration downgrades
+cleanly. Each store has an in-memory and a PostgreSQL adapter under one
+contract suite.
+
+### Configuration
+
+- **Flag.** `AGENT_COCKPIT_ENABLED`, exactly `0` or `1`, default `0`.
+- **Settings.** `AGENT_COCKPIT_BUILDER_IMAGE`, the repository, the branch and
+  the App identifiers, plus a `LoadCredential` name for the key. The
+  maintenance role refuses to start the outbox or the importer without the
+  credential.
+- **Tuning document.** The shipped configuration root gains
+  `cockpit/profiles.yaml`, beside `folders/profiles.yaml`. This is distinct
+  from the repository's `cockpit/` workspace. Its knobs:
+  - stale factor;
+  - history limits;
+  - projection interval;
+  - poll interval;
+  - commit wait;
+  - rate limits;
+  - watchdog deadline;
+  - stream lifetime;
+  - event retention;
+  - settings purge window.
+
+  These knobs join the shipped knob census when the implementation lands.
+
+### Release
+
+The release builds the builder image and runs the runsc canary and the live
+widget rebuild in preflight. It exports the runtime assets, then checks that
+the image is present in the deployment check.
+
+### Operations
+
+`docs/deployment.md` gains the App, the rulesets, the credential, the flag,
+and a runbook covering:
+
+- a stuck outbox;
+- a rejected import;
+- a quarantined widget;
+- rotating the App key.
+
+## Safety
+
+| Threat | Control |
+| --- | --- |
+| Widget code exfiltrates data | No network in the realm: CSP, a content rule list, removed primitives, no same-origin, a scheme handler that serves only named hashes and no API |
+| Widget code reaches native code or the token | The token never enters web content; message handler accepts main-frame messages only; intents validated natively and side-effect free |
+| A hung or crashing widget blanks the board | Per-widget error boundaries, watchdog reload and quarantine |
+| Personal data published to the public branch | Data-free packages, private settings and feeds, synthetic fixtures, the privacy screen, fixed commit messages |
+| Prompt injection writes a widget | Trust overlay escalates untrusted origins and arguments; writes only in interactive owner chat; never in scheduled or delegated runs |
+| Malicious or broken human commit on the branch | The importer runs the same pipeline; invalid commits never replace a live revision; rulesets restrict who can write |
+| The App credential is misused | Maintenance role only; short-lived installation tokens; one repository; one branch by ruleset and by adapter refusal |
+| A kit release breaks live widgets | Preflight rebuild; prior `kit_api` runtime retained |
+| Stale data read as current | Freshness computed at render with corrected time; stale treatment in every primitive |
+| A rendered feed string impersonates an instruction | Feed strings render as text; `discuss` context enters Chat as untrusted |
+
+## Hard gates
+
+1. **The schema is additive and both stores agree.** The migration creates
+   the widget, revision, settings, feed, snapshot, layout, event, outbox and
+   import-failure tables with tenant and principal predicates, downgrades
+   cleanly, and every Cockpit store passes one contract suite on both
+   adapters. Registered as `gate.cockpit.schema_additive`, case. **M35.**
+2. **The builder rejects what it must.** A package that breaks the manifest
+   schema, the file allowlist, a size cap, the import allowlist, a banned
+   reference, the credential pattern, the fixture requirements or the render
+   check is `rejected` with diagnostics, and no outbox entry, commit or event
+   exists for it. Registered as `gate.cockpit.builder_rejects_forbidden`,
+   case. **M35.**
+3. **Builds are offline and leased.** The builder image runs under gVisor with
+   networking off, a read-only root and no credentials; the release canary
+   builds under runsc; and a build started outside a run holds its own lease
+   and survives the reaper. Registered as
+   `gate.cockpit.builder_offline_under_runsc`, case. **M35.**
+4. **The privacy screen blocks personal data.** Any email address, telephone
+   number, owner or People display name, or current private settings value in
+   any package file or the commit message rejects the revision, and the
+   diagnostic never repeats the value. Registered as
+   `gate.cockpit.privacy_screen_blocks_commit`, case. **M35.**
+5. **Commits stay in scope and never force.** The adapter writes only under
+   `cockpit/widgets/<slug>/` on the configured branch as a fast-forward, and
+   refuses any other path, ref or non-fast-forward update before calling
+   GitHub. Registered as `gate.cockpit.commit_scope_and_no_force`, case.
+   **M35.**
+6. **Nothing activates before its commit.** A revision becomes live only after
+   its commit sha is recorded; while GitHub is unavailable the outbox retries
+   and the previous live revision keeps rendering. Registered as
+   `gate.cockpit.commit_before_activate`, case. **M35.**
+7. **An ambiguous commit reconciles once.** After a lost ref-update response
+   the worker finds the revision's trailer on the branch rather than
+   committing again, and a concurrent human commit to the same widget wins
+   while the assistant's revision becomes `conflicted`. Registered as
+   `gate.cockpit.ambiguous_commit_reconciles`, case. **M35.**
+8. **An invalid import keeps the live widget.** The importer activates a valid
+   human commit as an `owner_git` revision, and records and surfaces an
+   invalid or out-of-scope one without replacing the live revision.
+   Registered as `gate.cockpit.invalid_import_keeps_live`, case. **M35.**
+9. **Delete and restore round-trip.** Delete commits the directory's removal
+   and removes the widget from every layout; restore commits the package
+   again and reactivates it; revert is a new revision through the whole
+   pipeline. Registered as `gate.cockpit.delete_and_restore`, case. **M35.**
+10. **Untrusted turns escalate and other runs cannot write.** The write tool
+    is allowed for owner-origin turns, escalates to approval for an untrusted
+    origin or argument, remains subject to the credential-to-egress hardline
+    rule, and is not offered in scheduled, delegated, operational or
+    email-task sessions. Registered as
+    `gate.cockpit.untrusted_origin_escalates`, case. **M35.**
+11. **A widget sees only what it declares.** The host delivers a widget only
+    its manifest's feeds at no more than the declared history, only its own
+    settings, and never another widget's data. Registered as
+    `gate.cockpit.declared_feeds_only`, case. **M35.**
+12. **Feed text is inert.** Feed and settings strings render as text in every
+    kit primitive, with no markup, link or URL affordance, and `discuss`
+    context enters Chat as untrusted. Registered as
+    `gate.cockpit.feed_text_inert`, case. **M35.**
+13. **Stale renders stale.** For any snapshot, interval, factor and corrected
+    clock, a feed older than its expected interval times the stale factor is
+    `stale` in every primitive, including after reconnect and snapshot
+    refetch. Registered as `gate.cockpit.stale_renders_stale`, property.
+    **M35.**
+14. **The stream resumes and resets.** The stream resumes from
+    `Last-Event-ID` without loss or duplication, sends `stream.reset` past
+    retention, heartbeats, closes at its lifetime, and never crosses tenants.
+    Registered as `gate.cockpit.stream_resume_and_reset`, case. **M35.**
+15. **Off means absent.** With `AGENT_COCKPIT_ENABLED=0` no Cockpit route,
+    tool, builder manager, outbox, importer or projector exists, and the
+    native client shows Cockpit as unavailable. Registered as
+    `gate.cockpit.flag_off_absent`, structural. **M35.**
+16. **The realm has no network.** Every member of the adversarial corpus —
+    fetch, XHR, WebSocket, EventSource, beacon, peer connection, image,
+    script, style, font and frame loads, and navigation — fails in headless
+    WebKit and in a hosted `WKWebView`. Registered as
+    `gate.cockpit.realm_network_blocked`, case. **M35.**
+17. **The token never enters web content.** No document or frame can read the
+    bearer token or any credential, and the scheme handler's own requests
+    carry none to the web content. Registered as
+    `gate.cockpit.token_absent_from_web_content`, case. **M35.**
+18. **The scheme handler serves only named assets.** It answers only content
+    hashes named by the current snapshot, never proxies an API route, answers
+    404 otherwise, and the navigation policy admits only the host document.
+    Registered as `gate.cockpit.scheme_handler_allowlist`, case. **M35.**
+19. **A kit upgrade rebuilds live widgets.** Release preflight rebuilds every
+    live widget against a changed kit; one that fails keeps its prior runtime,
+    which stays served while referenced. Registered as
+    `gate.cockpit.kit_upgrade_rebuilds`, case. **M35.**
+20. **Three modes keep their state.** Switching among Chat, Email and Cockpit
+    preserves each mode's state, and every mode-dependent surface handles all
+    three. Registered as `gate.cockpit.three_mode_state_parity`, case.
+    **M35.**
+21. **The stream runs only while Cockpit is visible.** The client opens the
+    stream when Cockpit becomes the visible mode in an active app and closes
+    it otherwise. Registered as `gate.cockpit.streams_only_while_visible`,
+    case. **M35.**
+22. **The realm fits its budget.** The seed board on the oldest supported iPad
+    stays within the memory and first-paint budgets, and the watchdog
+    quarantines a widget that hangs the realm. Registered as
+    `gate.cockpit.realm_memory_budget`, case. **M35.**
+23. **The release is evidenced.** Production runs with the flag on, the
+    assistant authors a seed widget whose live revision's commit sha is on
+    `cockpit/widgets`, and an audit of the public branch finds no personal
+    data. Registered as `gate.cockpit.release_evidence`, case. **M35.**
+
+## Tracked metrics
+
+- The time from a tool call to a live revision, at the median and the 95th
+  percentile.
+- The share of the assistant's packages rejected, by rule.
+- Privacy screen hits.
+- Outbox retries and the age of the oldest pending entry.
+- Import failures.
+- Realm reloads and quarantines.
+- Stream reconnects per hour.
+- Feed staleness per feed.
+
+## Build sequence
+
+1. **MagicPath designs.** The design system, the kit gallery and the three
+   boards. The owner's canvas review is the exit.
+2. **The `cockpit/` workspace.** Schemas, the builder CLI, the host and
+   realm, and the adversarial corpus, then the kit primitives ported from the
+   approved designs, plus `make test-cockpit` in `make check` and CI. Gates
+   2, 12, 13 and 16 (headless half).
+3. **The builder image.** Release wiring, the runsc canary, the second
+   manager, the image allowlist and reaper leases. Gate 3.
+4. **Domain types, ports, migration, both store adapters under contract
+   suites, and a fake git adapter.** Gate 1.
+5. **The GitHub App adapter, the outbox, reconciliation, the importer and the
+   privacy screen.** Gates 4 through 9.
+6. **The routes, the scopes, the flag, the cockpit channel and the stream.**
+   Gates 14 and 15.
+7. **The tools, the `tool_rules` entry, session-environment filtering,
+   approval views and `kit.describe`, plus an evaluation in which a chat
+   request yields a valid committed widget.** Gates 10 and 11.
+8. **The platform feed projector.**
+9. **The `ClientMode` refactor, as a pure refactor.**
+10. **The native Cockpit mode.** The web view sandbox, the stream, the Mac
+    panel and iPad keep-awake. Gates 16 (hosted half) through 22.
+11. **Preview rendering.**
+12. **Activation.** The owner sets up the App, the rulesets, the credential
+    and the flag, and the assistant authors the seed widgets. Gate 23.
+
+Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
+
+## Decisions
+
+1. **React in a web realm, not SwiftUI.** Agent-written code has to ship
+   without an app release, and the MagicPath designs are already React. A
+   declarative native format would make widgets configuration rather than
+   code.
+2. **One realm, not one iframe per widget.** Same-process iframes share a main
+   thread, so per-widget frames would not contain a hang. The boundary worth
+   paying for is between widget code and the network or native code.
+3. **An orphan branch.** The branch then carries only widgets, people check it
+   out beside `main`, and widgets always build against the deployed kit.
+4. **Commit before activate.** The repository is the source of truth. An
+   outage costs latency, never correctness of the live display.
+5. **`publication` with an exact-name allow rule.** The classification is
+   honest about pushing to a public repository. The allow rule records the
+   owner's no-approval decision without weakening the trust overlay or the
+   hardline rule.
+6. **Deferred tools.** The definition roster's thirty items already bind, and
+   Cockpit work is occasional.
+7. **Feeds over fetching widgets.** Data acquisition stays in the governed
+   tool pipeline and schedules, and widgets stay pure functions of their
+   inputs.
+
+## Open questions
+
+1. Should the platform feed projector move from a timer to the triggering
+   transactions once the projection cost is measured?
+2. The deferred collectors. What egress allowlist, credential and budget model
+   should an LLM-free collector have for sub-minute external data?
+3. Should a widget be able to request a native share or copy action on its
+   own displayed text, given that intents are navigation-only today?

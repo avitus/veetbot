@@ -1,0 +1,139 @@
+# Canonical gate registry entries for the Cockpit area (Milestone 35).
+- id: gate.cockpit.schema_additive
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The schema is additive and both stores agree.** The migration creates the widget, revision, settings, feed, snapshot, layout, event, outbox and import-failure tables with tenant and principal predicates, downgrades cleanly, and every Cockpit store passes one contract suite on both adapters."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.builder_rejects_forbidden
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The builder rejects what it must.** A package that breaks the manifest schema, the file allowlist, a size cap, the import allowlist, a banned reference, the credential pattern, the fixture requirements or the render check is `rejected` with diagnostics, and no outbox entry, commit or event exists for it."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.builder_offline_under_runsc
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Builds are offline and leased.** The builder image runs under gVisor with networking off, a read-only root and no credentials; the release canary builds under runsc; and a build started outside a run holds its own lease and survives the reaper."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.privacy_screen_blocks_commit
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The privacy screen blocks personal data.** Any email address, telephone number, owner or People display name, or current private settings value in any package file or the commit message rejects the revision, and the diagnostic never repeats the value."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.commit_scope_and_no_force
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Commits stay in scope and never force.** The adapter writes only under `cockpit/widgets/<slug>/` on the configured branch as a fast-forward, and refuses any other path, ref or non-fast-forward update before calling GitHub."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.commit_before_activate
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Nothing activates before its commit.** A revision becomes live only after its commit sha is recorded; while GitHub is unavailable the outbox retries and the previous live revision keeps rendering."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.ambiguous_commit_reconciles
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**An ambiguous commit reconciles once.** After a lost ref-update response the worker finds the revision's trailer on the branch rather than committing again, and a concurrent human commit to the same widget wins while the assistant's revision becomes `conflicted`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.invalid_import_keeps_live
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**An invalid import keeps the live widget.** The importer activates a valid human commit as an `owner_git` revision, and records and surfaces an invalid or out-of-scope one without replacing the live revision."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.delete_and_restore
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Delete and restore round-trip.** Delete commits the directory's removal and removes the widget from every layout; restore commits the package again and reactivates it; revert is a new revision through the whole pipeline."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.untrusted_origin_escalates
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Untrusted turns escalate and other runs cannot write.** The write tool is allowed for owner-origin turns, escalates to approval for an untrusted origin or argument, remains subject to the credential-to-egress hardline rule, and is not offered in scheduled, delegated, operational or email-task sessions."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.declared_feeds_only
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**A widget sees only what it declares.** The host delivers a widget only its manifest's feeds at no more than the declared history, only its own settings, and never another widget's data."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.feed_text_inert
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Feed text is inert.** Feed and settings strings render as text in every kit primitive, with no markup, link or URL affordance, and `discuss` context enters Chat as untrusted."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.stale_renders_stale
+  milestone: 35
+  kind: property
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Stale renders stale.** For any snapshot, interval, factor and corrected clock, a feed older than its expected interval times the stale factor is `stale` in every primitive, including after reconnect and snapshot refetch."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.stream_resume_and_reset
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The stream resumes and resets.** The stream resumes from `Last-Event-ID` without loss or duplication, sends `stream.reset` past retention, heartbeats, closes at its lifetime, and never crosses tenants."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.flag_off_absent
+  milestone: 35
+  kind: structural
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Off means absent.** With `AGENT_COCKPIT_ENABLED=0` no Cockpit route, tool, builder manager, outbox, importer or projector exists, and the native client shows Cockpit as unavailable."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.realm_network_blocked
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The realm has no network.** Every member of the adversarial corpus — fetch, XHR, WebSocket, EventSource, beacon, peer connection, image, script, style, font and frame loads, and navigation — fails in headless WebKit and in a hosted `WKWebView`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.token_absent_from_web_content
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The token never enters web content.** No document or frame can read the bearer token or any credential, and the scheme handler's own requests carry none to the web content."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.scheme_handler_allowlist
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The scheme handler serves only named assets.** It answers only content hashes named by the current snapshot, never proxies an API route, answers 404 otherwise, and the navigation policy admits only the host document."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.kit_upgrade_rebuilds
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**A kit upgrade rebuilds live widgets.** Release preflight rebuilds every live widget against a changed kit; one that fails keeps its prior runtime, which stays served while referenced."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.three_mode_state_parity
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**Three modes keep their state.** Switching among Chat, Email and Cockpit preserves each mode's state, and every mode-dependent surface handles all three."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.streams_only_while_visible
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The stream runs only while Cockpit is visible.** The client opens the stream when Cockpit becomes the visible mode in an active app and closes it otherwise."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.realm_memory_budget
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The realm fits its budget.** The seed board on the oldest supported iPad stays within the memory and first-paint budgets, and the watchdog quarantines a widget that hangs the realm."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.cockpit.release_evidence
+  milestone: 35
+  kind: case
+  spec: docs/plan/cockpit.md#hard-gates
+  statement: "**The release is evidenced.** Production runs with the flag on, the assistant authors a seed widget whose live revision's commit sha is on `cockpit/widgets`, and an audit of the public branch finds no personal data."
+  check: tests/gates/pending.py::pending_gate

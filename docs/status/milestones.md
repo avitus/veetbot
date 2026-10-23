@@ -392,8 +392,16 @@ succeeded on merge `a9b81420` (`outside_milestone_evidence` in the state file).
 
 ## Authorized
 
-No authorized milestone remains unstarted. Milestone 15 has begun its independent
-reliability repair; its remaining gates and backup tranche remain open.
+Milestone 15 has begun its independent reliability repair; its remaining gates
+and backup tranche remain open. One authorized milestone has not started:
+
+- **Milestone 35 — Cockpit mode and agent-authored widgets** — twenty-three
+  gates; independent workstream under ADR-0240. A third client mode whose
+  widgets the assistant writes, commits to the public `cockpit/widgets` branch
+  as data-free code, and renders on iPhone, iPad and Mac inside a network-less
+  realm, fed by platform and assistant-published feeds. Design and pending
+  gates registered on 2026-10-22; implementation begins with the MagicPath
+  designs and the `cockpit/` workspace.
 
 
 

@@ -4367,6 +4367,67 @@ catalog item with an absolute cap and a stability gate. No SQL surface, HTTP
 route or native screen is included. This parallel workstream does not advance
 the sequential verified ceiling.
 
+### Milestone 35: Cockpit mode and agent-authored widgets
+
+The owner authorized this scope on 2026-10-22 under ADR-0240. Implement
+[cockpit.md](cockpit.md):
+
+- **The mode.** A third client mode, Cockpit, on iPhone, iPad and Mac: a
+  heads-up board of widgets that the assistant itself creates, updates and
+  deletes.
+- **The kit.** Widgets are React and TypeScript on a MagicPath-designed kit in
+  a `cockpit/` workspace on `main`. They run on the clients inside one
+  network-less sandboxed realm, and the bearer token never enters it.
+- **The branch.** Each widget change is validated, screened for personal data
+  and built offline in a second, platform-owned sandbox image. It is then
+  committed through a GitHub App to the orphan branch `cockpit/widgets` of
+  this public repository, and activated only after its commit is recorded.
+  Human commits to the branch are imported through the same pipeline.
+- **Feeds.** Widgets render platform feeds and assistant-published feeds,
+  with freshness, and receive only the feeds they declare. Personal values
+  live in private settings and feeds, never in widget code.
+- **Delivery and tools.** A per-tenant snapshot and resumable event stream
+  carry everything to the clients under new `cockpit.read` and `cockpit.write`
+  scopes and a default-off flag. Five deferred builtin tools carry the
+  assistant's side.
+
+The design declares twenty-three gates.
+
+The widget write tool is classified as `publication` and allowed by an
+exact-name rule in the default profile, as the owner decided. The trust
+overlay, the credential-to-egress hardline rule and the restriction to
+interactive owner chat still apply.
+
+This amends no roadmap item:
+
+- Widgets never enter the assistant's instructions or context, so B1 is
+  untouched.
+- No standing approval grant is introduced, so B8 is untouched.
+- The visual workflow builder in B11 stays deferred.
+
+The second sandbox image answers `sandbox-isolation.md`'s open question about
+images for one platform-owned purpose only.
+
+Acceptance requires:
+
+- all twenty-three gates;
+- both store adapters;
+- the adversarial realm corpus in headless WebKit and a hosted `WKWebView`;
+- the Apple package and simulator lanes;
+- the owner's activation of the GitHub App, its rulesets and the flag;
+- a production widget the assistant authored, whose commit is on the branch;
+- final-head hosted CI and review, plus separately authorized production
+  delivery.
+
+The verified sequential ceiling does not move. These remain outside this
+milestone:
+
+- deterministic collectors that fetch outside data with no model run;
+- a browser or television rendering;
+- WidgetKit, Lock Screen and Live Activities;
+- the assistant using MagicPath at runtime;
+- webhook-driven import.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

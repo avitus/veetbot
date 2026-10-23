@@ -1674,3 +1674,23 @@ the browser authorizers; setting `0` omits it and every call asks for approval.
 derives `mcp.bland_call.use` and `mcp.bland_read.use` from `AGENT_CALL_ENABLED`
 as it derives Gmail scopes, reading `BLAND_CONFIGURATION_FILE` but never a
 Bland credential. The contract is [bland-calling.md](bland-calling.md).
+
+## Milestone 35 Cockpit composition
+
+`AGENT_COCKPIT_ENABLED` defaults to off. When it is set, the composition root:
+
+- mounts the Cockpit routes;
+- registers the `cockpit` builtin domain's five tools as deferred entries in
+  the default agent's configuration;
+- constructs a second `SandboxManager` for `AGENT_COCKPIT_BUILDER_IMAGE`, and
+  the execution service then admits exactly the two configured images;
+- registers three maintenance-role work items: the platform feed projector,
+  the commit outbox and the branch importer.
+
+The outbox and the importer require the GitHub App credential delivered with
+`LoadCredential` to the maintenance role. That role refuses to start them
+without it, and no other process receives the credential.
+
+Unset, none of these exists. The flag, the image setting, the App identifiers
+and the `cockpit/profiles.yaml` knobs join the executable inventory when the
+implementation lands. The detailed contract is [cockpit.md](cockpit.md).
