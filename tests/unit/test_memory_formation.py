@@ -49,6 +49,7 @@ from agent_core.memory.formation import (
     portability_ceiling,
 )
 from agent_core.memory.profiles import DecayProfile, FormationProfile, UsageDeltas
+from agent_core.memory.recorded_values import recorded_elsewhere, recorded_value_sets
 from agent_core.memory.retrieval import HybridMemoryRetriever
 from tests.contract.memory_fixtures import (
     formation_stack,
@@ -1796,3 +1797,83 @@ async def test_high_recall_fallback_reads_a_leading_frequency_as_a_habit(
     assert candidates[0].statement.casefold() == statement
     assert candidates[0].source_event_ids == [7]
     assert all(span.text in message for span in candidates[0].evidence_spans)
+
+
+def _bp_event(values: dict[str, str]) -> EventEnvelope:
+    return _envelope(
+        "records.entry.appended",
+        {
+            "series_id": "s",
+            "entry_id": "e",
+            "observed_at": "2026-10-22T07:40:00+00:00",
+            "observed_precision": "exact",
+            "values": values,
+            "note_withheld": False,
+        },
+    )
+
+
+def test_recorded_elsewhere_matches_every_component() -> None:
+    bp = recorded_value_sets([_bp_event({"systolic": "128.000000", "diastolic": "82.000000"})])
+    assert recorded_elsewhere("my blood pressure was 128 over 82", bp)
+    assert not recorded_elsewhere("I ran 82 km", bp)
+    weight = recorded_value_sets([_bp_event({"weight": "82.400000"})])
+    assert recorded_elsewhere("weight 82.4 today", weight)
+    assert recorded_elsewhere("weight 82.400000 today", weight)
+    assert not recorded_elsewhere("weight 182.4 today", weight)
+    assert not recorded_elsewhere("weight 82.45 today", weight)
+    assert recorded_value_sets([_bp_event({"w": "abc"}), _bp_event({})]) == ()
+
+
+async def _run_with_record(statement: str) -> object:
+    clock, factory, baseline, _retriever = await formation_stack()
+    source = await user_event(factory, "My blood pressure was 128 over 82 this morning")
+    async with factory() as uow:
+        await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="records.entry.appended",
+                actor_type="principal",
+                actor_id=PRINCIPAL_ID,
+                payload={
+                    "series_id": "s",
+                    "entry_id": "e",
+                    "observed_at": "2026-10-22T07:40:00+00:00",
+                    "observed_precision": "exact",
+                    "values": {"systolic": "128.000000", "diastolic": "82.000000"},
+                    "note_withheld": False,
+                },
+            )
+        )
+    candidate = MemoryCandidate(
+        belief_type=BeliefType.FACT,
+        subject="health",
+        statement=statement,
+        polarity=Polarity.ASSERT,
+        source_event_ids=[source],
+        model_confidence=0.9,
+        proposed_scope="general",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        baseline._ids,
+        principal(),
+        extractor=_SingleCandidateExtractor(candidate),
+    )
+    return await service.run(trigger="session_closed", scope="general", session_id=SESSION_ID)
+
+
+async def test_recorded_values_never_form_beliefs() -> None:
+    result = await _run_with_record("My blood pressure was 128 over 82 this morning")
+    assert result.beliefs == []  # type: ignore[attr-defined]
+    assert result.run.rejected == 1  # type: ignore[attr-defined]
+    assert result.run.decision_counts == {"recorded_elsewhere": 1}  # type: ignore[attr-defined]
+
+
+async def test_one_value_of_two_still_forms() -> None:
+    result = await _run_with_record("I weigh 82 kilos")
+    assert "recorded_elsewhere" not in result.run.decision_counts  # type: ignore[attr-defined]

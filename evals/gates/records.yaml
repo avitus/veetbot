@@ -40,7 +40,7 @@
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**No belief per value.** A consolidation run over a session with appends forms no belief carrying every component value of an appended entry, on every extractor sharing the eligibility gate, while a statement carrying one value of a two-component entry still forms."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_memory_formation.py::test_recorded_values_never_form_beliefs
 - id: gate.records.registration
   milestone: 34
   kind: structural
